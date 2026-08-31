@@ -239,7 +239,7 @@ function App() {
     const fd = new FormData();
     fd.append("image", file);
     // User will need to provide this key in Vercel or replace it here
-    const IMGBB_API_KEY = import.meta.env.VITE_IMGBB_API_KEY || "a29d51e44de8b03046f1cbbf4f5b5c90"; // Dummy/default key, user should change
+    const IMGBB_API_KEY = import.meta.env.VITE_IMGBB_API_KEY || "9c75787468e638438bf8ec75dd73b29d"; // Dummy/default key, user should change
     const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
       method: "POST",
       body: fd,
