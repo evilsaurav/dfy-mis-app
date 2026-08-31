@@ -140,7 +140,7 @@ function App() {
   const closeToast = () => setToast({ message: "", type: "" });
 
   useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     fetch(`${API_BASE_URL}/get-directory`)
       .then(res => res.json())
       .then(data => {
@@ -156,7 +156,7 @@ function App() {
       setPinStatus("checking");
       const checkPin = async () => {
         try {
-          const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+          const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const res = await fetch(`${API_BASE_URL}/verify-pin`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -190,7 +190,7 @@ function App() {
       try {
         const today = new Date().toISOString().split('T')[0];
         setFormData(prev => ({...prev, date_of_reporting: today}));
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const res = await fetch(`${API_BASE_URL}/check-today-status`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
@@ -238,7 +238,7 @@ function App() {
   const uploadPhoto = async (file) => {
     const fd = new FormData();
     fd.append("file", file);
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     const res = await fetch(`${API_BASE_URL}/upload-image`, {
       method: "POST",
       body: fd,
@@ -274,7 +274,7 @@ function App() {
           morning_km: formData.morning_km,
           morning_km_photo_url: morningUrl
         };
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const response = await fetch(`${API_BASE_URL}/start-day`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload)
@@ -310,7 +310,7 @@ function App() {
         evening_km_photo_url: eveningUrl
       };
 
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const response = await fetch(`${API_BASE_URL}/submit-daily-report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(finalPayload)
