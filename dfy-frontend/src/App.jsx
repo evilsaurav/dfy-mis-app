@@ -207,7 +207,7 @@ function App() {
         const today = new Date().toISOString().split('T')[0];
         setFormData(prev => ({...prev, date_of_reporting: today}));
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-        const res = await fetch(${API_BASE_URL}/check-today-status, {
+        const res = await fetch(`${API_BASE_URL}/check-today-status`, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
         });
@@ -222,7 +222,7 @@ function App() {
            }));
         }
         setIsLoggedIn(true);
-        showToast(Welcome back, !, 'success');
+        showToast(`Welcome back, ${formData.fo_name}!`, 'success');
       } catch (err) {
         showToast("Error checking status", "error");
       } finally {
@@ -271,7 +271,32 @@ function App() {
   };
 
   const copyToWhatsApp = () => {
-    const text = *Daily Field Report - * ??\n*Name:*  ()\n\n*?? Travel Details:*\n- Morning:  KM\n- Evening:  KM\n- Total:  KM\n\n*?? Doctors/Stores Visited:*\n\n\n*?? Work Metrics:*\n- Notifications: \n- HIV & DM: \n- DBT: \n- Sample Collection: \n- Sample Tested: \n- Outcome Assigned: \n- Home Visit: \n- Contact Tracing: \n- Follow Up: \n- Face to Face: \n- Presumptive: \n- Documents: \n- FDC Provided: \n- Kit Consumption: ;
+    const text = `*Daily Field Report - ${formData.date_of_reporting}* ??
+*Name:* ${formData.fo_name} (${formData.working_place})
+
+*?? Travel Details:*
+- Morning: ${formData.morning_km} KM
+- Evening: ${formData.evening_km || 0} KM
+- Total: ${formData.total_km || 0} KM
+
+*?? Doctors/Stores Visited:*
+${(formData.visited_names || []).join(', ') || 'None'}
+
+*?? Work Metrics:*
+- Notifications: ${(formData.notification_ids || []).length}
+- HIV & DM: ${(formData.hiv_dm_ids || []).length}
+- DBT: ${(formData.dbt_ids || []).length}
+- Sample Collection: ${(formData.sample_collection_ids || []).length}
+- Sample Tested: ${(formData.sample_tested_ids || []).length}
+- Outcome Assigned: ${(formData.outcome_assigned_ids || []).length}
+- Home Visit: ${(formData.home_visit_ids || []).length}
+- Contact Tracing: ${(formData.contact_tracing_ids || []).length}
+- Follow Up: ${(formData.follow_up_ids || []).length}
+- Face to Face: ${(formData.face_to_face_ids || []).length}
+- Presumptive: ${(formData.presumptive_ids || []).length}
+- Documents: ${(formData.documents_ids || []).length}
+- FDC Provided: ${(formData.fdc_provided_ids || []).length}
+- Kit Consumption: ${(formData.kit_consumption_ids || []).length}`;
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text).then(() => showToast("Copied! Paste in WhatsApp.", "success")).catch(() => showToast("Failed to copy", "error"));
     }
@@ -481,32 +506,32 @@ function App() {
                
                <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-200 text-left text-sm text-slate-600 font-mono overflow-y-auto max-h-[300px]">
                   <pre className="whitespace-pre-wrap font-sans text-xs">
-{*Daily Field Report - * ??
-*Name:*  ()
+{`*Daily Field Report - ${formData.date_of_reporting || new Date().toISOString().split('T')[0]}* ??
+*Name:* ${formData.fo_name} (${formData.working_place})
 
 *?? Travel Details:*
-- Morning:  KM
-- Evening:  KM
-- Total:  KM
+- Morning: ${formData.morning_km || 0} KM
+- Evening: ${formData.evening_km || 0} KM
+- Total: ${formData.total_km || Math.max(0, Number(formData.evening_km) - Number(formData.morning_km)) || 0} KM
 
 *?? Doctors/Stores Visited:*
-
+${(formData.visited_names || []).join(', ') || 'None'}
 
 *?? Work Metrics:*
-- Notifications: 
-- HIV & DM: 
-- DBT: 
-- Sample Collection: 
-- Sample Tested: 
-- Outcome Assigned: 
-- Home Visit: 
-- Contact Tracing: 
-- Follow Up: 
-- Face to Face: 
-- Presumptive: 
-- Documents: 
-- FDC Provided: 
-- Kit Consumption: }
+- Notifications: ${(formData.notification_ids || []).length}
+- HIV & DM: ${(formData.hiv_dm_ids || []).length}
+- DBT: ${(formData.dbt_ids || []).length}
+- Sample Collection: ${(formData.sample_collection_ids || []).length}
+- Sample Tested: ${(formData.sample_tested_ids || []).length}
+- Outcome Assigned: ${(formData.outcome_assigned_ids || []).length}
+- Home Visit: ${(formData.home_visit_ids || []).length}
+- Contact Tracing: ${(formData.contact_tracing_ids || []).length}
+- Follow Up: ${(formData.follow_up_ids || []).length}
+- Face to Face: ${(formData.face_to_face_ids || []).length}
+- Presumptive: ${(formData.presumptive_ids || []).length}
+- Documents: ${(formData.documents_ids || []).length}
+- FDC Provided: ${(formData.fdc_provided_ids || []).length}
+- Kit Consumption: ${(formData.kit_consumption_ids || []).length}`}
                   </pre>
                </div>
                
