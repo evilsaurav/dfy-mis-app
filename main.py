@@ -60,15 +60,21 @@ class DailyActivityReport(BaseModel):
     documents_ids: List[str] = []
     fdc_provided_ids: List[str] = []
     kit_consumption_ids: List[str] = []
+    differentiated_tb_ids: List[str] = []
+    tpt_treatment_start_ids: List[str] = []
+    tpt_presumptive_ids: List[str] = []
+    adhar_face_authentication_ids: List[str] = []
+    consent_with_id_ids: List[str] = []
+    
+    remark: Optional[str] = ""
     
     doctor_store_visits_count: Optional[int] = 0
     visited_names: List[str] = []
     morning_km: Optional[int] = 0
     evening_km: Optional[int] = 0
     total_km: Optional[int] = 0
-    
-    morning_km_photo_url: Optional[str] = None
-    evening_km_photo_url: Optional[str] = None
+    morning_km_photo_url: Optional[str] = ""
+    evening_km_photo_url: Optional[str] = ""
     is_override_used: Optional[bool] = False
 
 class DashboardRequest(BaseModel):
@@ -261,7 +267,12 @@ async def download_excel():
             "presumptive_ids": "Presumptive",
             "documents_ids": "Documents",
             "fdc_provided_ids": "FDC Provided",
-            "kit_consumption_ids": "Kit Consumption"
+            "kit_consumption_ids": "Kit Consumption",
+            "differentiated_tb_ids": "Differentiated TB",
+            "tpt_treatment_start_ids": "TPT Treatment Start",
+            "tpt_presumptive_ids": "TPT Presumptive",
+            "adhar_face_authentication_ids": "Adhar Face Authentication",
+            "consent_with_id_ids": "Consent with ID"
         }
         
         for doc in docs:
@@ -295,7 +306,9 @@ async def download_excel():
                     row["Doctors Visited"] = ", ".join(data.get("visited_names", []))
                     row["Morning KM Photo"] = data.get("morning_km_photo_url", "")
                     row["Evening KM Photo"] = data.get("evening_km_photo_url", "")
-                    row["Remarks"] = "Entry Adjusted (Time Override Used)" if data.get("is_override_used") else ""
+                    user_remark = data.get("remark", "")
+                    override_str = "[Adjusted]" if data.get("is_override_used") else ""
+                    row["Remarks"] = f"{override_str} {user_remark}".strip()
                 else:
                     row["Morning KM"] = ""
                     row["Evening KM"] = ""

@@ -114,8 +114,15 @@ function App() {
     outcome_assigned_ids: [], home_visit_ids: [], 
     contact_tracing_ids: [], follow_up_ids: [], 
     face_to_face_ids: [], presumptive_ids: [], 
-    documents_ids: [], fdc_provided_ids: [], 
-    kit_consumption_ids: [], visited_names: [], 
+    documents_ids: [],
+    fdc_provided_ids: [],
+    kit_consumption_ids: [],
+    differentiated_tb_ids: [],
+    tpt_treatment_start_ids: [],
+    tpt_presumptive_ids: [],
+    adhar_face_authentication_ids: [],
+    consent_with_id_ids: [],
+    remark: "", visited_names: [], 
     morning_km: "", evening_km: "",
     is_override_used: false
   });
@@ -302,7 +309,12 @@ function App() {
       { key: 'presumptive_ids', label: 'Presumptive' },
       { key: 'documents_ids', label: 'Documents' },
       { key: 'fdc_provided_ids', label: 'FDC Provided' },
-      { key: 'kit_consumption_ids', label: 'Kit Consumption' }
+      { key: 'kit_consumption_ids', label: 'Kit Consumption' },
+      { key: 'differentiated_tb_ids', label: 'Differentiated TB' },
+      { key: 'tpt_treatment_start_ids', label: 'TPT Treatment Start' },
+      { key: 'tpt_presumptive_ids', label: 'TPT Presumptive' },
+      { key: 'adhar_face_authentication_ids', label: 'Adhar Face Auth' },
+      { key: 'consent_with_id_ids', label: 'Consent with ID' }
     ];
 
     let hasMetrics = false;
@@ -317,6 +329,10 @@ function App() {
 
     if (!hasMetrics) {
       text += 'None\n';
+    }
+
+    if (formData.remark && formData.remark.trim() !== '') {
+      text += '\n*?? Remarks:*\n' + formData.remark.trim() + '\n';
     }
 
     return text.trim();
@@ -432,6 +448,13 @@ function App() {
     { key: "documents_ids", label: "Documents" },
     { key: "fdc_provided_ids", label: "FDC Provided" },
     { key: "kit_consumption_ids", label: "Kit Consumption" }
+  ];
+  const group5 = [
+    { key: "differentiated_tb_ids", label: "Differentiated TB" },
+    { key: "tpt_treatment_start_ids", label: "TPT Treatment Start" },
+    { key: "tpt_presumptive_ids", label: "TPT Presumptive" },
+    { key: "adhar_face_authentication_ids", label: "Adhar Face Auth" },
+    { key: "consent_with_id_ids", label: "Consent with ID" }
   ];
 
   return (
@@ -590,6 +613,23 @@ function App() {
                   {group4.map((cat) => (
                     <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
+                </Accordion>
+
+                <Accordion title="5. Special Tracking">
+                  {group5.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key] || []} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+
+                <Accordion title="6. Additional Remarks">
+                  <div className="p-4 sm:p-5">
+                    <textarea 
+                      value={formData.remark || ''} 
+                      onChange={e => setFormData({...formData, remark: e.target.value})} 
+                      placeholder="Koi extra information ya remark yahan likhein..." 
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400 min-h-[120px]"
+                    ></textarea>
+                  </div>
                 </Accordion>
               </>
             )}
