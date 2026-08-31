@@ -237,15 +237,16 @@ function App() {
 
   const uploadPhoto = async (file) => {
     const fd = new FormData();
-    fd.append("file", file);
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    const res = await fetch(`${API_BASE_URL}/upload-image`, {
+    fd.append("image", file);
+    // User will need to provide this key in Vercel or replace it here
+    const IMGBB_API_KEY = import.meta.env.VITE_IMGBB_API_KEY || "a29d51e44de8b03046f1cbbf4f5b5c90"; // Dummy/default key, user should change
+    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
       method: "POST",
       body: fd,
     });
-    if (!res.ok) throw new Error("Photo upload failed");
+    if (!res.ok) throw new Error("Photo upload failed on ImgBB");
     const data = await res.json();
-    return data.url;
+    return data.data.url;
   };
 
   const submitReport = async () => {
@@ -606,6 +607,13 @@ function App() {
           </div>
         )}
       </main>
+
+        {/* Branding Footer */}
+        <footer className="w-full text-center py-6 mt-auto opacity-70">
+          <p className="text-xs font-bold text-slate-500 tracking-widest uppercase">
+            Designed by <span className="text-indigo-600 font-black">Insomniac</span>
+          </p>
+        </footer>
       
     </div>
   )

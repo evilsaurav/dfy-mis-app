@@ -332,6 +332,13 @@ export default function AdminDashboard() {
           </>
         )}
       </div>
+
+      {/* Branding Footer */}
+      <footer className="w-full text-center py-8 mt-auto opacity-70">
+        <p className="text-sm font-bold text-slate-500 tracking-widest uppercase">
+          Designed by <span className="text-indigo-600 font-black">Insomniac</span>
+        </p>
+      </footer>
     </div>
   );
 }

@@ -262,6 +262,7 @@ async def download_excel():
             consolidated_data.append(row)
 
         df = pd.DataFrame(consolidated_data)
+        df.loc[len(df)] = pd.Series({'Date': 'Designed by Insomniac'})
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Consolidated Report')
