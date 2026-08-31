@@ -124,6 +124,8 @@ function App() {
   const [eveningPhotoFile, setEveningPhotoFile] = useState(null);
   const [isAdvancedMode, setIsAdvancedMode] = useState(false);
 
+  const [appState, setAppState] = useState('not_started');
+
   const currentHour = new Date().getHours();
   const canEditMorning = appState === 'not_started' || isAdvancedMode;
   const canEditEvening = appState === 'in_progress' || isAdvancedMode;
