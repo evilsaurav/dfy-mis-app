@@ -304,28 +304,28 @@ function App() {
       <Toast message={toast.message} type={toast.type} onClose={closeToast} />
 
       <header className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)]">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-600 to-blue-500 h-11 w-11 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/30 text-white font-black text-xl">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <div className="bg-gradient-to-br from-indigo-600 to-blue-500 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/30 text-white font-black text-xl shrink-0">
+              <svg width="20" height="20" className="sm:w-[22px] sm:h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             </div>
             <div>
-              <h1 className="text-lg font-black tracking-wide leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
-              <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mt-0.5">Mobile MIS Dashboard</p>
+              <h1 className="text-base sm:text-lg font-black tracking-wide leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
+              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 whitespace-nowrap">Mobile MIS Dashboard</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
-              <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 px-2.5 py-1 rounded-full transition-colors border border-transparent hover:border-indigo-100" title="Admin Portal">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
-                <span className="text-[10px] font-bold tracking-wider">ADMIN</span>
+          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
+            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1 sm:gap-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full transition-colors border border-transparent hover:border-indigo-100" title="Admin Portal">
+              <svg width="12" height="12" className="sm:w-[14px] sm:h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
+              <span className="text-[9px] sm:text-[10px] font-bold tracking-wider hidden sm:inline">ADMIN</span>
+            </button>
+            <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
+            {isLoggedIn && (
+              <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors">
+                <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
               </button>
-              <div className="bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
-              {isLoggedIn && (
-                <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                </button>
-              )}
-            </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -466,7 +466,7 @@ function App() {
                     </span>
                   )}
                 </div>
-                <div className="p-4 flex gap-3 relative z-10">
+                <div className="p-4 flex flex-col sm:flex-row gap-4 sm:gap-3 relative z-10">
                   <div className="flex-1 space-y-2">
                     <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Morning KM</label>
                     <input disabled={!canEditMorning} type="number" placeholder="Start" value={formData.morning_km} onChange={(e) => setFormData({...formData, morning_km: e.target.value})} className={`w-full ${!canEditMorning ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : 'bg-slate-800/80 text-white'} border border-slate-700 rounded-xl px-3 py-2.5 outline-none text-sm placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner`} />
@@ -520,7 +520,7 @@ function App() {
                 <button 
                   onClick={submitReport} 
                   disabled={isSubmitting}
-                  className={`w-full bg-indigo-600 text-white font-bold text-sm py-4 rounded-xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-widest uppercase flex justify-center items-center gap-3 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                  className={`w-full bg-indigo-600 text-white font-bold text-sm py-4 px-4 sm:px-6 rounded-xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-widest uppercase flex justify-center items-center gap-3 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   {isSubmitting ? (
                     <>
