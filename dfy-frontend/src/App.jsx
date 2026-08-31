@@ -426,7 +426,7 @@ function App() {
                       maxLength="4" 
                       value={formData.pin} 
                       onChange={(e) => setFormData({...formData, pin: e.target.value})} 
-                      className={`w-full bg-slate-50 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-red-500 ring-2 ring-red-200' : 'border-slate-200'} rounded-xl px-4 py-3.5 text-xl tracking-[0.5em] text-slate-800 font-black outline-none text-center transition-all shadow-inner`} 
+                      className={`w-full bg-slate-50 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-red-500 ring-2 ring-red-200' : 'border-slate-200'} rounded-xl px-4 py-3.5 text-xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner`} 
                     />
                   </div>
                 )}
