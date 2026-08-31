@@ -21,7 +21,7 @@ else:
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred, {
-        'storageBucket': 'dfy-reporting-mis.firebasestorage.app'
+        'storageBucket': 'dfy-reporting-mis.appspot.com'
     })
 db = firestore.client()
 
