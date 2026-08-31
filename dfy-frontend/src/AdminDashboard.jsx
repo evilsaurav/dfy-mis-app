@@ -199,7 +199,7 @@ export default function AdminDashboard() {
         ) : (
           <>
             {selectedFO !== 'All' && (
-                <div className="bg-gradient-to-br from-indigo-600 to-blue-600 rounded-3xl shadow-xl p-8 sm:p-10 text-white flex flex-col items-center justify-center relative overflow-hidden mb-8 animate-fade-in-down mx-auto max-w-4xl border border-indigo-400/30">
+                <div className="bg-gradient-to-br from-indigo-600 to-blue-600 rounded-3xl shadow-xl p-8 sm:p-10 text-white flex flex-col items-center justify-center relative overflow-hidden mb-8 animate-fade-in-down w-full border border-indigo-400/30">
                    <div className="absolute top-0 right-0 w-80 h-80 bg-white opacity-10 rounded-full -mt-20 -mr-20 pointer-events-none blur-3xl"></div>
                    <div className="absolute bottom-0 left-0 w-64 h-64 bg-black opacity-10 rounded-full -mb-20 -ml-20 pointer-events-none blur-3xl"></div>
                    
@@ -211,7 +211,7 @@ export default function AdminDashboard() {
                      <h2 className="text-3xl sm:text-4xl font-black mb-2 tracking-tight drop-shadow-md">{selectedFO}</h2>
                      <p className="text-indigo-100 font-bold uppercase tracking-widest text-[10px] sm:text-xs mb-8 bg-black/20 inline-block px-4 py-1.5 rounded-full border border-white/10 shadow-sm">{selectedDistrict} District</p>
                      
-                     <div className="flex flex-wrap justify-center gap-3 sm:gap-6 text-sm font-semibold max-w-2xl mx-auto w-full">
+                     <div className="flex flex-wrap justify-center gap-3 sm:gap-6 text-sm font-semibold max-w-3xl mx-auto w-full mt-4">
                        <span className="bg-white/10 backdrop-blur-md px-2 py-3 sm:px-6 sm:py-4 rounded-2xl flex flex-col items-center gap-1.5 border border-white/20 shadow-lg flex-1 min-w-[100px] hover:bg-white/20 transition-all cursor-default">
                          <span className="text-indigo-100 text-[9px] sm:text-[11px] uppercase tracking-widest font-black opacity-80">Days Active</span> 
                          <span className="text-2xl sm:text-3xl font-black drop-shadow-sm">{filteredRecords.length}</span>
