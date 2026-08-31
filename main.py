@@ -168,32 +168,60 @@ async def upload_image(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
 
-@app.post("/submit-daily-report")
-async def submit_report(data: DailyActivityReport):
-    try:
-        doc_id = f"{data.working_place}_{data.fo_name}".replace(" ", "").lower()
-        staff_doc = db.collection("staff_directory").document(doc_id).get()
-        
-        if not staff_doc.exists:
-            raise HTTPException(status_code=404, detail="Ye ladka database me nahi hai.")
-            
-        real_pin = staff_doc.to_dict().get("pin")
-        if str(data.pin) != str(real_pin):
-            raise HTTPException(status_code=401, detail="Galat PIN bhai. Chori pakdi gayi.")
+class CheckStatusRequest(BaseModel):
+    working_place: str
+    fo_name: str
+    date: str
 
-        payload = data.dict()
-        del payload['pin']
+class StartDayRequest(BaseModel):
+    working_place: str
+    fo_name: str
+    date: str
+    morning_km: int
+    morning_km_photo_url: str
+
+@app.post("/check-today-status")
+async def check_today_status(req: CheckStatusRequest):
+    try:
+        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
+        doc_ref = db.collection("daily_field_reports").document(doc_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            return {"status": doc.to_dict().get("status", "in_progress"), "data": doc.to_dict()}
+        return {"status": "not_started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/start-day")
+async def start_day(req: StartDayRequest):
+    try:
+        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
+        doc_ref = db.collection("daily_field_reports").document(doc_id)
         
-        if not payload['date_of_reporting']:
-            payload['date_of_reporting'] = datetime.now().strftime("%Y-%m-%d")
+        payload = req.dict()
+        payload["status"] = "in_progress"
+        payload["timestamp_started"] = firestore.SERVER_TIMESTAMP
         
-        payload['designation'] = staff_doc.to_dict().get("designation", "FO")
-        
-        doc_ref = db.collection("daily_field_reports").document()
         doc_ref.set(payload)
-        return {"status": "success", "message": "Report Saved"}
-    except HTTPException:
-        raise
+        return {"message": "Day started successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/submit-daily-report")
+async def submit_daily_report(report: DailyActivityReport):
+    try:
+        if not report.date_of_reporting:
+            report.date_of_reporting = datetime.now().strftime("%Y-%m-%d")
+            
+        doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
+        doc_ref = db.collection("daily_field_reports").document(doc_id)
+        
+        payload = report.dict(exclude_unset=True)
+        payload["status"] = "completed"
+        payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
+        
+        doc_ref.set(payload, merge=True)
+        return {"message": "Daily report submitted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

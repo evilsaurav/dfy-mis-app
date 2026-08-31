@@ -125,8 +125,8 @@ function App() {
   const [isAdvancedMode, setIsAdvancedMode] = useState(false);
 
   const currentHour = new Date().getHours();
-  const canEditMorning = (currentHour < 14) || isAdvancedMode;
-  const canEditEvening = (currentHour >= 14) || isAdvancedMode;
+  const canEditMorning = appState === 'not_started' || isAdvancedMode;
+  const canEditEvening = appState === 'in_progress' || isAdvancedMode;
 
   const [docName, setDocName] = useState("");
   const [pinStatus, setPinStatus] = useState(null);
@@ -151,22 +151,22 @@ function App() {
 
   useEffect(() => {
     if (formData.pin.length === 4 && formData.fo_name && formData.working_place) {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-      fetch(`${API_BASE_URL}/verify-pin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          working_place: formData.working_place, 
-          fo_name: formData.fo_name, 
-          pin: formData.pin 
-        })
-      })
-      .then(res => res.json())
-      .then(data => {
-        if(data.valid) setPinStatus("success");
-        else setPinStatus("error");
-      })
-      .catch(() => setPinStatus("error"));
+      setPinStatus("checking");
+      const checkPin = async () => {
+        try {
+          const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+          const res = await fetch(`${API_BASE_URL}/verify-pin`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, pin: formData.pin })
+          });
+          const data = await res.json();
+          setPinStatus(data.valid ? "success" : "error");
+        } catch {
+          setPinStatus("error");
+        }
+      };
+      checkPin();
     } else {
       setPinStatus(null);
     }
@@ -175,17 +175,36 @@ function App() {
   const handleDistrictChange = (e) => {
     setFormData({ ...formData, working_place: e.target.value, fo_name: "", pin: "" });
     setPinStatus(null);
-  };
-  
+  }
+
   const handleNameChange = (e) => {
     setFormData({ ...formData, fo_name: e.target.value, pin: "" });
     setPinStatus(null);
   }
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (pinStatus === 'success') {
-      setIsLoggedIn(true);
-      showToast(`Welcome back, ${formData.fo_name}!`, 'success');
+      setIsSubmitting(true);
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        setFormData(prev => ({...prev, date_of_reporting: today}));
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+        const res = await fetch(`${API_BASE_URL}/check-today-status`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
+        });
+        const data = await res.json();
+        setAppState(data.status);
+        if (data.status === 'in_progress' || data.status === 'completed') {
+           setFormData(prev => ({ ...prev, morning_km: data.data.morning_km || '' }));
+        }
+        setIsLoggedIn(true);
+        showToast(`Welcome back, ${formData.fo_name}!`, 'success');
+      } catch (err) {
+        showToast("Error checking status", "error");
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       showToast("Please enter the correct PIN to continue.", "error");
     }
@@ -233,26 +252,59 @@ function App() {
       return;
     }
     
-    setIsSubmitting(true);
-
-    try {
-      let morningUrl = "";
-      let eveningUrl = "";
-      if (morningPhotoFile) {
-        showToast("Uploading Morning KM Photo...", "success");
-        morningUrl = await uploadPhoto(morningPhotoFile);
+    if (appState === 'not_started') {
+      if (!formData.morning_km) {
+        showToast("Morning KM dalna zaroori hai bhai!", "error");
+        return;
       }
+      setIsSubmitting(true);
+      try {
+        let morningUrl = "";
+        if (morningPhotoFile) {
+          showToast("Uploading Morning KM Photo...", "success");
+          morningUrl = await uploadPhoto(morningPhotoFile);
+        }
+        showToast("Starting your day...", "success");
+        const payload = {
+          working_place: formData.working_place,
+          fo_name: formData.fo_name,
+          date: formData.date_of_reporting,
+          morning_km: formData.morning_km,
+          morning_km_photo_url: morningUrl
+        };
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+        const response = await fetch(`${API_BASE_URL}/start-day`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (response.ok) {
+          showToast("Day Started! Have a great field visit.", "success");
+          setTimeout(() => window.location.reload(), 2000);
+        } else {
+          showToast("Error starting day.", "error");
+        }
+      } catch (err) {
+        showToast("Network error.", "error");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // Submit Final Report
+    setIsSubmitting(true);
+    try {
+      let eveningUrl = "";
       if (eveningPhotoFile) {
         showToast("Uploading Evening KM Photo...", "success");
         eveningUrl = await uploadPhoto(eveningPhotoFile);
       }
 
-      showToast("Submitting Form Data...", "success");
+      showToast("Submitting Final Report...", "success");
       const totalKm = Number(formData.evening_km) - Number(formData.morning_km);
       const finalPayload = { 
         ...formData, 
         total_km: totalKm > 0 ? totalKm : 0,
-        morning_km_photo_url: morningUrl,
         evening_km_photo_url: eveningUrl
       };
 
@@ -264,13 +316,13 @@ function App() {
       const result = await response.json();
       
       if(response.ok) {
-        showToast("Report Submitted Successfully!", "success");
+        showToast("Final Report Submitted Successfully!", "success");
         setTimeout(() => window.location.reload(), 2000);
       } else {
         showToast(result.detail || "Error in saving data.", "error");
       }
     } catch (error) {
-      showToast("API is down or upload failed. Make sure server is running.", "error");
+      showToast("API is down or upload failed.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -387,6 +439,16 @@ function App() {
               </div>
             </div>
           </div>
+        ) : appState === 'completed' ? (
+          <div className="max-w-md mx-auto mt-16 text-center bg-white p-8 rounded-2xl shadow-sm border border-slate-100 animate-fade-in-down">
+             <div className="mx-auto bg-emerald-50 w-16 h-16 rounded-full flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+             </div>
+             <h2 className="text-2xl font-black text-emerald-600 mb-2">Day Completed!</h2>
+             <p className="text-slate-500 text-sm font-medium">You have successfully submitted your final daily report for today. Great job!</p>
+          </div>
         ) : (
           /* Main Dashboard */
           <div className="animate-fade-in">
@@ -397,60 +459,66 @@ function App() {
               </div>
             </div>
 
-            <Accordion title="1. Patient Registration" defaultOpen={true}>
-              {group1.map((cat) => (
-                <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
-              ))}
-            </Accordion>
+            {appState === 'in_progress' && (
+              <>
+                <Accordion title="1. Patient Registration" defaultOpen={true}>
+                  {group1.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
 
-            <Accordion title="2. Diagnostics & Testing">
-              {group2.map((cat) => (
-                <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
-              ))}
-            </Accordion>
+                <Accordion title="2. Diagnostics & Testing">
+                  {group2.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
 
-            <Accordion title="3. Field Work & Visits">
-              {group3.map((cat) => (
-                <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
-              ))}
-            </Accordion>
+                <Accordion title="3. Field Work & Visits">
+                  {group3.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
 
-            <Accordion title="4. Logistics & Outcomes">
-              {group4.map((cat) => (
-                <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
-              ))}
-            </Accordion>
+                <Accordion title="4. Logistics & Outcomes">
+                  {group4.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+              </>
+            )}
 
             {/* Travel & Doctors Section */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+            <div className={`grid grid-cols-1 ${appState === 'in_progress' ? 'md:grid-cols-2' : ''} gap-4 mt-8`}>
               {/* Doctor Visits */}
-              <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(16,185,129,0.1)] border border-emerald-100 overflow-hidden">
-                <div className="bg-emerald-50/50 px-5 py-4 border-b border-emerald-50 flex items-center gap-2">
-                  <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                  <label className="block text-sm font-bold text-emerald-800 tracking-wide uppercase">Doctor / Store Visits</label>
-                </div>
-                <div className="p-4 sm:p-5">
-                  <div className="flex gap-2">
-                    <input type="text" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="Doctor/Store Name" className="flex-1 w-full bg-slate-50/50 border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:text-slate-300" />
-                    <button onClick={addDoctor} className="bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-bold shadow-md shadow-emerald-500/20 hover:bg-emerald-600 active:scale-95 transition-all text-sm tracking-wide">ADD</button>
+              {appState === 'in_progress' && (
+                <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(16,185,129,0.1)] border border-emerald-100 overflow-hidden">
+                  <div className="bg-emerald-50/50 px-5 py-4 border-b border-emerald-50 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    <label className="block text-sm font-bold text-emerald-800 tracking-wide uppercase">Doctor / Store Visits</label>
                   </div>
-                  {formData.visited_names.length > 0 && (
-                    <ul className="mt-4 space-y-2">
-                      {formData.visited_names.map((name, i) => (
-                        <li key={i} className="flex justify-between items-center bg-white border border-slate-100 px-3.5 py-2.5 rounded-lg text-sm text-slate-600 font-semibold shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)]">
-                          <span className="flex items-center gap-3">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
-                            {name}
-                          </span>
-                          <button onClick={() => {
-                            setFormData({ ...formData, visited_names: formData.visited_names.filter((_, idx) => idx !== i) });
-                          }} className="text-slate-300 hover:text-red-500 font-bold text-lg transition-colors">&times;</button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  <div className="p-4 sm:p-5">
+                    <div className="flex gap-2">
+                      <input type="text" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="Doctor/Store Name" className="flex-1 w-full bg-slate-50/50 border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:text-slate-300" />
+                      <button onClick={addDoctor} className="bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-bold shadow-md shadow-emerald-500/20 hover:bg-emerald-600 active:scale-95 transition-all text-sm tracking-wide">ADD</button>
+                    </div>
+                    {formData.visited_names.length > 0 && (
+                      <ul className="mt-4 space-y-2">
+                        {formData.visited_names.map((name, i) => (
+                          <li key={i} className="flex justify-between items-center bg-white border border-slate-100 px-3.5 py-2.5 rounded-lg text-sm text-slate-600 font-semibold shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)]">
+                            <span className="flex items-center gap-3">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                              {name}
+                            </span>
+                            <button onClick={() => {
+                              setFormData({ ...formData, visited_names: formData.visited_names.filter((_, idx) => idx !== i) });
+                            }} className="text-slate-300 hover:text-red-500 font-bold text-lg transition-colors">&times;</button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Travel Meter */}
               <div className="bg-[#0f172a] rounded-2xl shadow-xl shadow-slate-900/10 border border-slate-800 overflow-hidden relative flex flex-col justify-between">
@@ -476,15 +544,17 @@ function App() {
                       {morningPhotoFile ? 'Photo Added' : 'Take Photo'}
                     </label>
                   </div>
-                  <div className="flex-1 space-y-2">
-                    <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Evening KM</label>
-                    <input disabled={!canEditEvening} type="number" placeholder="End" value={formData.evening_km} onChange={(e) => setFormData({...formData, evening_km: e.target.value})} className={`w-full ${!canEditEvening ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : 'bg-slate-800/80 text-white'} border border-slate-700 rounded-xl px-3 py-2.5 outline-none text-sm placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner`} />
-                    <label className={`w-full border border-slate-600 rounded-lg py-2 flex items-center justify-center gap-2 text-xs font-bold transition-all ${!canEditEvening ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed' : 'cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300'}`}>
-                      <input disabled={!canEditEvening} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { if(e.target.files[0]) setEveningPhotoFile(e.target.files[0]); }} />
-                      <svg className={`w-4 h-4 ${eveningPhotoFile ? 'text-emerald-400' : 'text-slate-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      {eveningPhotoFile ? 'Photo Added' : 'Take Photo'}
-                    </label>
-                  </div>
+                  {appState === 'in_progress' && (
+                    <div className="flex-1 space-y-2">
+                      <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Evening KM</label>
+                      <input disabled={!canEditEvening} type="number" placeholder="End" value={formData.evening_km} onChange={(e) => setFormData({...formData, evening_km: e.target.value})} className={`w-full ${!canEditEvening ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : 'bg-slate-800/80 text-white'} border border-slate-700 rounded-xl px-3 py-2.5 outline-none text-sm placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner`} />
+                      <label className={`w-full border border-slate-600 rounded-lg py-2 flex items-center justify-center gap-2 text-xs font-bold transition-all ${!canEditEvening ? 'bg-slate-800/40 text-slate-600 cursor-not-allowed' : 'cursor-pointer bg-slate-800 hover:bg-slate-700 text-slate-300'}`}>
+                        <input disabled={!canEditEvening} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { if(e.target.files[0]) setEveningPhotoFile(e.target.files[0]); }} />
+                        <svg className={`w-4 h-4 ${eveningPhotoFile ? 'text-emerald-400' : 'text-slate-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        {eveningPhotoFile ? 'Photo Added' : 'Take Photo'}
+                      </label>
+                    </div>
+                  )}
                 </div>
                 {formData.morning_km && formData.evening_km && (
                   <div className="px-4 pb-4 relative z-10 mt-auto">
