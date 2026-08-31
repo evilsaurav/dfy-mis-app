@@ -128,7 +128,7 @@ function App() {
 
   const currentHour = new Date().getHours();
   const canEditMorning = appState === 'not_started' || isAdvancedMode;
-  const canEditEvening = appState === 'in_progress' || isAdvancedMode;
+  const canEditEvening = appState === 'in_progress' || appState === 'pending_previous' || isAdvancedMode;
 
   const [docName, setDocName] = useState("");
   const [pinStatus, setPinStatus] = useState(null);
@@ -184,6 +184,22 @@ function App() {
     setPinStatus(null);
   }
 
+  const morningQuotes = [
+    "Ek naya din, ek nayi shuruwat! Jeet ke aana!",
+    "Great things never come from comfort zones. Field par macha do!",
+    "Success is what happens after you have survived all your mistakes. All the best for today!",
+    "Your hard work makes a difference. Have a successful field day!",
+    "Aapki mehnat se hi farak padta hai. Best of luck!"
+  ];
+
+  const eveningQuotes = [
+    "Well done! Aaj ka din bahut badhiya raha. Aaram karein!",
+    "Great work today! Aapka dedication lajawab hai.",
+    "Mission accomplished! Ab kal milte hain naye josh ke sath.",
+    "Another day, another success. Proud of your hard work!",
+    "Ek aur behtareen din khatam hua. Good job and good night!"
+  ];
+
   const handleLogin = async () => {
     if (pinStatus === 'success') {
       setIsSubmitting(true);
@@ -191,17 +207,22 @@ function App() {
         const today = new Date().toISOString().split('T')[0];
         setFormData(prev => ({...prev, date_of_reporting: today}));
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-        const res = await fetch(`${API_BASE_URL}/check-today-status`, {
+        const res = await fetch(${API_BASE_URL}/check-today-status, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
         });
         const data = await res.json();
         setAppState(data.status);
-        if (data.status === 'in_progress' || data.status === 'completed') {
-           setFormData(prev => ({ ...prev, morning_km: data.data.morning_km || '' }));
+        if (data.status === 'in_progress' || data.status === 'completed' || data.status === 'pending_previous') {
+           const d = data.data;
+           setFormData(prev => ({ 
+             ...prev, 
+             ...d, 
+             date_of_reporting: d.date_of_reporting || today 
+           }));
         }
         setIsLoggedIn(true);
-        showToast(`Welcome back, ${formData.fo_name}!`, 'success');
+        showToast(Welcome back, !, 'success');
       } catch (err) {
         showToast("Error checking status", "error");
       } finally {
@@ -210,7 +231,7 @@ function App() {
     } else {
       showToast("Please enter the correct PIN to continue.", "error");
     }
-  };
+  };;
 
   const handleLogout = () => {
     setIsLoggedIn(false);
@@ -247,6 +268,13 @@ function App() {
     if (!res.ok) throw new Error("Photo upload failed on ImgBB");
     const data = await res.json();
     return data.data.url;
+  };
+
+  const copyToWhatsApp = () => {
+    const text = *Daily Field Report - * ??\n*Name:*  ()\n\n*?? Travel Details:*\n- Morning:  KM\n- Evening:  KM\n- Total:  KM\n\n*?? Doctors/Stores Visited:*\n\n\n*?? Work Metrics:*\n- Notifications: \n- HIV & DM: \n- DBT: \n- Sample Collection: \n- Sample Tested: \n- Outcome Assigned: \n- Home Visit: \n- Contact Tracing: \n- Follow Up: \n- Face to Face: \n- Presumptive: \n- Documents: \n- FDC Provided: \n- Kit Consumption: ;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(() => showToast("Copied! Paste in WhatsApp.", "success")).catch(() => showToast("Failed to copy", "error"));
+    }
   };
 
   const submitReport = async () => {
@@ -453,8 +481,21 @@ function App() {
              <p className="text-slate-500 text-sm font-medium">You have successfully submitted your final daily report for today. Great job!</p>
           </div>
         ) : (
-          /* Main Dashboard */
+                    /* Main Dashboard */
           <div className="animate-fade-in">
+            {appState === 'pending_previous' && (
+              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-xl shadow-sm mb-6">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <svg className="h-5 w-5 text-red-500" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                  </div>
+                  <div className="ml-3">
+                    <h3 className="text-sm font-bold text-red-800">Pending Report ({formData.date_of_reporting})</h3>
+                    <p className="mt-1 text-sm text-red-700 font-medium">Aapne is din ki evening report submit nahi ki thi. Kripya pehle isey poora karein.</p>
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mb-6 px-2 flex justify-between items-end">
               <div>
                 <h2 className="text-2xl font-black text-slate-800 tracking-tight">Daily Activity Form</h2>
@@ -462,7 +503,7 @@ function App() {
               </div>
             </div>
 
-            {appState === 'in_progress' && (
+            {(appState === 'in_progress' || appState === 'pending_previous') && (
               <>
                 <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
@@ -491,9 +532,9 @@ function App() {
             )}
 
             {/* Travel & Doctors Section */}
-            <div className={`grid grid-cols-1 ${appState === 'in_progress' ? 'md:grid-cols-2' : ''} gap-4 mt-8`}>
+            <div className={`grid grid-cols-1 ${(appState === 'in_progress' || appState === 'pending_previous') ? 'md:grid-cols-2' : ''} gap-4 mt-8`}>
               {/* Doctor Visits */}
-              {appState === 'in_progress' && (
+              {(appState === 'in_progress' || appState === 'pending_previous') && (
                 <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(16,185,129,0.1)] border border-emerald-100 overflow-hidden">
                   <div className="bg-emerald-50/50 px-5 py-4 border-b border-emerald-50 flex items-center gap-2">
                     <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
@@ -547,7 +588,7 @@ function App() {
                       {morningPhotoFile ? 'Photo Added' : 'Take Photo'}
                     </label>
                   </div>
-                  {appState === 'in_progress' && (
+                  {(appState === 'in_progress' || appState === 'pending_previous') && (
                     <div className="flex-1 space-y-2">
                       <label className="block text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Evening KM</label>
                       <input disabled={!canEditEvening} type="number" placeholder="End" value={formData.evening_km} onChange={(e) => setFormData({...formData, evening_km: e.target.value})} className={`w-full ${!canEditEvening ? 'bg-slate-800/40 text-slate-500 cursor-not-allowed' : 'bg-slate-800/80 text-white'} border border-slate-700 rounded-xl px-3 py-2.5 outline-none text-sm placeholder-slate-500 focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner`} />
@@ -620,3 +661,12 @@ function App() {
 }
 
 export default App
+
+
+
+
+
+
+
+
+

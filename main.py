@@ -183,6 +183,20 @@ class StartDayRequest(BaseModel):
 @app.post("/check-today-status")
 async def check_today_status(req: CheckStatusRequest):
     try:
+        # First check if there is an incomplete past report for this user
+        past_docs = db.collection("daily_field_reports").where("fo_name", "==", req.fo_name).stream()
+        past_docs_list = [d.to_dict() for d in past_docs]
+        
+        # Sort by date descending in memory to avoid needing composite indexes in Firestore
+        past_docs_list.sort(key=lambda x: x.get("date_of_reporting", ""), reverse=True)
+        
+        if past_docs_list:
+            last_doc = past_docs_list[0]
+            # If the most recent report is BEFORE today, and its status is still in_progress
+            if last_doc.get("date_of_reporting", "") < req.date and last_doc.get("status") == "in_progress":
+                return {"status": "pending_previous", "data": last_doc}
+
+        # If no pending previous, check today's status normally
         doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
         doc = doc_ref.get()
@@ -275,3 +289,4 @@ async def download_excel():
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
