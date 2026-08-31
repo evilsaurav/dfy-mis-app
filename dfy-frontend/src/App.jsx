@@ -270,37 +270,65 @@ function App() {
     return data.data.url;
   };
 
+
+  const generateWhatsAppText = () => {
+    let text = '*Daily Field Report - ' + (formData.date_of_reporting || new Date().toISOString().split('T')[0]) + '* ??\n';
+    text += '*Name:* ' + formData.fo_name + ' (' + formData.working_place + ')\n\n';
+    
+    text += '*?? Travel Details:*\n';
+    text += '- Morning: ' + (formData.morning_km || 0) + ' KM\n';
+    text += '- Evening: ' + (formData.evening_km || 0) + ' KM\n';
+    const tKm = Math.max(0, Number(formData.evening_km) - Number(formData.morning_km)) || 0;
+    text += '- Total: ' + tKm + ' KM\n\n';
+
+    if (formData.visited_names && formData.visited_names.length > 0) {
+      text += '*?? Doctors/Stores Visited:*\n';
+      text += formData.visited_names.join('\n') + '\n\n';
+    }
+
+    text += '*?? Work Metrics:*\n';
+    
+    const categories = [
+      { key: 'notification_ids', label: 'Notification' },
+      { key: 'hiv_dm_ids', label: 'HIV & DM' },
+      { key: 'dbt_ids', label: 'DBT' },
+      { key: 'sample_collection_ids', label: 'Sample Collection' },
+      { key: 'sample_tested_ids', label: 'Sample Tested' },
+      { key: 'outcome_assigned_ids', label: 'Outcome Assigned' },
+      { key: 'home_visit_ids', label: 'Home Visit' },
+      { key: 'contact_tracing_ids', label: 'Contact Tracing' },
+      { key: 'follow_up_ids', label: 'Follow Up' },
+      { key: 'face_to_face_ids', label: 'Face to Face' },
+      { key: 'presumptive_ids', label: 'Presumptive' },
+      { key: 'documents_ids', label: 'Documents' },
+      { key: 'fdc_provided_ids', label: 'FDC Provided' },
+      { key: 'kit_consumption_ids', label: 'Kit Consumption' }
+    ];
+
+    let hasMetrics = false;
+    categories.forEach(cat => {
+      const ids = formData[cat.key] || [];
+      if (ids.length > 0) {
+        hasMetrics = true;
+        text += '\n*' + cat.label + ':* ' + ids.length + '\n';
+        text += ids.join('\n') + '\n';
+      }
+    });
+
+    if (!hasMetrics) {
+      text += 'None\n';
+    }
+
+    return text.trim();
+  };
+
   const copyToWhatsApp = () => {
-    const text = `*Daily Field Report - ${formData.date_of_reporting}* ??
-*Name:* ${formData.fo_name} (${formData.working_place})
-
-*?? Travel Details:*
-- Morning: ${formData.morning_km} KM
-- Evening: ${formData.evening_km || 0} KM
-- Total: ${formData.total_km || 0} KM
-
-*?? Doctors/Stores Visited:*
-${(formData.visited_names || []).join(', ') || 'None'}
-
-*?? Work Metrics:*
-- Notifications: ${(formData.notification_ids || []).length}
-- HIV & DM: ${(formData.hiv_dm_ids || []).length}
-- DBT: ${(formData.dbt_ids || []).length}
-- Sample Collection: ${(formData.sample_collection_ids || []).length}
-- Sample Tested: ${(formData.sample_tested_ids || []).length}
-- Outcome Assigned: ${(formData.outcome_assigned_ids || []).length}
-- Home Visit: ${(formData.home_visit_ids || []).length}
-- Contact Tracing: ${(formData.contact_tracing_ids || []).length}
-- Follow Up: ${(formData.follow_up_ids || []).length}
-- Face to Face: ${(formData.face_to_face_ids || []).length}
-- Presumptive: ${(formData.presumptive_ids || []).length}
-- Documents: ${(formData.documents_ids || []).length}
-- FDC Provided: ${(formData.fdc_provided_ids || []).length}
-- Kit Consumption: ${(formData.kit_consumption_ids || []).length}`;
+    const text = generateWhatsAppText();
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).then(() => showToast("Copied! Paste in WhatsApp.", "success")).catch(() => showToast("Failed to copy", "error"));
+      navigator.clipboard.writeText(text).then(() => showToast('Copied! Paste in WhatsApp.', 'success')).catch(() => showToast('Failed to copy', 'error'));
     }
   };
+
 
   const submitReport = async () => {
     if(!formData.working_place || !formData.fo_name || !formData.pin) {
@@ -506,32 +534,7 @@ ${(formData.visited_names || []).join(', ') || 'None'}
                
                <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-200 text-left text-sm text-slate-600 font-mono overflow-y-auto max-h-[300px]">
                   <pre className="whitespace-pre-wrap font-sans text-xs">
-{`*Daily Field Report - ${formData.date_of_reporting || new Date().toISOString().split('T')[0]}* ??
-*Name:* ${formData.fo_name} (${formData.working_place})
-
-*?? Travel Details:*
-- Morning: ${formData.morning_km || 0} KM
-- Evening: ${formData.evening_km || 0} KM
-- Total: ${formData.total_km || Math.max(0, Number(formData.evening_km) - Number(formData.morning_km)) || 0} KM
-
-*?? Doctors/Stores Visited:*
-${(formData.visited_names || []).join(', ') || 'None'}
-
-*?? Work Metrics:*
-- Notifications: ${(formData.notification_ids || []).length}
-- HIV & DM: ${(formData.hiv_dm_ids || []).length}
-- DBT: ${(formData.dbt_ids || []).length}
-- Sample Collection: ${(formData.sample_collection_ids || []).length}
-- Sample Tested: ${(formData.sample_tested_ids || []).length}
-- Outcome Assigned: ${(formData.outcome_assigned_ids || []).length}
-- Home Visit: ${(formData.home_visit_ids || []).length}
-- Contact Tracing: ${(formData.contact_tracing_ids || []).length}
-- Follow Up: ${(formData.follow_up_ids || []).length}
-- Face to Face: ${(formData.face_to_face_ids || []).length}
-- Presumptive: ${(formData.presumptive_ids || []).length}
-- Documents: ${(formData.documents_ids || []).length}
-- FDC Provided: ${(formData.fdc_provided_ids || []).length}
-- Kit Consumption: ${(formData.kit_consumption_ids || []).length}`}
+{generateWhatsAppText()}
                   </pre>
                </div>
                
