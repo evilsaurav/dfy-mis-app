@@ -354,7 +354,7 @@ function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50/50 font-sans pb-40 text-slate-800">
+    <div className="min-h-screen bg-slate-50/50 font-sans pb-40 text-slate-800 flex flex-col">
       <Toast message={toast.message} type={toast.type} onClose={closeToast} />
 
       <header className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)]">
@@ -383,10 +383,10 @@ function App() {
         </div>
       </header>
 
-      <main className="max-w-4xl mx-auto p-4 sm:p-6 mt-2">
+      <main className={`max-w-4xl mx-auto p-4 sm:p-6 w-full flex-1 flex flex-col ${!isLoggedIn ? "justify-center mt-[-2rem]" : "mt-2"}`}>
         {!isLoggedIn ? (
           /* Login Screen */
-          <div className="max-w-md mx-auto mt-8 sm:mt-16 animate-fade-in-down">
+          <div className="max-w-md mx-auto animate-fade-in-down w-full">
             <div className="text-center mb-8">
               <div className="mx-auto bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mb-4">
                 <svg className="w-8 h-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
