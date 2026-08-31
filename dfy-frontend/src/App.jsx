@@ -12,9 +12,9 @@ const Toast = ({ message, type, onClose }) => {
   const bgColor = type === 'error' ? 'bg-red-500' : 'bg-emerald-500';
 
   return (
-    <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] ${bgColor} text-white px-5 py-3 rounded-full shadow-lg flex items-center gap-3 transition-all duration-300 ease-in-out`}>
+    <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] ${bgColor} text-white px-5 py-3 rounded-2xl sm:rounded-full shadow-lg flex items-center justify-between gap-3 transition-all duration-300 ease-in-out w-[90%] max-w-md`}>
       <span className="font-semibold text-sm tracking-wide">{message}</span>
-      <button onClick={onClose} className="opacity-80 hover:opacity-100 font-bold text-lg leading-none">&times;</button>
+      <button onClick={onClose} className="opacity-80 hover:opacity-100 font-bold text-lg leading-none shrink-0">&times;</button>
     </div>
   );
 };
@@ -365,7 +365,7 @@ function App() {
             </div>
             <div>
               <h1 className="text-base sm:text-lg font-black tracking-wide leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
-              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 whitespace-nowrap">Mobile MIS Dashboard</p>
+              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 ">Mobile MIS Dashboard</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 ml-auto">
