@@ -73,7 +73,7 @@ export default function AdminDashboard() {
       total_km: 0, notifications: 0, tests: 0, presumptive: 0, doctor_visits: 0,
       hiv_dm: 0, dbt: 0, sample_collection: 0, outcome_assigned: 0,
       home_visits: 0, contact_tracing: 0, follow_ups: 0, face_to_face: 0,
-      documents: 0, fdc_provided: 0, kit_consumption: 0, overrides: 0
+      documents: 0, fdc_provided: 0, kit_consumption: 0, overrides: 0, differentiated_tb: 0, tpt_treatment_start: 0, tpt_presumptive: 0, adhar_face_auth: 0, consent_with_id: 0
     };
     return records.reduce((acc, curr) => {
       for (let key in init) {
@@ -107,7 +107,8 @@ export default function AdminDashboard() {
       { subject: 'Home Visits', A: totals.home_visits, fullMark: 150 },
       { subject: 'Doc Visits', A: totals.doctor_visits, fullMark: 150 },
       { subject: 'Logistics', A: totals.fdc_provided + totals.kit_consumption, fullMark: 150 },
-      { subject: 'Presumptive', A: totals.presumptive, fullMark: 150 }
+      { subject: 'Presumptive', A: totals.presumptive, fullMark: 150 },
+        { subject: 'Special Tracking', A: totals.differentiated_tb + totals.tpt_treatment_start + totals.tpt_presumptive + totals.adhar_face_auth + totals.consent_with_id, fullMark: 150 }
     ];
   }, [totals]);
 
@@ -197,7 +198,25 @@ export default function AdminDashboard() {
           <div className="text-center py-20 font-bold text-slate-500 bg-white rounded-2xl shadow-sm border border-slate-100">No data found for selected filters</div>
         ) : (
           <>
-            {/* The BIG 5 KPIs */}
+            {selectedFO !== 'All' && (
+                <div className="bg-gradient-to-r from-indigo-600 to-blue-500 rounded-2xl shadow-lg p-6 sm:p-8 text-white flex flex-col sm:flex-row items-center gap-6 relative overflow-hidden mb-6 animate-fade-in-down">
+                   <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full -mt-10 -mr-10"></div>
+                   <div className="h-24 w-24 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center text-4xl font-black shadow-inner border-4 border-white/30 shrink-0 uppercase">
+                     {selectedFO.charAt(0)}
+                   </div>
+                   <div className="text-center sm:text-left z-10 w-full">
+                     <h2 className="text-3xl font-black mb-1">{selectedFO}</h2>
+                     <p className="text-indigo-100 font-bold uppercase tracking-widest text-xs mb-4 bg-black/20 inline-block px-3 py-1 rounded-full">{selectedDistrict} District</p>
+                     <div className="flex flex-wrap justify-center sm:justify-start gap-4 text-sm font-semibold">
+                       <span className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10"><span className="text-white/60 text-xs uppercase tracking-wider">Days Active</span> <span className="text-lg">{filteredRecords.length}</span></span>
+                       <span className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10"><span className="text-white/60 text-xs uppercase tracking-wider">Total Travel</span> <span className="text-lg">{totals.total_km} KM</span></span>
+                       <span className="bg-white/10 px-3 py-1.5 rounded-lg flex items-center gap-2 border border-white/10"><span className="text-white/60 text-xs uppercase tracking-wider">Total Activities</span> <span className="text-lg">{Object.values(totals).reduce((a,b)=>a+b, 0) - totals.total_km}</span></span>
+                     </div>
+                   </div>
+                </div>
+              )}
+
+              {/* The BIG 5 KPIs */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-indigo-500">
                 <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Total KM Travelled</h3>
@@ -306,6 +325,11 @@ export default function AdminDashboard() {
                       <TH label="Docs" sortKey="documents" />
                       <TH label="FDC" sortKey="fdc_provided" />
                       <TH label="Kits" sortKey="kit_consumption" />
+                      <TH label="Diff TB" sortKey="differentiated_tb" />
+                      <TH label="TPT Start" sortKey="tpt_treatment_start" />
+                      <TH label="TPT Presumptive" sortKey="tpt_presumptive" />
+                      <TH label="Adhar Auth" sortKey="adhar_face_auth" />
+                      <TH label="Consent" sortKey="consent_with_id" />
                       <TH label="Override" sortKey="overrides" />
                     </tr>
                   </thead>
@@ -329,6 +353,11 @@ export default function AdminDashboard() {
                         <td className="p-3">{row.documents}</td>
                         <td className="p-3">{row.fdc_provided}</td>
                         <td className="p-3">{row.kit_consumption}</td>
+                          <td className="p-3 font-bold text-pink-600">{row.differentiated_tb}</td>
+                          <td className="p-3 font-bold text-teal-600">{row.tpt_treatment_start}</td>
+                          <td className="p-3 font-bold text-cyan-600">{row.tpt_presumptive}</td>
+                          <td className="p-3 font-bold text-orange-600">{row.adhar_face_auth}</td>
+                          <td className="p-3 font-bold text-indigo-400">{row.consent_with_id}</td>
                         <td className="p-3 text-red-500">{row.overrides > 0 ? row.overrides : '-'}</td>
                       </tr>
                     ))}
