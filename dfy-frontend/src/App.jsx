@@ -130,21 +130,12 @@ function App() {
     tpt_presumptive_ids: [],
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
-    remark: "", visited_names: [], 
-    morning_km: "", evening_km: "",
-    is_override_used: false
+    remark: "", visited_names: []
   });
 
-  const [morningPhotoFile, setMorningPhotoFile] = useState(null);
-  const [eveningPhotoFile, setEveningPhotoFile] = useState(null);
-  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
-
-  const [appState, setAppState] = useState('not_started');
-
-  const currentHour = new Date().getHours();
-  const canEditMorning = appState === 'not_started' || isAdvancedMode;
-  const canEditEvening = appState === 'in_progress' || appState === 'pending_previous' || isAdvancedMode;
-
+      
+  
+      
   const [docName, setDocName] = useState("");
   const [pinStatus, setPinStatus] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -217,7 +208,6 @@ function App() {
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
         });
         const data = await res.json();
-        setAppState(data.status);
         if (data.status === 'in_progress' || data.status === 'completed' || data.status === 'pending_previous') {
            const d = data.data;
            setFormData(prev => ({ 
@@ -261,30 +251,11 @@ function App() {
     }
   };
 
-  const uploadPhoto = async (file) => {
-    const fd = new FormData();
-    fd.append("image", file);
-    // User will need to provide this key in Vercel or replace it here
-    const IMGBB_API_KEY = import.meta.env.VITE_IMGBB_API_KEY || "9c75787468e638438bf8ec75dd73b29d"; // Dummy/default key, user should change
-    const res = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-      method: "POST",
-      body: fd,
-    });
-    if (!res.ok) throw new Error("Photo upload failed on ImgBB");
-    const data = await res.json();
-    return data.data.url;
-  };
 
 
   const generateWhatsAppText = () => {
     let text = '*Daily Field Report - ' + (formData.date_of_reporting || new Date().toISOString().split('T')[0]) + '* ??\n';
     text += '*Name:* ' + formData.fo_name + ' (' + formData.working_place + ')\n\n';
-    
-    text += '*?? Travel Details:*\n';
-    text += '- Morning: ' + (formData.morning_km || 0) + ' KM\n';
-    text += '- Evening: ' + (formData.evening_km || 0) + ' KM\n';
-    const tKm = Math.max(0, Number(formData.evening_km) - Number(formData.morning_km)) || 0;
-    text += '- Total: ' + tKm + ' KM\n\n';
 
     if (formData.visited_names && formData.visited_names.length > 0) {
       text += '*?? Doctors/Stores Visited:*\n';
@@ -350,76 +321,26 @@ function App() {
       return;
     }
     
-    if (appState === 'not_started') {
-      if (!formData.morning_km) {
-        showToast("Morning KM dalna zaroori hai bhai!", "error");
-        return;
-      }
-      setIsSubmitting(true);
-      try {
-        let morningUrl = "";
-        if (morningPhotoFile) {
-          showToast("Uploading Morning KM Photo...", "success");
-          morningUrl = await uploadPhoto(morningPhotoFile);
-        }
-        showToast("Starting your day...", "success");
-        const payload = {
-          working_place: formData.working_place,
-          fo_name: formData.fo_name,
-          date: formData.date_of_reporting,
-          morning_km: formData.morning_km,
-          morning_km_photo_url: morningUrl
-        };
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-        const response = await fetch(`${API_BASE_URL}/start-day`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });        if (response.ok) {
-          const mq = morningQuotes[Math.floor(Math.random() * morningQuotes.length)];
-          showToast("? Aapka morning meter record ho gaya hai. Kripya shaam mein apni final report submit karein. " + mq, "success");
-          setTimeout(() => window.location.reload(), 3500);
-        } else {
-          showToast("Error starting day.", "error");
-        }
-      } catch (err) {
-        showToast("Network error.", "error");
-      } finally {
-        setIsSubmitting(false);
-      }
-      return;
-    }
-
-    // Submit Final Report
     setIsSubmitting(true);
     try {
-      let eveningUrl = "";
-      if (eveningPhotoFile) {
-        showToast("Uploading Evening KM Photo...", "success");
-        eveningUrl = await uploadPhoto(eveningPhotoFile);
-      }
-
-      showToast("Submitting Final Report...", "success");
-      const totalKm = Number(formData.evening_km) - Number(formData.morning_km);
-      const finalPayload = { 
-        ...formData, 
-        total_km: totalKm > 0 ? totalKm : 0,
-        evening_km_photo_url: eveningUrl
-      };
-
+      showToast("Saving your report...", "success");
+      const payload = { ...formData, date: formData.date_of_reporting };
+      
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const response = await fetch(`${API_BASE_URL}/submit-daily-report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalPayload)
+        body: JSON.stringify(payload)
       });
-      const result = await response.json();      if(response.ok) {
-        const eq = eveningQuotes[Math.floor(Math.random() * eveningQuotes.length)];
-        showToast("?? Final Report Submitted Successfully! " + eq, "success");
-        setTimeout(() => setAppState('completed'), 2500);
+      
+      if(response.ok) {
+        showToast("? Final Report Submitted Successfully!", "success");
+        setTimeout(() => window.location.reload(), 2500);
       } else {
+        const result = await response.json();
         showToast(result.detail || "Error in saving data.", "error");
       }
-    } catch (error) {
-      showToast("API is down or upload failed.", "error");
+    } catch(err) {
+      showToast("Network error while submitting report.", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -485,7 +406,7 @@ function App() {
         </div>
       </header>
 
-      <main className={`max-w-4xl mx-auto p-4 sm:p-6 w-full flex-1 flex flex-col ${!isLoggedIn ? "justify-center mt-[-2rem]" : "mt-2"}`}>
+      <main className={`max-w-4xl mx-auto px-1 sm:p-6 w-[95%] sm:w-full flex-1 flex flex-col overflow-x-hidden ${!isLoggedIn ? "justify-center" : "mt-2"}`}>
         {!isLoggedIn ? (
           /* Login Screen */
           <div className="max-w-md mx-auto animate-fade-in-down w-full">

@@ -72,7 +72,6 @@ class DailyActivityReport(BaseModel):
     visited_names: List[str] = []
     morning_km: Optional[int] = 0
     evening_km: Optional[int] = 0
-    total_km: Optional[int] = 0
     morning_km_photo_url: Optional[str] = ""
     evening_km_photo_url: Optional[str] = ""
     is_override_used: Optional[bool] = False
@@ -220,22 +219,6 @@ async def check_today_status(req: CheckStatusRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/start-day")
-async def start_day(req: StartDayRequest):
-    try:
-        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
-        doc_ref = db.collection("daily_field_reports").document(doc_id)
-        
-        payload = req.dict()
-        payload["date_of_reporting"] = req.date
-        payload["status"] = "in_progress"
-        payload["timestamp_started"] = firestore.SERVER_TIMESTAMP
-        
-        doc_ref.set(payload)
-        return {"message": "Day started successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/submit-daily-report")
 async def submit_daily_report(report: DailyActivityReport):
     try:
@@ -360,6 +343,44 @@ def ordinal(n: int) -> str:
     else:
         suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
     return f"{n}{suffix}"
+
+
+class TargetUpdate(BaseModel):
+    district: str
+    fo_name: str
+    target: int
+
+@app.get("/get-targets")
+async def get_targets(district: str = None):
+    try:
+        targets = []
+        docs = db.collection("staff_targets").stream()
+        for doc in docs:
+            data = doc.to_dict()
+            if district and data.get("district") != district:
+                continue
+            targets.append({
+                "fo_name": data.get("fo_name"),
+                "district": data.get("district"),
+                "target": data.get("target", 0)
+            })
+        return {"success": True, "targets": targets}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-target")
+async def update_target(data: TargetUpdate):
+    try:
+        doc_id = f"{data.district}_{data.fo_name}".replace(" ", "").lower()
+        db.collection("staff_targets").document(doc_id).set({
+            "district": data.district,
+            "fo_name": data.fo_name,
+            "target": data.target
+        }, merge=True)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/download-kpi-workbook")
 async def download_kpi_workbook(district: str):
