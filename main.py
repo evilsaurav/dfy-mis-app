@@ -445,3 +445,26 @@ async def download_kpi_workbook(district: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/staff-directory")
+async def get_staff_directory():
+    try:
+        docs = db.collection("staff_directory").stream()
+        directory = {}
+        for doc in docs:
+            data = doc.to_dict()
+            district = data.get("district")
+            name = data.get("name")
+            if district and name:
+                if district not in directory:
+                    directory[district] = []
+                directory[district].append(name)
+        
+        # Sort names within districts
+        for d in directory:
+            directory[d] = sorted(directory[d])
+            
+        # Return sorted by district name too if preferred, but dict is fine
+        return {"status": "success", "data": directory}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

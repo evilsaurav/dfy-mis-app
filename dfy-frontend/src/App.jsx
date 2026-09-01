@@ -95,17 +95,25 @@ const IdBucket = ({ title, ids, onAdd, onRemove, showToast }) => {
 };
 
 function App() {
-  const initialDirectory = {
-    "Sheikhpura": ["Dhiraj Kumar", "Nilkamal Kumar"],
-    "Nawada": ["Devraj Kumar", "Rajesh Kumar", "Rajiv kumar"],
-    "Munger": ["Jayant Kumar", "Amit Kumar", "Saif Khan", "Sudhanshu Prasad", "Sumit Kr Singh", "Md. Raza Uddin", "Devrath Kumar", "Shyam Kumar Gupta"],
-    "Lakhisarai": ["Ankit Kumar", "Ram Prakash"],
-    "Jehanabad": ["Shashi Ranjan", "Suraj Kumar", "Sammer Arya"],
-    "Jamui": ["Bablu Kumar", "Rajiv Kumar", "Rinki Kumari", "Monu Kumar"]
-  };
-
-  const [directory, setDirectory] = useState(initialDirectory);
-  const [districts, setDistricts] = useState(Object.keys(initialDirectory));
+  const [directory, setDirectory] = useState({});
+  const [districts, setDistricts] = useState([]);
+  
+  useEffect(() => {
+    const fetchDirectory = async () => {
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+        const res = await fetch(`${API_BASE_URL}/staff-directory`);
+        const data = await res.json();
+        if (data.status === 'success') {
+          setDirectory(data.data);
+          setDistricts(Object.keys(data.data).sort());
+        }
+      } catch (err) {
+        console.error("Failed to fetch staff directory", err);
+      }
+    };
+    fetchDirectory();
+  }, []);
   
   const [formData, setFormData] = useState({
     working_place: "", fo_name: "", pin: "",
