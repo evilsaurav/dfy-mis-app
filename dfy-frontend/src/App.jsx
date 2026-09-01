@@ -157,41 +157,74 @@ const MyProfileDashboard = ({ formData, showToast }) => {
 };
 
 // --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onRemove, showToast }) => {
+const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
 
   const handleAdd = () => {
-    if (currentId.length === 9 && !isNaN(currentId)) {
-      onAdd(currentId);
+    const raw = currentId.trim();
+    if (!raw) return;
+
+    // Check if user pasted multiple IDs (separated by comma, space, newline)
+    const matches = raw.match(/\b\d{9}\b/g);
+    if (matches && matches.length > 1) {
+      if (onAddMultiple) {
+        onAddMultiple(matches);
+        setCurrentId("");
+        return;
+      }
+    }
+
+    if (raw.length === 9 && !isNaN(raw)) {
+      onAdd(raw);
       setCurrentId("");
     } else {
       showToast("ID exactly 9 digit ki honi chahiye bhai!", "error");
     }
   };
 
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAdd();
+    }
+  };
+
   return (
-    <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm hover:border-slate-200 transition-colors group">
-      <label className="block text-xs font-bold text-slate-400 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-500 transition-colors">
-        {title} 
+    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5 shadow-sm hover:border-slate-200 transition-colors group">
+      <label className="block text-xs font-bold text-slate-500 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-600 transition-colors">
+        <span>{title}</span>
         <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
       </label>
       <div className="flex gap-2">
         <input 
-          type="number" 
+          type="text"
+          inputMode="numeric"
           value={currentId}
           onChange={(e) => setCurrentId(e.target.value)}
-          placeholder="9-digit ID"
-          className="flex-1 w-full bg-slate-50/50 border border-slate-200 text-slate-800 text-sm rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-300"
+          onKeyDown={handleKeyDown}
+          placeholder="Enter or paste 9-digit ID"
+          className="flex-1 w-full bg-slate-50/70 border border-slate-200 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 placeholder:font-normal"
         />
-        <button onClick={handleAdd} className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide">ADD</button>
+        <button 
+          onClick={handleAdd} 
+          className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide shrink-0"
+        >
+          ADD
+        </button>
       </div>
       {safeIds.length > 0 && (
-        <ul className="mt-4 space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
+        <ul className="mt-4 space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
           {safeIds.map((id, index) => (
-            <li key={index} className="flex justify-between items-center bg-white border border-slate-100 px-3 py-2 rounded-lg shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)]">
-              <span className="font-mono font-bold text-slate-600 tracking-widest text-sm">{id}</span>
-              <button onClick={() => onRemove(index)} className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-7 w-7 rounded-full flex items-center justify-center font-bold transition-all shadow-sm">&times;</button>
+            <li key={index} className="flex justify-between items-center bg-slate-50/80 border border-slate-100 px-3.5 py-2 rounded-xl shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] hover:bg-indigo-50/40 transition-colors">
+              <span className="font-mono font-bold text-slate-700 tracking-wider text-sm">{id}</span>
+              <button 
+                onClick={() => onRemove(index)} 
+                className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-7 w-7 rounded-full flex items-center justify-center font-bold transition-all shadow-sm"
+                title="Remove"
+              >
+                &times;
+              </button>
             </li>
           ))}
         </ul>
@@ -278,6 +311,17 @@ function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
+
+  // Auto-save draft whenever form data changes while logged in
+  useEffect(() => {
+    if (isLoggedIn && formData.fo_name && formData.working_place) {
+      try {
+        const draftKey = `dfy_draft_${formData.working_place}_${formData.fo_name}`;
+        localStorage.setItem(draftKey, JSON.stringify(formData));
+      } catch (e) {}
+    }
+  }, [formData, isLoggedIn]);
+
   const closeToast = () => setToast({ message: "", type: "" });
 
 
@@ -410,9 +454,29 @@ function App() {
   };
 
   const addId = (field, id) => {
-    if(!formData[field].includes(id)){
-      setFormData({ ...formData, [field]: [...formData[field], id] });
+    const current = formData[field] || [];
+    if (current.includes(id)) {
+      showToast(`ID ${id} pehle se added hai!`, "error");
+      return;
     }
+    setFormData(prev => ({ ...prev, [field]: [...(prev[field] || []), id] }));
+  };
+
+  const addMultipleIds = (field, newIds) => {
+    setFormData(prev => {
+      const current = prev[field] || [];
+      const uniqueNew = newIds.filter(id => !current.includes(id));
+      const duplicatesCount = newIds.length - uniqueNew.length;
+      if (duplicatesCount > 0) {
+        showToast(`${uniqueNew.length} IDs add hui (${duplicatesCount} duplicates ignore ki gayi)`, 'success');
+      } else {
+        showToast(`${uniqueNew.length} IDs add hui!`, 'success');
+      }
+      return {
+        ...prev,
+        [field]: [...current, ...uniqueNew]
+      };
+    });
   };
   
   const removeId = (field, idx) => {
@@ -508,6 +572,7 @@ function App() {
       });
       
       if(response.ok) {
+        try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
         showToast("? Final Report Submitted Successfully!", "success");
         setTimeout(() => window.location.reload(), 2500);
       } else {
@@ -669,27 +734,27 @@ function App() {
               
                 <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
                 </Accordion>
                 <Accordion title="2. Diagnostics & Testing">
                   {group2.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
                 </Accordion>
                 <Accordion title="3. Field Work & Visits">
                   {group3.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
                 </Accordion>
                 <Accordion title="4. Logistics & Outcomes">
                   {group4.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
                 </Accordion>
                 <Accordion title="5. Special Tracking">
                   {group5.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key] || []} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key] || []} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
                   ))}
                 </Accordion>
                 <Accordion title="6. Additional Remarks">
@@ -738,17 +803,25 @@ function App() {
               <div className="h-40 w-full pointer-events-none"></div>
 
               {/* Sticky Bottom Action Bar */}
-              <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-md border-t border-slate-100 p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] z-50">
-                <div className="max-w-4xl mx-auto">
+              <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 p-3 sm:p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50">
+                <div className="max-w-4xl mx-auto flex items-center gap-2 sm:gap-3">
+                  <button 
+                    onClick={copyToWhatsApp}
+                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-3.5 sm:px-5 rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-95 shadow-sm"
+                    title="Copy WhatsApp Summary"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span>WhatsApp</span>
+                  </button>
                   <button 
                     onClick={submitReport} 
                     disabled={isSubmitting}
-                    className={`w-full bg-indigo-600 text-white font-bold text-sm py-4 px-4 sm:px-6 rounded-xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-widest uppercase flex justify-center items-center gap-3 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className={`flex-1 bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     {isSubmitting ? (
                       <>
                         <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        Submitting...
+                        <span>Submitting...</span>
                       </>
                     ) : 'Submit Final Report'}
                   </button>
