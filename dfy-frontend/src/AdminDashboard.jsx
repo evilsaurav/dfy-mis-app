@@ -23,6 +23,19 @@ export default function AdminDashboard() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [compareDistA, setCompareDistA] = useState("Jamui");
   const [compareDistB, setCompareDistB] = useState("Bhojpur");
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [newRecoveryPassword, setNewRecoveryPassword] = useState("");
+  const [confirmRecoveryPassword, setConfirmRecoveryPassword] = useState("");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoverySuccess, setRecoverySuccess] = useState("");
+  const [isRecovering, setIsRecovering] = useState(false);
+
+  const [showSecurityModal, setShowSecurityModal] = useState(false);
+  const [changeCurrentPw, setChangeCurrentPw] = useState("");
+  const [changeNewPw, setChangeNewPw] = useState("");
+  const [securityStatusMsg, setSecurityStatusMsg] = useState("");
+  const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [staffDirectory, setStaffDirectory] = useState({});
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -175,15 +188,133 @@ export default function AdminDashboard() {
       }
   };
 
-  const handleLogin = (e) => {
+
+  const handleLogin = async (e) => {
     e.preventDefault();
-    if (password === 'dfyadmin2026') {
-      setIsAuthenticated(true);
-      fetchData();
-    } else {
-      setError('Invalid Password');
+    setError('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        setIsAuthenticated(true);
+        fetchData();
+      } else {
+        setError('Invalid password. Forgot password? Use Emergency Recovery below.');
+      }
+    } catch (err) {
+      if (password === 'dfyadmin2026') {
+        setIsAuthenticated(true);
+        fetchData();
+      } else {
+        setError('Invalid password or server offline.');
+      }
     }
   };
+
+  const handleEmergencyReset = async (e) => {
+    e.preventDefault();
+    setRecoveryError('');
+    setRecoverySuccess('');
+    if (!recoveryCode.trim() || !newRecoveryPassword.trim()) {
+      setRecoveryError('Please fill all fields.');
+      return;
+    }
+    if (newRecoveryPassword !== confirmRecoveryPassword) {
+      setRecoveryError('New passwords do not match.');
+      return;
+    }
+    setIsRecovering(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/admin/auth/emergency-reset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recovery_code: recoveryCode, new_password: newRecoveryPassword })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setRecoverySuccess('Password successfully reset! Logging you in...');
+        setPassword(newRecoveryPassword);
+        setTimeout(() => {
+          setShowRecoveryModal(false);
+          setIsAuthenticated(true);
+          fetchData();
+        }, 1500);
+      } else {
+        setRecoveryError(data.detail || 'Invalid Emergency Recovery Code or PIN.');
+      }
+    } catch (err) {
+      setRecoveryError('Failed to connect to recovery server.');
+    } finally {
+      setIsRecovering(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e) => {
+    e.preventDefault();
+    setSecurityStatusMsg('');
+    if (!changeCurrentPw || !changeNewPw) {
+      setSecurityStatusMsg('Please enter both current and new password.');
+      return;
+    }
+    setIsSavingSecurity(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/admin/auth/update-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: changeCurrentPw, new_password: changeNewPw })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPassword(changeNewPw);
+        setSecurityStatusMsg('✓ Password updated successfully!');
+        setChangeCurrentPw('');
+        setChangeNewPw('');
+      } else {
+        setSecurityStatusMsg(`Error: ${data.detail || 'Failed to update'}`);
+      }
+    } catch (err) {
+      setSecurityStatusMsg('Failed to connect to server.');
+    } finally {
+      setIsSavingSecurity(false);
+    }
+  };
+
+  const downloadEmergencyCard = () => {
+    const card = `=====================================================
+  DOCTORS FOR YOU (DFY) - ADMIN EMERGENCY ACCESS CARD
+=====================================================
+Created / Downloaded: ${new Date().toLocaleString()}
+
+🔐 PORTAL URL: https://dfy-mis-app.vercel.app/admin
+🔑 MASTER RECOVERY KEY: DFY-RESCUE-9921
+🛡️ 4-DIGIT SECURITY PIN: 7788
+📋 STATE MISSION CODE: BIHAR-DFY-TB
+
+INSTRUCTIONS:
+If you ever forget your master admin password:
+1. Open Admin Portal Login screen.
+2. Click "Forgot Password / Emergency Recovery Key".
+3. Enter your Master Recovery Key (DFY-RESCUE-9921) or PIN (7788).
+4. Enter your new password and submit.
+
+Keep this file safe in your Google Drive or personal diary.
+=====================================================`;
+
+    const blob = new Blob([card], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `DFY_Admin_Emergency_Access_Card_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
 
   const fetchData = async () => {
     setIsLoading(true);
@@ -346,16 +477,116 @@ export default function AdminDashboard() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-        <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl w-full max-w-md border border-slate-100">
           <div className="text-center mb-6">
-            <h1 className="text-2xl font-black text-slate-800">Admin Portal</h1>
-            <p className="text-sm text-slate-500 font-medium">Enter master password to continue</p>
+            <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 font-black shadow-inner">
+              🔐
+            </div>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Admin Portal</h1>
+            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">State Health MIS Management</p>
           </div>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500 outline-none" />
-          {error && <p className="text-red-500 text-xs font-bold mb-4 text-center">{error}</p>}
-          <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3 rounded-xl hover:bg-indigo-700 transition-colors">Login</button>
-        </form>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Master Password</label>
+              <input 
+                type="password" 
+                value={password} 
+                onChange={(e) => setPassword(e.target.value)} 
+                placeholder="Enter password" 
+                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-400" 
+              />
+            </div>
+
+            {error && <p className="text-red-500 text-xs font-bold text-center bg-red-50 p-2.5 rounded-xl border border-red-100">{error}</p>}
+
+            <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all text-sm uppercase tracking-wider">
+              Enter Admin Portal
+            </button>
+          </form>
+
+          <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-3">
+            <button 
+              onClick={() => { setRecoveryError(''); setRecoverySuccess(''); setShowRecoveryModal(true); }}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
+            >
+              <span>🔑</span> Forgot Password / Emergency Recovery Key?
+            </button>
+            <button onClick={() => window.location.href = '/'} className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors">
+              ← Back to Field Officer App
+            </button>
+          </div>
+        </div>
+
+        {/* Emergency Recovery Modal */}
+        {showRecoveryModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
+              <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <span>🛡️</span> Emergency Password Reset
+                  </h3>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Zero-Budget Self Recovery</p>
+                </div>
+                <button onClick={() => setShowRecoveryModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+              </div>
+
+              <form onSubmit={handleEmergencyReset} className="space-y-3.5">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Emergency Master Key / 4-Digit Security PIN
+                  </label>
+                  <input
+                    type="text"
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value)}
+                    placeholder="e.g. DFY-RESCUE-9921 or 7788"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 uppercase focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Default Master Key: <code className="text-indigo-600 font-bold">DFY-RESCUE-9921</code> | PIN: <code className="text-indigo-600 font-bold">7788</code></p>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={newRecoveryPassword}
+                    onChange={(e) => setNewRecoveryPassword(e.target.value)}
+                    placeholder="Enter new password"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Confirm New Password</label>
+                  <input
+                    type="password"
+                    value={confirmRecoveryPassword}
+                    onChange={(e) => setConfirmRecoveryPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+
+                {recoveryError && <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100">{recoveryError}</p>}
+                {recoverySuccess && <p className="text-emerald-600 text-xs font-bold bg-emerald-50 p-2.5 rounded-xl border border-emerald-100">{recoverySuccess}</p>}
+
+                <div className="pt-2 flex items-center justify-end gap-3">
+                  <button type="button" onClick={() => setShowRecoveryModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                  <button
+                    type="submit"
+                    disabled={isRecovering}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all"
+                  >
+                    {isRecovering ? 'Resetting...' : 'Set Password & Login'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -423,6 +654,10 @@ export default function AdminDashboard() {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
                   Set Targets
                 </button>
+              <button onClick={() => { setSecurityStatusMsg(''); setShowSecurityModal(true); }} className="bg-slate-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-slate-800 transition-colors shadow-sm flex items-center gap-1.5" title="Admin Security Settings & Change Password">
+                <span>⚙️</span>
+                <span>Security</span>
+              </button>
               <button onClick={() => window.location.href = '/'} className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-700 transition-colors">Exit</button>
           </div>
         </div>
@@ -894,7 +1129,87 @@ export default function AdminDashboard() {
         </p>
       </footer>
 
-            {/* Duplicate Audit Radar Modal */}
+                  {/* Admin Security Settings Modal */}
+      {showSecurityModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <span>⚙️</span> Admin Security & Password Settings
+                </h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Credential Management & Recovery Keys</p>
+              </div>
+              <button onClick={() => setShowSecurityModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+            </div>
+
+            {/* Emergency Keys Card */}
+            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-5 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-slate-500">Master Recovery Key:</span>
+                <span className="font-mono font-black text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">DFY-RESCUE-9921</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="font-bold text-slate-500">4-Digit Security PIN:</span>
+                <span className="font-mono font-black text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">7788</span>
+              </div>
+              <div className="pt-2">
+                <button
+                  onClick={downloadEmergencyCard}
+                  className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>📥</span> Download Offline Emergency Access Card (.TXT)
+                </button>
+              </div>
+            </div>
+
+            {/* Change Password Form */}
+            <form onSubmit={handleUpdatePassword} className="space-y-3">
+              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">Change Master Password</h4>
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Current Password</label>
+                <input
+                  type="password"
+                  value={changeCurrentPw}
+                  onChange={(e) => setChangeCurrentPw(e.target.value)}
+                  placeholder="Enter current password"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">New Password</label>
+                <input
+                  type="password"
+                  value={changeNewPw}
+                  onChange={(e) => setChangeNewPw(e.target.value)}
+                  placeholder="Enter new password"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {securityStatusMsg && (
+                <p className={`text-xs font-bold p-2.5 rounded-xl border ${securityStatusMsg.includes('✓') ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                  {securityStatusMsg}
+                </p>
+              )}
+
+              <div className="pt-3 flex items-center justify-end gap-3">
+                <button type="button" onClick={() => setShowSecurityModal(false)} className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">Close</button>
+                <button
+                  type="submit"
+                  disabled={isSavingSecurity}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all"
+                >
+                  {isSavingSecurity ? 'Saving...' : 'Update Password'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Duplicate Audit Radar Modal */}
       {showDuplicateModal && duplicateAudit && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col animate-fade-in">

@@ -947,3 +947,113 @@ async def duplicate_audit(month: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Admin Authentication & Zero-Budget Emergency Recovery ---
+class AdminLoginReq(BaseModel):
+    password: str
+
+class AdminRecoveryReq(BaseModel):
+    recovery_code: str
+    new_password: str
+
+class AdminChangeSettingsReq(BaseModel):
+    current_password: str
+    new_password: Optional[str] = None
+    new_recovery_key: Optional[str] = None
+    new_security_pin: Optional[str] = None
+
+def get_or_init_admin_auth() -> dict:
+    doc_ref = db.collection("admin_config").document("auth_settings")
+    doc = doc_ref.get()
+    if doc.exists:
+        return doc.to_dict()
+    
+    default_auth = {
+        "password": "dfyadmin2026",
+        "master_recovery_key": "DFY-RESCUE-9921",
+        "security_pin": "7788",
+        "security_question": "DFY State Organization Code",
+        "security_answer": "BIHAR-DFY-TB",
+        "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }
+    doc_ref.set(default_auth)
+    return default_auth
+
+@app.post("/admin/auth/login")
+async def admin_login(req: AdminLoginReq):
+    try:
+        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+        correct_pw = auth_data.get("password", "dfyadmin2026")
+        if req.password == correct_pw:
+            return {"success": True, "message": "Login successful"}
+        raise HTTPException(status_code=401, detail="Invalid password")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/auth/settings")
+async def get_admin_settings(password: str):
+    try:
+        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+        if password != auth_data.get("password", "dfyadmin2026"):
+            raise HTTPException(status_code=401, detail="Unauthorized")
+        return {
+            "success": True,
+            "master_recovery_key": auth_data.get("master_recovery_key", "DFY-RESCUE-9921"),
+            "security_pin": auth_data.get("security_pin", "7788"),
+            "last_updated": auth_data.get("last_updated", "")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/auth/emergency-reset")
+async def admin_emergency_reset(req: AdminRecoveryReq):
+    try:
+        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+        code = req.recovery_code.strip().upper()
+        
+        valid_key = str(auth_data.get("master_recovery_key", "DFY-RESCUE-9921")).strip().upper()
+        valid_pin = str(auth_data.get("security_pin", "7788")).strip()
+        valid_ans = str(auth_data.get("security_answer", "BIHAR-DFY-TB")).strip().upper()
+        
+        if code in [valid_key, valid_pin, valid_ans]:
+            doc_ref = db.collection("admin_config").document("auth_settings")
+            await asyncio.to_thread(lambda: doc_ref.set({
+                "password": req.new_password,
+                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }, merge=True))
+            return {"success": True, "message": "Password successfully reset!"}
+        
+        raise HTTPException(status_code=400, detail="Invalid Emergency Recovery Key or PIN.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/auth/update-credentials")
+async def admin_update_credentials(req: AdminChangeSettingsReq):
+    try:
+        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+        if req.current_password != auth_data.get("password", "dfyadmin2026"):
+            raise HTTPException(status_code=401, detail="Current password incorrect.")
+            
+        update_payload = {
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        if req.new_password:
+            update_payload["password"] = req.new_password
+        if req.new_recovery_key:
+            update_payload["master_recovery_key"] = req.new_recovery_key
+        if req.new_security_pin:
+            update_payload["security_pin"] = req.new_security_pin
+            
+        doc_ref = db.collection("admin_config").document("auth_settings")
+        await asyncio.to_thread(lambda: doc_ref.set(update_payload, merge=True))
+        return {"success": True, "message": "Admin credentials updated successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
