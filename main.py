@@ -924,24 +924,41 @@ async def duplicate_audit(month: Optional[str] = None):
                                 "category": label
                             })
                             
-        # Filter for actual duplicates
-        duplicates = []
+        same_category_duplicates = []
+        cross_category_history = []
+        
         for pid, occurrences in id_registry.items():
             if len(occurrences) > 1:
-                # Check if occurrences are from different FOs or different dates
-                unique_keys = set(f"{o['district']}_{o['fo_name']}_{o['date']}_{o['category']}" for o in occurrences)
-                if len(unique_keys) > 1 or len(occurrences) > 1:
-                    duplicates.append({
-                        "patient_id": pid,
-                        "occurrence_count": len(occurrences),
-                        "occurrences": occurrences
-                    })
+                # Check if any category was repeated
+                cat_counts = {}
+                for o in occurrences:
+                    c = o['category']
+                    cat_counts[c] = cat_counts.get(c, 0) + 1
+                    
+                is_same_category = any(cnt > 1 for cnt in cat_counts.values())
+                
+                entry = {
+                    "patient_id": pid,
+                    "occurrence_count": len(occurrences),
+                    "is_same_category": is_same_category,
+                    "repeated_categories": [c for c, cnt in cat_counts.items() if cnt > 1],
+                    "occurrences": occurrences
+                }
+                
+                if is_same_category:
+                    same_category_duplicates.append(entry)
+                else:
+                    cross_category_history.append(entry)
                     
         return {
             "status": "success",
             "month": month,
-            "total_duplicate_ids": len(duplicates),
-            "duplicates": duplicates
+            "total_same_category_duplicates": len(same_category_duplicates),
+            "total_cross_category": len(cross_category_history),
+            "total_duplicate_ids": len(same_category_duplicates) + len(cross_category_history),
+            "same_category_duplicates": same_category_duplicates,
+            "cross_category_history": cross_category_history,
+            "duplicates": same_category_duplicates + cross_category_history
         }
     except HTTPException:
         raise
@@ -1053,6 +1070,182 @@ async def admin_update_credentials(req: AdminChangeSettingsReq):
         doc_ref = db.collection("admin_config").document("auth_settings")
         await asyncio.to_thread(lambda: doc_ref.set(update_payload, merge=True))
         return {"success": True, "message": "Admin credentials updated successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/export-state-summary")
+async def export_state_summary(month: Optional[str] = None):
+    try:
+        if not month:
+            month = datetime.now().strftime("%Y-%m")
+            
+        start_date = f"{month}-01"
+        end_date = f"{month}-31"
+        
+        # 1. Fetch reports
+        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()))
+            
+        # 2. Fetch targets
+        target_docs = await asyncio.to_thread(lambda: list(db.collection("staff_targets").stream()))
+        targets_by_dist = {}
+        for td in target_docs:
+            d = td.to_dict()
+            dist = d.get("district", "Unknown")
+            targets_by_dist[dist] = targets_by_dist.get(dist, 0) + (int(d.get("target", 0)) if str(d.get("target", "")).isdigit() else 0)
+            
+        # 3. Fetch staff count
+        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        staff_by_dist = {}
+        for sd in staff_docs:
+            dist = sd.to_dict().get("district", "Unknown")
+            staff_by_dist[dist] = staff_by_dist.get(dist, 0) + 1
+            
+        # Aggregate by district
+        bihar_districts = ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"]
+        dist_data = {dist: {
+            "District": dist,
+            "Active Staff": staff_by_dist.get(dist, 0),
+            "Monthly Target": targets_by_dist.get(dist, 0),
+            "Notifications": 0,
+            "Target %": 0,
+            "Samples Tested": 0,
+            "Presumptive": 0,
+            "DBT Seeded": 0,
+            "TPT Started": 0,
+            "Doctor Visits": 0,
+            "Total Travel KM": 0,
+            "Reports Submitted": 0
+        } for dist in bihar_districts}
+        
+        for doc in report_docs:
+            d = doc.to_dict()
+            dist = d.get("working_place", "")
+            if dist in dist_data:
+                dist_data[dist]["Notifications"] += len(d.get("notification_ids", []))
+                dist_data[dist]["Samples Tested"] += len(d.get("sample_tested_ids", []))
+                dist_data[dist]["Presumptive"] += len(d.get("presumptive_ids", []))
+                dist_data[dist]["DBT Seeded"] += len(d.get("dbt_ids", []))
+                dist_data[dist]["TPT Started"] += len(d.get("tpt_treatment_start_ids", []))
+                dist_data[dist]["Doctor Visits"] += len(d.get("visited_names", []))
+                dist_data[dist]["Total Travel KM"] += int(d.get("total_km", 0) or 0)
+                dist_data[dist]["Reports Submitted"] += 1
+                
+        rows = []
+        for dist, data in dist_data.items():
+            tgt = data["Monthly Target"]
+            ach = data["Notifications"]
+            data["Target %"] = f"{round((ach / tgt) * 100)}%" if tgt > 0 else "0%"
+            rows.append(data)
+            
+        df = pd.DataFrame(rows)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="State Performance Summary")
+            ws = writer.sheets["State Performance Summary"]
+            # Formatting
+            for cell in ws[1]:
+                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                cell.fill = openpyxl.styles.PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+                
+        output.seek(0)
+        filename = f"DFY_State_Summary_{month}.xlsx"
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/admin/export-fo-dossier")
+async def export_fo_dossier(month: Optional[str] = None):
+    try:
+        if not month:
+            month = datetime.now().strftime("%Y-%m")
+            
+        start_date = f"{month}-01"
+        end_date = f"{month}-31"
+        
+        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()))
+            
+        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        staff_map = {}
+        for sd in staff_docs:
+            d = sd.to_dict()
+            key = (d.get("district", ""), d.get("name", ""))
+            staff_map[key] = {
+                "District": d.get("district", ""),
+                "Officer Name": d.get("name", ""),
+                "Designation": d.get("designation", "Field Officer"),
+                "Active Reporting Days": 0,
+                "Total Travel KM": 0,
+                "Notifications": 0,
+                "Samples Tested": 0,
+                "Presumptive": 0,
+                "DBT": 0,
+                "TPT Start": 0,
+                "Doctor Visits": 0,
+                "Total All IDs": 0
+            }
+            
+        for doc in report_docs:
+            d = doc.to_dict()
+            dist = d.get("working_place", "")
+            fo = d.get("fo_name", "")
+            key = (dist, fo)
+            if key not in staff_map:
+                staff_map[key] = {
+                    "District": dist,
+                    "Officer Name": fo,
+                    "Designation": "Field Officer",
+                    "Active Reporting Days": 0,
+                    "Total Travel KM": 0,
+                    "Notifications": 0,
+                    "Samples Tested": 0,
+                    "Presumptive": 0,
+                    "DBT": 0,
+                    "TPT Start": 0,
+                    "Doctor Visits": 0,
+                    "Total All IDs": 0
+                }
+                
+            entry = staff_map[key]
+            entry["Active Reporting Days"] += 1
+            entry["Total Travel KM"] += int(d.get("total_km", 0) or 0)
+            entry["Notifications"] += len(d.get("notification_ids", []))
+            entry["Samples Tested"] += len(d.get("sample_tested_ids", []))
+            entry["Presumptive"] += len(d.get("presumptive_ids", []))
+            entry["DBT"] += len(d.get("dbt_ids", []))
+            entry["TPT Start"] += len(d.get("tpt_treatment_start_ids", []))
+            entry["Doctor Visits"] += len(d.get("visited_names", []))
+            
+            day_total_ids = sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+            entry["Total All IDs"] += day_total_ids
+            
+        df = pd.DataFrame(list(staff_map.values()))
+        df.sort_values(by=["District", "Officer Name"], inplace=True)
+        
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="FO Performance Dossier")
+            ws = writer.sheets["FO Performance Dossier"]
+            for cell in ws[1]:
+                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                cell.fill = openpyxl.styles.PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
+                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+                
+        output.seek(0)
+        filename = f"DFY_FO_Performance_Dossier_{month}.xlsx"
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
     except HTTPException:
         raise
     except Exception as e:

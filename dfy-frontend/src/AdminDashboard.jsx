@@ -36,6 +36,10 @@ export default function AdminDashboard() {
   const [changeNewPw, setChangeNewPw] = useState("");
   const [securityStatusMsg, setSecurityStatusMsg] = useState("");
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
+  const [showReportsStudio, setShowReportsStudio] = useState(false);
+  const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, fo_dossier, cascade_funnel, whatsapp_bulletin
+  const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
+  const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [staffDirectory, setStaffDirectory] = useState({});
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -282,6 +286,42 @@ export default function AdminDashboard() {
       setSecurityStatusMsg('Failed to connect to server.');
     } finally {
       setIsSavingSecurity(false);
+    }
+  };
+
+
+  const copyWhatsAppBulletin = () => {
+    const totalStateNotif = totals.notifications || 0;
+    const totalStateTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    const overallPct = totalStateTarget > 0 ? Math.round((totalStateNotif / totalStateTarget) * 100) : 0;
+    const sortedDistricts = [...districts.filter(d => d !== 'All')].map(dist => {
+      const recs = rawRecords.filter(r => r.working_place === dist);
+      const notif = recs.reduce((sum, r) => sum + (r.notifications || 0), 0);
+      const tgt = targetsData.filter(t => t.district === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+      const pct = tgt > 0 ? Math.round((notif / tgt) * 100) : 0;
+      return { dist, notif, tgt, pct };
+    }).sort((a, b) => b.pct - a.pct);
+
+    let msg = `🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n`;
+    msg += `📅 *Month:* ${month} | *Generated:* ${new Date().toLocaleDateString()}\n\n`;
+    msg += `📊 *STATE SUMMARY:*\n`;
+    msg += `• Total Notifications: *${totalStateNotif}* / ${totalStateTarget} (*${overallPct}%*)\n`;
+    msg += `• Total Samples Tested: *${totals.tests || 0}*\n`;
+    msg += `• Total DBT Seeded: *${totals.dbt || 0}*\n`;
+    msg += `• Total Field KM: *${totals.total_km || 0} KM*\n\n`;
+    msg += `🏆 *DISTRICT LEADERBOARD:*\n`;
+
+    sortedDistricts.forEach((d, idx) => {
+      const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '•';
+      msg += `${medal} *${d.dist}:* ${d.notif}/${d.tgt} (${d.pct}%)\n`;
+    });
+
+    msg += `\n_DFY Bihar State Health Monitoring Cell_`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg);
+      setCopiedBulletin(true);
+      setTimeout(() => setCopiedBulletin(false), 2500);
     }
   };
 
@@ -609,31 +649,9 @@ Keep this file safe in your Google Drive or personal diary.
             <select value={selectedFO} onChange={(e) => setSelectedFO(e.target.value)} disabled={selectedDistrict === 'All'} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">
               {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
             </select>
-              <button onClick={() => {
-                  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-                  window.open(API_BASE_URL + "/download-excel", "_blank");
-                }} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  Raw Excel
-                </button>
-                <button onClick={() => {
-                  if (selectedDistrict === 'All') {
-                    alert('Please select a specific District from the dropdown to download its KPI Workbook.');
-                    return;
-                  }
-                  const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-                  window.open(API_BASE_URL + "/download-kpi-workbook?district=" + selectedDistrict + "&month=" + month, "_blank");
-                }} className="bg-blue-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5" title="Download single district workbook">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
-                  District KPI
-                </button>
-                <button onClick={downloadAllWorkbooks} className="bg-indigo-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm flex items-center gap-1.5" title="Download ZIP with all 10 district workbooks">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                  All 10 Districts (ZIP)
-                </button>
-                <button onClick={copyStateSummary} className="bg-emerald-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-emerald-700 transition-colors shadow-sm flex items-center gap-1.5" title="Copy state summary for WhatsApp">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  State WhatsApp
+              <button onClick={() => setShowReportsStudio(true)} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5" title="Open 5-in-1 Executive Reports & Export Studio">
+                  <span>📊</span>
+                  <span>Reports Studio</span>
                 </button>
                 <button onClick={() => {
                   fetchDuplicateAudit();
@@ -1209,51 +1227,287 @@ Keep this file safe in your Google Drive or personal diary.
         </div>
       )}
 
-      {/* Duplicate Audit Radar Modal */}
-      {showDuplicateModal && duplicateAudit && (
+            {/* 📊 Unified Reports & Export Studio Modal */}
+      {showReportsStudio && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col animate-fade-in">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-4xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
+            
+            {/* Modal Header */}
             <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
               <div>
-                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                  <span>🛡️</span> Duplicate Patient ID Radar ({duplicateAudit.total_duplicate_ids})
+                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                  <span>📊</span> DFY Executive Reports &amp; Export Studio
                 </h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Cross-Officer Collision Detector &bull; Month: {duplicateAudit.month}</p>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {month} &bull; Bihar 10 Districts Mission</p>
+              </div>
+              <button onClick={() => setShowReportsStudio(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+            </div>
+
+            {/* Studio Navigation Tabs */}
+            <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
+              {[
+                { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
+                { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
+                { id: "fo_dossier", label: "👤 FO Dossier / TA-DA (.xlsx)", icon: "👤" },
+                { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
+                { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setReportsStudioTab(tab.id)}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${reportsStudioTab === tab.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                >
+                  <span>{tab.icon}</span>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Studio Content Area */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar my-4 pr-1">
+              
+              {/* Tab 1: District KPI Workbooks */}
+              {reportsStudioTab === "kpi_workbooks" && (
+                <div className="space-y-4">
+                  <div className="bg-indigo-50/70 p-5 rounded-2xl border border-indigo-100">
+                    <h4 className="text-sm font-black text-indigo-900 mb-1">Official 33-Sheet Pre-Formulated KPI Workbooks</h4>
+                    <p className="text-xs text-indigo-700 font-medium">Monthly populated daily tabs (1ST..31st) with auto-calculating consolidated sheets and target injection.</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
+                      <div>
+                        <span className="text-xs font-black text-slate-800 block mb-1">Single District KPI Excel</span>
+                        <p className="text-[11px] text-slate-400 font-medium">Download for {selectedDistrict === 'All' ? 'currently selected district' : selectedDistrict}</p>
+                      </div>
+                      <button
+                        onClick={handleDownloadKpi}
+                        className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2"
+                      >
+                        <span>📥</span> Download {selectedDistrict === 'All' ? 'State' : selectedDistrict} KPI (.xlsx)
+                      </button>
+                    </div>
+
+                    <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-between">
+                      <div>
+                        <span className="text-xs font-black text-emerald-900 block mb-1">All 10 Districts Master ZIP</span>
+                        <p className="text-[11px] text-emerald-700 font-medium">1-Click bundles all 10 Bihar district `.xlsx` workbooks into a single ZIP archive.</p>
+                      </div>
+                      <button
+                        onClick={handleDownloadAllZip}
+                        className="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+                      >
+                        <span>📦</span> Download All 10 Districts (ZIP)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 2: State Summary Excel */}
+              {reportsStudioTab === "state_matrix" && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                    <h4 className="text-sm font-black text-slate-800 mb-1">Consolidated State Performance Summary (.xlsx)</h4>
+                    <p className="text-xs text-slate-500 font-medium mb-4">Executive 1-page table comparing Target, Notifications Achieved, Samples Tested, DBT velocity, and Travel KM for all 10 districts.</p>
+                    
+                    <a
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-state-summary?month=${month}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md transition-all"
+                    >
+                      <span>📥</span> Download State Summary Sheet (.xlsx)
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 3: FO Monthly Dossier & Allowance Sheet */}
+              {reportsStudioTab === "fo_dossier" && (
+                <div className="space-y-4">
+                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                    <h4 className="text-sm font-black text-slate-800 mb-1">Field Officer Monthly Appraisal &amp; TA/DA Dossier</h4>
+                    <p className="text-xs text-slate-500 font-medium mb-4">Detailed staff breakdown containing active reporting days, total travel KM (for fuel reimbursement), and categorized ID achievements.</p>
+                    
+                    <a
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all"
+                    >
+                      <span>📥</span> Download FO Performance Dossier (.xlsx)
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab 4: TB Cascade Conversion Funnel */}
+              {reportsStudioTab === "cascade_funnel" && (() => {
+                const presumptive = totals.presumptive || 1;
+                const tests = totals.tests || 0;
+                const notif = totals.notifications || 0;
+                const dbt = totals.dbt || 0;
+                const tpt = totals.tpt_treatment_start || 0;
+
+                const testConversion = Math.min(100, Math.round((tests / presumptive) * 100));
+                const dbtConversion = notif > 0 ? Math.min(100, Math.round((dbt / notif) * 100)) : 0;
+                const tptConversion = notif > 0 ? Math.min(100, Math.round((tpt / notif) * 100)) : 0;
+
+                return (
+                  <div className="space-y-4">
+                    <div className="bg-slate-900 text-white p-5 rounded-2xl border border-slate-800">
+                      <h4 className="text-sm font-black text-emerald-400 mb-1">State TB Cascade Conversion Funnel</h4>
+                      <p className="text-xs text-slate-400 font-medium">Tracking clinical progression from presumptive screening to treatment completion.</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <span className="text-[10px] font-black uppercase text-slate-400 block mb-1">Presumptive ➔ Tested</span>
+                        <p className="text-2xl font-black text-indigo-600">{testConversion}%</p>
+                        <p className="text-[10px] font-bold text-slate-500 mt-1">{tests} Tested / {presumptive} Presumptive</p>
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <span className="text-[10px] font-black uppercase text-slate-400 block mb-1">Notification ➔ DBT Seeded</span>
+                        <p className="text-2xl font-black text-blue-600">{dbtConversion}%</p>
+                        <p className="text-[10px] font-bold text-slate-500 mt-1">{dbt} DBT / {notif} Notifications</p>
+                      </div>
+
+                      <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 text-center">
+                        <span className="text-[10px] font-black uppercase text-slate-400 block mb-1">Notification ➔ TPT Start</span>
+                        <p className="text-2xl font-black text-teal-600">{tptConversion}%</p>
+                        <p className="text-[10px] font-bold text-slate-500 mt-1">{tpt} TPT / {notif} Notifications</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Tab 5: 1-Click WhatsApp State Bulletin */}
+              {reportsStudioTab === "whatsapp_bulletin" && (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50/70 p-5 rounded-2xl border border-emerald-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-emerald-950 mb-1">WhatsApp Executive State Bulletin</h4>
+                      <p className="text-xs text-emerald-800 font-medium">Ready-to-broadcast summary formatted with emojis, state totals &amp; district rankings.</p>
+                    </div>
+                    <button
+                      onClick={copyWhatsAppBulletin}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 active:scale-95 transition-all shrink-0"
+                    >
+                      {copiedBulletin ? '✓ Copied Bulletin!' : 'Copy WhatsApp Bulletin'}
+                    </button>
+                  </div>
+
+                  <div className="bg-slate-900 text-emerald-400 font-mono text-xs p-4 rounded-2xl border border-slate-800 overflow-x-auto whitespace-pre-wrap">
+                    {`🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n📅 Month: ${month}\n\n• Notifications: ${totals.notifications || 0}\n• Samples Tested: ${totals.tests || 0}\n• Travel KM: ${totals.total_km || 0} KM\n\n🏆 Top Districts ranked by Notification Target %`}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button onClick={() => setShowReportsStudio(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all">Close Studio</button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Upgraded Duplicate Audit Radar Modal */}
+      {showDuplicateModal && duplicateAudit && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-3xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-3">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <span>🛡️</span> Duplicate Patient ID Radar &amp; Journey Tracker
+                </h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {duplicateAudit.month}</p>
               </div>
               <button onClick={() => setShowDuplicateModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
             </div>
 
-            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1 my-2">
-              {duplicateAudit.duplicates && duplicateAudit.duplicates.length > 0 ? (
-                duplicateAudit.duplicates.map((dup, idx) => (
-                  <div key={idx} className="p-4 bg-rose-50/60 rounded-2xl border border-rose-100 space-y-2">
-                    <div className="flex justify-between items-center">
-                      <span className="font-mono text-sm font-black text-rose-700 bg-white px-2.5 py-1 rounded-lg border border-rose-200">
-                        ID #{dup.patient_id}
-                      </span>
-                      <span className="text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full">
-                        {dup.occurrence_count} Conflicting Entries
-                      </span>
-                    </div>
+            {/* Radar Tabs */}
+            <div className="flex gap-2 pb-3 border-b border-slate-100">
+              <button
+                onClick={() => setDuplicateRadarTab('collisions')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${duplicateRadarTab === 'collisions' ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span>🚨</span> Same-Category Double Entries ({duplicateAudit.total_same_category_duplicates || 0})
+              </button>
+              <button
+                onClick={() => setDuplicateRadarTab('journeys')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${duplicateRadarTab === 'journeys' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                <span>🛤️</span> Patient Cascade Journeys ({duplicateAudit.total_cross_category || 0})
+              </button>
+            </div>
 
-                    <div className="space-y-1.5 pt-1">
-                      {dup.occurrences.map((occ, oIdx) => (
-                        <div key={oIdx} className="flex justify-between items-center text-xs bg-white/80 px-3 py-1.5 rounded-xl border border-rose-100/60 font-semibold text-slate-700">
-                          <span>👤 <strong>{occ.fo_name}</strong> ({occ.district})</span>
-                          <span className="text-[10px] text-slate-400">📅 {occ.date} &bull; {occ.category}</span>
-                        </div>
-                      ))}
+            <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1 my-3">
+              {duplicateRadarTab === 'collisions' ? (
+                (duplicateAudit.same_category_duplicates && duplicateAudit.same_category_duplicates.length > 0) ? (
+                  duplicateAudit.same_category_duplicates.map((dup, idx) => (
+                    <div key={idx} className="p-4 bg-rose-50/70 rounded-2xl border border-rose-200 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-sm font-black text-rose-700 bg-white px-2.5 py-1 rounded-lg border border-rose-200">
+                          ID #{dup.patient_id}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full">
+                          Double Entry in: {dup.repeated_categories.join(', ')}
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 pt-1">
+                        {dup.occurrences.map((occ, oIdx) => (
+                          <div key={oIdx} className="flex justify-between items-center text-xs bg-white px-3 py-1.5 rounded-xl border border-rose-100 font-semibold text-slate-700">
+                            <span>👤 <strong>{occ.fo_name}</strong> ({occ.district})</span>
+                            <span className="text-[10px] text-slate-500 font-bold">📅 {occ.date} &bull; <strong className="text-rose-600">{occ.category}</strong></span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="text-center py-16">
+                    <div className="text-4xl mb-2">🎉</div>
+                    <p className="text-emerald-700 font-black text-sm">Shabash! 0 Double-Entry Duplicates Found.</p>
+                    <p className="text-slate-400 text-xs mt-1">Kisi bhi officer ne same category me duplicate ID report nahi ki hai. Full data clean hai!</p>
                   </div>
-                ))
+                )
               ) : (
-                <div className="text-center py-12 text-emerald-600 font-bold">
-                  🎉 Shabash! Is mahine me koi duplicate patient ID nahi mili. Full data clean hai!
-                </div>
+                (duplicateAudit.cross_category_history && duplicateAudit.cross_category_history.length > 0) ? (
+                  duplicateAudit.cross_category_history.map((dup, idx) => (
+                    <div key={idx} className="p-4 bg-indigo-50/60 rounded-2xl border border-indigo-100 space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-mono text-sm font-black text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-indigo-200">
+                          ID #{dup.patient_id}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full">
+                          {dup.occurrence_count} Cascade Services
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 pt-1">
+                        {dup.occurrences.map((occ, oIdx) => (
+                          <div key={oIdx} className="flex justify-between items-center text-xs bg-white px-3 py-1.5 rounded-xl border border-indigo-100 font-semibold text-slate-700">
+                            <span>👤 <strong>{occ.fo_name}</strong> ({occ.district})</span>
+                            <span className="text-[10px] text-slate-500 font-bold">📅 {occ.date} &bull; <strong className="text-indigo-600">{occ.category}</strong></span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-16 text-slate-400 font-bold text-xs">
+                    Koi multi-service history data nahi hai.
+                  </div>
+                )
               )}
             </div>
 
-            <div className="pt-4 border-t border-slate-100 flex justify-end">
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
               <button onClick={() => setShowDuplicateModal(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all">Close</button>
             </div>
           </div>
