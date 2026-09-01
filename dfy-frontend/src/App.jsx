@@ -476,6 +476,43 @@ function App() {
 
               </div>
 
+              
+                <Accordion title="1. Patient Registration" defaultOpen={true}>
+                  {group1.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+                <Accordion title="2. Diagnostics & Testing">
+                  {group2.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+                <Accordion title="3. Field Work & Visits">
+                  {group3.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+                <Accordion title="4. Logistics & Outcomes">
+                  {group4.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+                <Accordion title="5. Special Tracking">
+                  {group5.map((cat) => (
+                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key] || []} onAdd={(id) => addId(cat.key, id)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                  ))}
+                </Accordion>
+                <Accordion title="6. Additional Remarks">
+                  <div className="p-4 sm:p-5">
+                    <textarea 
+                      value={formData.remark || ''} 
+                      onChange={e => setFormData({...formData, remark: e.target.value})} 
+                      placeholder="Koi extra information ya remark yahan likhein..." 
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400 min-h-[120px]"
+                    ></textarea>
+                  </div>
+                </Accordion>
+
               {/* Travel & Doctors Section */}
               <div className="grid grid-cols-1 gap-4 mt-8">
                 <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(16,185,129,0.1)] border border-emerald-100 overflow-hidden">
