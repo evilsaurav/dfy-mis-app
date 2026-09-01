@@ -172,6 +172,8 @@ async def get_dashboard_data(req: DashboardRequest):
             })
             
         return {"records": records}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -187,6 +189,8 @@ async def get_directory():
                 directory[dist] = []
             directory[dist].append(data.get("name"))
         return directory
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -221,6 +225,8 @@ async def upload_image(file: UploadFile = File(...)):
         blob.upload_from_string(await file.read(), content_type=file.content_type)
         blob.make_public()
         return {"url": blob.public_url}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Image upload failed: {str(e)}")
 
@@ -261,6 +267,8 @@ async def check_today_status(req: CheckStatusRequest):
                 
         cache.set(cache_key, res, ttl=20) # 20s TTL cache for rapid checking
         return res
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -304,6 +312,8 @@ async def submit_daily_report(report: DailyActivityReport):
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         return {"message": "Daily report submitted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -392,6 +402,8 @@ async def download_excel():
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
             headers={"Content-Disposition": "attachment; filename=DFY_Consolidated_Report.xlsx"}
         )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -435,6 +447,8 @@ async def get_targets(district: str = None):
                 "target": data.get("target", 0)
             })
         return {"success": True, "targets": targets}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -448,6 +462,8 @@ async def update_target(data: TargetUpdate):
             "target": data.target
         }, merge=True)
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -534,6 +550,8 @@ async def download_kpi_workbook(district: str):
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -560,6 +578,8 @@ async def get_staff_directory():
             
         cache.set("staff_directory_list", directory, ttl=300) # 5 min cache
         return {"status": "success", "data": directory}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
