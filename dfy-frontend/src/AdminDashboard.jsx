@@ -15,6 +15,7 @@ export default function AdminDashboard() {
   const [sortConfig, setSortConfig] = useState({ key: 'total_km', direction: 'desc' });
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [targetsData, setTargetsData] = useState([]);
+  const [activeMetric, setActiveMetric] = useState('notifications');
   const [staffDirectory, setStaffDirectory] = useState({});
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -89,7 +90,7 @@ export default function AdminDashboard() {
 
   const downloadAllWorkbooks = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks`, "_blank");
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}`, "_blank");
   };
 
 
@@ -238,6 +239,42 @@ export default function AdminDashboard() {
     return Object.keys(map).map(k => ({ working_place: k, ...map[k] }));
   }, [rawRecords]);
 
+  // Daily Timeline Trend Data
+  const dailyTrendData = useMemo(() => {
+    const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+    const map = {};
+    days.forEach(d => { map[d] = 0; });
+    filteredRecords.forEach(r => {
+      if (r.date_of_reporting) {
+        const parts = r.date_of_reporting.split('-');
+        const d = parts[2];
+        if (d && map[d] !== undefined) {
+          map[d] += (r[activeMetric] || 0);
+        }
+      }
+    });
+    return days.map(d => ({ day: `${Number(d)}`, value: map[d] }));
+  }, [filteredRecords, activeMetric]);
+
+  // District Performance Leaderboard
+  const leaderboardData = useMemo(() => {
+    const distList = Object.keys(staffDirectory).length > 0 ? Object.keys(staffDirectory).sort() : ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"];
+    const result = distList.map(dist => {
+      const distRecords = rawRecords.filter(r => r.working_place === dist);
+      const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
+      const target = targetsData.filter(t => t.district === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+      const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
+      return {
+        district: dist,
+        notifications: notif,
+        target: target,
+        percentage: pct,
+        reports: distRecords.length
+      };
+    });
+    return result.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
+  }, [rawRecords, targetsData, staffDirectory]);
+
   // Radar Chart Data (Work Balance)
   const radarData = useMemo(() => {
     return [
@@ -333,7 +370,7 @@ export default function AdminDashboard() {
                     return;
                   }
                   const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-                  window.open(API_BASE_URL + "/download-kpi-workbook?district=" + selectedDistrict, "_blank");
+                  window.open(API_BASE_URL + "/download-kpi-workbook?district=" + selectedDistrict + "&month=" + month, "_blank");
                 }} className="bg-blue-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-1.5" title="Download single district workbook">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="3" y1="9" x2="21" y2="9"></line><line x1="9" y1="21" x2="9" y2="9"></line></svg>
                   District KPI
