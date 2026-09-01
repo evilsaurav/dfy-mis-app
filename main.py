@@ -169,6 +169,29 @@ async def get_dashboard_data(req: DashboardRequest):
                 "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
                 "consent_with_id": len(data.get("consent_with_id_ids", [])),
                 
+                # Raw ID Lists for FO Drill-Down Inspector
+                "notification_ids": data.get("notification_ids", []),
+                "hiv_dm_ids": data.get("hiv_dm_ids", []),
+                "dbt_ids": data.get("dbt_ids", []),
+                "sample_collection_ids": data.get("sample_collection_ids", []),
+                "sample_tested_ids": data.get("sample_tested_ids", []),
+                "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
+                "home_visit_ids": data.get("home_visit_ids", []),
+                "contact_tracing_ids": data.get("contact_tracing_ids", []),
+                "follow_up_ids": data.get("follow_up_ids", []),
+                "face_to_face_ids": data.get("face_to_face_ids", []),
+                "presumptive_ids": data.get("presumptive_ids", []),
+                "documents_ids": data.get("documents_ids", []),
+                "fdc_provided_ids": data.get("fdc_provided_ids", []),
+                "kit_consumption_ids": data.get("kit_consumption_ids", []),
+                "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
+                "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
+                "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
+                "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
+                "consent_with_id_ids": data.get("consent_with_id_ids", []),
+                "visited_names": data.get("visited_names", []),
+                "remark": data.get("remark", ""),
+                
                 "is_override": data.get("is_override_used", False)
             })
             
@@ -703,10 +726,20 @@ async def my_profile_stats(req: ProfileStatsRequest):
                     if isinstance(arr, list):
                         stats[k] += len(arr)
                         day_total += len(arr)
+                day_categories = {}
+                for k in stats.keys():
+                    arr = data.get(k + "_ids", [])
+                    if isinstance(arr, list) and len(arr) > 0:
+                        day_categories[k] = arr
+                        
                 daily_history[date_str] = {
                     "submitted": True,
                     "count": data.get("submission_count", 1),
-                    "total_ids": day_total
+                    "total_ids": day_total,
+                    "categories": day_categories,
+                    "visited_names": data.get("visited_names", []),
+                    "total_km": data.get("total_km", 0),
+                    "remark": data.get("remark", "")
                 }
                         
         total_achieved = sum(stats.values())
