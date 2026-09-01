@@ -147,8 +147,9 @@ const MyProfileDashboard = ({ formData, showToast }) => {
 };
 
 // --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids = [], onAdd, onRemove, showToast }) => {
+const IdBucket = ({ title, ids, onAdd, onRemove, showToast }) => {
   const [currentId, setCurrentId] = useState("");
+  const safeIds = Array.isArray(ids) ? ids : [];
 
   const handleAdd = () => {
     if (currentId.length === 9 && !isNaN(currentId)) {
@@ -163,7 +164,7 @@ const IdBucket = ({ title, ids = [], onAdd, onRemove, showToast }) => {
     <div className="bg-white rounded-xl border border-slate-100 p-4 shadow-sm hover:border-slate-200 transition-colors group">
       <label className="block text-xs font-bold text-slate-400 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-500 transition-colors">
         {title} 
-        <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{ids.length}</span>
+        <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
       </label>
       <div className="flex gap-2">
         <input 
@@ -175,9 +176,9 @@ const IdBucket = ({ title, ids = [], onAdd, onRemove, showToast }) => {
         />
         <button onClick={handleAdd} className="bg-indigo-600 text-white px-4 py-2.5 rounded-lg font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide">ADD</button>
       </div>
-      {ids.length > 0 && (
+      {safeIds.length > 0 && (
         <ul className="mt-4 space-y-2 max-h-40 overflow-y-auto pr-1 custom-scrollbar">
-          {ids.map((id, index) => (
+          {safeIds.map((id, index) => (
             <li key={index} className="flex justify-between items-center bg-white border border-slate-100 px-3 py-2 rounded-lg shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)]">
               <span className="font-mono font-bold text-slate-600 tracking-widest text-sm">{id}</span>
               <button onClick={() => onRemove(index)} className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-7 w-7 rounded-full flex items-center justify-center font-bold transition-all shadow-sm">&times;</button>
