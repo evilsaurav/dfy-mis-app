@@ -610,9 +610,16 @@ export default function AdminDashboard() {
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <h4 
-                            onClick={() => selectedDistrict !== 'All' && setInspectingFO({ fo_name: row.name, district: selectedDistrict })}
-                            className={`text-sm font-black text-slate-800 truncate max-w-[180px] ${selectedDistrict !== 'All' ? 'hover:text-indigo-600 hover:underline cursor-pointer' : ''}`}
-                            title={selectedDistrict !== 'All' ? "Click to inspect all submitted IDs" : ""}
+                            onClick={() => {
+                              if (selectedDistrict !== 'All') {
+                                setInspectingFO({ fo_name: row.name, district: selectedDistrict });
+                              } else {
+                                // If district card, filter to district; if officer, inspect
+                                setSelectedDistrict(row.name);
+                              }
+                            }}
+                            className="text-sm font-black text-slate-800 truncate max-w-[180px] hover:text-indigo-600 hover:underline cursor-pointer"
+                            title="Click to inspect all submitted IDs or filter district"
                           >
                             {row.name}
                           </h4>
@@ -726,7 +733,13 @@ export default function AdminDashboard() {
 
       {/* FO Detailed IDs Inspector Modal */}
       {inspectingFO && (() => {
-        const foRecords = rawRecords.filter(r => r.fo_name === inspectingFO.fo_name && (r.working_place === inspectingFO.district || !inspectingFO.district));
+        const foRecords = rawRecords.filter(r => {
+          if (!r.fo_name || !inspectingFO || !inspectingFO.fo_name) return false;
+          const matchName = r.fo_name.trim().toLowerCase() === inspectingFO.fo_name.trim().toLowerCase();
+          if (!matchName) return false;
+          if (!inspectingFO.district || inspectingFO.district === 'All') return true;
+          return r.working_place && r.working_place.trim().toLowerCase() === inspectingFO.district.trim().toLowerCase();
+        });
         const totalNotif = foRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
         const targetObj = targetsData.find(t => t.fo_name === inspectingFO.fo_name && (t.district === inspectingFO.district));
         const targetNum = targetObj ? Number(targetObj.target) : 0;
