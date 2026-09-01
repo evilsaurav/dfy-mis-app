@@ -406,7 +406,7 @@ function App() {
         </div>
       </header>
 
-      <main className={`max-w-4xl mx-auto px-1 sm:p-6 w-[95%] sm:w-full flex-1 flex flex-col overflow-x-hidden ${!isLoggedIn ? "justify-center" : "mt-2"}`}>
+      <main className={`max-w-4xl mx-auto px-4 sm:px-6 w-full flex-1 flex flex-col ${!isLoggedIn ? "justify-center py-10" : "py-6"}`}>
         {!isLoggedIn ? (
           /* Login Screen */
           <div className="max-w-md mx-auto animate-fade-in-down w-full">
