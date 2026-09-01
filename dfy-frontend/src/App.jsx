@@ -102,9 +102,9 @@ const MyProfileDashboard = ({ formData, showToast }) => {
   );
 
   const targetVal = Number(stats.target) || 0;
-  const achievedVal = Number(stats.total_achieved) || 0;
-  const percent = targetVal > 0 ? Math.min(100, Math.round((achievedVal / targetVal) * 100)) : 100;
   const breakdown = stats.breakdown || {};
+  const notifAchieved = Number(breakdown.notification) || 0;
+  const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
@@ -129,12 +129,12 @@ const MyProfileDashboard = ({ formData, showToast }) => {
         </div>
         <div className="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-100">
            <div>
-             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Monthly Target</p>
+             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Target</p>
              <p className="text-xl font-black text-slate-700">{targetVal}</p>
            </div>
            <div>
-             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Total Achieved</p>
-             <p className="text-xl font-black text-indigo-600">{achievedVal}</p>
+             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Achieved</p>
+             <p className="text-xl font-black text-indigo-600">{notifAchieved}</p>
            </div>
         </div>
       </div>
