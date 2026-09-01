@@ -195,26 +195,18 @@ class StartDayRequest(BaseModel):
 @app.post("/check-today-status")
 async def check_today_status(req: CheckStatusRequest):
     try:
-        # First check if there is an incomplete past report for this user
-        past_docs = db.collection("daily_field_reports").where("fo_name", "==", req.fo_name).stream()
-        past_docs_list = [d.to_dict() for d in past_docs]
-        
-        # Sort by date descending in memory to avoid needing composite indexes in Firestore
-        past_docs_list.sort(key=lambda x: x.get("date_of_reporting") or x.get("date", ""), reverse=True)
-        
-        if past_docs_list:
-            last_doc = past_docs_list[0]
-            last_date = last_doc.get("date_of_reporting") or last_doc.get("date", "")
-            # If the most recent report is BEFORE today, and its status is still in_progress
-            if last_date < req.date and last_doc.get("status") == "in_progress":
-                return {"status": "pending_previous", "data": last_doc}
-
-        # If no pending previous, check today's status normally
         doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
         doc = doc_ref.get()
         if doc.exists:
-            return {"status": doc.to_dict().get("status", "in_progress"), "data": doc.to_dict()}
+            d = doc.to_dict()
+            subs = d.get("submission_count", 0)
+            if subs >= 2:
+                return {"status": "max_limit_reached"}
+            elif subs == 1:
+                return {"status": "not_started", "data": {}}
+            else:
+                return {"status": d.get("status", "in_progress"), "data": d}
         return {"status": "not_started"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -232,6 +224,28 @@ async def submit_daily_report(report: DailyActivityReport):
         payload["status"] = "completed"
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
         
+        doc = doc_ref.get()
+        if doc.exists:
+            d = doc.to_dict()
+            subs = d.get("submission_count", 0)
+            if subs >= 2:
+                raise HTTPException(status_code=400, detail="Daily limit reached")
+                
+            for k, v in payload.items():
+                if isinstance(v, list) and k.endswith("_ids"):
+                    combined = d.get(k, []) + v
+                    payload[k] = list(dict.fromkeys(combined))
+                elif k == "visited_names" and isinstance(v, list):
+                    combined = d.get(k, []) + v
+                    payload[k] = list(dict.fromkeys(combined))
+                elif k == "remark" and v:
+                    old_remark = d.get("remark", "")
+                    payload[k] = f"{old_remark} | {v}".strip(" |")
+                    
+            payload["submission_count"] = subs + 1
+        else:
+            payload["submission_count"] = 1
+            
         doc_ref.set(payload, merge=True)
         return {"message": "Daily report submitted successfully"}
     except Exception as e:

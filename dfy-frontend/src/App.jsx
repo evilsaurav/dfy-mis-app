@@ -208,13 +208,31 @@ function App() {
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
         });
         const data = await res.json();
+        
+        if (data.status === 'max_limit_reached') {
+           showToast("Aapne aaj ki 2 reports submit kar di hain! Kal (12 AM ke baad) fresh report daalein.", "error");
+           return;
+        }
+        
         if (data.status === 'in_progress' || data.status === 'completed' || data.status === 'pending_previous') {
-           const d = data.data;
-           setFormData(prev => ({ 
-             ...prev, 
-             ...d, 
-             date_of_reporting: d.date_of_reporting || today 
-           }));
+           if (data.data && Object.keys(data.data).length > 0) {
+             const d = data.data;
+             setFormData(prev => ({ 
+               ...prev, 
+               ...d, 
+               date_of_reporting: d.date_of_reporting || today 
+             }));
+           } else {
+             // Second submission of the day (fresh start)
+             setFormData({
+                working_place: formData.working_place, fo_name: formData.fo_name, pin: formData.pin, date_of_reporting: today,
+                notification_ids: [], hiv_dm_ids: [], dbt_ids: [], sample_collection_ids: [], sample_tested_ids: [], 
+                outcome_assigned_ids: [], home_visit_ids: [], contact_tracing_ids: [], follow_up_ids: [], 
+                face_to_face_ids: [], presumptive_ids: [], documents_ids: [], fdc_provided_ids: [], kit_consumption_ids: [],
+                differentiated_tb_ids: [], tpt_treatment_start_ids: [], tpt_presumptive_ids: [], adhar_face_authentication_ids: [],
+                consent_with_id_ids: [], remark: "", visited_names: []
+             });
+           }
         }
         setIsLoggedIn(true);
         showToast(`Welcome back, ${formData.fo_name}!`, 'success');
@@ -223,15 +241,7 @@ function App() {
       } finally {
         setIsSubmitting(false);
       }
-    } else {
-      showToast("Please enter the correct PIN to continue.", "error");
     }
-  };;
-
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setFormData({ ...formData, pin: "" });
-    setPinStatus(null);
   };
 
   const addId = (field, id) => {
