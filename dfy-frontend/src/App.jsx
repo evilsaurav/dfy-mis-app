@@ -147,8 +147,8 @@ const MyProfileDashboard = ({ formData, showToast }) => {
             Monthly Activity Calendar
           </h3>
           <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500"></span> 2 Done</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400"></span> 1 Done</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Report Submitted</span>
+            <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-slate-200"></span> No Report</span>
           </div>
         </div>
 
@@ -164,10 +164,8 @@ const MyProfileDashboard = ({ formData, showToast }) => {
             const isToday = new Date().getDate() === dayNum;
 
             let bgColor = "bg-slate-50 text-slate-400 border-slate-100";
-            if (count >= 2) {
+            if (count > 0) {
               bgColor = "bg-emerald-500 text-white font-black shadow-sm shadow-emerald-500/30 border-emerald-600";
-            } else if (count === 1) {
-              bgColor = "bg-amber-400 text-white font-black shadow-sm shadow-amber-400/30 border-amber-500";
             }
 
             return (
@@ -358,6 +356,39 @@ function App() {
   const [currentView, setCurrentView] = useState('form');
   const [toast, setToast] = useState({ message: "", type: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Persistent Session Auto-Restore on Page Refresh (No Re-login required)
+  useEffect(() => {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const savedSession = localStorage.getItem('dfy_user_session');
+      if (savedSession) {
+        const session = JSON.parse(savedSession);
+        if (session && session.date === today && session.working_place && session.fo_name && session.pin) {
+          // Check for local draft backup
+          const draftKey = `dfy_draft_${session.working_place}_${session.fo_name}`;
+          let initialData = {
+            working_place: session.working_place,
+            fo_name: session.fo_name,
+            pin: session.pin,
+            date_of_reporting: today
+          };
+          const rawDraft = localStorage.getItem(draftKey);
+          if (rawDraft) {
+            try {
+              const parsedDraft = JSON.parse(rawDraft);
+              initialData = sanitizeIncomingFormData(parsedDraft, initialData);
+            } catch (e) {}
+          }
+          setFormData(prev => sanitizeIncomingFormData(initialData, { ...prev, ...initialData }));
+          setPinStatus("success");
+          setIsLoggedIn(true);
+        }
+      }
+    } catch (e) {
+      console.warn("Session restore error", e);
+    }
+  }, []);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
 
