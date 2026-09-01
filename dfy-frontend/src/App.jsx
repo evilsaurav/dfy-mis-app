@@ -117,6 +117,31 @@ const MyProfileDashboard = ({ formData, showToast }) => {
         <h2 className="text-2xl font-black text-slate-800">{formData.fo_name}</h2>
         <p className="text-slate-500 font-bold text-sm tracking-wider uppercase">{formData.working_place}</p>
         
+        {/* Streak Counter & Milestone Badges */}
+        <div className="mt-3 flex items-center justify-center gap-2">
+          <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full text-xs font-black shadow-sm">
+            <span>🔥</span>
+            <span>{stats.streak_days || 0} Day Streak</span>
+          </span>
+          {stats.total_km > 0 && (
+            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1 rounded-full text-xs font-black shadow-sm">
+              <span>🛵</span>
+              <span>{stats.total_km} KM Travelled</span>
+            </span>
+          )}
+        </div>
+
+        {stats.badges && stats.badges.length > 0 && (
+          <div className="mt-4 flex flex-wrap justify-center gap-2">
+            {stats.badges.map(b => (
+              <div key={b.id} className="bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all" title={b.desc}>
+                <span className="text-sm">{b.icon}</span>
+                <span className="text-[11px] font-black text-slate-700">{b.title}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        
         <div className="mt-8 flex justify-center items-center">
           <div className="relative w-40 h-40">
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
