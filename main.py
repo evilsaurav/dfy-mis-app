@@ -25,6 +25,43 @@ if not firebase_admin._apps:
     })
 db = firestore.client()
 
+import time
+import asyncio
+from typing import Dict, Any, Tuple
+
+class SimpleTTLCache:
+    def __init__(self, default_ttl: int = 30):
+        self._cache: Dict[str, Tuple[float, Any]] = {}
+        self.default_ttl = default_ttl
+
+    def get(self, key: str):
+        if key in self._cache:
+            exp, val = self._cache[key]
+            if time.time() < exp:
+                return val
+            else:
+                del self._cache[key]
+        return None
+
+    def set(self, key: str, val: Any, ttl: Optional[int] = None):
+        t = ttl if ttl is not None else self.default_ttl
+        self._cache[key] = (time.time() + t, val)
+
+    def delete(self, key: str):
+        if key in self._cache:
+            del self._cache[key]
+
+    def delete_prefix(self, prefix: str):
+        keys_to_del = [k for k in self._cache if k.startswith(prefix)]
+        for k in keys_to_del:
+            del self._cache[k]
+
+    def clear(self):
+        self._cache.clear()
+
+cache = SimpleTTLCache(default_ttl=30)
+
+
 app = FastAPI(title="DFY Daily Activity API")
 
 app.add_middleware(
@@ -157,12 +194,19 @@ async def get_directory():
 async def verify_pin(data: PinCheck):
     try:
         doc_id = f"{data.working_place}_{data.fo_name}".replace(" ", "").lower()
-        staff_doc = db.collection("staff_directory").document(doc_id).get()
+        cache_key = f"pin_{doc_id}"
+        cached_pin = cache.get(cache_key)
+        
+        if cached_pin is not None:
+            return {"valid": str(data.pin) == str(cached_pin)}
+
+        staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(doc_id).get)
         
         if not staff_doc.exists:
             return {"valid": False}
             
         real_pin = staff_doc.to_dict().get("pin")
+        cache.set(cache_key, str(real_pin), ttl=300) # 5 min cache
         if str(data.pin) == str(real_pin):
             return {"valid": True}
         return {"valid": False}
@@ -196,18 +240,27 @@ class StartDayRequest(BaseModel):
 async def check_today_status(req: CheckStatusRequest):
     try:
         doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
+        cache_key = f"status_{doc_id}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         doc_ref = db.collection("daily_field_reports").document(doc_id)
-        doc = doc_ref.get()
+        doc = await asyncio.to_thread(doc_ref.get)
+        
+        res = {"status": "not_started"}
         if doc.exists:
             d = doc.to_dict()
             subs = d.get("submission_count", 0)
             if subs >= 2:
-                return {"status": "max_limit_reached"}
+                res = {"status": "max_limit_reached"}
             elif subs == 1:
-                return {"status": "not_started", "data": {}}
+                res = {"status": "not_started", "data": {}}
             else:
-                return {"status": d.get("status", "in_progress"), "data": d}
-        return {"status": "not_started"}
+                res = {"status": d.get("status", "in_progress"), "data": d}
+                
+        cache.set(cache_key, res, ttl=20) # 20s TTL cache for rapid checking
+        return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -247,6 +300,9 @@ async def submit_daily_report(report: DailyActivityReport):
             payload["submission_count"] = 1
             
         doc_ref.set(payload, merge=True)
+        cache.delete(f"status_{doc_id}")
+        cache.delete_prefix("profile_")
+        cache.delete_prefix("dash_")
         return {"message": "Daily report submitted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -484,7 +540,11 @@ async def download_kpi_workbook(district: str):
 @app.get("/staff-directory")
 async def get_staff_directory():
     try:
-        docs = db.collection("staff_directory").stream()
+        cached = cache.get("staff_directory_list")
+        if cached is not None:
+            return {"status": "success", "data": cached}
+
+        docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         directory = {}
         for doc in docs:
             data = doc.to_dict()
@@ -495,11 +555,10 @@ async def get_staff_directory():
                     directory[district] = []
                 directory[district].append(name)
         
-        # Sort names within districts
         for d in directory:
             directory[d] = sorted(directory[d])
             
-        # Return sorted by district name too if preferred, but dict is fine
+        cache.set("staff_directory_list", directory, ttl=300) # 5 min cache
         return {"status": "success", "data": directory}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
