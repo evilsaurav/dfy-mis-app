@@ -154,17 +154,7 @@ function App() {
   const showToast = (message, type = 'success') => setToast({ message, type });
   const closeToast = () => setToast({ message: "", type: "" });
 
-  useEffect(() => {
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    fetch(`${API_BASE_URL}/get-directory`)
-      .then(res => res.json())
-      .then(data => {
-        if(Object.keys(data).length > 0){
-          setDirectory(data);
-          setDistricts(Object.keys(data));
-        }
-      }).catch(() => {});
-  }, []);
+
 
   useEffect(() => {
     if (formData.pin.length === 4 && formData.fo_name && formData.working_place) {
