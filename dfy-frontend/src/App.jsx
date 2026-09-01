@@ -147,7 +147,7 @@ const MyProfileDashboard = ({ formData, showToast }) => {
 };
 
 // --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onRemove, showToast }) => {
+const IdBucket = ({ title, ids = [], onAdd, onRemove, showToast }) => {
   const [currentId, setCurrentId] = useState("");
 
   const handleAdd = () => {
@@ -504,9 +504,14 @@ function App() {
             </button>
             <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
             {isLoggedIn && (
-              <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors">
-                <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-              </button>
+              <>
+                <button onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-indigo-200 transition-colors">
+                  {currentView === 'form' ? 'Profile' : 'Form'}
+                </button>
+                <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors ml-1">
+                  <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                </button>
+              </>
             )}
           </div>
         </div>
