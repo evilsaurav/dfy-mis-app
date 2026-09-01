@@ -40,6 +40,7 @@ export default function AdminDashboard() {
   const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, fo_dossier, cascade_funnel, whatsapp_bulletin
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
+  const [reportsDistrict, setReportsDistrict] = useState("Jamui");
   const [staffDirectory, setStaffDirectory] = useState({});
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -289,6 +290,18 @@ export default function AdminDashboard() {
     }
   };
 
+
+
+  const handleDownloadKpi = () => {
+    const targetDist = (reportsDistrict && reportsDistrict !== 'All') ? reportsDistrict : (selectedDistrict !== 'All' ? selectedDistrict : 'Jamui');
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+    window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}`, "_blank");
+  };
+
+  const handleDownloadAllZip = () => {
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}`, "_blank");
+  };
 
   const copyWhatsAppBulletin = () => {
     const totalStateNotif = totals.notifications || 0;
@@ -1277,14 +1290,23 @@ Keep this file safe in your Google Drive or personal diary.
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
                       <div>
-                        <span className="text-xs font-black text-slate-800 block mb-1">Single District KPI Excel</span>
-                        <p className="text-[11px] text-slate-400 font-medium">Download for {selectedDistrict === 'All' ? 'currently selected district' : selectedDistrict}</p>
+                        <span className="text-xs font-black text-slate-800 block mb-1.5">Single District KPI Excel</span>
+                        <p className="text-[11px] text-slate-400 font-medium mb-2.5">Select district to download its pre-formulated 33-sheet workbook:</p>
+                        <select
+                          value={reportsDistrict}
+                          onChange={(e) => setReportsDistrict(e.target.value)}
+                          className="w-full bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                        >
+                          {districts.filter(d => d !== 'All').map(d => (
+                            <option key={d} value={d}>{d} District</option>
+                          ))}
+                        </select>
                       </div>
                       <button
                         onClick={handleDownloadKpi}
-                        className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2"
+                        className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95"
                       >
-                        <span>📥</span> Download {selectedDistrict === 'All' ? 'State' : selectedDistrict} KPI (.xlsx)
+                        <span>📥</span> Download {reportsDistrict} KPI (.xlsx)
                       </button>
                     </div>
 
