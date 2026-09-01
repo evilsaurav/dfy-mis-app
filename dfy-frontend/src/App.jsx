@@ -356,6 +356,39 @@ function App() {
   const [currentView, setCurrentView] = useState('form');
   const [toast, setToast] = useState({ message: "", type: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [showInstallBtn, setShowInstallBtn] = useState(true);
+  const [showIosInstallModal, setShowIosInstallModal] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallBtn(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+      setShowInstallBtn(false);
+    }
+
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice && choice.outcome === 'accepted') {
+        setShowInstallBtn(false);
+        showToast("DFY MIS App install ho gayi hai!", "success");
+      }
+      setDeferredPrompt(null);
+    } else {
+      setShowIosInstallModal(true);
+    }
+  };
 
   // Persistent Session Auto-Restore on Page Refresh (No Re-login required)
   useEffect(() => {
@@ -727,6 +760,10 @@ function App() {
               <svg width="12" height="12" className="sm:w-[14px] sm:h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
               <span className="text-[9px] sm:text-[10px] font-bold tracking-wider hidden sm:inline">ADMIN</span>
             </button>
+            <button onClick={handleInstallApp} className="flex items-center gap-1 bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold shadow-sm transition-all active:scale-95" title="Install App">
+              <span>📲</span>
+              <span className="hidden xs:inline">Install App</span>
+            </button>
             <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
             {isLoggedIn && (
               <>
@@ -756,6 +793,27 @@ function App() {
               <p className="text-slate-500 text-sm font-medium">Select your profile and enter PIN to access the dashboard.</p>
             </div>
             
+                        {/* PWA Install Banner */}
+            {showInstallBtn && (
+              <div className="mb-5 bg-gradient-to-r from-indigo-600 to-blue-600 rounded-3xl p-4 sm:p-5 text-white flex items-center justify-between shadow-xl shadow-indigo-500/20 border border-indigo-400/30 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-xl shrink-0">
+                    📲
+                  </div>
+                  <div>
+                    <h4 className="text-xs sm:text-sm font-black tracking-wide leading-tight">Install Mobile App</h4>
+                    <p className="text-[10px] text-indigo-100 font-medium">Home screen par 1-click access</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={handleInstallApp}
+                  className="bg-white text-indigo-700 hover:bg-indigo-50 font-black text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md active:scale-95 transition-all shrink-0 uppercase tracking-wider"
+                >
+                  Install
+                </button>
+              </div>
+            )}
+
             <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 sm:p-8 border border-slate-100">
               <div className="space-y-5">
                 <div>
@@ -922,7 +980,44 @@ function App() {
         )}
       </main>
 
-        {/* Branding Footer */}
+        {/* iOS / Manual Install Modal */}
+      {showIosInstallModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-sm shadow-2xl border border-slate-100 text-center animate-fade-in">
+            <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-4 font-black">
+              📲
+            </div>
+            <h3 className="text-lg font-black text-slate-800 mb-2">App Install Guide</h3>
+            <p className="text-xs text-slate-500 mb-5 font-medium leading-relaxed">
+              Apne mobile home screen par is app ko add karne ke liye:
+            </p>
+
+            <div className="text-left space-y-3 bg-slate-50 p-4 rounded-2xl border border-slate-100 text-xs font-semibold text-slate-700 mb-6">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shrink-0">1</span>
+                <span>Chrome ya Safari me <strong>Share (📤)</strong> ya <strong>3-dots (⋮)</strong> par click karein.</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shrink-0">2</span>
+                <span><strong>"Install app"</strong> ya <strong>"Add to Home screen"</strong> par tap karein.</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center font-bold text-[10px] shrink-0">3</span>
+                <span>App aapke mobile phone me install ho jayegi! 🎉</span>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => setShowIosInstallModal(false)}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-md shadow-indigo-600/20 active:scale-95"
+            >
+              Samajh Gaya (Close)
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Branding Footer */}
         <footer className="w-full text-center py-6 mt-auto opacity-70">
           <p className="text-xs font-bold text-slate-500 tracking-widest uppercase">
             Designed by <span className="text-indigo-600 font-black">Insomniac</span>
