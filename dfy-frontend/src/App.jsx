@@ -680,6 +680,9 @@ function App() {
   const [showInstallBtn, setShowInstallBtn] = useState(true);
   const [showIosInstallModal, setShowIosInstallModal] = useState(false);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [showPostSubmitSuccess, setShowPostSubmitSuccess] = useState(false);
+  const [submittedReportSummary, setSubmittedReportSummary] = useState(null);
+  const [copiedPostSubmit, setCopiedPostSubmit] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstall = (e) => {
@@ -1020,7 +1023,22 @@ function App() {
         setShowReviewModal(false);
         try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
         showToast("✓ Final Report Submitted Successfully!", "success");
-        setTimeout(() => window.location.reload(), 2500);
+
+        const summaryText = generateWhatsAppText();
+        const totalCount = [
+          'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
+          'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
+          'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+          'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
+          'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
+        ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
+
+        setSubmittedReportSummary({
+          text: summaryText,
+          date: formData.date_of_reporting || new Date().toISOString().split('T')[0],
+          totalIds: totalCount
+        });
+        setShowPostSubmitSuccess(true);
       } else {
         const result = await response.json();
         showToast(result.detail || "Error in saving data.", "error");
@@ -1352,7 +1370,87 @@ function App() {
         )}
       </main>
 
-        {/* Pre-Submission Review Modal */}
+        {/* Post-Submission Success & WhatsApp Summary Modal */}
+      {showPostSubmitSuccess && submittedReportSummary && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in">
+            
+            {/* Success Header */}
+            <div className="text-center pb-4 border-b border-slate-100 mb-3">
+              <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-2 shadow-inner">
+                🎉
+              </div>
+              <h3 className="text-xl font-black text-slate-800">Report Submitted Successfully!</h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
+                {formData.fo_name} &bull; {formData.working_place} &bull; {submittedReportSummary.date}
+              </p>
+            </div>
+
+            {/* WhatsApp Summary Box */}
+            <div className="flex-1 overflow-y-auto space-y-2.5 custom-scrollbar pr-1 my-1">
+              <div className="flex justify-between items-center px-1">
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                  <span>📱</span> WhatsApp Summary:
+                </span>
+                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full">
+                  {submittedReportSummary.totalIds} IDs Recorded
+                </span>
+              </div>
+
+              <div className="bg-slate-900 text-emerald-400 font-mono text-xs p-4 rounded-2xl border border-slate-800 whitespace-pre-wrap max-h-56 overflow-y-auto custom-scrollbar select-all">
+                {submittedReportSummary.text}
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(submittedReportSummary.text);
+                    setCopiedPostSubmit(true);
+                    showToast("WhatsApp summary copied to clipboard!", "success");
+                    setTimeout(() => setCopiedPostSubmit(false), 2500);
+                  }
+                }}
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2"
+              >
+                <span>📋</span>
+                <span>{copiedPostSubmit ? '✓ Copied to Clipboard!' : 'Copy for WhatsApp'}</span>
+              </button>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPostSubmitSuccess(false);
+                    setCurrentView('profile');
+                  }}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-3 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <span>✏️</span>
+                  <span>Edit / Correct IDs</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowPostSubmitSuccess(false);
+                    window.location.reload();
+                  }}
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl text-xs transition-colors"
+                >
+                  Done / Close
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Pre-Submission Review Modal */}
       {showReviewModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-lg shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col animate-fade-in">
