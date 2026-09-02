@@ -1250,3 +1250,106 @@ async def export_fo_dossier(month: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Patient ID Correction & Editing Suite ---
+class EditIdRequest(BaseModel):
+    working_place: str
+    fo_name: str
+    date: str
+    category: str # e.g. "notification_ids" or "notification"
+    action: str   # "replace", "delete", "add"
+    old_id: Optional[str] = ""
+    new_id: Optional[str] = ""
+    edited_by: Optional[str] = "FO" # "FO" or "Admin"
+    pin: Optional[str] = ""
+
+@app.post("/api/reports/edit-id")
+async def edit_patient_id(req: EditIdRequest):
+    try:
+        cat_key = req.category if req.category.endswith("_ids") else f"{req.category}_ids"
+        
+        if req.action not in ["replace", "delete", "add"]:
+            raise HTTPException(status_code=400, detail="Invalid action. Must be 'replace', 'delete', or 'add'.")
+            
+        if req.action in ["replace", "add"]:
+            clean_new_id = str(req.new_id).strip()
+            if not clean_new_id.isdigit() or len(clean_new_id) != 9:
+                raise HTTPException(status_code=400, detail=f"Invalid Patient ID '{clean_new_id}'. Must be exactly 9 digits.")
+            req.new_id = clean_new_id
+            
+        if req.edited_by == "FO" and req.pin:
+            pin_doc_id = f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()
+            staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(pin_doc_id).get)
+            if staff_doc.exists and str(staff_doc.to_dict().get("pin")) != str(req.pin):
+                raise HTTPException(status_code=401, detail="Invalid PIN authorization.")
+
+        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
+        doc_ref = db.collection("daily_field_reports").document(doc_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        
+        if not doc.exists:
+            docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                .where("working_place", "==", req.working_place)
+                .where("fo_name", "==", req.fo_name)
+                .where("date_of_reporting", "==", req.date)
+                .stream()))
+            if not docs:
+                raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+            doc_ref = docs[0].reference
+            data = docs[0].to_dict()
+        else:
+            data = doc.to_dict()
+            
+        current_list = list(data.get(cat_key, []))
+        old_id_clean = str(req.old_id).strip()
+        
+        if req.action == "replace":
+            if old_id_clean not in current_list:
+                raise HTTPException(status_code=404, detail=f"Old ID '{old_id_clean}' not found in category '{cat_key}'.")
+            idx = current_list.index(old_id_clean)
+            current_list[idx] = req.new_id
+            
+        elif req.action == "delete":
+            if old_id_clean not in current_list:
+                raise HTTPException(status_code=404, detail=f"ID '{old_id_clean}' not found in category '{cat_key}'.")
+            current_list.remove(old_id_clean)
+            
+        elif req.action == "add":
+            if req.new_id in current_list:
+                raise HTTPException(status_code=400, detail=f"ID '{req.new_id}' is already present in this category.")
+            current_list.append(req.new_id)
+
+        await asyncio.to_thread(lambda: doc_ref.update({
+            cat_key: current_list,
+            "last_edited_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_edited_by": req.edited_by
+        }))
+        
+        log_entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "working_place": req.working_place,
+            "fo_name": req.fo_name,
+            "date": req.date,
+            "category": cat_key,
+            "action": req.action,
+            "old_id": req.old_id,
+            "new_id": req.new_id,
+            "edited_by": req.edited_by
+        }
+        await asyncio.to_thread(lambda: db.collection("id_edit_logs").add(log_entry))
+        
+        cache.delete(f"status_{doc_id}")
+        cache.delete_prefix("profile_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("attendance_")
+        
+        return {
+            "success": True,
+            "message": f"Patient ID successfully {req.action}d!",
+            "category": cat_key,
+            "updated_ids": current_list
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

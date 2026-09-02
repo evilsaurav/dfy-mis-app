@@ -57,6 +57,7 @@ const MyProfileDashboard = ({ formData, showToast }) => {
   const [stats, setStats] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [editingModal, setEditingModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -102,6 +103,71 @@ const MyProfileDashboard = ({ formData, showToast }) => {
       <button onClick={() => window.location.reload()} className="mt-3 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-100">Retry</button>
     </div>
   );
+
+
+  const handleExecuteIdEdit = async (e) => {
+    e.preventDefault();
+    if (!editingModal) return;
+    const { date, category, action, oldId, newId } = editingModal;
+    
+    if (action !== 'delete' && (!newId || newId.trim().length !== 9 || !/^\d+$/.test(newId.trim()))) {
+      setEditingModal(prev => ({ ...prev, error: "Patient ID must be exactly 9 digits (numbers only)." }));
+      return;
+    }
+
+    setEditingModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/edit-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          working_place: formData.working_place,
+          fo_name: formData.fo_name,
+          date: date,
+          category: category,
+          action: action,
+          old_id: oldId,
+          new_id: newId ? newId.trim() : "",
+          pin: formData.pin,
+          edited_by: "FO"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "ID updated successfully!", "success");
+        // Update local stats in memory
+        setStats(prev => {
+          if (!prev || !prev.daily_history || !prev.daily_history[date]) return prev;
+          const updatedHistory = { ...prev.daily_history };
+          const day = { ...updatedHistory[date] };
+          const cats = { ...(day.categories || {}) };
+          cats[category] = data.updated_ids;
+          day.categories = cats;
+          day.total_ids = Object.values(cats).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+          updatedHistory[date] = day;
+
+          const updatedBreakdown = { ...(prev.breakdown || {}) };
+          if (updatedBreakdown[category] !== undefined) {
+            const countDiff = action === 'add' ? 1 : action === 'delete' ? -1 : 0;
+            updatedBreakdown[category] = Math.max(0, updatedBreakdown[category] + countDiff);
+          }
+
+          return {
+            ...prev,
+            daily_history: updatedHistory,
+            breakdown: updatedBreakdown
+          };
+        });
+        setEditingModal(null);
+      } else {
+        setEditingModal(prev => ({ ...prev, error: data.detail || "Failed to update ID.", loading: false }));
+      }
+    } catch (err) {
+      setEditingModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
 
   const targetVal = Number(stats.target) || 0;
   const breakdown = stats.breakdown || {};
@@ -267,24 +333,51 @@ const MyProfileDashboard = ({ formData, showToast }) => {
                       <div key={catKey} className="bg-slate-50/90 p-3 rounded-2xl border border-slate-100">
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[11px] font-black text-slate-700">{label} ({idList.length})</span>
-                          <button
-                            onClick={() => {
-                              if (navigator.clipboard) {
-                                navigator.clipboard.writeText(idList.join('\n'));
-                                setCopiedKey(catKey);
-                                setTimeout(() => setCopiedKey(null), 2000);
-                              }
-                            }}
-                            className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg transition-colors"
-                          >
-                            {copiedKey === catKey ? '✓ Copied' : 'Copy IDs'}
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'add', oldId: '', newId: '', error: '' })}
+                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-0.5"
+                              title="Add missing ID"
+                            >
+                              <span>+</span> Add ID
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (navigator.clipboard) {
+                                  navigator.clipboard.writeText(idList.join('\n'));
+                                  setCopiedKey(catKey);
+                                  setTimeout(() => setCopiedKey(null), 2000);
+                                }
+                              }}
+                              className="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-lg transition-colors"
+                            >
+                              {copiedKey === catKey ? '✓ Copied' : 'Copy'}
+                            </button>
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {idList.map((id, idx) => (
-                            <span key={idx} className="font-mono text-xs font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shadow-sm">
-                              {id}
-                            </span>
+                            <div key={idx} className="inline-flex items-center gap-1 font-mono text-xs font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shadow-sm group">
+                              <span>{id}</span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'replace', oldId: id, newId: id, error: '' })}
+                                className="text-slate-400 hover:text-indigo-600 text-[10px] p-0.5"
+                                title="Edit / Correct this ID"
+                              >
+                                ✏️
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'delete', oldId: id, newId: '', error: '' })}
+                                className="text-slate-400 hover:text-red-500 text-[10px] p-0.5"
+                                title="Delete this ID"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -298,6 +391,65 @@ const MyProfileDashboard = ({ formData, showToast }) => {
           </div>
         );
       })()}
+
+      {/* FO Patient ID Edit / Correction Modal */}
+      {editingModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
+              <div>
+                <h4 className="text-sm font-black text-slate-800 flex items-center gap-1.5">
+                  {editingModal.action === 'replace' ? '✏️ Correct Patient ID' : editingModal.action === 'delete' ? '🗑️ Remove Patient ID' : '➕ Add Missing Patient ID'}
+                </h4>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                  {editingModal.category.replace(/_/g, ' ').toUpperCase()} &bull; {editingModal.date}
+                </p>
+              </div>
+              <button onClick={() => setEditingModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
+            </div>
+
+            <form onSubmit={handleExecuteIdEdit} className="space-y-3">
+              {editingModal.action === 'delete' ? (
+                <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center">
+                  <p className="text-xs font-bold text-red-800 mb-1">Kya aap sach me ID <strong className="font-mono text-sm">{editingModal.oldId}</strong> ko delete karna chahte hain?</p>
+                  <p className="text-[10px] text-red-500">Yeh ID database aur aapke report count se hat jayegi.</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    {editingModal.action === 'replace' ? `Replace ID #${editingModal.oldId} With:` : 'Enter 9-Digit Patient ID:'}
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={9}
+                    value={editingModal.newId}
+                    onChange={(e) => setEditingModal(prev => ({ ...prev, newId: e.target.value.replace(/\D/g, '') }))}
+                    placeholder="e.g. 332882518"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-indigo-500"
+                    autoFocus
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Must be exactly 9 digits.</p>
+                </div>
+              )}
+
+              {editingModal.error && (
+                <p className="text-red-500 text-xs font-bold bg-red-50 p-2 rounded-xl border border-red-100">{editingModal.error}</p>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button type="button" onClick={() => setEditingModal(null)} className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={editingModal.loading}
+                  className={`px-4 py-2 rounded-xl text-xs font-black text-white shadow-md active:scale-95 transition-all ${editingModal.action === 'delete' ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'}`}
+                >
+                  {editingModal.loading ? 'Saving...' : editingModal.action === 'delete' ? 'Confirm Delete' : 'Save ID'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 px-2">Work Breakdown</h3>
       <div className="grid grid-cols-2 gap-3">

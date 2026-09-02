@@ -41,6 +41,7 @@ export default function AdminDashboard() {
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("Jamui");
+  const [adminEditModal, setAdminEditModal] = useState(null); // { fo_name, district, date, category, action, oldId, newId, error, loading }
   const [staffDirectory, setStaffDirectory] = useState({});
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -291,6 +292,65 @@ export default function AdminDashboard() {
   };
 
 
+
+
+  const handleAdminExecuteIdEdit = async (e) => {
+    e.preventDefault();
+    if (!adminEditModal) return;
+    const { fo_name, district, date, category, action, oldId, newId } = adminEditModal;
+
+    if (action !== 'delete' && (!newId || newId.trim().length !== 9 || !/^\d+$/.test(newId.trim()))) {
+      setAdminEditModal(prev => ({ ...prev, error: "Patient ID must be exactly 9 digits (numbers only)." }));
+      return;
+    }
+
+    setAdminEditModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/edit-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          working_place: district,
+          fo_name: fo_name,
+          date: date,
+          category: category,
+          action: action,
+          old_id: oldId,
+          new_id: newId ? newId.trim() : "",
+          edited_by: "Admin"
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        // Update rawRecords in memory
+        setRawRecords(prev => prev.map(rec => {
+          if (rec.fo_name === fo_name && rec.working_place === district && rec.date === date) {
+            const updatedRec = { ...rec };
+            updatedRec[category] = data.updated_ids;
+            // update scalar count
+            const countKey = category.replace('_ids', '');
+            if (updatedRec[countKey] !== undefined) {
+              updatedRec[countKey] = data.updated_ids.length;
+            }
+            if (countKey === 'notification') {
+              updatedRec.notifications = data.updated_ids.length;
+            }
+            return updatedRec;
+          }
+          return rec;
+        }));
+
+        fetchDuplicateAudit();
+        setAdminEditModal(null);
+      } else {
+        setAdminEditModal(prev => ({ ...prev, error: data.detail || "Failed to update ID.", loading: false }));
+      }
+    } catch (err) {
+      setAdminEditModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
 
   const handleDownloadKpi = () => {
     const targetDist = (reportsDistrict && reportsDistrict !== 'All') ? reportsDistrict : (selectedDistrict !== 'All' ? selectedDistrict : 'Jamui');
@@ -1240,7 +1300,73 @@ Keep this file safe in your Google Drive or personal diary.
         </div>
       )}
 
-            {/* 📊 Unified Reports & Export Studio Modal */}
+                  {/* Admin Patient ID Correction / Edit Modal */}
+      {adminEditModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  {adminEditModal.action === 'replace' ? '✏️ Correct Patient ID' : adminEditModal.action === 'delete' ? '🗑️ Remove Patient ID' : '➕ Add Missing Patient ID'}
+                </h3>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                  {adminEditModal.fo_name} ({adminEditModal.district}) &bull; {adminEditModal.date}
+                </p>
+              </div>
+              <button onClick={() => setAdminEditModal(null)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+            </div>
+
+            <form onSubmit={handleAdminExecuteIdEdit} className="space-y-4">
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs font-bold text-slate-600">
+                <span className="text-slate-400 text-[10px] uppercase block mb-0.5">Category:</span>
+                {adminEditModal.category.replace('_ids', '').replace(/_/g, ' ').toUpperCase()}
+              </div>
+
+              {adminEditModal.action === 'delete' ? (
+                <div className="p-4 bg-red-50 rounded-2xl border border-red-100 text-center space-y-1">
+                  <p className="text-xs font-bold text-red-800">
+                    Kya aap sach me ID <strong className="font-mono text-sm">{adminEditModal.oldId}</strong> ko report se hatana chahte hain?
+                  </p>
+                  <p className="text-[10px] text-red-500">Yeh action database aur KPI calculation ko turant update karega.</p>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1.5">
+                    {adminEditModal.action === 'replace' ? `Replace ID #${adminEditModal.oldId} With:` : 'Enter 9-Digit Patient ID:'}
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={9}
+                    value={adminEditModal.newId}
+                    onChange={(e) => setAdminEditModal(prev => ({ ...prev, newId: e.target.value.replace(/\D/g, '') }))}
+                    placeholder="e.g. 332882518"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-indigo-500"
+                    autoFocus
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">Must be exactly 9 digits (numbers only).</p>
+                </div>
+              )}
+
+              {adminEditModal.error && (
+                <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100">{adminEditModal.error}</p>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-3">
+                <button type="button" onClick={() => setAdminEditModal(null)} className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100">Cancel</button>
+                <button
+                  type="submit"
+                  disabled={adminEditModal.loading}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-black text-white shadow-md active:scale-95 transition-all ${adminEditModal.action === 'delete' ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'}`}
+                >
+                  {adminEditModal.loading ? 'Saving...' : adminEditModal.action === 'delete' ? 'Confirm Delete' : 'Save ID'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 📊 Unified Reports & Export Studio Modal */}
       {showReportsStudio && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-4xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
@@ -1681,24 +1807,47 @@ Keep this file safe in your Google Drive or personal diary.
                               <div key={cat.key} className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
                                 <div className="flex justify-between items-center mb-1.5">
                                   <span className="text-[10px] font-black uppercase text-slate-500">{cat.label} ({ids.length})</span>
-                                  <button
-                                    onClick={() => {
-                                      if (navigator.clipboard) {
-                                        navigator.clipboard.writeText(ids.join('\n'));
-                                        setCopiedFoCategory(`${rec.date}_${cat.key}`);
-                                        setTimeout(() => setCopiedFoCategory(null), 2000);
-                                      }
-                                    }}
-                                    className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
-                                  >
-                                    {copiedFoCategory === `${rec.date}_${cat.key}` ? '✓ Copied' : 'Copy'}
-                                  </button>
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'add', oldId: '', newId: '', error: '' })}
+                                      className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded"
+                                      title="Add missing ID"
+                                    >
+                                      + Add ID
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        if (navigator.clipboard) {
+                                          navigator.clipboard.writeText(ids.join('\n'));
+                                          setCopiedFoCategory(`${rec.date}_${cat.key}`);
+                                          setTimeout(() => setCopiedFoCategory(null), 2000);
+                                        }
+                                      }}
+                                      className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
+                                    >
+                                      {copiedFoCategory === `${rec.date}_${cat.key}` ? '✓ Copied' : 'Copy'}
+                                    </button>
+                                  </div>
                                 </div>
                                 <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
                                   {ids.map((id, idIdx) => (
-                                    <span key={idIdx} className={`font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border ${foSearchId && String(id).includes(foSearchId) ? 'bg-amber-100 border-amber-300 text-amber-900 ring-2 ring-amber-400' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                                      {id}
-                                    </span>
+                                    <div key={idIdx} className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border ${foSearchId && String(id).includes(foSearchId) ? 'bg-amber-100 border-amber-300 text-amber-900 ring-2 ring-amber-400' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                                      <span>{id}</span>
+                                      <button
+                                        onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'replace', oldId: id, newId: id, error: '' })}
+                                        className="text-slate-400 hover:text-indigo-600 text-[9px]"
+                                        title="Edit / Correct ID"
+                                      >
+                                        ✏️
+                                      </button>
+                                      <button
+                                        onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'delete', oldId: id, newId: '', error: '' })}
+                                        className="text-slate-400 hover:text-red-500 text-[9px]"
+                                        title="Delete ID"
+                                      >
+                                        🗑️
+                                      </button>
+                                    </div>
                                   ))}
                                 </div>
                               </div>
