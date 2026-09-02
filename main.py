@@ -1353,3 +1353,192 @@ async def edit_patient_id(req: EditIdRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Admin Staff & PIN Management Suite ---
+class AddStaffReq(BaseModel):
+    district: str
+    name: str
+    pin: str
+    designation: Optional[str] = "Field Officer"
+    target: Optional[int] = 50
+
+class UpdatePinReq(BaseModel):
+    district: str
+    name: str
+    new_pin: str
+
+class DeleteStaffReq(BaseModel):
+    district: str
+    name: str
+
+@app.get("/admin/staff/list")
+async def get_staff_full_list():
+    try:
+        docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        staff = []
+        for doc in docs:
+            d = doc.to_dict()
+            if d.get("district") and d.get("name"):
+                staff.append({
+                    "id": doc.id,
+                    "district": d.get("district"),
+                    "name": d.get("name"),
+                    "pin": str(d.get("pin", "")),
+                    "designation": d.get("designation", "Field Officer"),
+                    "created_at": d.get("created_at", "")
+                })
+        staff.sort(key=lambda s: (s["district"], s["name"]))
+        return {"success": True, "staff": staff}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/staff/add")
+async def add_staff_member(req: AddStaffReq):
+    try:
+        clean_dist = req.district.strip()
+        clean_name = req.name.strip()
+        clean_pin = str(req.pin).strip()
+        
+        if not clean_dist or not clean_name:
+            raise HTTPException(status_code=400, detail="District and Officer Name are required.")
+            
+        if not clean_pin.isdigit() or len(clean_pin) != 4:
+            raise HTTPException(status_code=400, detail="PIN must be exactly 4 digits.")
+            
+        doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        doc_ref = db.collection("staff_directory").document(doc_id)
+        
+        existing = await asyncio.to_thread(doc_ref.get)
+        if existing.exists:
+            raise HTTPException(status_code=400, detail=f"Officer '{clean_name}' already exists in '{clean_dist}'.")
+            
+        payload = {
+            "district": clean_dist,
+            "name": clean_name,
+            "pin": clean_pin,
+            "designation": req.designation or "Field Officer",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        await asyncio.to_thread(lambda: doc_ref.set(payload))
+        
+        target_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("staff_targets").document(target_doc_id).set({
+            "district": clean_dist,
+            "fo_name": clean_name,
+            "target": req.target or 50,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, merge=True))
+        
+        cache.delete("staff_directory_list")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("targets_")
+        
+        return {"success": True, "message": f"Officer '{clean_name}' added successfully to {clean_dist}!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/staff/update-pin")
+async def update_staff_pin(req: UpdatePinReq):
+    try:
+        clean_dist = req.district.strip()
+        clean_name = req.name.strip()
+        clean_pin = str(req.new_pin).strip()
+        
+        if not clean_pin.isdigit() or len(clean_pin) != 4:
+            raise HTTPException(status_code=400, detail="New PIN must be exactly 4 digits.")
+            
+        doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        doc_ref = db.collection("staff_directory").document(doc_id)
+        
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Staff record not found.")
+            
+        await asyncio.to_thread(lambda: doc_ref.update({
+            "pin": clean_pin,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }))
+        
+        cache.delete(f"pin_{doc_id}")
+        cache.delete("staff_directory_list")
+        
+        return {"success": True, "message": f"PIN for '{clean_name}' successfully updated to {clean_pin}!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/staff/delete")
+async def delete_staff_member(req: DeleteStaffReq):
+    try:
+        clean_dist = req.district.strip()
+        clean_name = req.name.strip()
+        
+        doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        doc_ref = db.collection("staff_directory").document(doc_id)
+        
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Staff record not found.")
+            
+        await asyncio.to_thread(doc_ref.delete)
+        
+        cache.delete(f"pin_{doc_id}")
+        cache.delete("staff_directory_list")
+        cache.delete_prefix("attendance_")
+        
+        return {"success": True, "message": f"Officer '{clean_name}' removed from directory."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/staff/export-pins")
+async def export_staff_pins(district: Optional[str] = "All"):
+    try:
+        docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        rows = []
+        s_no = 1
+        for doc in docs:
+            d = doc.to_dict()
+            dist = d.get("district", "")
+            name = d.get("name", "")
+            if district != "All" and dist != district:
+                continue
+            if dist and name:
+                rows.append({
+                    "S.No": s_no,
+                    "District": dist,
+                    "Officer Name": name,
+                    "Designation": d.get("designation", "Field Officer"),
+                    "4-Digit PIN": str(d.get("pin", "")),
+                    "Status": "Active"
+                })
+                s_no += 1
+                
+        rows.sort(key=lambda r: (r["District"], r["Officer Name"]))
+        for idx, r in enumerate(rows):
+            r["S.No"] = idx + 1
+            
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            sheet_title = f"PINs {district}"
+            df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
+            ws = writer.sheets[sheet_title[:31]]
+            for cell in ws[1]:
+                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                cell.fill = openpyxl.styles.PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
+                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+                
+        output.seek(0)
+        filename = f"DFY_Staff_PIN_Directory_{district}_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
