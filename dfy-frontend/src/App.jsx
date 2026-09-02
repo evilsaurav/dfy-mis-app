@@ -469,7 +469,7 @@ const MyProfileDashboard = ({ formData, showToast }) => {
 };
 
 // --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast }) => {
+const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
 
@@ -508,11 +508,61 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast }) => 
         <span className="flex items-center gap-1.5">
           {title}
           {currentId.length === 9 && !isNaN(currentId) && (
-            <span className="text-emerald-500 text-[10px] font-bold">? Ready</span>
+            <span className="text-emerald-500 text-[10px] font-bold">✓ Ready</span>
           )}
         </span>
         <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
       </label>
+
+      {/* Smart Notification ID Suggestion Chips */}
+      {suggestedIds && suggestedIds.length > 0 && (
+        <div className="mb-3 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
+              <span>💡</span> Notification IDs ({suggestedIds.length}):
+            </span>
+            {suggestedIds.some(sid => !safeIds.includes(sid)) && onAddBulk && (
+              <button
+                type="button"
+                onClick={() => {
+                  const missing = suggestedIds.filter(sid => !safeIds.includes(sid));
+                  onAddBulk(missing);
+                  if (showToast) showToast(`Added ${missing.length} Notification IDs!`, "success");
+                }}
+                className="text-[9px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors active:scale-95 shadow-sm"
+              >
+                + Add All ({suggestedIds.filter(sid => !safeIds.includes(sid)).length})
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+            {suggestedIds.map((sid, sIdx) => {
+              const isAdded = safeIds.includes(sid);
+              return (
+                <button
+                  key={sIdx}
+                  type="button"
+                  disabled={isAdded}
+                  onClick={() => {
+                    onAdd(sid);
+                    if (showToast) showToast(`ID #${sid} added!`, "success");
+                  }}
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
+                    isAdded 
+                      ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
+                      : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
+                  }`}
+                  title={isAdded ? "Already Added" : `Tap to add ID #${sid}`}
+                >
+                  <span>{sid}</span>
+                  <span>{isAdded ? '✓' : '+'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <input 
           type="text"
@@ -1155,27 +1205,77 @@ function App() {
               
                 <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket 
+                      key={cat.key} 
+                      title={cat.label} 
+                      ids={formData[cat.key]} 
+                      onAdd={(id) => addId(cat.key, id)} 
+                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                      onRemove={(idx) => removeId(cat.key, idx)} 
+                      showToast={showToast}
+                      suggestedIds={cat.key !== 'notification_ids' ? (formData.notification_ids || []) : []}
+                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                    />
                   ))}
                 </Accordion>
                 <Accordion title="2. Diagnostics & Testing">
                   {group2.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket 
+                      key={cat.key} 
+                      title={cat.label} 
+                      ids={formData[cat.key]} 
+                      onAdd={(id) => addId(cat.key, id)} 
+                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                      onRemove={(idx) => removeId(cat.key, idx)} 
+                      showToast={showToast}
+                      suggestedIds={formData.notification_ids || []}
+                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                    />
                   ))}
                 </Accordion>
                 <Accordion title="3. Field Work & Visits">
                   {group3.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket 
+                      key={cat.key} 
+                      title={cat.label} 
+                      ids={formData[cat.key]} 
+                      onAdd={(id) => addId(cat.key, id)} 
+                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                      onRemove={(idx) => removeId(cat.key, idx)} 
+                      showToast={showToast}
+                      suggestedIds={formData.notification_ids || []}
+                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                    />
                   ))}
                 </Accordion>
                 <Accordion title="4. Logistics & Outcomes">
                   {group4.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key]} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket 
+                      key={cat.key} 
+                      title={cat.label} 
+                      ids={formData[cat.key]} 
+                      onAdd={(id) => addId(cat.key, id)} 
+                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                      onRemove={(idx) => removeId(cat.key, idx)} 
+                      showToast={showToast}
+                      suggestedIds={formData.notification_ids || []}
+                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                    />
                   ))}
                 </Accordion>
                 <Accordion title="5. Special Tracking">
                   {group5.map((cat) => (
-                    <IdBucket key={cat.key} title={cat.label} ids={formData[cat.key] || []} onAdd={(id) => addId(cat.key, id)} onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} onRemove={(idx) => removeId(cat.key, idx)} showToast={showToast} />
+                    <IdBucket 
+                      key={cat.key} 
+                      title={cat.label} 
+                      ids={formData[cat.key] || []} 
+                      onAdd={(id) => addId(cat.key, id)} 
+                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                      onRemove={(idx) => removeId(cat.key, idx)} 
+                      showToast={showToast}
+                      suggestedIds={formData.notification_ids || []}
+                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                    />
                   ))}
                 </Accordion>
                 <Accordion title="6. Additional Remarks">
