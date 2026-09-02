@@ -1542,3 +1542,182 @@ async def export_staff_pins(district: Optional[str] = "All"):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- Predictive Cascade & Dropout Alerts Engine ---
+def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name: Optional[str] = None):
+    start_date = f"{month}-01"
+    end_date = f"{month}-31"
+    
+    docs = db.collection("daily_field_reports")\
+        .where("date_of_reporting", ">=", start_date)\
+        .where("date_of_reporting", "<=", end_date)\
+        .stream()
+        
+    patient_map = {}
+    
+    for doc in docs:
+        d = doc.to_dict()
+        doc_dist = d.get("working_place", "")
+        doc_fo = d.get("fo_name", "")
+        doc_date = d.get("date_of_reporting", "")
+        
+        if district != "All" and doc_dist != district:
+            continue
+        if fo_name and doc_fo != fo_name:
+            continue
+            
+        for cat_key, flag in [
+            ("notification_ids", "notification"),
+            ("hiv_dm_ids", "hiv_dm"),
+            ("dbt_ids", "dbt"),
+            ("tpt_treatment_start_ids", "tpt"),
+            ("sample_tested_ids", "sample_tested"),
+            ("outcome_assigned_ids", "outcome")
+        ]:
+            ids = d.get(cat_key, [])
+            if isinstance(ids, list):
+                for pid in ids:
+                    pid_clean = str(pid).strip()
+                    if len(pid_clean) == 9:
+                        if pid_clean not in patient_map:
+                            patient_map[pid_clean] = {
+                                "id": pid_clean,
+                                "district": doc_dist,
+                                "fo_name": doc_fo,
+                                "first_date": doc_date,
+                                "notification": False,
+                                "hiv_dm": False,
+                                "dbt": False,
+                                "tpt": False,
+                                "sample_tested": False,
+                                "outcome": False
+                            }
+                        patient_map[pid_clean][flag] = True
+                        if flag == "notification" and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
+                            patient_map[pid_clean]["first_date"] = doc_date
+                            patient_map[pid_clean]["district"] = doc_dist
+                            patient_map[pid_clean]["fo_name"] = doc_fo
+
+    alert_list = []
+    today_dt = datetime.now().date()
+    
+    summary = {
+        "total_notified": 0,
+        "dbt_pending": 0,
+        "hiv_pending": 0,
+        "tpt_pending": 0,
+        "high_risk_count": 0
+    }
+    
+    for pid, p in patient_map.items():
+        if p["notification"]:
+            summary["total_notified"] += 1
+            missing_actions = []
+            
+            if not p["dbt"]:
+                missing_actions.append("DBT Bank Seeding Missing")
+                summary["dbt_pending"] += 1
+            if not p["hiv_dm"]:
+                missing_actions.append("HIV & DM Testing Missing")
+                summary["hiv_pending"] += 1
+            if not p["tpt"]:
+                missing_actions.append("TPT / Contact Tracing Pending")
+                summary["tpt_pending"] += 1
+                
+            risk_level = "LOW"
+            if len(missing_actions) >= 2:
+                risk_level = "HIGH"
+                summary["high_risk_count"] += 1
+            elif len(missing_actions) == 1:
+                risk_level = "MEDIUM"
+                
+            days_elapsed = 0
+            if p["first_date"]:
+                try:
+                    p_dt = datetime.strptime(p["first_date"], "%Y-%m-%d").date()
+                    days_elapsed = (today_dt - p_dt).days
+                except:
+                    pass
+                    
+            if len(missing_actions) > 0:
+                alert_list.append({
+                    "id": pid,
+                    "district": p["district"],
+                    "fo_name": p["fo_name"],
+                    "notified_date": p["first_date"],
+                    "days_elapsed": days_elapsed,
+                    "missing_actions": missing_actions,
+                    "risk_level": risk_level,
+                    "has_dbt": p["dbt"],
+                    "has_hiv": p["hiv_dm"],
+                    "has_tpt": p["tpt"],
+                    "has_outcome": p["outcome"]
+                })
+                
+    risk_weight = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
+    alert_list.sort(key=lambda x: (risk_weight.get(x["risk_level"], 0), x["days_elapsed"]), reverse=True)
+    
+    return {"summary": summary, "alerts": alert_list}
+
+@app.get("/api/reports/cascade-alerts")
+async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All", fo_name: Optional[str] = None):
+    try:
+        if not month:
+            month = datetime.now().strftime("%Y-%m")
+            
+        cache_key = f"cascade_alerts_{month}_{district}_{fo_name or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+            
+        data = await asyncio.to_thread(compute_cascade_alerts, month, district, fo_name)
+        cache.set(cache_key, data, ttl=180)
+        return {"success": True, "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/export-cascade-alerts")
+async def export_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All"):
+    try:
+        if not month:
+            month = datetime.now().strftime("%Y-%m")
+            
+        data = await asyncio.to_thread(compute_cascade_alerts, month, district)
+        alerts = data.get("alerts", [])
+        
+        rows = []
+        for idx, a in enumerate(alerts):
+            rows.append({
+                "S.No": idx + 1,
+                "Patient ID": a["id"],
+                "District": a["district"],
+                "Field Officer": a["fo_name"],
+                "Notification Date": a["notified_date"],
+                "Days Elapsed": a["days_elapsed"],
+                "Risk Level": a["risk_level"],
+                "Missing Interventions": " | ".join(a["missing_actions"]),
+                "DBT Status": "Completed" if a["has_dbt"] else "PENDING",
+                "HIV/DM Status": "Completed" if a["has_hiv"] else "PENDING",
+                "TPT Status": "Completed" if a["has_tpt"] else "PENDING"
+            })
+            
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            sheet_title = f"Cascade Alerts ({district})"
+            df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
+            ws = writer.sheets[sheet_title[:31]]
+            for cell in ws[1]:
+                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
+                cell.fill = openpyxl.styles.PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
+                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+                
+        output.seek(0)
+        filename = f"DFY_Cascade_Dropout_Alerts_{district}_{month}.xlsx"
+        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

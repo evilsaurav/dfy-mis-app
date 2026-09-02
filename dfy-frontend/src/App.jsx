@@ -57,6 +57,29 @@ const MyProfileDashboard = ({ formData, showToast }) => {
   const [stats, setStats] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [copiedKey, setCopiedKey] = useState(null);
+  const [cascadeAlerts, setCascadeAlerts] = useState([]);
+  const [loadingAlerts, setLoadingAlerts] = useState(false);
+
+  useEffect(() => {
+    const fetchFoCascadeAlerts = async () => {
+      try {
+        setLoadingAlerts(true);
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+        const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?district=${formData.working_place}&fo_name=${formData.fo_name}`);
+        if (res.ok) {
+          const json = await res.json();
+          setCascadeAlerts(json.data?.alerts || []);
+        }
+      } catch (e) {
+        console.warn("Failed to fetch FO cascade alerts", e);
+      } finally {
+        setLoadingAlerts(false);
+      }
+    };
+    if (formData.fo_name && formData.working_place) {
+      fetchFoCascadeAlerts();
+    }
+  }, [formData.fo_name, formData.working_place]);
   const [editingModal, setEditingModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -251,6 +274,56 @@ const MyProfileDashboard = ({ formData, showToast }) => {
           )}
         </div>
       </div>
+
+      {/* 🚨 FO Predictive Cascade & Dropout Alerts */}
+      {cascadeAlerts.length > 0 && (
+        <div className="bg-gradient-to-r from-rose-50 to-amber-50 rounded-3xl p-5 shadow-sm border border-rose-100/80 mb-6 animate-fade-in">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <h3 className="text-xs font-black text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
+              <span>🚨</span>
+              <span>Pending Patient Interventions ({cascadeAlerts.length})</span>
+            </h3>
+            <span className="text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full border border-rose-200">
+              Action Required
+            </span>
+          </div>
+          <p className="text-[11px] text-slate-600 font-semibold mb-3 px-1">
+            Niche diye gaye patients ka TB Notification ho chuka hai lekin unke DBT ya TPT interventions baaki hain:
+          </p>
+
+          <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
+            {cascadeAlerts.map((alt, altIdx) => (
+              <div key={altIdx} className="bg-white p-3 rounded-2xl border border-rose-100 flex items-center justify-between shadow-xs">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">{alt.id}</span>
+                    <span className="text-[10px] font-bold text-slate-400">Notified {alt.notified_date} ({alt.days_elapsed}d ago)</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {alt.missing_actions.map((m, mIdx) => (
+                      <span key={mIdx} className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(alt.id);
+                      showToast(`Patient ID #${alt.id} copied!`, "success");
+                    }
+                  }}
+                  className="text-xs font-bold text-indigo-600 hover:text-white hover:bg-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl transition-all active:scale-95 shrink-0 ml-2"
+                >
+                  Copy ID 📋
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 30-Day Activity Calendar */}
       <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-6">
