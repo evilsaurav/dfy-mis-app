@@ -684,6 +684,9 @@ function App() {
   const [submittedReportSummary, setSubmittedReportSummary] = useState(null);
   const [copiedPostSubmit, setCopiedPostSubmit] = useState(false);
   const [todayMaxReached, setTodayMaxReached] = useState(false);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [offlineQueueCount, setOfflineQueueCount] = useState(0);
+  const [isSyncingOffline, setIsSyncingOffline] = useState(false);
 
   useEffect(() => {
     const handleBeforeInstall = (e) => {
@@ -746,6 +749,55 @@ function App() {
     } catch (e) {
       console.warn("Session restore error", e);
     }
+  }, []);
+
+
+  const updateOfflineCount = async () => {
+    try {
+      const count = await getOfflineReportsCount();
+      setOfflineQueueCount(count);
+    } catch (e) {}
+  };
+
+  const triggerOfflineSync = async () => {
+    if (isSyncingOffline) return;
+    try {
+      setIsSyncingOffline(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await syncAllOfflineReports(API_BASE_URL, (syncedItem) => {
+        showToast(`✓ Offline report for ${syncedItem.date} synced to server! 🎉`, "success");
+      });
+      await updateOfflineCount();
+      if (res.syncedCount > 0) {
+        showToast(`✓ All ${res.syncedCount} offline reports synced successfully!`, "success");
+      }
+    } catch (err) {
+      console.warn("Offline sync error", err);
+    } finally {
+      setIsSyncingOffline(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast("🌐 Internet connected! Syncing offline reports...", "success");
+      triggerOfflineSync();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast("📴 Offline Mode. Reports will be saved locally.", "info");
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    updateOfflineCount();
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   const showToast = (message, type = 'success') => setToast({ message, type });
@@ -1023,10 +1075,43 @@ function App() {
     }
     
     setIsSubmitting(true);
+    const payload = { ...formData, date: formData.date_of_reporting || new Date().toISOString().split('T')[0] };
+
+    const summaryText = generateWhatsAppText();
+    const totalCount = [
+      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
+      'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
+      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+      'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
+      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
+    ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
+
+    // Direct Offline Submission via IndexedDB
+    if (!navigator.onLine) {
+      try {
+        await saveOfflineReport(payload);
+        setShowReviewModal(false);
+        try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
+        await updateOfflineCount();
+
+        setSubmittedReportSummary({
+          text: summaryText,
+          date: payload.date,
+          totalIds: totalCount,
+          isOffline: true
+        });
+        setShowPostSubmitSuccess(true);
+        showToast("📴 Internet nahi hai. Report phone me safe save ho gayi hai aur connection aane par auto-sync ho jayegi!", "success");
+      } catch (err) {
+        showToast("Failed to save report to offline queue.", "error");
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
     try {
       showToast("Saving your report...", "success");
-      const payload = { ...formData, date: formData.date_of_reporting };
-      
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const response = await fetch(`${API_BASE_URL}/submit-daily-report`, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1038,19 +1123,11 @@ function App() {
         try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
         showToast("✓ Final Report Submitted Successfully!", "success");
 
-        const summaryText = generateWhatsAppText();
-        const totalCount = [
-          'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
-          'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
-          'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
-          'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
-          'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
-        ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
-
         setSubmittedReportSummary({
           text: summaryText,
-          date: formData.date_of_reporting || new Date().toISOString().split('T')[0],
-          totalIds: totalCount
+          date: payload.date,
+          totalIds: totalCount,
+          isOffline: false
         });
         setShowPostSubmitSuccess(true);
       } else {
@@ -1058,7 +1135,24 @@ function App() {
         showToast(result.detail || "Error in saving data.", "error");
       }
     } catch(err) {
-      showToast("Network error while submitting report.", "error");
+      console.warn("Network drop during submit, saving to IndexedDB:", err);
+      try {
+        await saveOfflineReport(payload);
+        setShowReviewModal(false);
+        try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
+        await updateOfflineCount();
+
+        setSubmittedReportSummary({
+          text: summaryText,
+          date: payload.date,
+          totalIds: totalCount,
+          isOffline: true
+        });
+        setShowPostSubmitSuccess(true);
+        showToast("📴 Network issue! Report phone ke offline database me safe save ho gayi hai.", "success");
+      } catch (e2) {
+        showToast("Network error while submitting report.", "error");
+      }
     } finally {
       setIsSubmitting(false);
     }
