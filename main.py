@@ -283,11 +283,11 @@ async def check_today_status(req: CheckStatusRequest):
             d = doc.to_dict()
             subs = d.get("submission_count", 0)
             if subs >= 2:
-                res = {"status": "max_limit_reached"}
+                res = {"status": "max_limit_reached", "submission_count": subs, "data": d}
             elif subs == 1:
-                res = {"status": "not_started", "data": {}}
+                res = {"status": "not_started", "submission_count": 1, "data": {}}
             else:
-                res = {"status": d.get("status", "in_progress"), "data": d}
+                res = {"status": d.get("status", "in_progress"), "submission_count": subs, "data": d}
                 
         cache.set(cache_key, res, ttl=20) # 20s TTL cache for rapid checking
         return res
