@@ -313,7 +313,7 @@ export default function AdminDashboard() {
     try {
       setLoadingCascade(true);
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?month=${selectedMonth}&district=${cascadeFilterDist}`);
+      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?month=${month}&district=${cascadeFilterDist}`);
       if (res.ok) {
         const json = await res.json();
         setCascadeData(json.data || { summary: {}, alerts: [] });
@@ -1464,7 +1464,7 @@ Keep this file safe in your Google Drive or personal diary.
                 <div>
                   <h3 className="text-xl font-black text-slate-800">Predictive Clinical Cascade &amp; Dropout Radar</h3>
                   <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
-                    {cascadeData.summary.total_notified || 0} Total Notified Patients &bull; {selectedMonth}
+                    {cascadeData.summary.total_notified || 0} Total Notified Patients &bull; {month}
                   </p>
                 </div>
               </div>
@@ -1528,7 +1528,7 @@ Keep this file safe in your Google Drive or personal diary.
               </div>
 
               <a
-                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${selectedMonth}&district=${cascadeFilterDist}`}
+                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${month}&district=${cascadeFilterDist}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md shadow-rose-600/20 active:scale-95 transition-all flex items-center gap-1.5"
