@@ -993,46 +993,34 @@ function App() {
   const handleLogin = async () => {
     if (pinStatus === 'success') {
       setIsSubmitting(true);
+      const today = new Date().toISOString().split('T')[0];
       try {
-        const today = new Date().toISOString().split('T')[0];
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const res = await fetch(`${API_BASE_URL}/check-today-status`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
         });
-        const data = await res.json();
         
-        const isMaxLimit = data.status === 'max_limit_reached';
-        setTodayMaxReached(isMaxLimit);
-
-        if (isMaxLimit) {
-           if (data.data && Object.keys(data.data).length > 0) {
-             const d = data.data;
-             setFormData(prev => sanitizeIncomingFormData(d, {
-               ...prev,
-               date_of_reporting: d.date_of_reporting || today
-             }));
-           }
-        } else if (data.status === 'in_progress' || data.status === 'completed' || data.status === 'pending_previous') {
-           if (data.data && Object.keys(data.data).length > 0) {
-             const d = data.data;
-             setFormData(prev => sanitizeIncomingFormData(d, {
-               ...prev,
-               date_of_reporting: d.date_of_reporting || today
-             }));
-           } else {
-             // Second submission of the day (fresh start)
-             setFormData(prev => sanitizeIncomingFormData({}, {
-                ...prev,
-                date_of_reporting: today,
-                remark: "", visited_names: []
-             }));
-           }
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.data && Object.keys(data.data).length > 0) {
+            const d = data.data;
+            setFormData(prev => sanitizeIncomingFormData(d, {
+              ...prev,
+              date_of_reporting: d.date_of_reporting || today
+            }));
+          } else {
+            setFormData(prev => ({ ...prev, date_of_reporting: today }));
+          }
         } else {
           setFormData(prev => ({ ...prev, date_of_reporting: today }));
         }
-
-        // ALWAYS allow login and persist session
+      } catch (err) {
+        console.warn("Status check notice, continuing login:", err);
+        setFormData(prev => ({ ...prev, date_of_reporting: today }));
+      } finally {
+        // ALWAYS allow login and persist session safely
         try {
           localStorage.setItem('dfy_user_session', JSON.stringify({
             working_place: formData.working_place,
@@ -1043,17 +1031,8 @@ function App() {
         } catch (e) {}
 
         setIsLoggedIn(true);
-
-        if (isMaxLimit) {
-          setCurrentView('profile');
-          showToast("Aaj ki 2 reports submitted hain. Profile me aap apna data dekh/edit kar sakte hain!", "success");
-        } else {
-          showToast(`Welcome back, ${formData.fo_name}!`, 'success');
-        }
-      } catch (err) {
-        showToast("Error checking status", "error");
-      } finally {
         setIsSubmitting(false);
+        showToast(`Welcome back, ${formData.fo_name}!`, 'success');
       }
     }
   };
