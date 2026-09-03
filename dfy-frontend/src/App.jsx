@@ -1536,27 +1536,18 @@ function App() {
               {/* Sticky Bottom Action Bar */}
               <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 p-3 sm:p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50">
                 <div className="max-w-md mx-auto flex items-center gap-2 sm:gap-3">
-                  {todayMaxReached ? (
-                    <button 
-                      onClick={() => setCurrentView('profile')}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2"
-                    >
-                      <span>✓ 2 Reports Submitted (View Profile)</span>
-                    </button>
-                  ) : (
-                    <button 
-                      onClick={() => { if(!formData.working_place || !formData.fo_name || !formData.pin) { showToast("Pehle Zila, Naam aur PIN bharo!", "error"); return; } setShowReviewModal(true); }} 
-                      disabled={isSubmitting}
-                      className={`w-full bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                    >
-                      {isSubmitting ? (
-                        <>
-                          <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                          <span>Submitting...</span>
-                        </>
-                      ) : 'Review & Submit Daily Report →'}
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => { if(!formData.working_place || !formData.fo_name || !formData.pin) { showToast("Pehle Zila, Naam aur PIN bharo!", "error"); return; } setShowReviewModal(true); }} 
+                    disabled={isSubmitting}
+                    className={`w-full bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <span>Submitting...</span>
+                      </>
+                    ) : 'Review & Submit Daily Report →'}
+                  </button>
                 </div>
               </div>
             </div>
