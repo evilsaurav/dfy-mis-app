@@ -335,15 +335,9 @@ async def check_today_status(req: CheckStatusRequest):
         res = {"status": "not_started"}
         if doc.exists:
             d = doc.to_dict()
-            subs = d.get("submission_count", 0)
-            if subs >= 2:
-                res = {"status": "max_limit_reached", "submission_count": subs, "data": d}
-            elif subs == 1:
-                res = {"status": "not_started", "submission_count": 1, "data": {}}
-            else:
-                res = {"status": d.get("status", "in_progress"), "submission_count": subs, "data": d}
+            res = {"status": "completed", "submission_count": 1, "data": d}
                 
-        cache.set(cache_key, res, ttl=20) # 20s TTL cache for rapid checking
+        cache.set(cache_key, res, ttl=20)
         return res
     except HTTPException:
         raise
@@ -362,14 +356,11 @@ async def submit_daily_report(report: DailyActivityReport):
         payload = report.dict(exclude_unset=True)
         payload["status"] = "completed"
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
+        payload["submission_count"] = 1
         
         doc = doc_ref.get()
         if doc.exists:
             d = doc.to_dict()
-            subs = d.get("submission_count", 0)
-            if subs >= 2:
-                raise HTTPException(status_code=400, detail="Daily limit reached")
-                
             for k, v in payload.items():
                 if isinstance(v, list) and k.endswith("_ids"):
                     combined = d.get(k, []) + v
@@ -379,16 +370,16 @@ async def submit_daily_report(report: DailyActivityReport):
                     payload[k] = list(dict.fromkeys(combined))
                 elif k == "remark" and v:
                     old_remark = d.get("remark", "")
-                    payload[k] = f"{old_remark} | {v}".strip(" |")
-                    
-            payload["submission_count"] = subs + 1
-        else:
-            payload["submission_count"] = 1
-            
+                    if v not in old_remark:
+                        payload[k] = f"{old_remark} | {v}".strip(" |")
+                    else:
+                        payload[k] = old_remark
+                        
         doc_ref.set(payload, merge=True)
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
+        cache.delete_prefix("attendance_")
         return {"message": "Daily report submitted successfully"}
     except HTTPException:
         raise

@@ -786,7 +786,6 @@ function App() {
   const [showPostSubmitSuccess, setShowPostSubmitSuccess] = useState(false);
   const [submittedReportSummary, setSubmittedReportSummary] = useState(null);
   const [copiedPostSubmit, setCopiedPostSubmit] = useState(false);
-  const [todayMaxReached, setTodayMaxReached] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
