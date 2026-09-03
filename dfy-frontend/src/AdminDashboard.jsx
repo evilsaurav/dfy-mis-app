@@ -3,7 +3,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 
 export default function AdminDashboard() {
   const [password, setPassword] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    try {
+      return localStorage.getItem('dfy_admin_auth') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [rawRecords, setRawRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -220,6 +226,7 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         setIsAuthenticated(true);
+        try { localStorage.setItem('dfy_admin_auth', 'true'); } catch (e) {}
         fetchData();
       } else {
         setError('Invalid password. Forgot password? Use Emergency Recovery below.');
@@ -227,6 +234,7 @@ export default function AdminDashboard() {
     } catch (err) {
       if (password === 'dfyadmin2026') {
         setIsAuthenticated(true);
+        try { localStorage.setItem('dfy_admin_auth', 'true'); } catch (e) {}
         fetchData();
       } else {
         setError('Invalid password or server offline.');
@@ -261,6 +269,7 @@ export default function AdminDashboard() {
         setTimeout(() => {
           setShowRecoveryModal(false);
           setIsAuthenticated(true);
+          try { localStorage.setItem('dfy_admin_auth', 'true'); } catch (e) {}
           fetchData();
         }, 1500);
       } else {
@@ -899,7 +908,35 @@ Keep this file safe in your Google Drive or personal diary.
                 <span>⚙️</span>
                 <span>Security</span>
               </button>
-              <button onClick={() => window.location.href = '/'} className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-700 transition-colors">Exit</button>
+              <button
+                onClick={() => {
+                  fetchData();
+                  fetchAttendance();
+                  fetchDirectory();
+                  loadTargets('All');
+                  fetchDuplicateAudit();
+                  fetchStaffList();
+                  if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
+                }}
+                disabled={isLoading}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+                title="Refresh Dashboard & Sync Latest Reports"
+              >
+                <span className={isLoading ? "animate-spin" : ""}>🔄</span>
+                <span>{isLoading ? "Syncing..." : "Refresh Data"}</span>
+              </button>
+              <button 
+                onClick={() => {
+                  try { localStorage.removeItem('dfy_admin_auth'); } catch (e) {}
+                  setIsAuthenticated(false);
+                  window.location.href = '/';
+                }} 
+                className="bg-slate-800 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 active:scale-95"
+                title="Logout from Admin Portal"
+              >
+                <span>🚪</span>
+                <span>Logout</span>
+              </button>
           </div>
         </div>
 
