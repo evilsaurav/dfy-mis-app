@@ -492,6 +492,40 @@ async def update_target(data: TargetUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 14 Standard KPI Categories Definition (Exact Master Blueprint)
+EXCEL_KPI_CATEGORIES = [
+    ("NOTIFICATION", "notification_ids", 3),
+    ("HIV & DM", "hiv_dm_ids", 4),
+    ("DBT", "dbt_ids", 5),
+    ("SAMPLE COLLECTION", "sample_collection_ids", 6),
+    ("SAMPLE TESTED", "sample_tested_ids", 7),
+    ("Outcome Assigned", "outcome_assigned_ids", 8),
+    ("Home Visit", "home_visit_ids", 9),
+    ("Contact Tracing", "contact_tracing_ids", 10),
+    ("Follow Up", "follow_up_ids", 11),
+    ("Face to Face", "face_to_face_ids", 12),
+    ("Presumptive", "presumptive_ids", 13),
+    ("Documents", "documents_ids", 14),
+    ("FDC Provided", "fdc_provided_ids", 15),
+    ("Kit Consumption", "kit_consumption_ids", 16)
+]
+
+def get_kpi_tab_name(day: int) -> str:
+    if day == 1:
+        return "1ST"
+    elif day == 2:
+        return "2nd"
+    elif day == 3:
+        return "3rd"
+    elif day in [21, 31]:
+        return f"{day}st"
+    elif day == 22:
+        return "22nd"
+    elif day == 23:
+        return "23rd"
+    else:
+        return f"{day}th"
+
 def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = None) -> Optional[bytes]:
     if not month_prefix:
         month_prefix = datetime.now().strftime("%Y-%m")
@@ -501,10 +535,11 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     if not os.path.exists(template_path):
         return None
         
-    wb = openpyxl.load_workbook(template_path)
+    # Load workbook preserving all formulas
+    wb = openpyxl.load_workbook(template_path, data_only=False)
     sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
     
-    # 1. Fetch Targets & Populate 'Performance sheet'
+    # 1. Fetch Targets & Populate 'Performance sheet' Dynamic Targets
     target_map = {}
     try:
         t_docs = db.collection("staff_targets").where("district", "==", district).stream()
@@ -518,74 +553,108 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         
     if "Performance sheet" in wb.sheetnames:
         ws_perf = wb["Performance sheet"]
-        for r_idx in range(2, ws_perf.max_row + 1):
+        for r_idx in range(5, ws_perf.max_row + 1):
             cell_name = ws_perf.cell(row=r_idx, column=1).value
-            if cell_name and str(cell_name).strip() != "GRAND TOTAL":
+            if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
                 norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
                 if norm_name in target_map:
                     ws_perf.cell(row=r_idx, column=3).value = target_map[norm_name]
                     
-    # 2. Filter Reports by Month
+    # 2. Fetch and Sort Daily Field Reports for this District and Month
     docs = db.collection("daily_field_reports").where("working_place", "==", district).stream()
-    
-    KPI_MAP = {
-        "notification_ids": 3, "hiv_dm_ids": 4, "dbt_ids": 5, "sample_collection_ids": 6,
-        "sample_tested_ids": 7, "outcome_assigned_ids": 8, "home_visit_ids": 9,
-        "contact_tracing_ids": 10, "follow_up_ids": 11, "face_to_face_ids": 12,
-        "presumptive_ids": 13, "documents_ids": 14, "fdc_provided_ids": 15, "kit_consumption_ids": 16,
-        "differentiated_tb_ids": 17, "tpt_treatment_start_ids": 18, "tpt_presumptive_ids": 19,
-        "adhar_face_authentication_ids": 20, "consent_with_id_ids": 21
-    }
-    
+    reports = []
     for doc in docs:
-        data = doc.to_dict()
-        date_str = str(data.get("date_of_reporting", "")).strip()
-        if not date_str or not date_str.startswith(month_prefix):
-            continue
+        d = doc.to_dict()
+        date_str = str(d.get("date_of_reporting", "")).strip()
+        if date_str and date_str.startswith(month_prefix):
+            reports.append(d)
             
+    reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
+    
+    # Map staff names to their index in this template
+    staff_name_to_idx = {}
+    ws_day1 = wb["1ST"] if "1ST" in wb.sheetnames else wb[sheet_map.get("1st")] if "1st" in sheet_map else None
+    if ws_day1:
+        s_idx = 0
+        for r in range(2, ws_day1.max_row + 1, 40):
+            val = ws_day1.cell(row=r, column=1).value
+            if val and str(val).strip():
+                staff_name_to_idx[re.sub(r'\s+', ' ', str(val)).strip().lower()] = s_idx
+                s_idx += 1
+
+    # 3. Populate Tabs 3 to 33 ('1ST' to '31st')
+    for rep in reports:
+        date_str = str(rep.get("date_of_reporting", "")).strip()
         try:
             day_int = int(date_str.split('-')[2])
         except Exception:
             continue
             
-        raw_tab_key = ordinal(day_int).lower()
+        raw_tab_key = get_kpi_tab_name(day_int).lower()
         actual_tab_name = sheet_map.get(raw_tab_key)
-        fo_name = re.sub(r'\s+', ' ', str(data.get("fo_name", ""))).strip().lower()
+        fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
         
-        # 1. Update Daily Tab
-        if actual_tab_name and actual_tab_name in wb.sheetnames:
-            ws = wb[actual_tab_name]
-            start_row = -1
-            for r_idx in range(1, ws.max_row + 1):
-                cell_val = ws.cell(row=r_idx, column=1).value
-                if cell_val and re.sub(r'\s+', ' ', str(cell_val)).strip().lower() == fo_name:
-                    start_row = r_idx
-                    break
+        if actual_tab_name and actual_tab_name in wb.sheetnames and fo_norm in staff_name_to_idx:
+            ws_day = wb[actual_tab_name]
+            s_idx = staff_name_to_idx[fo_norm]
+            start_row = 2 + (s_idx * 40)
             
-            if start_row != -1:
-                BLOCK_SIZE = 40
-                for key, col_idx in KPI_MAP.items():
-                    ids = data.get(key) or []
-                    for i in range(BLOCK_SIZE):
-                        if i < len(ids):
-                            ws.cell(row=start_row + i, column=col_idx).value = str(ids[i]).strip()
+            # Populate IDs vertically within 40-row bounds
+            for kpi_name, cat_key, col_idx in EXCEL_KPI_CATEGORIES:
+                ids = rep.get(cat_key) or []
+                if isinstance(ids, list):
+                    for i in range(min(40, len(ids))):
+                        ws_day.cell(row=start_row + i, column=col_idx).value = str(ids[i]).strip()
 
-        # 2. Update CONSOLIDATED SHEET Attendance & Counts
-        if "CONSOLIDATED SHEET" in wb.sheetnames:
-            ws_cons = wb["CONSOLIDATED SHEET"]
-            base_col = -1
-            for c_idx in range(22, ws_cons.max_column + 1):
-                cell_val = ws_cons.cell(row=1, column=c_idx).value
-                if cell_val and re.sub(r'\s+', ' ', str(cell_val)).strip().lower() == fo_name:
-                    base_col = c_idx
-                    break
+    # 4. Populate Tab 2: 'CONSOLIDATED SHEET'
+    if "CONSOLIDATED SHEET" in wb.sheetnames:
+        ws_cons = wb["CONSOLIDATED SHEET"]
+        
+        # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AM (Cols 1 to 39)
+        # 13 Clusters (Cols 1-3, 4-6, 7-9, ..., 37-39)
+        cluster_row_ptrs = { c_idx: 4 for c_idx in range(13) }
+        
+        for rep in reports:
+            rep_date = str(rep.get("date_of_reporting", "")).strip()
+            rep_fo = str(rep.get("fo_name", "")).strip()
             
-            if base_col != -1:
-                cons_row = 1 + day_int
-                ws_cons.cell(row=cons_row, column=base_col + 1).value = "Present"
-                ws_cons.cell(row=cons_row, column=base_col + 2).value = len(data.get("hiv_dm_ids") or [])
-                ws_cons.cell(row=cons_row, column=base_col + 3).value = len(data.get("dbt_ids") or [])
+            for c_idx in range(13):
+                _, cat_key, _ = EXCEL_KPI_CATEGORIES[c_idx]
+                ids = rep.get(cat_key) or []
+                if isinstance(ids, list):
+                    start_c = 1 + (c_idx * 3)
+                    for patient_id in ids:
+                        pid_str = str(patient_id).strip()
+                        if pid_str:
+                            r = cluster_row_ptrs[c_idx]
+                            ws_cons.cell(row=r, column=start_c, value=pid_str)
+                            ws_cons.cell(row=r, column=start_c + 1, value=rep_date)
+                            ws_cons.cell(row=r, column=start_c + 2, value=rep_fo)
+                            cluster_row_ptrs[c_idx] += 1
+                            
+        # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
+        staff_kpi_row_ptrs = {}
+        for s_idx in range(len(staff_name_to_idx)):
+            for k_idx in range(len(EXCEL_KPI_CATEGORIES)):
+                staff_kpi_row_ptrs[(s_idx, k_idx)] = 4
                 
+        for rep in reports:
+            fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+            if fo_norm in staff_name_to_idx:
+                s_idx = staff_name_to_idx[fo_norm]
+                staff_base_col = 40 + (s_idx * 14)
+                
+                for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
+                    ids = rep.get(cat_key) or []
+                    if isinstance(ids, list):
+                        col = staff_base_col + k_idx
+                        for patient_id in ids:
+                            pid_str = str(patient_id).strip()
+                            if pid_str:
+                                r = staff_kpi_row_ptrs[(s_idx, k_idx)]
+                                ws_cons.cell(row=r, column=col, value=pid_str)
+                                staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
+                                
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)

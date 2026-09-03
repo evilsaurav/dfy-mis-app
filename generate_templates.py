@@ -1,264 +1,325 @@
-#!/usr/bin/env python3
+﻿# -*- coding: utf-8 -*-
 """
 generate_templates.py
-----------------------
-Scalable district-wise Excel master-template generator.
+Master Blueprint: District KPI Multi-Tab Excel Engine Template Generator
+Creates 33-tab production-grade KPI templates for all 10 Bihar districts.
 """
-
-import csv
 import os
-import re
-from collections import OrderedDict
-
-from openpyxl import Workbook
+import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-from openpyxl.comments import Comment
 
-# ==============================================================================
-# CONFIG
-# ==============================================================================
-
-CSV_PATH = "staff_master.csv"
-OUTPUT_DIR = "templates"
-
-KPI_COLUMNS = [
-    "Notification",
-    "HIV & DM",
-    "DBT",
-    "Sample Collection",
-    "Sample Tested",
-    "Outcome Assigned",
-    "Home Visit",
-    "Contact Tracing",
-    "Follow Up",
-    "Face to Face",
-    "Presumptive",
-    "Documents",
-    "FDC Provided",
-    "Kit Consumption",
-    "Differentiated TB",
-    "TPT Treatment Start",
-    "TPT Presumptive",
-    "Adhar Face Authentication",
-    "Consent with ID",
-]
-
-PERFORMANCE_HEADERS = [
-    "Employee Name", "DESIG.", "Target",
-    "NOTIFICATION", "HIV & DM", "DBT",
-    "SAMPLE COLLECTION", "SAMPLE TESTED", "Outcome Assigned",
-]
-PERFORMANCE_KPI_MAP = {
-    "NOTIFICATION": "Notification",
-    "HIV & DM": "HIV & DM",
-    "DBT": "DBT",
-    "SAMPLE COLLECTION": "Sample Collection",
-    "SAMPLE TESTED": "Sample Tested",
-    "Outcome Assigned": "Outcome Assigned",
+DISTRICT_STAFF = {
+    "Aurangabad": ["Prince Kumar", "Rahul Kumar", "Ram Ji Singh", "Rishu Kumar"],
+    "Bhojpur": ["Ashwani Kr Keshri", "Mukesh Tiwari", "Naveen Kumar", "Rahul Kumar", "Ram Prasad", "Surya Pratap"],
+    "Buxar": ["Krishna Kumar", "Mukul Kumar", "Nilesh Ranjan", "Raj Tiwari", "Randhir Kumar", "Shailesh Kumar", "Srishty Singh"],
+    "Jamui": ["Bablu Kumar", "Monu Kumar", "Rajiv Kumar", "Rinki Kumari"],
+    "Jehanabad": ["Sammer Arya", "Shashi Ranjan", "Suraj Kumar"],
+    "Kaimur": ["Durgesh Kumar", "Praphull Kumar", "Raushan Kumar", "Vinit Kumar"],
+    "Lakhisarai": ["Ankit Kumar", "Ram Prakash"],
+    "Munger": ["Amit Kumar", "Devrath Kumar", "Jayant Kumar", "Md. Raza Uddin", "Saif Khan", "Shyam Kumar Gupta", "Sudhanshu Prasad", "Sumit Kr Singh"],
+    "Nawada": ["Devraj Kumar", "Rajesh Kumar", "Rajiv Kumar"],
+    "Sheikhpura": ["Dhiraj Kumar", "Nilkamal Kumar"]
 }
 
-NUM_DAYS = 31
-BLOCK_SIZE = 40
+KPI_CATEGORIES = [
+    ("NOTIFICATION", "notification_ids"),
+    ("HIV & DM", "hiv_dm_ids"),
+    ("DBT", "dbt_ids"),
+    ("SAMPLE COLLECTION", "sample_collection_ids"),
+    ("SAMPLE TESTED", "sample_tested_ids"),
+    ("Outcome Assigned", "outcome_assigned_ids"),
+    ("Home Visit", "home_visit_ids"),
+    ("Contact Tracing", "contact_tracing_ids"),
+    ("Follow Up", "follow_up_ids"),
+    ("Face to Face", "face_to_face_ids"),
+    ("Presumptive", "presumptive_ids"),
+    ("Documents", "documents_ids"),
+    ("FDC Provided", "fdc_provided_ids"),
+    ("Kit Consumption", "kit_consumption_ids")
+]
 
-FONT_NAME = "Arial"
-HEADER_FONT = Font(name=FONT_NAME, bold=True, color="FFFFFF", size=10)
-HEADER_FILL = PatternFill(start_color="305496", end_color="305496", fill_type="solid")
-BODY_FONT = Font(name=FONT_NAME, size=10)
-THIN_SIDE = Side(style="thin", color="B7B7B7")
-THIN_BORDER = Border(left=THIN_SIDE, right=THIN_SIDE, top=THIN_SIDE, bottom=THIN_SIDE)
-CENTER = Alignment(horizontal="center", vertical="center")
-
-
-def ordinal(n: int) -> str:
-    if n == 1:
+def get_ordinal_tab_name(day: int) -> str:
+    if day == 1:
         return "1ST"
-    if 10 <= n % 100 <= 20:
-        suffix = "th"
+    elif day == 2:
+        return "2nd"
+    elif day == 3:
+        return "3rd"
+    elif day in [21, 31]:
+        return f"{day}st"
+    elif day == 22:
+        return "22nd"
+    elif day == 23:
+        return "23rd"
     else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
+        return f"{day}th"
 
-def safe_filename(district: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", district.strip())
-    return cleaned.strip("_") or "UNKNOWN"
+# Styling definitions
+font_title = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+font_header = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+font_bold = Font(name="Calibri", size=10, bold=True, color="000000")
+font_regular = Font(name="Calibri", size=10, bold=False, color="000000")
 
-def load_staff(csv_path: str):
-    districts = OrderedDict()
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        required = {"District", "Name", "Designation"}
-        if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
-            raise ValueError(
-                f"{csv_path} must contain columns: District, Name, Designation "
-                f"(found: {reader.fieldnames})"
-            )
-        for row in reader:
-            district = (row["District"] or "").strip()
-            name = (row["Name"] or "").strip()
-            designation = (row["Designation"] or "").strip()
-            if not district or not name:
-                continue
-            districts.setdefault(district, []).append((name, designation))
-    return districts
+fill_navy = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Dark Blue
+fill_indigo = PatternFill(start_color="4338CA", end_color="4338CA", fill_type="solid")
+fill_gray_header = PatternFill(start_color="374151", end_color="374151", fill_type="solid")
+fill_green_header = PatternFill(start_color="047857", end_color="047857", fill_type="solid")
+fill_gold_total = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
 
-def style_header_row(ws, num_cols, row=1):
-    for col in range(1, num_cols + 1):
-        cell = ws.cell(row=row, column=col)
-        cell.font = HEADER_FONT
-        cell.fill = HEADER_FILL
-        cell.alignment = CENTER
-        cell.border = THIN_BORDER
+thin_border = Border(
+    left=Side(style='thin', color='D1D5DB'),
+    right=Side(style='thin', color='D1D5DB'),
+    top=Side(style='thin', color='D1D5DB'),
+    bottom=Side(style='thin', color='D1D5DB')
+)
 
-def autosize(ws, widths):
-    for col, width in widths.items():
-        ws.column_dimensions[get_column_letter(col)].width = width
+align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-def build_daily_sheet(wb, tab_name, staff_list):
-    ws = wb.create_sheet(tab_name)
-    headers = ["NAME", "DESIGNATION"] + KPI_COLUMNS
-    for col, h in enumerate(headers, start=1):
-        ws.cell(row=1, column=col, value=h)
-    style_header_row(ws, len(headers))
-    ws.freeze_panes = "A2"
+def generate_district_template(district: str, staff_list: list, output_path: str):
+    wb = openpyxl.Workbook()
+    default_sheet = wb.active
+    
+    daily_tab_names = [get_ordinal_tab_name(d) for d in range(1, 32)]
+    
+    # -------------------------------------------------------------
+    # 1. TAB 1: 'Performance sheet'
+    # -------------------------------------------------------------
+    ws_perf = wb.create_sheet(title="Performance sheet")
+    ws_perf.views.sheetView[0].showGridLines = True
+    
+    # Title Banner
+    ws_perf.merge_cells("A1:R2")
+    ws_perf["A1"] = f"DOCTORS FOR YOU (DFY) -- DISTRICT KPI PERFORMANCE SHEET ({district.upper()})"
+    ws_perf["A1"].font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    ws_perf["A1"].fill = fill_navy
+    ws_perf["A1"].alignment = align_center
+    
+    # Subtitle Row 3
+    ws_perf["A3"] = f"Monthly Evaluation & Notification Target Achievement Matrix"
+    ws_perf["A3"].font = Font(name="Calibri", size=10, italic=True, color="6B7280")
+    
+    # Row 4: Headers
+    perf_headers = [
+        "Employee Name", "DESIG.", "Target", "NOTIFICATION", "% Achieved"
+    ] + [kpi[0] for kpi in KPI_CATEGORIES[1:]] # HIV & DM to Kit Consumption
+    
+    for c_idx, h in enumerate(perf_headers, start=1):
+        cell = ws_perf.cell(row=4, column=c_idx, value=h)
+        cell.font = font_header
+        cell.fill = fill_indigo if c_idx <= 5 else fill_gray_header
+        cell.alignment = align_center
+        cell.border = thin_border
+        
+    # Row 5 onwards: Staff Rows
+    start_r = 5
+    for idx, staff_name in enumerate(staff_list):
+        r = start_r + idx
+        ws_perf.cell(row=r, column=1, value=staff_name).font = font_bold
+        ws_perf.cell(row=r, column=2, value="Field Officer").font = font_regular
+        ws_perf.cell(row=r, column=3, value=50).font = font_bold # Target
+        ws_perf.cell(row=r, column=3).alignment = align_center
+        
+        # In CONSOLIDATED SHEET Right Wing:
+        # Staff idx block starts at column 40 + (idx * 14)
+        cons_start_col = 40 + (idx * 14)
+        
+        # Col D (NOTIFICATION) -> references Row 3 of this staff in CONSOLIDATED SHEET
+        notif_col_letter = get_column_letter(cons_start_col)
+        ws_perf.cell(row=r, column=4, value=f"='CONSOLIDATED SHEET'!{notif_col_letter}3").font = font_bold
+        ws_perf.cell(row=r, column=4).alignment = align_center
+        
+        # Col E (% Achieved) -> Formula =IF(C{r}>0, D{r}/C{r}, 0)
+        cell_pct = ws_perf.cell(row=r, column=5, value=f"=IF(C{r}>0, D{r}/C{r}, 0)")
+        cell_pct.font = font_bold
+        cell_pct.alignment = align_center
+        cell_pct.number_format = "0.0%"
+        
+        # Cols F to R (Remaining 13 KPIs)
+        for k_idx in range(1, len(KPI_CATEGORIES)):
+            col_target = 5 + k_idx # Col 6 is F
+            cons_kpi_col = get_column_letter(cons_start_col + k_idx)
+            c = ws_perf.cell(row=r, column=col_target, value=f"='CONSOLIDATED SHEET'!{cons_kpi_col}3")
+            c.font = font_regular
+            c.alignment = align_center
+            c.border = thin_border
+            
+        for c in range(1, len(perf_headers) + 1):
+            ws_perf.cell(row=r, column=c).border = thin_border
+            
+    # Grand Total Row
+    total_r = start_r + len(staff_list)
+    ws_perf.cell(row=total_r, column=1, value="GRAND TOTAL").font = font_title
+    ws_perf.cell(row=total_r, column=1).fill = fill_navy
+    ws_perf.cell(row=total_r, column=2, value="").fill = fill_navy
+    
+    # Target Total
+    ws_perf.cell(row=total_r, column=3, value=f"=SUM(C{start_r}:C{total_r-1})").font = font_title
+    ws_perf.cell(row=total_r, column=3).fill = fill_navy
+    ws_perf.cell(row=total_r, column=3).alignment = align_center
+    
+    # Notif Total
+    ws_perf.cell(row=total_r, column=4, value=f"=SUM(D{start_r}:D{total_r-1})").font = font_title
+    ws_perf.cell(row=total_r, column=4).fill = fill_navy
+    ws_perf.cell(row=total_r, column=4).alignment = align_center
+    
+    # Overall % Achieved Total
+    cell_tot_pct = ws_perf.cell(row=total_r, column=5, value=f"=IF(C{total_r}>0, D{total_r}/C{total_r}, 0)")
+    cell_tot_pct.font = font_title
+    cell_tot_pct.fill = fill_navy
+    cell_tot_pct.alignment = align_center
+    cell_tot_pct.number_format = "0.0%"
+    
+    for k_idx in range(1, len(KPI_CATEGORIES)):
+        col_target = 5 + k_idx
+        col_letter = get_column_letter(col_target)
+        c = ws_perf.cell(row=total_r, column=col_target, value=f"=SUM({col_letter}{start_r}:{col_letter}{total_r-1})")
+        c.font = font_title
+        c.fill = fill_navy
+        c.alignment = align_center
+        c.border = thin_border
+        
+    for c in range(1, len(perf_headers) + 1):
+        ws_perf.cell(row=total_r, column=c).border = thin_border
 
-    for i, (name, designation) in enumerate(staff_list):
-        r = 2 + i * BLOCK_SIZE
-        ws.cell(row=r, column=1, value=name).font = BODY_FONT
-        ws.cell(row=r, column=2, value=designation).font = BODY_FONT
+    ws_perf.column_dimensions['A'].width = 24
+    ws_perf.column_dimensions['B'].width = 14
+    ws_perf.column_dimensions['C'].width = 12
+    ws_perf.column_dimensions['D'].width = 15
+    ws_perf.column_dimensions['E'].width = 14
+    for c in range(6, len(perf_headers) + 1):
+        ws_perf.column_dimensions[get_column_letter(c)].width = 16
 
-    if staff_list:
-        ws.cell(row=2, column=1).comment = Comment(
-            "Fixed 40-row block per staff member (1 name row + 39 blank "
-            "rows) reserved for backend ID data population. "
-            "Do not insert or delete rows inside a block.",
-            "generate_templates.py",
-        )
+    # -------------------------------------------------------------
+    # 2. TAB 2: 'CONSOLIDATED SHEET'
+    # -------------------------------------------------------------
+    ws_cons = wb.create_sheet(title="CONSOLIDATED SHEET")
+    ws_cons.views.sheetView[0].showGridLines = True
+    
+    # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AM (Cols 1 to 39)
+    left_clusters = [kpi[0] for kpi in KPI_CATEGORIES[:13]]
+    
+    for c_idx, cluster_name in enumerate(left_clusters):
+        start_c = 1 + (c_idx * 3)
+        end_c = start_c + 2
+        
+        ws_cons.merge_cells(start_row=1, start_column=start_c, end_row=1, end_column=end_c)
+        r1_cell = ws_cons.cell(row=1, column=start_c, value=cluster_name)
+        r1_cell.font = font_title
+        r1_cell.fill = fill_navy
+        r1_cell.alignment = align_center
+        
+        c_letter = get_column_letter(start_c)
+        ws_cons.merge_cells(start_row=2, start_column=start_c, end_row=2, end_column=end_c)
+        r2_cell = ws_cons.cell(row=2, column=start_c, value=f"=COUNTA({c_letter}4:{c_letter}5000)")
+        r2_cell.font = font_title
+        r2_cell.fill = fill_indigo
+        r2_cell.alignment = align_center
+        
+        subheaders = ["Patient ID", "Date", "Reported by"]
+        for s_idx, sh in enumerate(subheaders):
+            sub_cell = ws_cons.cell(row=3, column=start_c + s_idx, value=sh)
+            sub_cell.font = font_header
+            sub_cell.fill = fill_gray_header
+            sub_cell.alignment = align_center
+            sub_cell.border = thin_border
+            
+        for r in range(1, 4):
+            for c in range(start_c, end_c + 1):
+                ws_cons.cell(row=r, column=c).border = thin_border
+                
+        ws_cons.column_dimensions[get_column_letter(start_c)].width = 14
+        ws_cons.column_dimensions[get_column_letter(start_c+1)].width = 12
+        ws_cons.column_dimensions[get_column_letter(start_c+2)].width = 18
 
-    autosize(ws, {1: 24, 2: 22, **{3 + k: 15 for k in range(len(KPI_COLUMNS))}})
-    return ws
+    # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
+    for s_idx, staff_name in enumerate(staff_list):
+        staff_start_c = 40 + (s_idx * 14)
+        staff_end_c = staff_start_c + 13
+        
+        ws_cons.merge_cells(start_row=1, start_column=staff_start_c, end_row=1, end_column=staff_end_c)
+        r1_staff = ws_cons.cell(row=1, column=staff_start_c, value=staff_name)
+        r1_staff.font = font_title
+        r1_staff.fill = fill_green_header
+        r1_staff.alignment = align_center
+        
+        fo_start_row = 2 + (s_idx * 40)
+        fo_end_row = 1 + ((s_idx + 1) * 40)
+        
+        for k_idx, (kpi_name, _) in enumerate(KPI_CATEGORIES):
+            c_num = staff_start_c + k_idx
+            
+            h_cell = ws_cons.cell(row=2, column=c_num, value=kpi_name)
+            h_cell.font = font_header
+            h_cell.fill = fill_gray_header
+            h_cell.alignment = align_center
+            h_cell.border = thin_border
+            
+            daily_col_letter = get_column_letter(3 + k_idx)
+            sum_terms = [f"COUNTA('{tab}'!{daily_col_letter}{fo_start_row}:{daily_col_letter}{fo_end_row})" for tab in daily_tab_names]
+            formula_3d = "=" + "+".join(sum_terms)
+            
+            r3_cell = ws_cons.cell(row=3, column=c_num, value=formula_3d)
+            r3_cell.font = font_bold
+            r3_cell.fill = fill_gold_total
+            r3_cell.alignment = align_center
+            r3_cell.border = thin_border
+            
+            ws_cons.column_dimensions[get_column_letter(c_num)].width = 15
+            
+        for r in range(1, 4):
+            for c in range(staff_start_c, staff_end_c + 1):
+                ws_cons.cell(row=r, column=c).border = thin_border
 
-def build_performance_sheet(wb, staff_list):
-    ws = wb.create_sheet("Performance sheet")
-    for col, h in enumerate(PERFORMANCE_HEADERS, start=1):
-        ws.cell(row=1, column=col, value=h)
-    style_header_row(ws, len(PERFORMANCE_HEADERS))
-    ws.freeze_panes = "A2"
+    # -------------------------------------------------------------
+    # 3. TABS 3 to 33: Daily Tabs ('1ST' to '31st')
+    # -------------------------------------------------------------
+    daily_headers = ["NAME", "DESIGNATION"] + [kpi[0] for kpi in KPI_CATEGORIES]
+    
+    for day_int in range(1, 32):
+        tab_title = get_ordinal_tab_name(day_int)
+        ws_day = wb.create_sheet(title=tab_title)
+        ws_day.views.sheetView[0].showGridLines = True
+        
+        for c_idx, h in enumerate(daily_headers, start=1):
+            cell = ws_day.cell(row=1, column=c_idx, value=h)
+            cell.font = font_header
+            cell.fill = fill_navy if c_idx <= 2 else fill_gray_header
+            cell.alignment = align_center
+            cell.border = thin_border
+            
+        for s_idx, staff_name in enumerate(staff_list):
+            fo_start_r = 2 + (s_idx * 40)
+            
+            ws_day.cell(row=fo_start_r, column=1, value=staff_name).font = font_bold
+            ws_day.cell(row=fo_start_r, column=2, value="Field Officer").font = font_regular
+            
+            for r in range(fo_start_r, fo_start_r + 40):
+                for c in range(1, len(daily_headers) + 1):
+                    ws_day.cell(row=r, column=c).border = thin_border
+                    
+        ws_day.column_dimensions['A'].width = 22
+        ws_day.column_dimensions['B'].width = 14
+        for c in range(3, len(daily_headers) + 1):
+            ws_day.column_dimensions[get_column_letter(c)].width = 15
 
-    for i, (name, designation) in enumerate(staff_list):
-        r = 2 + i
-        ws.cell(row=r, column=1, value=name).font = BODY_FONT
-        ws.cell(row=r, column=2, value=designation).font = BODY_FONT
-        for col_idx, perf_header in enumerate(PERFORMANCE_HEADERS[3:], start=4):
-            kpi_name = PERFORMANCE_KPI_MAP[perf_header]
-            kpi_col = get_column_letter(3 + KPI_COLUMNS.index(kpi_name))
-            ws.cell(row=r, column=col_idx,
-                     value=f"='CONSOLIDATED SHEET'!{kpi_col}{r}").font = BODY_FONT
-                     
-    # ADD TOTAL ROW
-    total_row = 2 + len(staff_list)
-    ws.cell(row=total_row, column=1, value="GRAND TOTAL").font = HEADER_FONT
-    for col_idx in range(4, len(PERFORMANCE_HEADERS) + 1):
-        col_letter = get_column_letter(col_idx)
-        ws.cell(row=total_row, column=col_idx, value=f"=SUM({col_letter}2:{col_letter}{total_row-1})").font = HEADER_FONT
-
-    autosize(ws, {1: 24, 2: 22, 3: 10,
-                  **{c: 15 for c in range(4, len(PERFORMANCE_HEADERS) + 1)}})
-    return ws
-
-def build_consolidated_sheet(wb, staff_list, daily_tab_names):
-    ws = wb.create_sheet("CONSOLIDATED SHEET")
-
-    left_headers = ["Employee Name", "Designation"] + KPI_COLUMNS
-    for col, h in enumerate(left_headers, start=1):
-        ws.cell(row=1, column=col, value=h)
-    style_header_row(ws, len(left_headers))
-
-    for i, (name, designation) in enumerate(staff_list):
-        r = 2 + i
-        ws.cell(row=r, column=1, value=name).font = BODY_FONT
-        ws.cell(row=r, column=2, value=designation).font = BODY_FONT
-
-        row_start = 2 + i * BLOCK_SIZE
-        row_end = row_start + BLOCK_SIZE - 1
-        for k, kpi in enumerate(KPI_COLUMNS):
-            col_letter = get_column_letter(3 + k)
-            terms = "+".join(
-                f"COUNTA('{tab}'!{col_letter}{row_start}:{col_letter}{row_end})"
-                for tab in daily_tab_names
-            )
-            # Add +0 so that empty sum shows exactly 0 in Excel rather than blank
-            formula = f"=({terms})+0"
-            ws.cell(row=r, column=3 + k, value=formula).font = BODY_FONT
-
-    # ADD TOTAL ROW
-    total_row = 2 + len(staff_list)
-    ws.cell(row=total_row, column=1, value="GRAND TOTAL").font = HEADER_FONT
-    for k in range(len(KPI_COLUMNS)):
-        col_letter = get_column_letter(3 + k)
-        ws.cell(row=total_row, column=3 + k, value=f"=SUM({col_letter}2:{col_letter}{total_row-1})").font = HEADER_FONT
-
-    autosize(ws, {1: 24, 2: 22, **{3 + k: 15 for k in range(len(KPI_COLUMNS))}})
-
-    spacer_col = 2 + len(KPI_COLUMNS) + 1
-    right_start = spacer_col + 1
-    block_headers = ["Date", "Reported By", "HIV", "DBT"]
-    block_width = len(block_headers)
-    block_stride = block_width + 1
-
-    for i, (name, designation) in enumerate(staff_list):
-        base_col = right_start + i * block_stride
-
-        ws.merge_cells(start_row=1, start_column=base_col,
-                        end_row=1, end_column=base_col + block_width - 1)
-        banner = ws.cell(row=1, column=base_col, value=name)
-        banner.font, banner.fill, banner.alignment = HEADER_FONT, HEADER_FILL, CENTER
-
-        for offset, h in enumerate(block_headers):
-            cell = ws.cell(row=2, column=base_col + offset, value=h)
-            cell.font, cell.fill, cell.alignment = HEADER_FONT, HEADER_FILL, CENTER
-
-        for day in range(1, NUM_DAYS + 1):
-            r = 2 + day
-            date_cell = ws.cell(row=r, column=base_col, value=day)
-            date_cell.font, date_cell.alignment = BODY_FONT, CENTER
-
-        for offset in range(block_width):
-            ws.column_dimensions[get_column_letter(base_col + offset)].width = 13
-
-    if staff_list:
-        ws.cell(row=2, column=right_start).comment = Comment(
-            "Per-staff date-wise breakdown. 'Date' is pre-filled 1-31; "
-            "'Reported By' / 'HIV' / 'DBT' are populated by the backend "
-            "per daily entry.",
-            "generate_templates.py",
-        )
-
-    ws.freeze_panes = "C2"
-    return ws
-
-def build_workbook_for_district(staff_list):
-    wb = Workbook()
-    wb.remove(wb.active)
-    daily_tab_names = [ordinal(d) for d in range(1, NUM_DAYS + 1)]
-    build_performance_sheet(wb, staff_list)
-    build_consolidated_sheet(wb, staff_list, daily_tab_names)
-    for tab_name in daily_tab_names:
-        build_daily_sheet(wb, tab_name, staff_list)
-    return wb
+    if default_sheet.title in wb.sheetnames and len(wb.sheetnames) > 33:
+        wb.remove(default_sheet)
+    elif "Sheet" in wb.sheetnames:
+        wb.remove(wb["Sheet"])
+        
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    wb.save(output_path)
+    print(f"[SUCCESS] Generated Template for {district}: {output_path} ({len(wb.sheetnames)} tabs)")
 
 def main():
-    staff_by_district = load_staff(CSV_PATH)
-    if not staff_by_district:
-        print(f"No usable rows found in {CSV_PATH}.")
-        return
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    for district, staff_list in staff_by_district.items():
-        wb = build_workbook_for_district(staff_list)
-        filename = f"template_{safe_filename(district)}.xlsx"
-        path = os.path.join(OUTPUT_DIR, filename)
-        wb.save(path)
-        print(f"Generated: {path}  ({len(staff_list)} staff, 33 tabs)")
+    print("="*60)
+    print("Generating Master KPI Excel Templates for all 10 Bihar Districts...")
+    print("="*60)
+    for district, staff in DISTRICT_STAFF.items():
+        out_file = f"templates/template_{district}.xlsx"
+        generate_district_template(district, staff, out_file)
+    print("\n[ALL TEMPLATES GENERATED SUCCESSFULLY]")
 
 if __name__ == "__main__":
     main()
