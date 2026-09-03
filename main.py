@@ -1,3 +1,57 @@
+
+# Professional OpenPyXL Border & Style Helpers
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
+
+EXCEL_THIN_BORDER = Border(
+    left=Side(style='thin', color='CBD5E1'),
+    right=Side(style='thin', color='CBD5E1'),
+    top=Side(style='thin', color='CBD5E1'),
+    bottom=Side(style='thin', color='CBD5E1')
+)
+
+EXCEL_HEADER_BORDER = Border(
+    left=Side(style='thin', color='94A3B8'),
+    right=Side(style='thin', color='94A3B8'),
+    top=Side(style='medium', color='1E293B'),
+    bottom=Side(style='medium', color='1E293B')
+)
+
+EXCEL_TOTAL_ROW_BORDER = Border(
+    left=Side(style='thin', color='CBD5E1'),
+    right=Side(style='thin', color='CBD5E1'),
+    top=Side(style='medium', color='1E293B'),
+    bottom=Side(style='double', color='1E293B')
+)
+
+EXCEL_CLUSTER_DIVIDER = Border(
+    left=Side(style='thin', color='CBD5E1'),
+    right=Side(style='medium', color='64748B'),
+    top=Side(style='thin', color='CBD5E1'),
+    bottom=Side(style='thin', color='CBD5E1')
+)
+
+def style_excel_worksheet(ws, header_fill_color="4F46E5"):
+    for cell in ws[1]:
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color=header_fill_color, end_color=header_fill_color, fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = EXCEL_HEADER_BORDER
+        
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=ws.max_column):
+        for cell in row:
+            cell.border = EXCEL_THIN_BORDER
+            cell.font = Font(name="Calibri", size=10)
+            if isinstance(cell.value, (int, float)):
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                cell.alignment = Alignment(horizontal="left", vertical="center")
+                
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
 import zipfile
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
@@ -648,9 +702,15 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                         pid_str = str(patient_id).strip()
                         if pid_str:
                             r = cluster_row_ptrs[c_idx]
-                            ws_cons.cell(row=r, column=start_c, value=pid_str)
-                            ws_cons.cell(row=r, column=start_c + 1, value=rep_date)
-                            ws_cons.cell(row=r, column=start_c + 2, value=rep_fo)
+                            c1 = ws_cons.cell(row=r, column=start_c, value=pid_str)
+                            c2 = ws_cons.cell(row=r, column=start_c + 1, value=rep_date)
+                            c3 = ws_cons.cell(row=r, column=start_c + 2, value=rep_fo)
+                            c1.border = EXCEL_THIN_BORDER
+                            c2.border = EXCEL_THIN_BORDER
+                            c3.border = EXCEL_CLUSTER_DIVIDER
+                            c1.alignment = Alignment(horizontal="center", vertical="center")
+                            c2.alignment = Alignment(horizontal="center", vertical="center")
+                            c3.alignment = Alignment(horizontal="left", vertical="center")
                             cluster_row_ptrs[c_idx] += 1
                             
         # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
@@ -676,7 +736,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                             pid_str = str(patient_id).strip()
                             if pid_str:
                                 r = staff_kpi_row_ptrs[(s_idx, k_idx)]
-                                ws_cons.cell(row=r, column=col, value=pid_str)
+                                c_cell = ws_cons.cell(row=r, column=col, value=pid_str)
+                                if col == staff_base_col + 13:
+                                    c_cell.border = EXCEL_CLUSTER_DIVIDER
+                                else:
+                                    c_cell.border = EXCEL_THIN_BORDER
+                                c_cell.alignment = Alignment(horizontal="center", vertical="center")
                                 staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
 
     # 5. Populate Tab 1: 'Performance sheet'
@@ -1270,10 +1335,7 @@ async def export_state_summary(month: Optional[str] = None):
             df.to_excel(writer, index=False, sheet_name="State Performance Summary")
             ws = writer.sheets["State Performance Summary"]
             # Formatting
-            for cell in ws[1]:
-                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                cell.fill = openpyxl.styles.PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
-                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+            style_excel_worksheet(ws, header_fill_color="1E3A8A")
                 
         output.seek(0)
         filename = f"DFY_State_Summary_{month}.xlsx"
@@ -1651,10 +1713,7 @@ async def export_staff_pins(district: Optional[str] = "All"):
             sheet_title = f"PINs {district}"
             df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
             ws = writer.sheets[sheet_title[:31]]
-            for cell in ws[1]:
-                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                cell.fill = openpyxl.styles.PatternFill(start_color="4F46E5", end_color="4F46E5", fill_type="solid")
-                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+            style_excel_worksheet(ws, header_fill_color="1E3A8A")
                 
         output.seek(0)
         filename = f"DFY_Staff_PIN_Directory_{district}_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
@@ -1830,10 +1889,7 @@ async def export_cascade_alerts(month: Optional[str] = None, district: Optional[
             sheet_title = f"Cascade Alerts ({district})"
             df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
             ws = writer.sheets[sheet_title[:31]]
-            for cell in ws[1]:
-                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                cell.fill = openpyxl.styles.PatternFill(start_color="DC2626", end_color="DC2626", fill_type="solid")
-                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+            style_excel_worksheet(ws, header_fill_color="B91C1C")
                 
         output.seek(0)
         filename = f"DFY_Cascade_Dropout_Alerts_{district}_{month}.xlsx"
