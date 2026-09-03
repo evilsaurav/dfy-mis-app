@@ -1482,6 +1482,41 @@ async def edit_patient_id(req: EditIdRequest):
             data = docs[0].to_dict()
         else:
             data = doc.to_dict()
+
+        # ?? Strict 24-Hour Editing Window Rule for Field Officers
+        if req.edited_by == "FO":
+            is_expired = False
+            # Check submitted_at timestamp
+            sub_ts = data.get("timestamp") or data.get("submitted_at")
+            if sub_ts:
+                try:
+                    # Parse timestamp format
+                    sub_clean = str(sub_ts).replace("Z", "+00:00")
+                    if "T" in sub_clean:
+                        sub_dt = datetime.fromisoformat(sub_clean).replace(tzinfo=None)
+                    else:
+                        sub_dt = datetime.strptime(sub_clean, "%Y-%m-%d %H:%M:%S")
+                    hours_diff = (datetime.now() - sub_dt).total_seconds() / 3600.0
+                    if hours_diff > 24.0:
+                        is_expired = True
+                except Exception:
+                    pass
+            
+            # Fallback check against date_of_reporting
+            if not is_expired:
+                try:
+                    rep_date = datetime.strptime(req.date, "%Y-%m-%d").date()
+                    today = datetime.now().date()
+                    if (today - rep_date).days > 1: # More than 1 calendar day ago
+                        is_expired = True
+                except Exception:
+                    pass
+                    
+            if is_expired:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Field Officer edit window expired (24 hours limit). 24 ghante beet chuke hain. Kripya badlav ke liye District Admin ya State MIS se sampark karein."
+                )
             
         current_list = list(data.get(cat_key, []))
         old_id_clean = str(req.old_id).strip()

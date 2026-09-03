@@ -371,6 +371,15 @@ const MyProfileDashboard = ({ formData, showToast }) => {
       {/* Date-wise Reported IDs Inspector */}
       {selectedDate && (() => {
         const selectedDayData = stats.daily_history && stats.daily_history[selectedDate];
+        const isDateEditable = (() => {
+          if (!selectedDate) return false;
+          const todayStr = new Date().toISOString().split('T')[0];
+          if (selectedDate === todayStr) return true;
+          const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const yesterdayStr = yesterday.toISOString().split('T')[0];
+          return selectedDate === yesterdayStr;
+        })();
+
         return (
           <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-6 animate-fade-in">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
@@ -383,9 +392,17 @@ const MyProfileDashboard = ({ formData, showToast }) => {
                 </p>
               </div>
               {selectedDayData && selectedDayData.submitted && (
-                <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-100">
-                  Submitted
-                </span>
+                <div className="flex items-center gap-1.5">
+                  {isDateEditable ? (
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200" title="Aap 24 ghante ke andar IDs edit/correct kar sakte hain">
+                      ⏱️ 24h Edit Open
+                    </span>
+                  ) : (
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full border border-slate-200" title="24h beet chuke hain. Badlav ke liye Admin se contact karein.">
+                      🔒 Edit Locked
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -407,14 +424,16 @@ const MyProfileDashboard = ({ formData, showToast }) => {
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[11px] font-black text-slate-700">{label} ({idList.length})</span>
                           <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'add', oldId: '', newId: '', error: '' })}
-                              className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-0.5"
-                              title="Add missing ID"
-                            >
-                              <span>+</span> Add ID
-                            </button>
+                            {isDateEditable && (
+                              <button
+                                type="button"
+                                onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'add', oldId: '', newId: '', error: '' })}
+                                className="text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-0.5"
+                                title="Add missing ID"
+                              >
+                                <span>+</span> Add ID
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => {
@@ -434,22 +453,26 @@ const MyProfileDashboard = ({ formData, showToast }) => {
                           {idList.map((id, idx) => (
                             <div key={idx} className="inline-flex items-center gap-1 font-mono text-xs font-bold bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-lg shadow-sm group">
                               <span>{id}</span>
-                              <button
-                                type="button"
-                                onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'replace', oldId: id, newId: id, error: '' })}
-                                className="text-slate-400 hover:text-indigo-600 text-[10px] p-0.5"
-                                title="Edit / Correct this ID"
-                              >
-                                ✏️
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'delete', oldId: id, newId: '', error: '' })}
-                                className="text-slate-400 hover:text-red-500 text-[10px] p-0.5"
-                                title="Delete this ID"
-                              >
-                                🗑️
-                              </button>
+                              {isDateEditable && (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'replace', oldId: id, newId: id, error: '' })}
+                                    className="text-slate-400 hover:text-indigo-600 text-[10px] p-0.5"
+                                    title="Edit / Correct this ID"
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingModal({ date: selectedDate, category: catKey, action: 'delete', oldId: id, newId: '', error: '' })}
+                                    className="text-slate-400 hover:text-red-500 text-[10px] p-0.5"
+                                    title="Delete this ID"
+                                  >
+                                    🗑️
+                                  </button>
+                                </>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -457,6 +480,13 @@ const MyProfileDashboard = ({ formData, showToast }) => {
                     );
                   })}
                 </div>
+
+                {!isDateEditable && (
+                  <div className="p-2.5 bg-amber-50 rounded-xl border border-amber-200/70 text-[11px] text-amber-800 font-semibold flex items-center gap-2">
+                    <span>🔒</span>
+                    <span>24 ghante beet chuke hain isliye editing lock hai. Badlav ke liye Admin se contact karein.</span>
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-center py-6 text-xs text-slate-400 font-medium">Is date ko koi report submit nahi ki gayi thi.</p>
