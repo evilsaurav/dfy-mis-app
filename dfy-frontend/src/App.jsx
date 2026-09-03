@@ -1080,15 +1080,18 @@ function App() {
 
 
   const generateWhatsAppText = () => {
-    let text = '*Daily Field Report - ' + (formData.date_of_reporting || new Date().toISOString().split('T')[0]) + '* ??\n';
-    text += '*Name:* ' + formData.fo_name + ' (' + formData.working_place + ')\n\n';
+    const reportDate = formData.date_of_reporting || new Date().toISOString().split('T')[0];
+    let text = `*Daily Field Report - ${reportDate}*\n`;
+    text += `*Name:* ${formData.fo_name} (${formData.working_place})\n`;
+    text += `*Designation:* Field Officer\n`;
+    text += `*Status:* Report Submitted ✓\n\n`;
 
     if (formData.visited_names && formData.visited_names.length > 0) {
-      text += '*?? Doctors/Stores Visited:*\n';
+      text += `*Doctors/Stores Visited:*\n`;
       text += formData.visited_names.join('\n') + '\n\n';
     }
 
-    text += '*?? Work Metrics:*\n';
+    text += `*Work Metrics:*\n`;
     
     const categories = [
       { key: 'notification_ids', label: 'Notification' },
@@ -1117,17 +1120,17 @@ function App() {
       const ids = formData[cat.key] || [];
       if (ids.length > 0) {
         hasMetrics = true;
-        text += '\n*' + cat.label + ':* ' + ids.length + '\n';
+        text += `\n*${cat.label}:* ${ids.length}\n`;
         text += ids.join('\n') + '\n';
       }
     });
 
     if (!hasMetrics) {
-      text += 'None\n';
+      text += '\nNone\n';
     }
 
     if (formData.remark && formData.remark.trim() !== '') {
-      text += '\n*?? Remarks:*\n' + formData.remark.trim() + '\n';
+      text += `\n*Remarks:*\n` + formData.remark.trim() + '\n';
     }
 
     return text.trim();
@@ -1524,19 +1527,11 @@ function App() {
 
               {/* Sticky Bottom Action Bar */}
               <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 p-3 sm:p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50">
-                <div className="max-w-4xl mx-auto flex items-center gap-2 sm:gap-3">
-                  <button 
-                    onClick={copyToWhatsApp}
-                    className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-3.5 sm:px-5 rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0 active:scale-95 shadow-sm"
-                    title="Copy WhatsApp Summary"
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span>WhatsApp</span>
-                  </button>
+                <div className="max-w-md mx-auto flex items-center gap-2 sm:gap-3">
                   {todayMaxReached ? (
                     <button 
                       onClick={() => setCurrentView('profile')}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2"
                     >
                       <span>✓ 2 Reports Submitted (View Profile)</span>
                     </button>
@@ -1544,14 +1539,14 @@ function App() {
                     <button 
                       onClick={() => { if(!formData.working_place || !formData.fo_name || !formData.pin) { showToast("Pehle Zila, Naam aur PIN bharo!", "error"); return; } setShowReviewModal(true); }} 
                       disabled={isSubmitting}
-                      className={`flex-1 bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                      className={`w-full bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                     >
                       {isSubmitting ? (
                         <>
                           <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                           <span>Submitting...</span>
                         </>
-                      ) : 'Submit Final Report'}
+                      ) : 'Review & Submit Daily Report →'}
                     </button>
                   )}
                 </div>
@@ -1570,7 +1565,7 @@ function App() {
               <div className="w-16 h-16 bg-emerald-50 text-emerald-600 rounded-3xl flex items-center justify-center text-3xl mx-auto mb-2 shadow-inner">
                 🎉
               </div>
-              <h3 className="text-xl font-black text-slate-800">Report Submitted Successfully!</h3>
+              <h3 className="text-xl font-black text-slate-800">Daily Field Report Submitted Successfully!</h3>
               <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">
                 {formData.fo_name} &bull; {formData.working_place} &bull; {submittedReportSummary.date}
               </p>
