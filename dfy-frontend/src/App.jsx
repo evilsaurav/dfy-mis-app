@@ -1668,35 +1668,53 @@ function App() {
               </div>
 
               <div>
-                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider mb-2">Category Summary</h4>
-                <div className="grid grid-cols-2 gap-2">
+                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+                  <span>Entered Indicators &amp; Patient IDs</span>
+                  <span className="text-[10px] text-slate-400 font-bold">Kripya sabhi IDs check karein</span>
+                </h4>
+                
+                <div className="space-y-3">
                   {[
-                    { key: 'notification_ids', label: 'Notification' },
-                    { key: 'hiv_dm_ids', label: 'HIV & DM' },
-                    { key: 'dbt_ids', label: 'DBT' },
-                    { key: 'sample_collection_ids', label: 'Sample Col' },
-                    { key: 'sample_tested_ids', label: 'Sample Tested' },
-                    { key: 'outcome_assigned_ids', label: 'Outcome' },
-                    { key: 'home_visit_ids', label: 'Home Visit' },
-                    { key: 'contact_tracing_ids', label: 'Contact Trace' },
-                    { key: 'follow_up_ids', label: 'Follow Up' },
-                    { key: 'face_to_face_ids', label: 'Face to Face' },
-                    { key: 'presumptive_ids', label: 'Presumptive' },
-                    { key: 'documents_ids', label: 'Documents' },
-                    { key: 'fdc_provided_ids', label: 'FDC Provided' },
-                    { key: 'kit_consumption_ids', label: 'Kit Cons' },
-                    { key: 'differentiated_tb_ids', label: 'Diff TB' },
-                    { key: 'tpt_treatment_start_ids', label: 'TPT Start' },
-                    { key: 'tpt_presumptive_ids', label: 'TPT Presumptive' },
-                    { key: 'adhar_face_authentication_ids', label: 'Adhar Face' },
-                    { key: 'consent_with_id_ids', label: 'Consent ID' }
+                    { key: 'notification_ids', label: '1. TB Notification', color: 'indigo' },
+                    { key: 'hiv_dm_ids', label: '2. HIV & Diabetes Testing', color: 'purple' },
+                    { key: 'dbt_ids', label: '3. DBT Bank Details', color: 'emerald' },
+                    { key: 'sample_collection_ids', label: '4. Sample Collection', color: 'blue' },
+                    { key: 'sample_tested_ids', label: '5. Sample Tested', color: 'blue' },
+                    { key: 'outcome_assigned_ids', label: '6. Outcome Assigned', color: 'teal' },
+                    { key: 'home_visit_ids', label: '7. Home Visit', color: 'amber' },
+                    { key: 'contact_tracing_ids', label: '8. Contact Tracing', color: 'rose' },
+                    { key: 'follow_up_ids', label: '9. Follow Up Done', color: 'indigo' },
+                    { key: 'face_to_face_ids', label: '10. Face to Face Counseling', color: 'cyan' },
+                    { key: 'presumptive_ids', label: '11. Presumptive TB', color: 'orange' },
+                    { key: 'documents_ids', label: '12. Documents Collected', color: 'slate' },
+                    { key: 'fdc_provided_ids', label: '13. FDC Provided', color: 'emerald' },
+                    { key: 'kit_consumption_ids', label: '14. Kit Consumption', color: 'violet' },
+                    { key: 'differentiated_tb_ids', label: '15. Differentiated TB Care', color: 'pink' },
+                    { key: 'tpt_treatment_start_ids', label: '16. TPT Treatment Start', color: 'blue' },
+                    { key: 'tpt_presumptive_ids', label: '17. TPT Presumptive Screened', color: 'sky' },
+                    { key: 'adhar_face_authentication_ids', label: '18. Aadhar Face Auth', color: 'indigo' },
+                    { key: 'consent_with_id_ids', label: '19. Patient Consent Form', color: 'emerald' }
                   ].map(cat => {
-                    const count = Array.isArray(formData[cat.key]) ? formData[cat.key].length : 0;
-                    if (count === 0) return null;
+                    const ids = Array.isArray(formData[cat.key]) ? formData[cat.key] : [];
+                    if (ids.length === 0) return null;
                     return (
-                      <div key={cat.key} className="flex justify-between items-center bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
-                        <span className="font-bold text-slate-600 truncate mr-2">{cat.label}</span>
-                        <span className="font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">{count}</span>
+                      <div key={cat.key} className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 shadow-xs">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                            <span className="w-2 h-2 rounded-full bg-indigo-500 shrink-0"></span>
+                            {cat.label}
+                          </span>
+                          <span className="font-black text-indigo-700 bg-indigo-100 text-[10px] px-2.5 py-0.5 rounded-full border border-indigo-200">
+                            {ids.length} {ids.length === 1 ? 'ID' : 'IDs'}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
+                          {ids.map((idVal, iIdx) => (
+                            <span key={iIdx} className="font-mono text-xs font-bold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs">
+                              {idVal}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     );
                   })}
