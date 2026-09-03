@@ -1758,7 +1758,7 @@ async def export_staff_pins(district: Optional[str] = "All"):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Predictive Cascade & Dropout Alerts Engine ---
+# --- Predictive Cascade & Dropout Alerts Engine (Mission Critical Priority) ---
 def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name: Optional[str] = None):
     start_date = f"{month}-01"
     end_date = f"{month}-31"
@@ -1785,15 +1785,16 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             ("notification_ids", "notification"),
             ("hiv_dm_ids", "hiv_dm"),
             ("dbt_ids", "dbt"),
-            ("tpt_treatment_start_ids", "tpt"),
+            ("contact_tracing_ids", "contact_tracing"),
             ("sample_tested_ids", "sample_tested"),
+            ("presumptive_ids", "presumptive"),
             ("outcome_assigned_ids", "outcome")
         ]:
             ids = d.get(cat_key, [])
             if isinstance(ids, list):
                 for pid in ids:
                     pid_clean = str(pid).strip()
-                    if len(pid_clean) == 9:
+                    if len(pid_clean) >= 5:
                         if pid_clean not in patient_map:
                             patient_map[pid_clean] = {
                                 "id": pid_clean,
@@ -1803,12 +1804,13 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                                 "notification": False,
                                 "hiv_dm": False,
                                 "dbt": False,
-                                "tpt": False,
+                                "contact_tracing": False,
                                 "sample_tested": False,
+                                "presumptive": False,
                                 "outcome": False
                             }
                         patient_map[pid_clean][flag] = True
-                        if flag == "notification" and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
+                        if flag in ["notification", "presumptive"] and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
                             patient_map[pid_clean]["first_date"] = doc_date
                             patient_map[pid_clean]["district"] = doc_dist
                             patient_map[pid_clean]["fo_name"] = doc_fo
@@ -1818,26 +1820,40 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     
     summary = {
         "total_notified": 0,
-        "dbt_pending": 0,
         "hiv_pending": 0,
-        "tpt_pending": 0,
+        "dbt_pending": 0,
+        "contact_pending": 0,
+        "udst_pending": 0,
+        "presumptive_untested": 0,
         "high_risk_count": 0
     }
     
     for pid, p in patient_map.items():
+        days_elapsed = 0
+        if p["first_date"]:
+            try:
+                p_dt = datetime.strptime(p["first_date"], "%Y-%m-%d").date()
+                days_elapsed = (today_dt - p_dt).days
+            except:
+                pass
+
+        # 1. Top Priority: TB Notification Follow-Up Cascade
         if p["notification"]:
             summary["total_notified"] += 1
             missing_actions = []
             
-            if not p["dbt"]:
-                missing_actions.append("DBT Bank Seeding Missing")
-                summary["dbt_pending"] += 1
             if not p["hiv_dm"]:
                 missing_actions.append("HIV & DM Testing Missing")
                 summary["hiv_pending"] += 1
-            if not p["tpt"]:
-                missing_actions.append("TPT / Contact Tracing Pending")
-                summary["tpt_pending"] += 1
+            if not p["dbt"]:
+                missing_actions.append("DBT Bank Seeding Missing")
+                summary["dbt_pending"] += 1
+            if not p["contact_tracing"]:
+                missing_actions.append("Contact Tracing Missing")
+                summary["contact_pending"] += 1
+            if not p["sample_tested"]:
+                missing_actions.append("UDST / Testing Missing")
+                summary["udst_pending"] += 1
                 
             risk_level = "LOW"
             if len(missing_actions) >= 2:
@@ -1846,14 +1862,6 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             elif len(missing_actions) == 1:
                 risk_level = "MEDIUM"
                 
-            days_elapsed = 0
-            if p["first_date"]:
-                try:
-                    p_dt = datetime.strptime(p["first_date"], "%Y-%m-%d").date()
-                    days_elapsed = (today_dt - p_dt).days
-                except:
-                    pass
-                    
             if len(missing_actions) > 0:
                 alert_list.append({
                     "id": pid,
@@ -1863,11 +1871,32 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                     "days_elapsed": days_elapsed,
                     "missing_actions": missing_actions,
                     "risk_level": risk_level,
-                    "has_dbt": p["dbt"],
+                    "cascade_type": "Notification",
                     "has_hiv": p["hiv_dm"],
-                    "has_tpt": p["tpt"],
+                    "has_dbt": p["dbt"],
+                    "has_contact": p["contact_tracing"],
+                    "has_udst": p["sample_tested"],
                     "has_outcome": p["outcome"]
                 })
+                
+        # 2. Secondary Priority: Presumptive TB to Testing Cascade
+        elif p["presumptive"] and not p["sample_tested"]:
+            summary["presumptive_untested"] += 1
+            alert_list.append({
+                "id": pid,
+                "district": p["district"],
+                "fo_name": p["fo_name"],
+                "notified_date": p["first_date"],
+                "days_elapsed": days_elapsed,
+                "missing_actions": ["Presumptive TB Testing Pending"],
+                "risk_level": "HIGH" if days_elapsed > 7 else "MEDIUM",
+                "cascade_type": "Presumptive",
+                "has_hiv": p["hiv_dm"],
+                "has_dbt": p["dbt"],
+                "has_contact": p["contact_tracing"],
+                "has_udst": False,
+                "has_outcome": p["outcome"]
+            })
                 
     risk_weight = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
     alert_list.sort(key=lambda x: (risk_weight.get(x["risk_level"], 0), x["days_elapsed"]), reverse=True)

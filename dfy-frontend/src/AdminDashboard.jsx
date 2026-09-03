@@ -1509,22 +1509,26 @@ Keep this file safe in your Google Drive or personal diary.
             </div>
 
             {/* Quick KPI Summary Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 my-3">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 my-3">
               <div className="bg-rose-50 border border-rose-100 p-3 rounded-2xl text-center">
-                <span className="text-[10px] font-black uppercase text-rose-500 block">High Risk Dropouts</span>
+                <span className="text-[10px] font-black uppercase text-rose-500 block">High Risk (2+ Missing)</span>
                 <p className="text-xl font-black text-rose-700">{cascadeData.summary.high_risk_count || 0}</p>
+              </div>
+              <div className="bg-purple-50 border border-purple-100 p-3 rounded-2xl text-center">
+                <span className="text-[10px] font-black uppercase text-purple-600 block">HIV / DM Missing</span>
+                <p className="text-xl font-black text-purple-700">{cascadeData.summary.hiv_pending || 0}</p>
               </div>
               <div className="bg-amber-50 border border-amber-100 p-3 rounded-2xl text-center">
                 <span className="text-[10px] font-black uppercase text-amber-600 block">DBT Bank Pending</span>
                 <p className="text-xl font-black text-amber-700">{cascadeData.summary.dbt_pending || 0}</p>
               </div>
-              <div className="bg-purple-50 border border-purple-100 p-3 rounded-2xl text-center">
-                <span className="text-[10px] font-black uppercase text-purple-600 block">HIV/DM Missing</span>
-                <p className="text-xl font-black text-purple-700">{cascadeData.summary.hiv_pending || 0}</p>
-              </div>
               <div className="bg-blue-50 border border-blue-100 p-3 rounded-2xl text-center">
-                <span className="text-[10px] font-black uppercase text-blue-600 block">TPT Contact Pending</span>
-                <p className="text-xl font-black text-blue-700">{cascadeData.summary.tpt_pending || 0}</p>
+                <span className="text-[10px] font-black uppercase text-blue-600 block">Contact Tracing</span>
+                <p className="text-xl font-black text-blue-700">{cascadeData.summary.contact_pending || 0}</p>
+              </div>
+              <div className="bg-emerald-50 border border-emerald-100 p-3 rounded-2xl text-center">
+                <span className="text-[10px] font-black uppercase text-emerald-600 block">UDST / Testing</span>
+                <p className="text-xl font-black text-emerald-700">{cascadeData.summary.udst_pending || 0}</p>
               </div>
             </div>
 
@@ -1549,11 +1553,14 @@ Keep this file safe in your Google Drive or personal diary.
                   onChange={(e) => setCascadeRiskFilter(e.target.value)}
                   className="bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-rose-500"
                 >
-                  <option value="All">All Risk Levels</option>
-                  <option value="HIGH">🔴 High Risk Only</option>
+                  <option value="All">All Alerts</option>
+                  <option value="HIGH">🔴 High Risk Only (2+ Missing)</option>
                   <option value="MEDIUM">🟡 Medium Risk</option>
+                  <option value="HIV">🧪 HIV &amp; DM Missing</option>
                   <option value="DBT">💳 DBT Missing Only</option>
-                  <option value="TPT">🛡️ TPT Missing Only</option>
+                  <option value="CONTACT">👥 Contact Tracing Missing</option>
+                  <option value="UDST">🔬 UDST Testing Missing</option>
+                  <option value="PRESUMPTIVE">🔍 Presumptive Not Tested</option>
                 </select>
 
                 <button
@@ -1586,8 +1593,11 @@ Keep this file safe in your Google Drive or personal diary.
                   if (cascadeFilterDist !== 'All' && a.district !== cascadeFilterDist) return false;
                   if (cascadeRiskFilter === 'HIGH' && a.risk_level !== 'HIGH') return false;
                   if (cascadeRiskFilter === 'MEDIUM' && a.risk_level !== 'MEDIUM') return false;
+                  if (cascadeRiskFilter === 'HIV' && a.has_hiv) return false;
                   if (cascadeRiskFilter === 'DBT' && a.has_dbt) return false;
-                  if (cascadeRiskFilter === 'TPT' && a.has_tpt) return false;
+                  if (cascadeRiskFilter === 'CONTACT' && a.has_contact) return false;
+                  if (cascadeRiskFilter === 'UDST' && a.has_udst) return false;
+                  if (cascadeRiskFilter === 'PRESUMPTIVE' && a.cascade_type !== 'Presumptive') return false;
                   return true;
                 });
 
