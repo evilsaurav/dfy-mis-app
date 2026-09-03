@@ -539,7 +539,14 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     wb = openpyxl.load_workbook(template_path, data_only=False)
     sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
     
-    # 1. Fetch Targets & Populate 'Performance sheet' Dynamic Targets
+    # Configure auto-recalculation
+    try:
+        wb.calculation.calcMode = 'auto'
+        wb.calculation.fullCalcOnLoad = True
+    except Exception:
+        pass
+    
+    # 1. Fetch Targets
     target_map = {}
     try:
         t_docs = db.collection("staff_targets").where("district", "==", district).stream()
@@ -547,18 +554,9 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
             t_data = td.to_dict()
             f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
             if f_name:
-                target_map[f_name] = t_data.get("target", 0)
+                target_map[f_name] = t_data.get("target", 50)
     except Exception as e:
         print(f"Target fetch notice for {district}: {e}")
-        
-    if "Performance sheet" in wb.sheetnames:
-        ws_perf = wb["Performance sheet"]
-        for r_idx in range(5, ws_perf.max_row + 1):
-            cell_name = ws_perf.cell(row=r_idx, column=1).value
-            if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
-                norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
-                if norm_name in target_map:
-                    ws_perf.cell(row=r_idx, column=3).value = target_map[norm_name]
                     
     # 2. Fetch and Sort Daily Field Reports for this District and Month
     docs = db.collection("daily_field_reports").where("working_place", "==", district).stream()
@@ -582,6 +580,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                 staff_name_to_idx[re.sub(r'\s+', ' ', str(val)).strip().lower()] = s_idx
                 s_idx += 1
 
+    # Pre-calculate counts for each FO and each KPI
+    num_staff = len(staff_name_to_idx)
+    num_kpis = len(EXCEL_KPI_CATEGORIES)
+    staff_counts = { s_idx: { k_idx: 0 for k_idx in range(num_kpis) } for s_idx in range(num_staff) }
+    district_cluster_counts = { c_idx: 0 for c_idx in range(13) }
+
     # 3. Populate Tabs 3 to 33 ('1ST' to '31st')
     for rep in reports:
         date_str = str(rep.get("date_of_reporting", "")).strip()
@@ -594,26 +598,43 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         actual_tab_name = sheet_map.get(raw_tab_key)
         fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
         
-        if actual_tab_name and actual_tab_name in wb.sheetnames and fo_norm in staff_name_to_idx:
-            ws_day = wb[actual_tab_name]
+        if fo_norm in staff_name_to_idx:
             s_idx = staff_name_to_idx[fo_norm]
-            start_row = 2 + (s_idx * 40)
             
-            # Populate IDs vertically within 40-row bounds
-            for kpi_name, cat_key, col_idx in EXCEL_KPI_CATEGORIES:
+            # Accumulate staff and district counts
+            for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
                 ids = rep.get(cat_key) or []
                 if isinstance(ids, list):
-                    for i in range(min(40, len(ids))):
-                        ws_day.cell(row=start_row + i, column=col_idx).value = str(ids[i]).strip()
+                    valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
+                    staff_counts[s_idx][k_idx] += len(valid_ids)
+                    if k_idx < 13:
+                        district_cluster_counts[k_idx] += len(valid_ids)
+
+            if actual_tab_name and actual_tab_name in wb.sheetnames:
+                ws_day = wb[actual_tab_name]
+                start_row = 2 + (s_idx * 40)
+                
+                # Populate IDs vertically within 40-row bounds
+                for kpi_name, cat_key, col_idx in EXCEL_KPI_CATEGORIES:
+                    ids = rep.get(cat_key) or []
+                    if isinstance(ids, list):
+                        valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
+                        for i in range(min(40, len(valid_ids))):
+                            ws_day.cell(row=start_row + i, column=col_idx).value = valid_ids[i]
 
     # 4. Populate Tab 2: 'CONSOLIDATED SHEET'
     if "CONSOLIDATED SHEET" in wb.sheetnames:
         ws_cons = wb["CONSOLIDATED SHEET"]
         
         # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AM (Cols 1 to 39)
-        # 13 Clusters (Cols 1-3, 4-6, 7-9, ..., 37-39)
         cluster_row_ptrs = { c_idx: 4 for c_idx in range(13) }
         
+        # Write Left Wing Row 2 Grand Totals
+        for c_idx in range(13):
+            start_c = 1 + (c_idx * 3)
+            # Pre-compute exact total count for immediate display across all viewers
+            ws_cons.cell(row=2, column=start_c).value = district_cluster_counts[c_idx]
+
         for rep in reports:
             rep_date = str(rep.get("date_of_reporting", "")).strip()
             rep_fo = str(rep.get("fo_name", "")).strip()
@@ -634,9 +655,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                             
         # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
         staff_kpi_row_ptrs = {}
-        for s_idx in range(len(staff_name_to_idx)):
-            for k_idx in range(len(EXCEL_KPI_CATEGORIES)):
+        for s_idx in range(num_staff):
+            staff_base_col = 40 + (s_idx * 14)
+            # Write Row 3 Staff Totals
+            for k_idx in range(num_kpis):
                 staff_kpi_row_ptrs[(s_idx, k_idx)] = 4
+                ws_cons.cell(row=3, column=staff_base_col + k_idx).value = staff_counts[s_idx][k_idx]
                 
         for rep in reports:
             fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
@@ -654,7 +678,35 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                                 r = staff_kpi_row_ptrs[(s_idx, k_idx)]
                                 ws_cons.cell(row=r, column=col, value=pid_str)
                                 staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
-                                
+
+    # 5. Populate Tab 1: 'Performance sheet'
+    if "Performance sheet" in wb.sheetnames:
+        ws_perf = wb["Performance sheet"]
+        for r_idx in range(5, 5 + num_staff):
+            cell_name = ws_perf.cell(row=r_idx, column=1).value
+            if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
+                norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
+                if norm_name in staff_name_to_idx:
+                    s_idx = staff_name_to_idx[norm_name]
+                    
+                    # Col 3: Target
+                    target_val = target_map.get(norm_name, 50)
+                    ws_perf.cell(row=r_idx, column=3).value = target_val
+                    
+                    # Col 4: NOTIFICATION
+                    notif_count = staff_counts[s_idx][0]
+                    ws_perf.cell(row=r_idx, column=4).value = notif_count
+                    
+                    # Col 5: % Achieved (Formula)
+                    cell_pct = ws_perf.cell(row=r_idx, column=5)
+                    cell_pct.value = f"=IF(C{r_idx}>0, D{r_idx}/C{r_idx}, 0)"
+                    cell_pct.number_format = "0.0%"
+                    
+                    # Cols 6 to 18: Remaining 13 KPIs
+                    for k_idx in range(1, num_kpis):
+                        kpi_val = staff_counts[s_idx][k_idx]
+                        ws_perf.cell(row=r_idx, column=5 + k_idx).value = kpi_val
+
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
