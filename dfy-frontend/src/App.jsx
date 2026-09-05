@@ -792,6 +792,46 @@ function App() {
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [isSyncingOffline, setIsSyncingOffline] = useState(false);
 
+  // Field Staff Broadcast Announcements State
+  const [activeFoBroadcasts, setActiveFoBroadcasts] = useState([]);
+  const [unreadBroadcastPopup, setUnreadBroadcastPopup] = useState(null);
+  const [showAllAlertsModal, setShowAllAlertsModal] = useState(false);
+
+  const fetchFoBroadcasts = async (district) => {
+    if (!district) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/broadcasts/active?district=${encodeURIComponent(district)}&role=FIELD_STAFF`);
+      if (res.ok) {
+        const data = await res.json();
+        const list = data.broadcasts || [];
+        setActiveFoBroadcasts(list);
+
+        // Check if there is an unread broadcast for popup
+        try {
+          const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+          const unread = list.find(b => !seenIds.includes(b.id));
+          if (unread && !unreadBroadcastPopup) {
+            setUnreadBroadcastPopup(unread);
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.warn("Failed to fetch FO broadcasts", e);
+    }
+  };
+
+  const dismissBroadcastPopup = (id) => {
+    try {
+      const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+      if (!seenIds.includes(id)) {
+        seenIds.push(id);
+        localStorage.setItem('dfy_seen_broadcasts', JSON.stringify(seenIds));
+      }
+    } catch (e) {}
+    setUnreadBroadcastPopup(null);
+  };
+
   useEffect(() => {
     const handleBeforeInstall = (e) => {
       e.preventDefault();
@@ -848,6 +888,7 @@ function App() {
           setFormData(prev => sanitizeIncomingFormData(initialData, { ...prev, ...initialData }));
           setPinStatus("success");
           setIsLoggedIn(true);
+          fetchFoBroadcasts(session.working_place);
         }
       }
     } catch (e) {
@@ -1035,6 +1076,7 @@ function App() {
 
         setIsLoggedIn(true);
         setIsSubmitting(false);
+        fetchFoBroadcasts(formData.working_place);
         showToast(`Welcome back, ${formData.fo_name}!`, 'success');
       }
     }
@@ -1304,6 +1346,18 @@ function App() {
             <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
             {isLoggedIn && (
               <>
+                {activeFoBroadcasts.length > 0 && (
+                  <button 
+                    onClick={() => setShowAllAlertsModal(true)} 
+                    className="relative flex items-center justify-center p-1.5 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 transition-all active:scale-95"
+                    title="View Important Announcements"
+                  >
+                    <span className="text-sm">📢</span>
+                    <span className="absolute -top-1 -right-1 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                      {activeFoBroadcasts.length}
+                    </span>
+                  </button>
+                )}
                 <button onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-indigo-200 transition-colors">
                   {currentView === 'form' ? 'Profile' : 'Form'}
                 </button>
@@ -1408,6 +1462,53 @@ function App() {
           ) : (
             /* Main Dashboard */
             <div className="animate-fade-in w-full max-w-md mx-auto overflow-x-hidden">
+              {/* Top Urgent Notice Banner for Field Officers */}
+              {activeFoBroadcasts.length > 0 && (
+                <div className="mb-5 space-y-3">
+                  <div className="flex items-center justify-between px-1">
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <span>📢</span>
+                      <span>Notice Board ({activeFoBroadcasts.length})</span>
+                    </h3>
+                    <button 
+                      onClick={() => fetchFoBroadcasts(formData.working_place)} 
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  {activeFoBroadcasts.map((b) => {
+                    const isHigh = b.priority === 'HIGH';
+                    const isMed = b.priority === 'MEDIUM';
+                    const bgClass = isHigh ? 'bg-gradient-to-r from-rose-50 to-red-50 border-rose-200' : isMed ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200' : 'bg-gradient-to-r from-indigo-50 to-blue-50 border-indigo-200';
+                    const textClass = isHigh ? 'text-rose-950' : isMed ? 'text-amber-950' : 'text-indigo-950';
+                    const badgeClass = isHigh ? 'bg-rose-600 text-white' : isMed ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white';
+                    const icon = isHigh ? '🚨' : isMed ? '⚠️' : '📢';
+
+                    return (
+                      <div key={b.id} className={`p-4 rounded-2xl border shadow-sm ${bgClass} ${textClass} space-y-2`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <span className="text-lg">{icon}</span>
+                            <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${badgeClass}`}>
+                              {b.priority || 'MEDIUM'}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-medium">
+                              {b.created_at ? new Date(b.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-bold text-slate-500 bg-white/70 px-2 py-0.5 rounded-md border border-slate-200/50">
+                            {b.created_by_user}
+                          </span>
+                        </div>
+                        <h4 className="text-xs sm:text-sm font-black tracking-tight">{b.title}</h4>
+                        <p className="text-xs font-medium opacity-90 leading-relaxed whitespace-pre-wrap">{b.message}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 gap-4">
 
 
@@ -1805,6 +1906,118 @@ function App() {
             >
               Samajh Gaya (Close)
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* FO Unread Urgent Broadcast Alert Popup Modal */}
+      {unreadBroadcastPopup && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 w-full max-w-sm sm:max-w-md animate-scale-up">
+            <div className={`p-5 sm:p-6 text-white ${
+              unreadBroadcastPopup.priority === 'HIGH' ? 'bg-gradient-to-r from-rose-600 to-red-600' :
+              unreadBroadcastPopup.priority === 'MEDIUM' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
+              'bg-gradient-to-r from-indigo-600 to-purple-600'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-3xl">
+                  {unreadBroadcastPopup.priority === 'HIGH' ? '🚨' : unreadBroadcastPopup.priority === 'MEDIUM' ? '⚠️' : '📢'}
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm border border-white/20 text-white">
+                  {unreadBroadcastPopup.priority || 'MEDIUM'} NOTICE
+                </span>
+              </div>
+              <h3 className="text-lg sm:text-xl font-black mt-3 leading-tight tracking-tight">
+                {unreadBroadcastPopup.title}
+              </h3>
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-white/90 font-medium">
+                <span>👤 Posted by: {unreadBroadcastPopup.created_by_user}</span>
+                <span>&bull;</span>
+                <span>📍 {unreadBroadcastPopup.target_districts?.includes('All') ? 'Statewide' : unreadBroadcastPopup.target_districts?.join(', ')}</span>
+              </div>
+            </div>
+
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-xs sm:text-sm text-slate-800 font-medium leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
+                {unreadBroadcastPopup.message}
+              </div>
+
+              <div className="pt-2">
+                <button
+                  onClick={() => dismissBroadcastPopup(unreadBroadcastPopup.id)}
+                  className={`w-full py-3.5 rounded-xl font-black text-xs sm:text-sm text-white shadow-lg active:scale-95 transition-all uppercase tracking-wider ${
+                    unreadBroadcastPopup.priority === 'HIGH' ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/30' :
+                    unreadBroadcastPopup.priority === 'MEDIUM' ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30' :
+                    'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
+                  }`}
+                >
+                  ✓ Samajh Gaya / Acknowledge
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* All Active Notices Modal (From Header Bell) */}
+      {showAllAlertsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl border border-slate-100 flex flex-col max-h-[85vh] overflow-hidden animate-scale-up">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl">📢</span>
+                <div>
+                  <h3 className="text-base font-black text-slate-800 tracking-tight">Active Notices &amp; Directives</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    {formData.working_place || 'DFY Team'} Bulletin
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAllAlertsModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="py-4 overflow-y-auto flex-1 custom-scrollbar space-y-3">
+              {activeFoBroadcasts.length === 0 ? (
+                <p className="text-center py-8 text-xs text-slate-400 font-medium">No active notices for your district.</p>
+              ) : (
+                activeFoBroadcasts.map((b) => {
+                  const isHigh = b.priority === 'HIGH';
+                  const isMed = b.priority === 'MEDIUM';
+                  const borderClass = isHigh ? 'border-rose-200 bg-rose-50/70 text-rose-950' : isMed ? 'border-amber-200 bg-amber-50/70 text-amber-950' : 'border-indigo-200 bg-indigo-50/70 text-indigo-950';
+                  const badgeClass = isHigh ? 'bg-rose-600 text-white' : isMed ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white';
+
+                  return (
+                    <div key={b.id} className={`p-4 rounded-2xl border ${borderClass} space-y-2`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${badgeClass}`}>
+                          {b.priority || 'MEDIUM'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          {b.created_at ? new Date(b.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+                      <h4 className="text-xs font-black tracking-tight">{b.title}</h4>
+                      <p className="text-xs font-medium opacity-90 leading-relaxed whitespace-pre-wrap">{b.message}</p>
+                      <p className="text-[9px] font-bold text-slate-400">By: {b.created_by_user}</p>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setShowAllAlertsModal(false)}
+                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

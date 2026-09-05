@@ -113,11 +113,154 @@ export default function AdminDashboard() {
   const [auditFilterUser, setAuditFilterUser] = useState("All");
   const [auditSearchQuery, setAuditSearchQuery] = useState("");
 
+  // Broadcast & Urgent Announcements State
+  const [showBroadcastStudio, setShowBroadcastStudio] = useState(false);
+  const [broadcastsList, setBroadcastsList] = useState([]);
+  const [activeAdminBroadcasts, setActiveAdminBroadcasts] = useState([]);
+  const [loadingBroadcasts, setLoadingBroadcasts] = useState(false);
+  const [unreadBroadcastPopup, setUnreadBroadcastPopup] = useState(null);
+  const [newBroadcastModal, setNewBroadcastModal] = useState(null); // { title, message, priority, target_audience, target_districts, loading, error }
+
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const canEditTargets = isSuperAdmin || currentUser?.permissions?.can_edit_targets !== false;
   const canManageStaff = isSuperAdmin || currentUser?.permissions?.can_manage_staff !== false;
   const canEditPatientIds = isSuperAdmin || currentUser?.permissions?.can_edit_patient_ids !== false;
   const canExportReports = isSuperAdmin || currentUser?.permissions?.can_export_reports !== false;
+
+  const fetchActiveBroadcasts = async () => {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const roleParam = currentUser?.role === 'SUPER_ADMIN' ? '' : '&role=SUB_ADMIN';
+      let distParam = '';
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        distParam = `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/api/broadcasts/active?${roleParam}${distParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        const active = data.broadcasts || [];
+        setActiveAdminBroadcasts(active);
+
+        // Check if there is an unread high-priority or un-dismissed broadcast
+        try {
+          const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+          const unread = active.find(b => !seenIds.includes(b.id));
+          if (unread && !unreadBroadcastPopup) {
+            setUnreadBroadcastPopup(unread);
+          }
+        } catch (e) {}
+      }
+    } catch (e) {
+      console.error("Failed to fetch active broadcasts", e);
+    }
+  };
+
+  const fetchAllBroadcasts = async () => {
+    try {
+      setLoadingBroadcasts(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let distParam = '';
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        distParam = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/api/broadcasts/all${distParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBroadcastsList(data.broadcasts || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch all broadcasts", e);
+    } finally {
+      setLoadingBroadcasts(false);
+    }
+  };
+
+  const handleCreateBroadcast = async (e) => {
+    e.preventDefault();
+    if (!newBroadcastModal) return;
+    const { title, message, priority, target_audience, target_districts } = newBroadcastModal;
+    if (!title || !title.trim()) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please enter announcement title." }));
+      return;
+    }
+    if (!message || !message.trim()) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please enter announcement message body." }));
+      return;
+    }
+    if (!target_districts || target_districts.length === 0) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please select at least one district." }));
+      return;
+    }
+
+    setNewBroadcastModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/broadcasts/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          message: message.trim(),
+          priority: priority || "MEDIUM",
+          target_audience: target_audience || "ALL",
+          target_districts: target_districts,
+          created_by_user: currentUser?.name || currentUser?.username || "Admin",
+          created_by_role: currentUser?.role || "SUPER_ADMIN",
+          allowed_districts: currentUser?.allowed_districts || ["All"]
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNewBroadcastModal(null);
+        fetchAllBroadcasts();
+        fetchActiveBroadcasts();
+      } else {
+        setNewBroadcastModal(prev => ({ ...prev, error: data.detail || "Failed to create broadcast.", loading: false }));
+      }
+    } catch (err) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
+
+  const handleDeleteBroadcast = async (broadcast_id) => {
+    if (!window.confirm("Kya aap sach me yeh broadcast alert delete karna chahte hain? Sabhi staff aur sub-admins ke portal se turant hat jayega.")) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/broadcasts/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          broadcast_id,
+          requested_by_user: currentUser?.username || "admin",
+          requested_by_role: currentUser?.role || "SUPER_ADMIN",
+          allowed_districts: currentUser?.allowed_districts || ["All"]
+        })
+      });
+      if (res.ok) {
+        setBroadcastsList(prev => prev.filter(b => b.id !== broadcast_id));
+        setActiveAdminBroadcasts(prev => prev.filter(b => b.id !== broadcast_id));
+        if (unreadBroadcastPopup && unreadBroadcastPopup.id === broadcast_id) {
+          setUnreadBroadcastPopup(null);
+        }
+      } else {
+        const data = await res.json();
+        alert(data.detail || "Failed to delete broadcast");
+      }
+    } catch (e) {
+      alert("Network error while deleting broadcast.");
+    }
+  };
+
+  const dismissBroadcastPopup = (id) => {
+    try {
+      const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+      if (!seenIds.includes(id)) {
+        seenIds.push(id);
+        localStorage.setItem('dfy_seen_broadcasts', JSON.stringify(seenIds));
+      }
+    } catch (e) {}
+    setUnreadBroadcastPopup(null);
+  };
 
   const fetchAttendance = async () => {
     setIsAttendanceLoading(true);
@@ -841,7 +984,15 @@ Keep this file safe in your Google Drive or personal diary.
   };
 
   useEffect(() => {
-    if (isAuthenticated) { fetchData(); fetchAttendance(); fetchDirectory(); loadTargets('All'); fetchDuplicateAudit(); fetchStaffList(); }
+    if (isAuthenticated) { 
+      fetchData(); 
+      fetchAttendance(); 
+      fetchDirectory(); 
+      loadTargets('All'); 
+      fetchDuplicateAudit(); 
+      fetchStaffList(); 
+      fetchActiveBroadcasts();
+    }
   }, [month, isAuthenticated]);
 
   // Derived Filter Lists (Filtered by RBAC for Sub-Admins)
@@ -1229,6 +1380,23 @@ Keep this file safe in your Google Drive or personal diary.
               </>
             )}
 
+            <button 
+              onClick={() => {
+                fetchAllBroadcasts();
+                setShowBroadcastStudio(true);
+              }} 
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 relative" 
+              title="Broadcast urgent alerts and notices to field staff and sub-admins"
+            >
+              <span>📢</span>
+              <span>Broadcasts</span>
+              {activeAdminBroadcasts.length > 0 && (
+                <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black animate-pulse">
+                  {activeAdminBroadcasts.length}
+                </span>
+              )}
+            </button>
+
             <button onClick={() => setShowReportsStudio(true)} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5" title="Open 5-in-1 Executive Reports & Export Studio">
               <span>📊</span>
               <span>Reports Studio</span>
@@ -1288,6 +1456,7 @@ Keep this file safe in your Google Drive or personal diary.
                 loadTargets('All');
                 fetchDuplicateAudit();
                 fetchStaffList();
+                fetchActiveBroadcasts();
                 if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
               }}
               disabled={isLoading}
@@ -1315,6 +1484,69 @@ Keep this file safe in your Google Drive or personal diary.
             </button>
           </div>
         </div>
+
+        {/* Active Broadcasts & Alert Bulletin */}
+        {activeAdminBroadcasts && activeAdminBroadcasts.length > 0 && (
+          <div className="space-y-3 animate-fade-in">
+            {activeAdminBroadcasts.map((b) => {
+              const isHigh = b.priority === 'HIGH';
+              const isMedium = b.priority === 'MEDIUM';
+              const borderClass = isHigh ? 'border-rose-300 bg-rose-50/80 text-rose-950' : isMedium ? 'border-amber-300 bg-amber-50/80 text-amber-950' : 'border-indigo-200 bg-indigo-50/80 text-indigo-950';
+              const badgeClass = isHigh ? 'bg-rose-600 text-white' : isMedium ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white';
+              const icon = isHigh ? '🚨' : isMedium ? '⚠️' : '📢';
+              const distLabel = b.target_districts?.includes('All') ? 'Statewide (All Districts)' : (b.target_districts || []).join(', ');
+
+              return (
+                <div key={b.id} className={`p-4 sm:p-5 rounded-2xl border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all ${borderClass}`}>
+                  <div className="flex items-start gap-3.5 flex-1">
+                    <div className="text-2xl mt-0.5 shrink-0 select-none">{icon}</div>
+                    <div className="space-y-1 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md ${badgeClass}`}>
+                          {b.priority || 'MEDIUM'} NOTICE
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500 bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded-md">
+                          🎯 {b.target_audience === 'FIELD_STAFF' ? 'Field Staff' : b.target_audience === 'SUB_ADMINS' ? 'Sub-Admins' : 'All Team'}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-500 bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded-md">
+                          📍 {distLabel}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium ml-auto md:ml-0">
+                          {b.created_at ? new Date(b.created_at).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-black tracking-tight">{b.title}</h4>
+                      <p className="text-xs font-medium leading-relaxed opacity-90 whitespace-pre-wrap">{b.message}</p>
+                      <p className="text-[10px] font-bold opacity-60">Posted by: {b.created_by_user} ({b.created_by_role === 'SUPER_ADMIN' ? 'Super Admin' : 'Sub-Admin'})</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 self-end md:self-center shrink-0">
+                    {(isSuperAdmin || b.created_by_user === currentUser?.username || b.created_by_user === currentUser?.name) && (
+                      <button
+                        onClick={() => handleDeleteBroadcast(b.id)}
+                        className="bg-white/90 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-200 text-xs font-bold px-3 py-1.5 rounded-xl transition-all shadow-2xs active:scale-95 flex items-center gap-1"
+                        title="Delete Broadcast (instantly removes for all staff)"
+                      >
+                        <span>🗑️</span>
+                        <span>Delete</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        fetchAllBroadcasts();
+                        setShowBroadcastStudio(true);
+                      }}
+                      className="bg-white/90 hover:bg-white text-slate-700 border border-slate-200/80 text-xs font-bold px-3 py-1.5 rounded-xl transition-all shadow-2xs active:scale-95 flex items-center gap-1"
+                    >
+                      <span>📢</span>
+                      <span>Studio</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Real-Time Live Activity Ticker */}
         {filteredRecords.length > 0 && (
@@ -3721,6 +3953,355 @@ Keep this file safe in your Google Drive or personal diary.
             <div className="p-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-500">Showing {auditLogsList.length} audit records</span>
               <button onClick={() => setShowAuditModal(false)} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs py-2 px-5 rounded-xl transition-colors">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Unread Urgent Broadcast Alert Popup Modal */}
+      {unreadBroadcastPopup && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border border-slate-100 w-full max-w-lg animate-scale-up">
+            <div className={`p-6 text-white ${
+              unreadBroadcastPopup.priority === 'HIGH' ? 'bg-gradient-to-r from-rose-600 to-red-600' :
+              unreadBroadcastPopup.priority === 'MEDIUM' ? 'bg-gradient-to-r from-amber-500 to-orange-600' :
+              'bg-gradient-to-r from-indigo-600 to-purple-600'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-3xl">
+                  {unreadBroadcastPopup.priority === 'HIGH' ? '🚨' : unreadBroadcastPopup.priority === 'MEDIUM' ? '⚠️' : '📢'}
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full bg-white/20 backdrop-blur-sm border border-white/20 text-white">
+                  {unreadBroadcastPopup.priority || 'MEDIUM'} PRIORITY
+                </span>
+              </div>
+              <h3 className="text-xl font-black mt-3 leading-tight tracking-tight">
+                {unreadBroadcastPopup.title}
+              </h3>
+              <div className="flex flex-wrap items-center gap-2 mt-2 text-[11px] text-white/90">
+                <span>👤 {unreadBroadcastPopup.created_by_user}</span>
+                <span>&bull;</span>
+                <span>🎯 {unreadBroadcastPopup.target_audience === 'FIELD_STAFF' ? 'Field Staff' : unreadBroadcastPopup.target_audience === 'SUB_ADMINS' ? 'Sub-Admins' : 'All Teams'}</span>
+                <span>&bull;</span>
+                <span>📍 {unreadBroadcastPopup.target_districts?.includes('All') ? 'Statewide' : unreadBroadcastPopup.target_districts?.join(', ')}</span>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-100 text-sm text-slate-800 font-medium leading-relaxed max-h-60 overflow-y-auto whitespace-pre-wrap">
+                {unreadBroadcastPopup.message}
+              </div>
+
+              <div className="pt-2 flex items-center justify-end">
+                <button
+                  onClick={() => dismissBroadcastPopup(unreadBroadcastPopup.id)}
+                  className={`w-full py-3.5 rounded-xl font-black text-sm text-white shadow-lg active:scale-95 transition-all uppercase tracking-wider ${
+                    unreadBroadcastPopup.priority === 'HIGH' ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/30' :
+                    unreadBroadcastPopup.priority === 'MEDIUM' ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/30' :
+                    'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/30'
+                  }`}
+                >
+                  ✓ Acknowledge &amp; Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Broadcast Studio Modal */}
+      {showBroadcastStudio && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl w-full max-w-4xl shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] overflow-hidden animate-scale-up">
+            {/* Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-r from-indigo-50/50 via-white to-purple-50/50">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-2xl shadow-md shadow-indigo-600/20">
+                  📢
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+                    Central Broadcast Studio
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    Broadcast instant alerts, directives &amp; urgent instructions to field staff &amp; sub-admins.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {!newBroadcastModal && (
+                  <button
+                    onClick={() => {
+                      const allowed = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+                        ? currentUser.allowed_districts
+                        : ['All'];
+                      setNewBroadcastModal({
+                        title: '',
+                        message: '',
+                        priority: 'MEDIUM',
+                        target_audience: 'ALL',
+                        target_districts: allowed,
+                        loading: false,
+                        error: ''
+                      });
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl shadow-md shadow-indigo-600/20 transition-all flex items-center gap-1.5 active:scale-95"
+                  >
+                    <span>➕</span>
+                    <span>Compose Broadcast</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowBroadcastStudio(false)}
+                  className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none ml-2"
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 overflow-y-auto flex-1 custom-scrollbar space-y-6">
+              {/* Compose Form */}
+              {newBroadcastModal && (
+                <form onSubmit={handleCreateBroadcast} className="bg-indigo-50/60 rounded-2xl p-5 border border-indigo-100 space-y-4 animate-fade-in">
+                  <div className="flex items-center justify-between border-b border-indigo-100/80 pb-3">
+                    <h4 className="text-sm font-black text-indigo-950 flex items-center gap-2">
+                      <span>✍️</span> Compose New Broadcast Notice
+                    </h4>
+                    <button
+                      type="button"
+                      onClick={() => setNewBroadcastModal(null)}
+                      className="text-xs font-bold text-slate-500 hover:text-slate-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+
+                  {newBroadcastModal.error && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold rounded-xl">
+                      {newBroadcastModal.error}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Urgency / Priority Level
+                      </label>
+                      <select
+                        value={newBroadcastModal.priority}
+                        onChange={(e) => setNewBroadcastModal(prev => ({ ...prev, priority: e.target.value }))}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="HIGH">🚨 HIGH (Urgent Modal Popup on Login)</option>
+                        <option value="MEDIUM">⚠️ MEDIUM (Notice Banner &amp; Alert)</option>
+                        <option value="INFO">📢 INFO (General Announcement)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                        Target Audience
+                      </label>
+                      <select
+                        value={newBroadcastModal.target_audience}
+                        onChange={(e) => setNewBroadcastModal(prev => ({ ...prev, target_audience: e.target.value }))}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="ALL">👥 Everyone (Field Staff &amp; Sub-Admins)</option>
+                        <option value="FIELD_STAFF">🩺 Field Officers (Field Staff App Only)</option>
+                        <option value="SUB_ADMINS">🛡️ Sub-Admins (Admin Portal Only)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Target Districts */}
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1.5">
+                      Target Districts {currentUser?.role === 'SUB_ADMIN' && '(Restricted to your assigned districts)'}
+                    </label>
+                    <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap gap-2 max-h-36 overflow-y-auto custom-scrollbar">
+                      {isSuperAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isAll = newBroadcastModal.target_districts.includes('All');
+                            setNewBroadcastModal(prev => ({
+                              ...prev,
+                              target_districts: isAll ? [] : ['All']
+                            }));
+                          }}
+                          className={`text-xs font-black px-3 py-1.5 rounded-lg border transition-all ${
+                            newBroadcastModal.target_districts.includes('All')
+                              ? 'bg-indigo-600 text-white border-indigo-600'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                          }`}
+                        >
+                          🌐 Statewide (All Districts)
+                        </button>
+                      )}
+                      {districts.filter(d => d !== 'All').map(d => {
+                        const isSelected = newBroadcastModal.target_districts.includes(d) || (isSuperAdmin && newBroadcastModal.target_districts.includes('All'));
+                        return (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => {
+                              let current = newBroadcastModal.target_districts.filter(x => x !== 'All');
+                              if (current.includes(d)) {
+                                current = current.filter(x => x !== d);
+                              } else {
+                                current.push(d);
+                              }
+                              setNewBroadcastModal(prev => ({
+                                ...prev,
+                                target_districts: current
+                              }));
+                            }}
+                            className={`text-xs font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                              isSelected
+                                ? 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            {d}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      Announcement Title
+                    </label>
+                    <input
+                      type="text"
+                      value={newBroadcastModal.title}
+                      onChange={(e) => setNewBroadcastModal(prev => ({ ...prev, title: e.target.value }))}
+                      placeholder="e.g. Urgent: Complete Missing DBT & Cult/DST IDs by 6 PM"
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      Announcement Message Body
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={newBroadcastModal.message}
+                      onChange={(e) => setNewBroadcastModal(prev => ({ ...prev, message: e.target.value }))}
+                      placeholder="Type the full announcement message here. Will be shown on staff login popup and notice board..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewBroadcastModal(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={newBroadcastModal.loading}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                    >
+                      {newBroadcastModal.loading ? 'Publishing...' : '🚀 Publish Broadcast'}
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {/* Broadcasts History List */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase tracking-wider text-slate-500">
+                    Active &amp; Past Broadcasts ({broadcastsList.length})
+                  </h4>
+                  <button
+                    onClick={fetchAllBroadcasts}
+                    disabled={loadingBroadcasts}
+                    className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                  >
+                    <span className={loadingBroadcasts ? "animate-spin" : ""}>🔄</span> Refresh
+                  </button>
+                </div>
+
+                {loadingBroadcasts ? (
+                  <div className="text-center py-10 text-slate-400 font-bold text-xs">Loading broadcasts...</div>
+                ) : broadcastsList.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400 font-bold text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                    No broadcasts created yet. Click "+ Compose Broadcast" to send an alert.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden">
+                    {broadcastsList.map((b) => {
+                      const isHigh = b.priority === 'HIGH';
+                      const isMed = b.priority === 'MEDIUM';
+                      const isAuthor = isSuperAdmin || b.created_by_user === currentUser?.username || b.created_by_user === currentUser?.name;
+
+                      return (
+                        <div key={b.id} className="p-4 bg-white hover:bg-slate-50/80 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1.5 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider ${
+                                isHigh ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                                isMed ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                                'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                              }`}>
+                                {b.priority || 'MEDIUM'}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                                🎯 {b.target_audience === 'FIELD_STAFF' ? 'Field Staff' : b.target_audience === 'SUB_ADMINS' ? 'Sub-Admins' : 'Everyone'}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+                                📍 {b.target_districts?.includes('All') ? 'Statewide' : b.target_districts?.join(', ')}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-medium ml-auto sm:ml-0">
+                                {b.created_at ? new Date(b.created_at).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                              </span>
+                            </div>
+                            <h5 className="text-sm font-black text-slate-800">{b.title}</h5>
+                            <p className="text-xs text-slate-600 font-medium whitespace-pre-wrap">{b.message}</p>
+                            <p className="text-[10px] text-slate-400 font-semibold">
+                              Created by: <strong className="text-slate-600">{b.created_by_user}</strong> ({b.created_by_role === 'SUPER_ADMIN' ? 'Super Admin' : 'Sub-Admin'})
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 flex items-center justify-end">
+                            {isAuthor && (
+                              <button
+                                onClick={() => handleDeleteBroadcast(b.id)}
+                                className="bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 border border-rose-200 text-xs font-bold px-3 py-1.5 rounded-xl transition-all shadow-2xs active:scale-95 flex items-center gap-1"
+                                title="Permanently delete broadcast notice"
+                              >
+                                <span>🗑️</span>
+                                <span>Delete</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-500">DFY Central Alert Radar</span>
+              <button
+                onClick={() => setShowBroadcastStudio(false)}
+                className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs py-2 px-5 rounded-xl transition-colors"
+              >
+                Close Studio
+              </button>
             </div>
           </div>
         </div>

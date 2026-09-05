@@ -2486,3 +2486,194 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# --- Enterprise Broadcast & Urgent Announcements Engine ---
+class BroadcastCreateReq(BaseModel):
+    title: str
+    message: str
+    priority: Optional[str] = "MEDIUM" # HIGH, MEDIUM, INFO
+    target_audience: Optional[str] = "ALL" # ALL, FIELD_STAFF, SUB_ADMINS
+    target_districts: Optional[List[str]] = ["All"] # ["All"] or ["Buxar", "Bhojpur", ...]
+    created_by_user: Optional[str] = "Super Admin"
+    created_by_role: Optional[str] = "SUPER_ADMIN"
+    allowed_districts: Optional[List[str]] = None
+
+class BroadcastDeleteReq(BaseModel):
+    broadcast_id: str
+    requested_by_user: Optional[str] = "admin"
+    requested_by_role: Optional[str] = "SUPER_ADMIN"
+    allowed_districts: Optional[List[str]] = None
+
+@app.post("/api/broadcasts/create")
+async def create_broadcast(req: BroadcastCreateReq):
+    try:
+        clean_title = req.title.strip()
+        clean_msg = req.message.strip()
+        if not clean_title or not clean_msg:
+            raise HTTPException(status_code=400, detail="Title and message content are required.")
+
+        role = (req.created_by_role or "SUPER_ADMIN").upper()
+        # RBAC Check for Sub-Admin:
+        target_dists = req.target_districts or ["All"]
+        if role == "SUB_ADMIN":
+            user_allowed = req.allowed_districts or []
+            if "All" in target_dists:
+                # Sub-admin cannot broadcast to 'All' Bihar districts, must be scoped to user_allowed
+                target_dists = [d for d in user_allowed if d != "All"]
+            else:
+                # Ensure all selected districts are in user_allowed
+                target_dists = [d for d in target_dists if d in user_allowed]
+            if not target_dists:
+                raise HTTPException(status_code=403, detail="Sub-Admins can only broadcast to their assigned districts.")
+
+        broadcast_id = f"bc_{int(datetime.now().timestamp() * 1000)}"
+        doc_data = {
+            "id": broadcast_id,
+            "title": clean_title,
+            "message": clean_msg,
+            "priority": (req.priority or "MEDIUM").upper(),
+            "target_audience": (req.target_audience or "ALL").upper(),
+            "target_districts": target_dists,
+            "created_by_user": req.created_by_user or "Admin",
+            "created_by_role": role,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "is_active": True
+        }
+
+        await asyncio.to_thread(lambda: db.collection("broadcast_alerts").document(broadcast_id).set(doc_data))
+        cache.delete_prefix("broadcasts_")
+
+        await log_admin_activity(
+            action_type="BROADCAST_CREATED",
+            details=f"Created [{req.priority}] broadcast: '{clean_title}' for {', '.join(target_dists)} ({req.target_audience})",
+            district=target_dists[0] if len(target_dists) == 1 else "Statewide",
+            user_name=req.created_by_user,
+            role=role
+        )
+
+        return {"success": True, "message": "Broadcast created successfully!", "broadcast": doc_data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/broadcasts/active")
+async def get_active_broadcasts(
+    district: Optional[str] = None, 
+    role: Optional[str] = None, # 'FIELD_STAFF' or 'SUB_ADMIN'
+    districts: Optional[str] = None
+):
+    try:
+        cache_key = f"broadcasts_active_{district or 'all'}_{role or 'all'}_{districts or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        docs = await asyncio.to_thread(lambda: list(db.collection("broadcast_alerts")
+            .where("is_active", "==", True)
+            .stream()))
+
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
+        active_list = []
+        for doc in docs:
+            d = doc.to_dict()
+            target_aud = d.get("target_audience", "ALL").upper()
+            target_dists = d.get("target_districts", ["All"])
+
+            # 1. Audience Filter
+            if role:
+                r_upper = role.upper()
+                if r_upper == "FIELD_STAFF" and target_aud not in ["ALL", "FIELD_STAFF"]:
+                    continue
+                if r_upper == "SUB_ADMIN" and target_aud not in ["ALL", "SUB_ADMINS"]:
+                    continue
+
+            # 2. District Filter
+            # If specific district is passed (e.g. Field Officer in Buxar):
+            if district and district != "All":
+                if "All" not in target_dists and district not in target_dists:
+                    continue
+
+            # If multi-district list is passed (e.g. Sub-Admin with Buxar, Bhojpur):
+            if allowed_dist_set:
+                if "All" not in target_dists and not any(td in allowed_dist_set for td in target_dists):
+                    continue
+
+            active_list.append(d)
+
+        active_list.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        res = {"success": True, "broadcasts": active_list}
+        cache.set(cache_key, res, ttl=10) # 10 seconds cache for fast broadcast updates
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/broadcasts/all")
+async def get_all_broadcasts(districts: Optional[str] = None, role: Optional[str] = None):
+    try:
+        docs = await asyncio.to_thread(lambda: list(db.collection("broadcast_alerts")
+            .order_by("created_at", direction=firestore.Query.DESCENDING)
+            .limit(100)
+            .stream()))
+
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
+        broadcasts = []
+        for doc in docs:
+            d = doc.to_dict()
+            target_dists = d.get("target_districts", ["All"])
+            if allowed_dist_set:
+                if "All" not in target_dists and not any(td in allowed_dist_set for td in target_dists):
+                    continue
+            broadcasts.append(d)
+
+        return {"success": True, "broadcasts": broadcasts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/broadcasts/delete")
+async def delete_broadcast(req: BroadcastDeleteReq):
+    try:
+        doc_ref = db.collection("broadcast_alerts").document(req.broadcast_id)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Broadcast not found.")
+
+        d = doc.to_dict()
+        user_role = (req.requested_by_role or "SUPER_ADMIN").upper()
+
+        if user_role != "SUPER_ADMIN":
+            # Sub-admin can only delete if they created it or it matches their allowed districts
+            created_by = d.get("created_by_user", "")
+            if created_by != req.requested_by_user:
+                target_dists = d.get("target_districts", [])
+                allowed = req.allowed_districts or []
+                if not any(td in allowed for td in target_dists):
+                    raise HTTPException(status_code=403, detail="Permission denied to delete this broadcast.")
+
+        await asyncio.to_thread(doc_ref.delete)
+        cache.delete_prefix("broadcasts_")
+
+        await log_admin_activity(
+            action_type="BROADCAST_DELETED",
+            details=f"Deleted broadcast '{d.get('title')}': {req.broadcast_id}",
+            district="Statewide" if "All" in d.get("target_districts", []) else d.get("target_districts", [""])[0],
+            user_name=req.requested_by_user,
+            role=user_role
+        )
+
+        return {"success": True, "message": "Broadcast deleted successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
