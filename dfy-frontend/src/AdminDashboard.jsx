@@ -831,7 +831,7 @@ Keep this file safe in your Google Drive or personal diary.
     }
     const userAllowed = currentUser.allowed_districts;
     const filtered = allList.filter(d => userAllowed.includes(d));
-    return filtered.length > 0 ? filtered : allList;
+    return ['All', ...(filtered.length > 0 ? filtered : allList)];
   }, [staffDirectory, rawRecords, currentUser]);
 
   // Synchronize Report Studio & Comparator dropdowns when districts change
@@ -1140,7 +1140,31 @@ Keep this file safe in your Google Drive or personal diary.
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500" />
-            <select value={selectedDistrict} onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500">
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedDistrict('All');
+                setSelectedFO('All');
+              }}
+              className={`px-3 py-2 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 ${
+                selectedDistrict === 'All'
+                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+              }`}
+              title="View All Districts"
+            >
+              <span>🌐</span>
+              <span>All</span>
+            </button>
+            <select 
+              value={selectedDistrict} 
+              onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
+              className={`border px-3 py-2 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
+                selectedDistrict !== 'All'
+                  ? 'bg-indigo-50 border-indigo-300 text-indigo-800 ring-1 ring-indigo-300'
+                  : 'bg-slate-50 border border-slate-200 text-slate-700'
+              }`}
+            >
               {districts.map(d => <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>)}
             </select>
             <select value={selectedFO} onChange={(e) => setSelectedFO(e.target.value)} disabled={selectedDistrict === 'All'} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">
