@@ -500,22 +500,83 @@ class TargetUpdate(BaseModel):
     district: str
     fo_name: str
     target: int
+    month: Optional[str] = None
 
 @app.get("/get-targets")
-async def get_targets(district: str = None):
+async def get_targets(district: Optional[str] = None, month: Optional[str] = None):
     try:
-        targets = []
-        docs = db.collection("staff_targets").stream()
+        if not month:
+            month = datetime.now().strftime("%Y-%m")
+            
+        cache_key = f"targets_{month}_{district or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        docs = await asyncio.to_thread(lambda: list(db.collection("staff_targets").stream()))
+        
+        month_targets = {}
+        default_targets = {}
+        
         for doc in docs:
             data = doc.to_dict()
-            if district and data.get("district") != district:
+            d_dist = data.get("district")
+            d_name = data.get("fo_name")
+            d_target = int(data.get("target", 50)) if str(data.get("target", "")).isdigit() else 50
+            d_month = data.get("month")
+            
+            if not d_dist or not d_name:
                 continue
+                
+            key = f"{d_dist}_{d_name}".lower()
+            
+            if d_month == month:
+                month_targets[key] = {
+                    "fo_name": d_name,
+                    "district": d_dist,
+                    "target": d_target,
+                    "month": month
+                }
+            elif not d_month:
+                default_targets[key] = {
+                    "fo_name": d_name,
+                    "district": d_dist,
+                    "target": d_target,
+                    "month": month
+                }
+
+        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        targets = []
+        
+        for s in staff_docs:
+            sd = s.to_dict()
+            s_dist = sd.get("district")
+            s_name = sd.get("name")
+            if not s_dist or not s_name:
+                continue
+            if district and district != "All" and s_dist != district:
+                continue
+                
+            key = f"{s_dist}_{s_name}".lower()
+            if key in month_targets:
+                t_val = month_targets[key]["target"]
+            elif key in default_targets:
+                t_val = default_targets[key]["target"]
+            else:
+                t_val = 50
+                
             targets.append({
-                "fo_name": data.get("fo_name"),
-                "district": data.get("district"),
-                "target": data.get("target", 0)
+                "fo_name": s_name,
+                "district": s_dist,
+                "designation": sd.get("designation", "FC"),
+                "target": t_val,
+                "month": month
             })
-        return {"success": True, "targets": targets}
+            
+        targets.sort(key=lambda x: (x["district"], x["fo_name"]))
+        res = {"success": True, "month": month, "targets": targets}
+        cache.set(cache_key, res, ttl=30)
+        return res
     except HTTPException:
         raise
     except Exception as e:
@@ -524,13 +585,32 @@ async def get_targets(district: str = None):
 @app.post("/update-target")
 async def update_target(data: TargetUpdate):
     try:
-        doc_id = f"{data.district}_{data.fo_name}".replace(" ", "").lower()
-        db.collection("staff_targets").document(doc_id).set({
-            "district": data.district,
-            "fo_name": data.fo_name,
-            "target": data.target
-        }, merge=True)
-        return {"success": True}
+        month = data.month or datetime.now().strftime("%Y-%m")
+        clean_dist = data.district.strip()
+        clean_name = data.fo_name.strip()
+        
+        # 1. Month-scoped document
+        month_doc_id = f"{month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("staff_targets").document(month_doc_id).set({
+            "month": month,
+            "district": clean_dist,
+            "fo_name": clean_name,
+            "target": int(data.target),
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, merge=True))
+        
+        # 2. General fallback document
+        fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("staff_targets").document(fallback_doc_id).set({
+            "district": clean_dist,
+            "fo_name": clean_name,
+            "target": int(data.target),
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, merge=True))
+        
+        cache.delete_prefix("targets_")
+        cache.delete_prefix("profile_")
+        return {"success": True, "month": month, "message": f"Target for {month} successfully updated!"}
     except HTTPException:
         raise
     except Exception as e:
@@ -591,7 +671,7 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     except Exception:
         pass
     
-    # 1. Fetch Targets
+    # 1. Fetch Targets (Prioritizing Month-Scoped Target)
     target_map = {}
     try:
         t_docs = db.collection("staff_targets").where("district", "==", district).stream()
@@ -599,7 +679,10 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
             t_data = td.to_dict()
             f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
             if f_name:
-                target_map[f_name] = t_data.get("target", 50)
+                if t_data.get("month") == month_prefix:
+                    target_map[f_name] = int(t_data.get("target", 50))
+                elif f_name not in target_map:
+                    target_map[f_name] = int(t_data.get("target", 50))
     except Exception as e:
         print(f"Target fetch notice for {district}: {e}")
                     
@@ -793,12 +876,12 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None):
 @app.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(month: Optional[str] = None):
     try:
-        districts = ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"]
+        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
         zip_buffer = io.BytesIO()
         month_tag = month or datetime.now().strftime("%Y-%m")
         
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for dist in districts:
+            for dist in bihar_districts:
                 excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
                 if excel_bytes:
                     zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
@@ -860,12 +943,21 @@ async def my_profile_stats(req: ProfileStatsRequest):
         if not pin_doc.exists or pin_doc.to_dict().get("pin") != req.pin:
             raise HTTPException(status_code=401, detail="Invalid PIN")
             
-        # Step 2: Fetch Target
-        target_val = 0
-        target_docs = db.collection("staff_targets").where("district", "==", req.working_place).where("fo_name", "==", req.fo_name).stream()
-        for t in target_docs:
-            target_val = t.to_dict().get("target", 0)
-            break
+        # Step 2: Fetch Target (Month-Scoped with Fallback)
+        target_val = 50
+        try:
+            req_month = req.month or datetime.now().strftime("%Y-%m")
+            m_doc_id = f"{req_month}_{req.working_place}_{req.fo_name}".replace(" ", "").lower()
+            m_doc = await asyncio.to_thread(db.collection("staff_targets").document(m_doc_id).get)
+            if m_doc.exists:
+                target_val = int(m_doc.to_dict().get("target", 50))
+            else:
+                fb_id = f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()
+                fb_doc = await asyncio.to_thread(db.collection("staff_targets").document(fb_id).get)
+                if fb_doc.exists:
+                    target_val = int(fb_doc.to_dict().get("target", 50))
+        except Exception:
+            target_val = 50
             
         # Step 3: Fetch all reports for the month
         # Since we don't have indexes for fo_name + date, we can fetch by fo_name and filter in memory
@@ -1283,7 +1375,7 @@ async def export_state_summary(month: Optional[str] = None):
             staff_by_dist[dist] = staff_by_dist.get(dist, 0) + 1
             
         # Aggregate by district
-        bihar_districts = ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"]
+        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
         dist_data = {dist: {
             "District": dist,
             "Active Staff": staff_by_dist.get(dist, 0),

@@ -1,8 +1,19 @@
-District,Name,Designation
+﻿District,Name,Designation
 Aurangabad,Prince Kumar,FC
 Aurangabad,Rahul Kumar,TC
 Aurangabad,Ram Ji Singh,FC
 Aurangabad,Rishu Kumar,FC
+Begusarai,Gulshan kumar Jha,FO
+Begusarai,Manjesh kumar,HA
+Begusarai,Vikash kumar,HA
+Begusarai,Md.Imran,HA
+Begusarai,Sonu kumar,HA
+Begusarai,Neeraj kumar,HA
+Begusarai,Sonu kumar 1,TC
+Begusarai,Gunjan kumar jha,TC
+Begusarai,Omprakash Saw,TC
+Begusarai,Ramruchi jha,TC
+Begusarai,Md Sahnawaj,LT
 Bhojpur,Ashwani Kr Keshri,FC
 Bhojpur,Mukesh Tiwari,FC
 Bhojpur,Naveen Kumar,FC
@@ -16,6 +27,46 @@ Buxar,Raj Tiwari,FC
 Buxar,Randhir Kumar,FC
 Buxar,Shailesh Kumar,TC
 Buxar,Srishty Singh,PCE
+Darbhanga,REKHA KUMARI,FC
+Darbhanga,RAKESH KUMAR,FC
+Darbhanga,DEEPAK KUMAR,FC
+Darbhanga,RITU KUMAR,FC
+Darbhanga,RITESH KUMAR,FC
+Darbhanga,SUMAN KUMAR,FC
+Darbhanga,KAVITA KUMARI,FC
+Darbhanga,MUKESH DAS,TC
+Darbhanga,RAUSHAN KUMAR,TC
+Darbhanga,VIVEK KUMAR,TC
+Darbhanga,DABEER AHMED,TC
+Darbhanga,KUNDAN KUMAR,SCT
+Darbhanga,AMIT SHARAN,FC
+East Champaran,ADITYA SHRIVASTAVA,FC
+East Champaran,RAHUL DEY,FC
+East Champaran,VISHAL DEY,FC
+East Champaran,KRINESH KUMAR,FC
+East Champaran,ANAND MOHAN,FC
+East Champaran,DIWAKAR KUMAR,FC
+East Champaran,SAHIL KUMAR,FC
+East Champaran,NAVIN KUMAR,FC
+East Champaran,ABHISHEK KUMAR,FC
+East Champaran,PAPPU PATEL,FC
+East Champaran,AMIT DUBEY,FC
+East Champaran,SUMIT KUMAR,FC
+East Champaran,SOURABH KUMAR,FC
+East Champaran,RAVI RANJAN,FC
+East Champaran,POOJA KUMARI,CCE
+East Champaran,PURUSHOTTAM KUMAR,MIS
+Gaya,Amit Kr Tiwary,FC
+Gaya,Bikki Kumar,FC
+Gaya,Vikash Kr Pathak,FC
+Gaya,Rita Kumari,FC
+Gaya,Mukesh Kumar,FC
+Gaya,Kundan Kumar,FC
+Gaya,Manish Kumar,FC
+Gaya,Niraj Kumar,FC
+Gaya,Shashank Sourabh,FC
+Gaya,Lila Manjhi,SCT
+Gaya,Nitish,SCT
 Jamui,Bablu Kumar,FC
 Jamui,Monu Kumar,FC
 Jamui,Rajiv Kumar,FC
@@ -29,6 +80,20 @@ Kaimur,Raushan Kumar,FC
 Kaimur,Vinit Kumar,FC
 Lakhisarai,Ankit Kumar,FC
 Lakhisarai,Ram Prakash,FC
+Madhubani,Ramudgar Rajak,FC
+Madhubani,Md Sadakat,FC
+Madhubani,Ranjeet Kumar Sahu,FC
+Madhubani,Sharda kumari,FC
+Madhubani,Satish Kumar Yadav,FC
+Madhubani,Guddu Kumar,FC
+Madhubani,Prafulla Kumar,FC
+Madhubani,Rohit Kumar,FC
+Madhubani,Amit kumar thakur,TC
+Madhubani,krishna kumar,LT
+Madhubani,Sudha kumari,FC
+Madhubani,Aazad kumar pandey,FC
+Madhubani,Ram kuamr gupta,FO
+Madhubani,Rakesh kumar,FC
 Munger,Amit Kumar,FC
 Munger,Devrath Kumar,FC
 Munger,Jayant Kumar,FC
@@ -37,8 +102,68 @@ Munger,Saif Khan,FC
 Munger,Shyam Kumar Gupta,FC
 Munger,Sudhanshu Prasad,FC
 Munger,Sumit Kr Singh,FC
+Muzaffarpur,Bishram Kumar,FC
+Muzaffarpur,RAJA KUMAR,FC
+Muzaffarpur,Diwakar Kumar,TC
+Muzaffarpur,Rajeev Kumar,FC
+Muzaffarpur,Sonu Kumar,FC
+Muzaffarpur,Vijit Kumar,FC
+Muzaffarpur,Vinay Prakash,LT
+Muzaffarpur,Dinesh Kumar,FC
+Muzaffarpur,VINIT KUMAR,FO
+Muzaffarpur,Deepak Kumar,FO
+Muzaffarpur,Rakesh KUMAR,FC
+Muzaffarpur,MUNNA KUMAR,FC
+Muzaffarpur,Raj kumar,TC
+Muzaffarpur,Sunny Kumar,TC
+Muzaffarpur,Vijay Kumar,TC
 Nawada,Devraj Kumar,FC
 Nawada,Rajesh Kumar,FC
 Nawada,Rajiv Kumar,FC
+Rohtas,Ameet Kumar Pathak,FC
+Rohtas,Manish Kumar,FC
+Rohtas,Sandeep Kumar Mehta,FC
+Rohtas,Md Arsalan Ansari,FC
+Rohtas,Santosh kumar,TC
+Rohtas,Avnish kumar,TC
+Rohtas,Md Danish Ansari,LT
+Rohtas,Abhay Kumar,FC
+Samastipur,RAJESH KUMAR,FC
+Samastipur,AMARJEET KUMAR,FC
+Samastipur,AJEET KUMAR,FC
+Samastipur,SUBHAM KUMAR,FC
+Samastipur,KAMINI KUMARI,FC
+Samastipur,SHARVAN KUMAR,FC
+Samastipur,DEEPAK KUMAR,FC
+Samastipur,RATAN KUMAR,FC
+Samastipur,CHANDAN KUMAR,FC
+Samastipur,SUBODH KUMAR I,FC
+Samastipur,SUBODH KUMAR II,SCT
+Samastipur,AMIT KUMAR,LT
 Sheikhpura,Dhiraj Kumar,FC
 Sheikhpura,Nilkamal Kumar,FC
+Sheohar,Ashish Jha,FC
+Sitamarhi,SUJAY KUMAR,FC
+Sitamarhi,AVINASH KUMAR,FC
+Sitamarhi,CHANDAN KUMAR,FC
+Sitamarhi,SATYENDRA KUMAR,FC
+Sitamarhi,DILIP KUMAR,FC
+Sitamarhi,RUNJHUN KUMAR AKELA,FC
+Sitamarhi,PURUSHOTTAM KUMAR,FC
+Sitamarhi,MANIBUSHAN KUMAR,FC
+Sitamarhi,ALOK KUMAR,LT
+Sitamarhi,AYUSH KUMAR,FC
+Sitamarhi,DEEPAK KUMAR,FC
+Vaishali,ASHISH KUMAR,HB
+Vaishali,MADHUSUDAN KUMAR,HB
+Vaishali,BABY KUMARI,HB
+Vaishali,Gurudayal Das,HB
+Vaishali,Nitesh Kumar,HB
+Vaishali,Vishal Kumar,HB
+Vaishali,CHANDAN KUMAR,TC
+Vaishali,Dinesh Kumar,TC
+Vaishali,Chintu Kumar,TC
+Vaishali,Raushan Kumar,TC
+Vaishali,Gautam Kumar,LT
+Vaishali,Neeraj Kumar,SCT
+Vaishali,Deepak kumar,HB

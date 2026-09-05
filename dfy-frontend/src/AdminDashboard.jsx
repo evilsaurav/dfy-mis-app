@@ -20,6 +20,10 @@ export default function AdminDashboard() {
   const [selectedFO, setSelectedFO] = useState('All');
   const [sortConfig, setSortConfig] = useState({ key: 'total_km', direction: 'desc' });
   const [showTargetModal, setShowTargetModal] = useState(false);
+  const [targetModalMonth, setTargetModalMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [targetModalDistrict, setTargetModalDistrict] = useState('All');
+  const [isSavingTargets, setIsSavingTargets] = useState(false);
+  const [bulkTargetValue, setBulkTargetValue] = useState("");
   const [targetsData, setTargetsData] = useState([]);
   const [activeMetric, setActiveMetric] = useState('notifications');
   const [inspectingFO, setInspectingFO] = useState(null);
@@ -62,8 +66,6 @@ export default function AdminDashboard() {
   const [cascadeRiskFilter, setCascadeRiskFilter] = useState("All");
   const [loadingCascade, setLoadingCascade] = useState(false); // { name, district, error, loading } // { fo_name, district, date, category, action, oldId, newId, error, loading }
   const [staffDirectory, setStaffDirectory] = useState({});
-  const [targetModalDistrict, setTargetModalDistrict] = useState('All');
-  const [isSavingTargets, setIsSavingTargets] = useState(false);
   const [attendance, setAttendance] = useState(null);
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
@@ -166,16 +168,18 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadTargets = async (dist) => {
+  const loadTargets = async (dist = 'All', monthVal = null) => {
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-          const res = await fetch(API_BASE_URL + "/get-targets" + (dist !== 'All' ? `?district=${dist}` : ''));
+          const targetMonth = monthVal || targetModalMonth || month || new Date().toISOString().slice(0, 7);
+          const distParam = dist && dist !== 'All' ? `&district=${encodeURIComponent(dist)}` : '';
+          const res = await fetch(`${API_BASE_URL}/get-targets?month=${targetMonth}${distParam}`);
           const data = await res.json();
           if(data.success) {
               setTargetsData(data.targets);
           }
       } catch(err) {
-          console.error(err);
+          console.error("loadTargets error", err);
       }
   };
 
@@ -194,17 +198,23 @@ export default function AdminDashboard() {
       setIsSavingTargets(true);
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+          const targetMonth = targetModalMonth || month || new Date().toISOString().slice(0, 7);
           for (let t of targetsData) {
               if (t.fo_name && t.district) {
                   await fetch(API_BASE_URL + "/update-target", {
                       method: "POST", headers:{"Content-Type":"application/json"},
-                      body: JSON.stringify({ fo_name: t.fo_name, district: t.district, target: Number(t.target) || 0 })
+                      body: JSON.stringify({ 
+                          fo_name: t.fo_name, 
+                          district: t.district, 
+                          target: Number(t.target) || 0,
+                          month: targetMonth
+                      })
                   });
               }
           }
-          alert("All targets saved successfully!");
+          alert(`Targets for ${targetMonth} saved successfully!`);
           setShowTargetModal(false);
-          loadTargets('All');
+          loadTargets('All', month);
       } catch(err) {
           console.error(err);
           alert("Error saving targets");
@@ -2632,44 +2642,126 @@ Keep this file safe in your Google Drive or personal diary.
 
       {showTargetModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col overflow-hidden shadow-2xl border border-slate-100 animate-fade-in">
+          <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-100 animate-fade-in">
+            {/* Modal Header with Month & District Pickers */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-50/80">
               <div>
-                <h2 className="text-lg sm:text-xl font-black text-slate-800">Set Monthly Notification Targets</h2>
-                <p className="text-xs text-slate-500 font-medium">Configure individual officer targets across all districts</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🎯</span>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-800">Dynamic Monthly Targets</h2>
+                </div>
+                <p className="text-xs text-slate-500 font-medium">Harr mahine ke liye alag target set karein (e.g. June 100, July 115, Sept 120)</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Month Picker */}
+                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-xs">
+                  <span className="text-[10px] font-black uppercase text-purple-600">Month:</span>
+                  <input 
+                    type="month" 
+                    value={targetModalMonth} 
+                    onChange={(e) => {
+                      const newM = e.target.value;
+                      setTargetModalMonth(newM);
+                      loadTargets(targetModalDistrict, newM);
+                    }}
+                    className="text-xs font-black text-slate-800 outline-none bg-transparent cursor-pointer"
+                  />
+                </div>
+
+                {/* District Filter */}
                 <select 
                   value={targetModalDistrict} 
-                  onChange={(e) => setTargetModalDistrict(e.target.value)}
-                  className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500"
+                  onChange={(e) => {
+                    setTargetModalDistrict(e.target.value);
+                    loadTargets(e.target.value, targetModalMonth);
+                  }}
+                  className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 shadow-xs"
                 >
-                  <option value="All">All Districts</option>
+                  <option value="All">All Districts ({Object.keys(staffDirectory).length})</option>
                   {Object.keys(staffDirectory).sort().map(d => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
-                <button onClick={() => setShowTargetModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none">&times;</button>
+                <button onClick={() => setShowTargetModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none ml-1">&times;</button>
               </div>
             </div>
 
+            {/* Quick Bulk Setting Action Bar */}
+            <div className="px-5 py-2.5 bg-purple-50/60 border-b border-purple-100 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-bold text-purple-900">
+                <span>⚡ Quick Fill for {targetModalMonth}:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetsData(prev => prev.map(t => ({ ...t, target: 100 })));
+                  }}
+                  className="bg-white hover:bg-purple-100 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  Set All to 100
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetsData(prev => prev.map(t => ({ ...t, target: 115 })));
+                  }}
+                  className="bg-white hover:bg-purple-100 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  Set All to 115
+                </button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  placeholder="Custom Target"
+                  value={bulkTargetValue}
+                  onChange={(e) => setBulkTargetValue(e.target.value)}
+                  className="w-28 bg-white border border-purple-200 rounded-lg px-2.5 py-1 text-xs font-bold text-slate-800 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const val = Number(bulkTargetValue);
+                    if (val > 0) {
+                      setTargetsData(prev => prev.map(t => {
+                        if (targetModalDistrict === 'All' || t.district === targetModalDistrict) {
+                          return { ...t, target: val };
+                        }
+                        return t;
+                      }));
+                      setBulkTargetValue("");
+                    }
+                  }}
+                  className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-1 rounded-lg text-xs font-bold transition-all"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+
+            {/* Staff List with Targets */}
             <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
               {(targetModalDistrict === 'All' ? Object.keys(staffDirectory).sort() : [targetModalDistrict]).map(dist => {
                 const officers = staffDirectory[dist] || [];
                 return (
                   <div key={dist} className="space-y-2.5">
-                    <div className="flex items-center gap-2 pb-1 border-b border-slate-100">
-                      <span className="h-2 w-2 rounded-full bg-purple-600"></span>
-                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{dist} District ({officers.length} Staff)</h4>
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-purple-600"></span>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-700">{dist} District ({officers.length} Staff)</h4>
+                      </div>
+                      <span className="text-[10px] font-bold text-slate-400">Target for {targetModalMonth}</span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {officers.map(fo => {
                         const tData = targetsData.find(t => t.fo_name === fo && t.district === dist);
-                        const currentTarget = tData ? tData.target : 0;
+                        const currentTarget = tData ? tData.target : 50;
                         return (
                           <div key={fo} className="flex justify-between items-center bg-slate-50 border border-slate-100 hover:border-purple-200 p-3 rounded-xl transition-colors">
-                            <span className="font-bold text-xs text-slate-800 truncate mr-2">{fo}</span>
+                            <div className="truncate mr-2">
+                              <span className="font-bold text-xs text-slate-800 block truncate">{fo}</span>
+                              <span className="text-[10px] font-semibold text-slate-400">{dist}</span>
+                            </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <span className="text-[10px] font-bold text-slate-400">Target:</span>
                               <input 
@@ -2677,7 +2769,7 @@ Keep this file safe in your Google Drive or personal diary.
                                 value={currentTarget} 
                                 onChange={(e) => handleTargetChange(dist, fo, e.target.value)} 
                                 className="w-20 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-sm" 
-                                placeholder="0" 
+                                placeholder="50" 
                               />
                             </div>
                           </div>
@@ -2689,8 +2781,11 @@ Keep this file safe in your Google Drive or personal diary.
               })}
             </div>
 
-            <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex justify-between items-center gap-3">
-              <span className="text-xs text-slate-400 font-medium hidden sm:inline">Targets are evaluated against monthly Notification metrics.</span>
+            {/* Modal Footer */}
+            <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-wrap justify-between items-center gap-3">
+              <span className="text-xs text-slate-500 font-medium">
+                Saving will apply targets strictly to <strong className="text-purple-700">{targetModalMonth}</strong>.
+              </span>
               <div className="flex items-center gap-3 ml-auto">
                 <button onClick={() => setShowTargetModal(false)} className="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-200 transition-colors">Cancel</button>
                 <button 
@@ -2698,7 +2793,7 @@ Keep this file safe in your Google Drive or personal diary.
                   disabled={isSavingTargets}
                   className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-purple-600/20 active:scale-95 transition-all flex items-center gap-2"
                 >
-                  {isSavingTargets ? 'Saving...' : 'Save All Targets'}
+                  {isSavingTargets ? 'Saving...' : `Save ${targetModalMonth} Targets`}
                 </button>
               </div>
             </div>

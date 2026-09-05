@@ -9,18 +9,25 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-DISTRICT_STAFF = {
-    "Aurangabad": ["Prince Kumar", "Rahul Kumar", "Ram Ji Singh", "Rishu Kumar"],
-    "Bhojpur": ["Ashwani Kr Keshri", "Mukesh Tiwari", "Naveen Kumar", "Rahul Kumar", "Ram Prasad", "Surya Pratap"],
-    "Buxar": ["Krishna Kumar", "Mukul Kumar", "Nilesh Ranjan", "Raj Tiwari", "Randhir Kumar", "Shailesh Kumar", "Srishty Singh"],
-    "Jamui": ["Bablu Kumar", "Monu Kumar", "Rajiv Kumar", "Rinki Kumari"],
-    "Jehanabad": ["Sammer Arya", "Shashi Ranjan", "Suraj Kumar"],
-    "Kaimur": ["Durgesh Kumar", "Praphull Kumar", "Raushan Kumar", "Vinit Kumar"],
-    "Lakhisarai": ["Ankit Kumar", "Ram Prakash"],
-    "Munger": ["Amit Kumar", "Devrath Kumar", "Jayant Kumar", "Md. Raza Uddin", "Saif Khan", "Shyam Kumar Gupta", "Sudhanshu Prasad", "Sumit Kr Singh"],
-    "Nawada": ["Devraj Kumar", "Rajesh Kumar", "Rajiv Kumar"],
-    "Sheikhpura": ["Dhiraj Kumar", "Nilkamal Kumar"]
-}
+import csv
+
+def load_district_staff():
+    mapping = {}
+    csv_path = os.path.join(os.path.dirname(__file__), "staff_master.csv")
+    if os.path.exists(csv_path):
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for r in reader:
+                d = r.get("District", "").strip()
+                n = r.get("Name", "").strip()
+                if d and n:
+                    if d not in mapping:
+                        mapping[d] = []
+                    if n not in mapping[d]:
+                        mapping[d].append(n)
+    return mapping
+
+DISTRICT_STAFF = load_district_staff()
 
 KPI_CATEGORIES = [
     ("NOTIFICATION", "notification_ids"),
