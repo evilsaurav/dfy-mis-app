@@ -876,7 +876,7 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None):
 @app.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(month: Optional[str] = None):
     try:
-        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
         zip_buffer = io.BytesIO()
         month_tag = month or datetime.now().strftime("%Y-%m")
         
@@ -1375,7 +1375,7 @@ async def export_state_summary(month: Optional[str] = None):
             staff_by_dist[dist] = staff_by_dist.get(dist, 0) + 1
             
         # Aggregate by district
-        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
         dist_data = {dist: {
             "District": dist,
             "Active Staff": staff_by_dist.get(dist, 0),
