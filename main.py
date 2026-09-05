@@ -157,6 +157,7 @@ class DailyActivityReport(BaseModel):
     tpt_presumptive_ids: List[str] = []
     adhar_face_authentication_ids: List[str] = []
     consent_with_id_ids: List[str] = []
+    culture_dst_ids: List[str] = []
     
     remark: Optional[str] = ""
     
@@ -216,12 +217,13 @@ async def get_dashboard_data(req: DashboardRequest):
                 "fdc_provided": len(data.get("fdc_provided_ids", [])),
                 "kit_consumption": len(data.get("kit_consumption_ids", [])),
                 
-                # Group 5 (New Fields)
+                # Group 5 (New Fields & Special)
                 "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
                 "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
                 "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
                 "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
                 "consent_with_id": len(data.get("consent_with_id_ids", [])),
+                "culture_dst": len(data.get("culture_dst_ids", [])),
                 
                 # Raw ID Lists for FO Drill-Down Inspector
                 "notification_ids": data.get("notification_ids", []),
@@ -243,6 +245,7 @@ async def get_dashboard_data(req: DashboardRequest):
                 "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
                 "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
                 "consent_with_id_ids": data.get("consent_with_id_ids", []),
+                "culture_dst_ids": data.get("culture_dst_ids", []),
                 "visited_names": data.get("visited_names", []),
                 "remark": data.get("remark", ""),
                 
@@ -610,6 +613,13 @@ async def update_target(data: TargetUpdate):
         
         cache.delete_prefix("targets_")
         cache.delete_prefix("profile_")
+        await log_admin_activity(
+            action_type="TARGET_UPDATED",
+            details=f"Updated target for {clean_name} ({clean_dist}) to {data.target} for month {month}",
+            district=clean_dist,
+            target_officer=clean_name,
+            diff={"month": month, "target": int(data.target)}
+        )
         return {"success": True, "month": month, "message": f"Target for {month} successfully updated!"}
     except HTTPException:
         raise
@@ -981,7 +991,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
             "tpt_treatment_start": 0,
             "tpt_presumptive": 0,
             "adhar_face_authentication": 0,
-            "consent_with_id": 0
+            "consent_with_id": 0,
+            "culture_dst": 0
         }
         
         daily_history = {}
@@ -1638,6 +1649,14 @@ async def edit_patient_id(req: EditIdRequest):
             "edited_by": req.edited_by
         }
         await asyncio.to_thread(lambda: db.collection("id_edit_logs").add(log_entry))
+        await log_admin_activity(
+            action_type=f"PATIENT_ID_{req.action.upper()}",
+            details=f"{req.edited_by} {req.action}d ID in {cat_key} for {req.fo_name} on {req.date} (Old: {req.old_id}, New: {req.new_id})",
+            district=req.working_place,
+            target_officer=req.fo_name,
+            user_name=req.edited_by,
+            diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
+        )
         
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
@@ -2041,6 +2060,354 @@ async def export_cascade_alerts(month: Optional[str] = None, district: Optional[
         output.seek(0)
         filename = f"DFY_Cascade_Dropout_Alerts_{district}_{month}.xlsx"
         return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================================
+# --- Enterprise Multi-Admin RBAC & Activity Audit Trail Suite ---
+# =========================================================================
+
+class AdminUserLoginReq(BaseModel):
+    username: str
+    password: str
+
+class AdminUserCreateReq(BaseModel):
+    username: str
+    name: str
+    password: str
+    role: Optional[str] = "SUB_ADMIN" # "SUPER_ADMIN" or "SUB_ADMIN"
+    allowed_districts: Optional[List[str]] = ["All"]
+    permissions: Optional[Dict[str, bool]] = {
+        "can_view_dashboard": True,
+        "can_edit_targets": False,
+        "can_manage_staff": False,
+        "can_edit_patient_ids": False,
+        "can_export_reports": True,
+        "can_view_audit_logs": False
+    }
+    status: Optional[str] = "ACTIVE"
+    created_by: Optional[str] = "Super Admin"
+
+class AdminUserUpdateReq(BaseModel):
+    user_id: str
+    name: Optional[str] = None
+    password: Optional[str] = None
+    role: Optional[str] = None
+    allowed_districts: Optional[List[str]] = None
+    permissions: Optional[Dict[str, bool]] = None
+    status: Optional[str] = None
+
+class AuditLogQueryReq(BaseModel):
+    action_type: Optional[str] = "All"
+    district: Optional[str] = "All"
+    user_id: Optional[str] = "All"
+    search: Optional[str] = ""
+    limit: Optional[int] = 200
+
+async def log_admin_activity(
+    action_type: str,
+    details: str,
+    user_name: str = "Super Admin",
+    user_id: str = "admin",
+    role: str = "SUPER_ADMIN",
+    district: Optional[str] = "All",
+    target_officer: Optional[str] = "",
+    diff: Optional[Dict[str, Any]] = None,
+    ip_address: Optional[str] = ""
+):
+    try:
+        entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "action_type": action_type,
+            "details": details,
+            "user_name": user_name,
+            "user_id": user_id,
+            "role": role,
+            "district": district or "All",
+            "target_officer": target_officer or "",
+            "diff": diff or {},
+            "ip_address": ip_address or ""
+        }
+        await asyncio.to_thread(lambda: db.collection("admin_audit_logs").add(entry))
+    except Exception as e:
+        print(f"Audit log background notice: {e}")
+
+async def init_default_super_admin():
+    try:
+        doc_ref = db.collection("admin_users").document("admin")
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            default_super = {
+                "user_id": "admin",
+                "username": "admin",
+                "name": "Super Admin (Master)",
+                "password": "dfyadmin2026",
+                "role": "SUPER_ADMIN",
+                "allowed_districts": ["All"],
+                "permissions": {
+                    "can_view_dashboard": True,
+                    "can_edit_targets": True,
+                    "can_manage_staff": True,
+                    "can_edit_patient_ids": True,
+                    "can_export_reports": True,
+                    "can_view_audit_logs": True
+                },
+                "status": "ACTIVE",
+                "created_by": "System Root",
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "last_login": ""
+            }
+            await asyncio.to_thread(lambda: doc_ref.set(default_super))
+    except Exception as e:
+        print(f"Super admin init notice: {e}")
+
+@app.post("/admin/auth/user-login")
+async def admin_user_login(req: AdminUserLoginReq):
+    try:
+        await init_default_super_admin()
+        clean_user = req.username.strip().lower()
+        
+        # Check in admin_users collection
+        user_doc_ref = db.collection("admin_users").document(clean_user)
+        user_doc = await asyncio.to_thread(user_doc_ref.get)
+        
+        if not user_doc.exists:
+            # Fallback check for query by username
+            docs = await asyncio.to_thread(lambda: list(db.collection("admin_users").where("username", "==", clean_user).stream()))
+            if docs:
+                user_doc = docs[0]
+            else:
+                # Master legacy password fallback
+                auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+                if req.password == auth_data.get("password", "dfyadmin2026") and clean_user in ["admin", "superadmin", "dfyadmin"]:
+                    user_data = {
+                        "user_id": "admin",
+                        "username": "admin",
+                        "name": "Super Admin",
+                        "role": "SUPER_ADMIN",
+                        "allowed_districts": ["All"],
+                        "permissions": {
+                            "can_view_dashboard": True,
+                            "can_edit_targets": True,
+                            "can_manage_staff": True,
+                            "can_edit_patient_ids": True,
+                            "can_export_reports": True,
+                            "can_view_audit_logs": True
+                        },
+                        "status": "ACTIVE"
+                    }
+                    await log_admin_activity("LOGIN_SUCCESS", "Super Admin master login", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN")
+                    return {"success": True, "user": user_data}
+                
+                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for username '{req.username}'", user_name=req.username, user_id=clean_user, role="UNKNOWN")
+                raise HTTPException(status_code=401, detail="Invalid username or password.")
+                
+        user_data = user_doc.to_dict()
+        if user_data.get("status") != "ACTIVE":
+            raise HTTPException(status_code=403, detail="Your admin account has been disabled. Contact Super Admin.")
+            
+        if user_data.get("password") != req.password:
+            await log_admin_activity("LOGIN_FAILED", f"Incorrect password for user '{clean_user}'", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"))
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
+            
+        # Update last login timestamp
+        await asyncio.to_thread(lambda: user_doc.reference.update({"last_login": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}))
+        
+        # Don't return password in payload
+        safe_user = {k: v for k, v in user_data.items() if k != "password"}
+        await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"))
+        
+        return {"success": True, "user": safe_user}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/users/list")
+async def list_admin_users():
+    try:
+        await init_default_super_admin()
+        docs = await asyncio.to_thread(lambda: list(db.collection("admin_users").stream()))
+        users = []
+        for doc in docs:
+            d = doc.to_dict()
+            safe_d = {k: v for k, v in d.items() if k != "password"}
+            users.append(safe_d)
+            
+        users.sort(key=lambda x: (x.get("role") != "SUPER_ADMIN", x.get("name", "")))
+        return {"success": True, "users": users}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/users/create")
+async def create_admin_user(req: AdminUserCreateReq):
+    try:
+        clean_user = req.username.strip().lower()
+        if not clean_user or not req.password:
+            raise HTTPException(status_code=400, detail="Username and password are required.")
+            
+        doc_ref = db.collection("admin_users").document(clean_user)
+        existing = await asyncio.to_thread(doc_ref.get)
+        if existing.exists:
+            raise HTTPException(status_code=400, detail=f"Username '{clean_user}' is already taken.")
+            
+        new_user = {
+            "user_id": clean_user,
+            "username": clean_user,
+            "name": req.name.strip(),
+            "password": req.password,
+            "role": req.role or "SUB_ADMIN",
+            "allowed_districts": req.allowed_districts or ["All"],
+            "permissions": req.permissions or {
+                "can_view_dashboard": True,
+                "can_edit_targets": False,
+                "can_manage_staff": False,
+                "can_edit_patient_ids": False,
+                "can_export_reports": True,
+                "can_view_audit_logs": False
+            },
+            "status": req.status or "ACTIVE",
+            "created_by": req.created_by or "Super Admin",
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_login": ""
+        }
+        await asyncio.to_thread(lambda: doc_ref.set(new_user))
+        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=req.created_by, role="SUPER_ADMIN")
+        
+        safe_user = {k: v for k, v in new_user.items() if k != "password"}
+        return {"success": True, "user": safe_user, "message": f"User {req.name} successfully created!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/users/update")
+async def update_admin_user(req: AdminUserUpdateReq):
+    try:
+        clean_user = req.user_id.strip().lower()
+        doc_ref = db.collection("admin_users").document(clean_user)
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail=f"Admin user '{clean_user}' not found.")
+            
+        update_data = {"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        if req.name is not None:
+            update_data["name"] = req.name.strip()
+        if req.password:
+            update_data["password"] = req.password
+        if req.role is not None:
+            update_data["role"] = req.role
+        if req.allowed_districts is not None:
+            update_data["allowed_districts"] = req.allowed_districts
+        if req.permissions is not None:
+            update_data["permissions"] = req.permissions
+        if req.status is not None:
+            update_data["status"] = req.status
+            
+        await asyncio.to_thread(lambda: doc_ref.update(update_data))
+        await log_admin_activity("PERMISSIONS_UPDATED", f"Updated settings/permissions for admin user '{clean_user}'", user_name="Super Admin", role="SUPER_ADMIN")
+        return {"success": True, "message": f"User {clean_user} updated successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/users/delete")
+async def delete_admin_user(user_id: str):
+    try:
+        clean_user = user_id.strip().lower()
+        if clean_user == "admin":
+            raise HTTPException(status_code=400, detail="Cannot delete master root admin account.")
+            
+        doc_ref = db.collection("admin_users").document(clean_user)
+        await asyncio.to_thread(doc_ref.delete)
+        await log_admin_activity("ADMIN_USER_DELETED", f"Deleted admin user account '{clean_user}'", user_name="Super Admin", role="SUPER_ADMIN")
+        return {"success": True, "message": f"User {clean_user} deleted successfully!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/audit-logs")
+async def get_audit_logs(query: AuditLogQueryReq):
+    try:
+        # Fetch audit logs ordered chronologically descending
+        docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(query.limit or 200)
+            .stream()))
+            
+        logs = []
+        for doc in docs:
+            d = doc.to_dict()
+            
+            # Apply filters in memory
+            if query.action_type and query.action_type != "All" and d.get("action_type") != query.action_type:
+                continue
+            if query.district and query.district != "All" and d.get("district") != query.district:
+                continue
+            if query.user_id and query.user_id != "All" and d.get("user_id") != query.user_id:
+                continue
+            if query.search:
+                s_lower = query.search.lower()
+                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')}".lower()
+                if s_lower not in text_to_search:
+                    continue
+                    
+            logs.append(d)
+            
+        return {"success": True, "total": len(logs), "logs": logs}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/export-audit-logs")
+async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All"):
+    try:
+        docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(1000)
+            .stream()))
+            
+        rows = []
+        for idx, doc in enumerate(docs):
+            d = doc.to_dict()
+            if action_type and action_type != "All" and d.get("action_type") != action_type:
+                continue
+            if district and district != "All" and d.get("district") != district:
+                continue
+                
+            rows.append({
+                "S.No": idx + 1,
+                "Timestamp": d.get("timestamp", ""),
+                "Admin User": d.get("user_name", ""),
+                "Role": d.get("role", ""),
+                "Action Type": d.get("action_type", ""),
+                "District": d.get("district", ""),
+                "Target Officer": d.get("target_officer", ""),
+                "Activity Details": d.get("details", ""),
+                "IP Address": d.get("ip_address", "")
+            })
+            
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name="Admin Audit Trail")
+            ws = writer.sheets["Admin Audit Trail"]
+            style_excel_worksheet(ws, header_fill_color="1E293B")
+            
+        output.seek(0)
+        filename = f"DFY_Admin_Audit_Trail_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     except HTTPException:
         raise
     except Exception as e:

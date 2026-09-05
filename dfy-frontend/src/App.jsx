@@ -710,7 +710,8 @@ const sanitizeIncomingFormData = (d, base) => {
     'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
     'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
     'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
-    'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
+    'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+    'culture_dst_ids'
   ];
   const clean = { ...base };
   if (d && typeof d === 'object') {
@@ -767,6 +768,7 @@ function App() {
     tpt_presumptive_ids: [],
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
+    culture_dst_ids: [],
     remark: "", visited_names: []
   });
 
@@ -983,6 +985,7 @@ function App() {
       kit_consumption_ids: [], differentiated_tb_ids: [],
       tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
       adhar_face_authentication_ids: [], consent_with_id_ids: [],
+      culture_dst_ids: [],
       remark: "", visited_names: []
     });
     setPinStatus(null);
@@ -1120,7 +1123,8 @@ function App() {
       { key: 'tpt_treatment_start_ids', label: 'TPT Treatment Start' },
       { key: 'tpt_presumptive_ids', label: 'TPT Presumptive' },
       { key: 'adhar_face_authentication_ids', label: 'Adhar Face Auth' },
-      { key: 'consent_with_id_ids', label: 'Consent with ID' }
+      { key: 'consent_with_id_ids', label: 'Consent with ID' },
+      { key: 'culture_dst_ids', label: 'Culture / DST' }
     ];
 
     let hasMetrics = false;
@@ -1167,7 +1171,8 @@ function App() {
       'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
       'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
       'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
-      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
+      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+      'culture_dst_ids'
     ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
 
     // Direct Offline Submission via IndexedDB
@@ -1442,6 +1447,19 @@ function App() {
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
+                  {formData.working_place === 'Buxar' && (
+                    <IdBucket 
+                      key="culture_dst_ids" 
+                      title="Culture / DST (Buxar Special)" 
+                      ids={formData.culture_dst_ids || []} 
+                      onAdd={(id) => addId('culture_dst_ids', id)} 
+                      onAddMultiple={(ids) => addMultipleIds('culture_dst_ids', ids)} 
+                      onRemove={(idx) => removeId('culture_dst_ids', idx)} 
+                      showToast={showToast}
+                      suggestedIds={formData.notification_ids || []}
+                      onAddBulk={(newIds) => addMultipleIds('culture_dst_ids', newIds)}
+                    />
+                  )}
                 </Accordion>
                 <Accordion title="3. Field Work & Visits">
                   {group3.map((cat) => (
@@ -1656,7 +1674,8 @@ function App() {
                       'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
                       'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
                       'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
-                      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids'
+                      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+                      'culture_dst_ids'
                     ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0)}
                   </p>
                 </div>
@@ -1692,7 +1711,8 @@ function App() {
                     { key: 'tpt_treatment_start_ids', label: '16. TPT Treatment Start', color: 'blue' },
                     { key: 'tpt_presumptive_ids', label: '17. TPT Presumptive Screened', color: 'sky' },
                     { key: 'adhar_face_authentication_ids', label: '18. Aadhar Face Auth', color: 'indigo' },
-                    { key: 'consent_with_id_ids', label: '19. Patient Consent Form', color: 'emerald' }
+                    { key: 'consent_with_id_ids', label: '19. Patient Consent Form', color: 'emerald' },
+                    { key: 'culture_dst_ids', label: '20. Culture / DST (Buxar)', color: 'indigo' }
                   ].map(cat => {
                     const ids = Array.isArray(formData[cat.key]) ? formData[cat.key] : [];
                     if (ids.length === 0) return null;
