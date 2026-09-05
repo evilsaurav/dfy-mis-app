@@ -230,8 +230,14 @@ export default function AdminDashboard() {
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const targetMonth = monthVal || targetModalMonth || month || new Date().toISOString().slice(0, 7);
-          const distParam = dist && dist !== 'All' ? `&district=${encodeURIComponent(dist)}` : '';
-          const res = await fetch(`${API_BASE_URL}/get-targets?month=${targetMonth}${distParam}`);
+          let q = `?month=${targetMonth}`;
+          if (dist && dist !== 'All') {
+            q += `&district=${encodeURIComponent(dist)}`;
+          }
+          if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+            q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+          }
+          const res = await fetch(`${API_BASE_URL}/get-targets${q}`);
           const data = await res.json();
           if(data.success) {
               setTargetsData(data.targets);
@@ -257,8 +263,12 @@ export default function AdminDashboard() {
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const targetMonth = targetModalMonth || month || new Date().toISOString().slice(0, 7);
+          const isSubAdmin = currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All');
           for (let t of targetsData) {
               if (t.fo_name && t.district) {
+                  if (isSubAdmin && !currentUser.allowed_districts.includes(t.district)) {
+                    continue;
+                  }
                   await fetch(API_BASE_URL + "/update-target", {
                       method: "POST", headers:{"Content-Type":"application/json"},
                       body: JSON.stringify({ 
@@ -529,7 +539,11 @@ export default function AdminDashboard() {
     try {
       setLoadingCascade(true);
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?month=${month}&district=${cascadeFilterDist}`);
+      let q = `?month=${month}&district=${cascadeFilterDist}`;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts${q}`);
       if (res.ok) {
         const json = await res.json();
         setCascadeData(json.data || { summary: {}, alerts: [] });
@@ -544,7 +558,11 @@ export default function AdminDashboard() {
   const fetchStaffList = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/staff/list`);
+      let q = "";
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/admin/staff/list${q}`);
       if (res.ok) {
         const data = await res.json();
         setStaffList(data.staff || []);
@@ -801,10 +819,14 @@ Keep this file safe in your Google Drive or personal diary.
     setError('');
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = { month_prefix: month };
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        payload.districts = currentUser.allowed_districts.join(',');
+      }
       const res = await fetch(`${API_BASE_URL}/admin/dashboard-data`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ month_prefix: month })
+        body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error("Failed to fetch data");
       const data = await res.json();
@@ -833,6 +855,14 @@ Keep this file safe in your Google Drive or personal diary.
     const filtered = allList.filter(d => userAllowed.includes(d));
     return ['All', ...(filtered.length > 0 ? filtered : allList)];
   }, [staffDirectory, rawRecords, currentUser]);
+
+  const targetModalDistricts = useMemo(() => {
+    const allDists = Object.keys(staffDirectory).sort();
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      return allDists.filter(d => currentUser.allowed_districts.includes(d));
+    }
+    return allDists;
+  }, [staffDirectory, currentUser]);
 
   // Synchronize Report Studio & Comparator dropdowns when districts change
   useEffect(() => {
@@ -1971,7 +2001,7 @@ Keep this file safe in your Google Drive or personal diary.
               </div>
 
               <a
-                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${month}&district=${cascadeFilterDist}`}
+                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${month}&district=${cascadeFilterDist}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md shadow-rose-600/20 active:scale-95 transition-all flex items-center gap-1.5"
@@ -2091,7 +2121,7 @@ Keep this file safe in your Google Drive or personal diary.
                 </div>
                 <div>
                   <h3 className="text-xl font-black text-slate-800">Field Staff &amp; PIN Management Suite</h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{staffList.length} Active Officers across 10 Bihar Districts</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{staffList.length} Active Officers across {districts.filter(d => d !== 'All').length} Districts</p>
                 </div>
               </div>
               <button onClick={() => setShowStaffSuite(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none self-end sm:self-center">&times;</button>
@@ -2122,14 +2152,14 @@ Keep this file safe in your Google Drive or personal diary.
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setAddStaffModal({ district: staffFilterDistrict !== 'All' ? staffFilterDistrict : 'Jamui', name: '', pin: String(Math.floor(1000 + Math.random() * 9000)), designation: 'Field Officer', target: 50, error: '' })}
+                  onClick={() => setAddStaffModal({ district: staffFilterDistrict !== 'All' ? staffFilterDistrict : (districts.filter(d => d !== 'All')[0] || 'Jamui'), name: '', pin: String(Math.floor(1000 + Math.random() * 9000)), designation: 'Field Officer', target: 50, error: '' })}
                   className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5"
                 >
                   <span>+</span> Add Employee
                 </button>
 
                 <a
-                  href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/staff/export-pins?district=${staffFilterDistrict}`}
+                  href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/staff/export-pins?district=${staffFilterDistrict}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5"
@@ -3069,8 +3099,8 @@ Keep this file safe in your Google Drive or personal diary.
                   }}
                   className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 shadow-xs"
                 >
-                  <option value="All">All Districts ({Object.keys(staffDirectory).length})</option>
-                  {Object.keys(staffDirectory).sort().map(d => (
+                  <option value="All">All Districts ({targetModalDistricts.length})</option>
+                  {targetModalDistricts.map(d => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
@@ -3081,7 +3111,7 @@ Keep this file safe in your Google Drive or personal diary.
             {/* Custom Target Action Bar */}
             <div className="px-5 py-3 bg-purple-50/60 border-b border-purple-100 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs font-bold text-purple-900">
-                <span>⚡ Custom Bulk Setter for {targetModalDistrict === 'All' ? 'All Districts' : targetModalDistrict}:</span>
+                <span>⚡ Custom Bulk Setter for {targetModalDistrict === 'All' ? 'All Permitted Districts' : targetModalDistrict}:</span>
               </div>
               <div className="flex items-center gap-1.5 ml-auto">
                 <input
@@ -3114,7 +3144,7 @@ Keep this file safe in your Google Drive or personal diary.
 
             {/* Staff List with Targets and District Total Indicators */}
             <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
-              {(targetModalDistrict === 'All' ? Object.keys(staffDirectory).sort() : [targetModalDistrict]).map(dist => {
+              {(targetModalDistrict === 'All' ? targetModalDistricts : [targetModalDistrict]).map(dist => {
                 const officers = staffDirectory[dist] || [];
                 const distTotal = officers.reduce((sum, fo) => {
                   const tData = targetsData.find(t => t.fo_name === fo && t.district === dist);

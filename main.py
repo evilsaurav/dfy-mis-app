@@ -171,6 +171,7 @@ class DailyActivityReport(BaseModel):
 
 class DashboardRequest(BaseModel):
     month_prefix: str
+    districts: Optional[str] = None
 
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest):
@@ -178,6 +179,10 @@ async def get_dashboard_data(req: DashboardRequest):
         start_date = f"{req.month_prefix}-01"
         end_date = f"{req.month_prefix}-31"
         
+        allowed_dist_set = None
+        if req.districts and req.districts.strip() and req.districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in req.districts.split(",") if d.strip()])
+
         docs = db.collection("daily_field_reports")\
             .where("date_of_reporting", ">=", start_date)\
             .where("date_of_reporting", "<=", end_date)\
@@ -186,9 +191,13 @@ async def get_dashboard_data(req: DashboardRequest):
         records = []
         for doc in docs:
             data = doc.to_dict()
+            wp = data.get("working_place", "Unknown")
+            if allowed_dist_set and wp not in allowed_dist_set:
+                continue
+
             records.append({
                 "date": data.get("date_of_reporting", ""),
-                "working_place": data.get("working_place", "Unknown"),
+                "working_place": wp,
                 "fo_name": data.get("fo_name", "Unknown"),
                 
                 # Big 5
@@ -506,12 +515,16 @@ class TargetUpdate(BaseModel):
     month: Optional[str] = None
 
 @app.get("/get-targets")
-async def get_targets(district: Optional[str] = None, month: Optional[str] = None):
+async def get_targets(district: Optional[str] = None, month: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
-        cache_key = f"targets_{month}_{district or 'all'}"
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
+        cache_key = f"targets_{month}_{district or 'all'}_{districts or 'all'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -556,6 +569,8 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             s_dist = sd.get("district")
             s_name = sd.get("name")
             if not s_dist or not s_name:
+                continue
+            if allowed_dist_set and s_dist not in allowed_dist_set:
                 continue
             if district and district != "All" and s_dist != district:
                 continue
@@ -1732,16 +1747,23 @@ class DeleteStaffReq(BaseModel):
     name: str
 
 @app.get("/admin/staff/list")
-async def get_staff_full_list():
+async def get_staff_full_list(districts: Optional[str] = None):
     try:
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
         docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         staff = []
         for doc in docs:
             d = doc.to_dict()
-            if d.get("district") and d.get("name"):
+            dist = d.get("district")
+            if dist and d.get("name"):
+                if allowed_dist_set and dist not in allowed_dist_set:
+                    continue
                 staff.append({
                     "id": doc.id,
-                    "district": d.get("district"),
+                    "district": dist,
                     "name": d.get("name"),
                     "pin": str(d.get("pin", "")),
                     "designation": d.get("designation", "Field Officer"),
@@ -1858,8 +1880,12 @@ async def delete_staff_member(req: DeleteStaffReq):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/staff/export-pins")
-async def export_staff_pins(district: Optional[str] = "All"):
+async def export_staff_pins(district: Optional[str] = "All", districts: Optional[str] = None):
     try:
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
         docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         rows = []
         s_no = 1
@@ -1867,6 +1893,8 @@ async def export_staff_pins(district: Optional[str] = "All"):
             d = doc.to_dict()
             dist = d.get("district", "")
             name = d.get("name", "")
+            if allowed_dist_set and dist not in allowed_dist_set:
+                continue
             if district != "All" and dist != district:
                 continue
             if dist and name:
@@ -1887,7 +1915,7 @@ async def export_staff_pins(district: Optional[str] = "All"):
         df = pd.DataFrame(rows)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            sheet_title = f"PINs {district}"
+            sheet_title = f"PINs {district}" if len(district) < 20 else "Staff PINs"
             df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
             ws = writer.sheets[sheet_title[:31]]
             style_excel_worksheet(ws, header_fill_color="1E3A8A")
@@ -1901,10 +1929,14 @@ async def export_staff_pins(district: Optional[str] = "All"):
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Predictive Cascade & Dropout Alerts Engine (Mission Critical Priority) ---
-def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name: Optional[str] = None):
+def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name: Optional[str] = None, districts: Optional[str] = None):
     start_date = f"{month}-01"
     end_date = f"{month}-31"
     
+    allowed_dist_set = None
+    if districts and districts.strip() and districts.strip() != "All":
+        allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+        
     docs = db.collection("daily_field_reports")\
         .where("date_of_reporting", ">=", start_date)\
         .where("date_of_reporting", "<=", end_date)\
@@ -1918,6 +1950,8 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
         doc_fo = d.get("fo_name", "")
         doc_date = d.get("date_of_reporting", "")
         
+        if allowed_dist_set and doc_dist not in allowed_dist_set:
+            continue
         if district != "All" and doc_dist != district:
             continue
         if fo_name and doc_fo != fo_name:
@@ -2046,17 +2080,17 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     return {"summary": summary, "alerts": alert_list}
 
 @app.get("/api/reports/cascade-alerts")
-async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All", fo_name: Optional[str] = None):
+async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All", fo_name: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
-        cache_key = f"cascade_alerts_{month}_{district}_{fo_name or 'all'}"
+        cache_key = f"cascade_alerts_{month}_{district}_{fo_name or 'all'}_{districts or 'all'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
             
-        data = await asyncio.to_thread(compute_cascade_alerts, month, district, fo_name)
+        data = await asyncio.to_thread(compute_cascade_alerts, month, district, fo_name, districts)
         cache.set(cache_key, data, ttl=180)
         return {"success": True, "data": data}
     except HTTPException:
@@ -2065,12 +2099,12 @@ async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/export-cascade-alerts")
-async def export_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All"):
+async def export_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All", districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
-        data = await asyncio.to_thread(compute_cascade_alerts, month, district)
+        data = await asyncio.to_thread(compute_cascade_alerts, month, district, None, districts)
         alerts = data.get("alerts", [])
         
         rows = []
