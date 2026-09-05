@@ -50,7 +50,7 @@ export default function AdminDashboard() {
   const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, fo_dossier, cascade_funnel, whatsapp_bulletin
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
-  const [reportsDistrict, setReportsDistrict] = useState("Jamui");
+  const [reportsDistrict, setReportsDistrict] = useState("");
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [showStaffSuite, setShowStaffSuite] = useState(false);
   const [staffList, setStaffList] = useState([]);
@@ -123,7 +123,11 @@ export default function AdminDashboard() {
     setIsAttendanceLoading(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/today-attendance`);
+      let q = "";
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/admin/today-attendance${q}`);
       if (res.ok) {
         const data = await res.json();
         setAttendance(data);
@@ -185,15 +189,21 @@ export default function AdminDashboard() {
 
   const downloadAllWorkbooks = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}`, "_blank");
+    let distParam = "";
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      distParam = `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+    }
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}`, "_blank");
   };
-
-
 
   const fetchDuplicateAudit = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/duplicate-audit?month=${month}`);
+      let q = `?month=${month}`;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await fetch(`${API_BASE_URL}/admin/duplicate-audit${q}`);
       if (res.ok) {
         const data = await res.json();
         setDuplicateAudit(data);
@@ -695,19 +705,33 @@ export default function AdminDashboard() {
   };
 
   const handleDownloadKpi = () => {
-    const targetDist = (reportsDistrict && reportsDistrict !== 'All') ? reportsDistrict : (selectedDistrict !== 'All' ? selectedDistrict : 'Jamui');
+    const validPermitted = (districts || []).filter(d => d !== 'All');
+    const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
+    const targetDist = (reportsDistrict && reportsDistrict !== 'All') 
+      ? reportsDistrict 
+      : (selectedDistrict !== 'All' ? selectedDistrict : fallback);
+    if (!targetDist) {
+      alert("Please select a district to download.");
+      return;
+    }
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}`, "_blank");
   };
 
   const handleDownloadAllZip = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}`, "_blank");
+    const subAdminParam = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+      ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`
+      : '';
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${subAdminParam}`, "_blank");
   };
 
   const copyWhatsAppBulletin = () => {
     const totalStateNotif = totals.notifications || 0;
-    const totalStateTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    const permittedTargets = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+      ? targetsData.filter(t => currentUser.allowed_districts.includes(t.district))
+      : targetsData;
+    const totalStateTarget = permittedTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
     const overallPct = totalStateTarget > 0 ? Math.round((totalStateNotif / totalStateTarget) * 100) : 0;
     const sortedDistricts = [...districts.filter(d => d !== 'All')].map(dist => {
       const recs = rawRecords.filter(r => r.working_place === dist);
@@ -717,9 +741,10 @@ export default function AdminDashboard() {
       return { dist, notif, tgt, pct };
     }).sort((a, b) => b.pct - a.pct);
 
+    const isSubAdmin = currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All');
     let msg = `🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n`;
     msg += `📅 *Month:* ${month} | *Generated:* ${new Date().toLocaleDateString()}\n\n`;
-    msg += `📊 *STATE SUMMARY:*\n`;
+    msg += `📊 *${isSubAdmin ? 'ASSIGNED DISTRICTS SUMMARY' : 'STATE SUMMARY'}:*\n`;
     msg += `• Total Notifications: *${totalStateNotif}* / ${totalStateTarget} (*${overallPct}%*)\n`;
     msg += `• Total Samples Tested: *${totals.tests || 0}*\n`;
     msg += `• Total DBT Seeded: *${totals.dbt || 0}*\n`;
@@ -809,6 +834,22 @@ Keep this file safe in your Google Drive or personal diary.
     return filtered.length > 0 ? filtered : allList;
   }, [staffDirectory, rawRecords, currentUser]);
 
+  // Synchronize Report Studio & Comparator dropdowns when districts change
+  useEffect(() => {
+    const validDists = districts.filter(d => d !== 'All');
+    if (validDists.length > 0) {
+      if (!reportsDistrict || !validDists.includes(reportsDistrict)) {
+        setReportsDistrict(validDists[0]);
+      }
+      if (!compareDistA || !validDists.includes(compareDistA)) {
+        setCompareDistA(validDists[0]);
+      }
+      if (!compareDistB || !validDists.includes(compareDistB)) {
+        setCompareDistB(validDists.length > 1 ? validDists[1] : validDists[0]);
+      }
+    }
+  }, [districts]);
+
   const fos = useMemo(() => {
     let filtered = rawRecords;
     if (selectedDistrict !== 'All') filtered = filtered.filter(r => r.working_place === selectedDistrict);
@@ -849,7 +890,10 @@ Keep this file safe in your Google Drive or personal diary.
   // District Comparison Data (for Bar Chart)
   const districtComparisonData = useMemo(() => {
     const map = {};
-    rawRecords.forEach(r => {
+    const visibleRecords = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+      ? rawRecords.filter(r => currentUser.allowed_districts.includes(r.working_place))
+      : rawRecords;
+    visibleRecords.forEach(r => {
       if (!map[r.working_place]) map[r.working_place] = aggregate([]);
       for (let key in map[r.working_place]) {
         if (key === 'overrides') map[r.working_place][key] += r.is_override ? 1 : 0;
@@ -857,7 +901,7 @@ Keep this file safe in your Google Drive or personal diary.
       }
     });
     return Object.keys(map).map(k => ({ working_place: k, ...map[k] }));
-  }, [rawRecords]);
+  }, [rawRecords, currentUser]);
 
   // Daily Timeline Trend Data
   const dailyTrendData = useMemo(() => {
@@ -878,7 +922,10 @@ Keep this file safe in your Google Drive or personal diary.
 
   // District Performance Leaderboard
   const leaderboardData = useMemo(() => {
-    const distList = Object.keys(staffDirectory).length > 0 ? Object.keys(staffDirectory).sort() : ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"];
+    let distList = Object.keys(staffDirectory).length > 0 ? Object.keys(staffDirectory).sort() : ["Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad", "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"];
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      distList = distList.filter(d => currentUser.allowed_districts.includes(d));
+    }
     const result = distList.map(dist => {
       const distRecords = rawRecords.filter(r => r.working_place === dist);
       const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
@@ -893,7 +940,7 @@ Keep this file safe in your Google Drive or personal diary.
       };
     });
     return result.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
-  }, [rawRecords, targetsData, staffDirectory]);
+  }, [rawRecords, targetsData, staffDirectory, currentUser]);
 
   // Radar Chart Data (Work Balance)
   const radarData = useMemo(() => {
@@ -1216,7 +1263,7 @@ Keep this file safe in your Google Drive or personal diary.
         </div>
 
         {/* Real-Time Live Activity Ticker */}
-        {rawRecords.length > 0 && (
+        {filteredRecords.length > 0 && (
           <div className="bg-slate-900 text-white rounded-2xl px-5 py-3 shadow-md flex items-center justify-between gap-4 overflow-hidden border border-slate-800 animate-fade-in">
             <div className="flex items-center gap-2 shrink-0">
               <span className="relative flex h-2.5 w-2.5">
@@ -1226,9 +1273,9 @@ Keep this file safe in your Google Drive or personal diary.
               <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Live Activity Feed</span>
             </div>
             <div className="flex-1 overflow-x-auto whitespace-nowrap custom-scrollbar text-xs font-semibold text-slate-300 flex items-center gap-6">
-              {rawRecords.slice(-4).reverse().map((r, i) => (
+              {filteredRecords.slice(-6).reverse().map((r, i) => (
                 <span key={i} className="flex items-center gap-1.5">
-                  <strong className="text-white">{r.fo_name}</strong> ({r.working_place}) &bull; <span className="text-emerald-400">{r.notifications} Notif</span> &bull; {r.total_km} KM &bull; <span className="text-slate-400 text-[10px]">{r.date}</span>
+                  <strong className="text-white">{r.fo_name}</strong> ({r.working_place}) &bull; <span className="text-emerald-400">{r.notifications} Notif</span> &bull; {r.total_km} KM &bull; <span className="text-slate-400 text-[10px]">{r.date_of_reporting || r.date}</span>
                 </span>
               ))}
             </div>
@@ -1480,11 +1527,16 @@ Keep this file safe in your Google Drive or personal diary.
               
               {/* Target Pacing Calculator */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col">
-                <div className="mb-4">
-                  <h3 className="text-slate-800 font-black text-base flex items-center gap-2">
-                    <span>⚡</span> Target Pacing & Forecaster
-                  </h3>
-                  <p className="text-slate-400 text-xs font-semibold">Run-rate needed for 100% monthly achievement</p>
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-slate-800 font-black text-base flex items-center gap-2">
+                      <span>⚡</span> Target Pacing &amp; Forecaster
+                    </h3>
+                    <p className="text-slate-400 text-xs font-semibold">Run-rate needed for 100% monthly achievement</p>
+                  </div>
+                  <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0">
+                    {selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? currentUser.allowed_districts.join(', ') : 'Statewide')}
+                  </span>
                 </div>
 
                 <div className="space-y-3">
@@ -1492,13 +1544,22 @@ Keep this file safe in your Google Drive or personal diary.
                     const daysInMonth = 30;
                     const todayDate = new Date().getDate();
                     const daysRemaining = Math.max(1, daysInMonth - todayDate);
-                    const totalStateNotif = totals.notifications || 0;
-                    const totalStateTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
-                    const pendingStateNotif = Math.max(0, totalStateTarget - totalStateNotif);
-                    const requiredDailyRate = (pendingStateNotif / daysRemaining).toFixed(1);
-                    const currentDailyRate = todayDate > 0 ? (totalStateNotif / todayDate).toFixed(1) : 0;
+                    
+                    let scopedTarget = 0;
+                    if (selectedDistrict !== 'All') {
+                      scopedTarget = targetsData.filter(t => t.district === selectedDistrict).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                    } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+                      scopedTarget = targetsData.filter(t => currentUser.allowed_districts.includes(t.district)).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                    } else {
+                      scopedTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                    }
+                    
+                    const totalScopeNotif = totals.notifications || 0;
+                    const pendingScopeNotif = Math.max(0, scopedTarget - totalScopeNotif);
+                    const requiredDailyRate = (pendingScopeNotif / daysRemaining).toFixed(1);
+                    const currentDailyRate = todayDate > 0 ? (totalScopeNotif / todayDate).toFixed(1) : 0;
                     const projectedTotal = Math.round(Number(currentDailyRate) * daysInMonth);
-                    const projectedPct = totalStateTarget > 0 ? Math.round((projectedTotal / totalStateTarget) * 100) : 100;
+                    const projectedPct = scopedTarget > 0 ? Math.round((projectedTotal / scopedTarget) * 100) : 100;
 
                     return (
                       <>
@@ -1514,6 +1575,10 @@ Keep this file safe in your Google Drive or personal diary.
                         </div>
 
                         <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-2 text-xs">
+                          <div className="flex justify-between font-bold">
+                            <span className="text-slate-500">Scope Target &amp; Actual:</span>
+                            <span className="font-black text-slate-800">{totalScopeNotif} / {scopedTarget} Notif</span>
+                          </div>
                           <div className="flex justify-between font-bold">
                             <span className="text-slate-500">Month-End Projection:</span>
                             <span className="font-black text-indigo-600">{projectedTotal} Notifications ({projectedPct}%)</span>
@@ -1539,14 +1604,14 @@ Keep this file safe in your Google Drive or personal diary.
                     <h3 className="text-slate-800 font-black text-base flex items-center gap-2">
                       <span>⚖️</span> District Benchmarking Comparator
                     </h3>
-                    <p className="text-slate-400 text-xs font-semibold">Side-by-side performance comparison</p>
+                    <p className="text-slate-400 text-xs font-semibold">Side-by-side performance &amp; percentage share</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <select value={compareDistA} onChange={(e) => setCompareDistA(e.target.value)} className="bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none">
+                    <select value={compareDistA} onChange={(e) => setCompareDistA(e.target.value)} className="bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none">
                       {districts.filter(d => d !== 'All').map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                     <span className="text-xs font-black text-slate-400">vs</span>
-                    <select value={compareDistB} onChange={(e) => setCompareDistB(e.target.value)} className="bg-slate-50 border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none">
+                    <select value={compareDistB} onChange={(e) => setCompareDistB(e.target.value)} className="bg-purple-50 border border-purple-200 text-purple-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none">
                       {districts.filter(d => d !== 'All').map(d => <option key={d} value={d}>{d}</option>)}
                     </select>
                   </div>
@@ -1555,34 +1620,69 @@ Keep this file safe in your Google Drive or personal diary.
                 {(() => {
                   const recA = rawRecords.filter(r => r.working_place === compareDistA);
                   const recB = rawRecords.filter(r => r.working_place === compareDistB);
+                  
+                  const targetA = targetsData.filter(t => t.district === compareDistA).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                  const targetB = targetsData.filter(t => t.district === compareDistB).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                  
                   const notifA = recA.reduce((sum, r) => sum + (r.notifications || 0), 0);
                   const notifB = recB.reduce((sum, r) => sum + (r.notifications || 0), 0);
+                  const achievePctA = targetA > 0 ? Math.round((notifA / targetA) * 100) : 0;
+                  const achievePctB = targetB > 0 ? Math.round((notifB / targetB) * 100) : 0;
+
                   const testsA = recA.reduce((sum, r) => sum + (r.tests || 0), 0);
                   const testsB = recB.reduce((sum, r) => sum + (r.tests || 0), 0);
+
+                  const presumpA = recA.reduce((sum, r) => sum + (r.presumptive || 0), 0);
+                  const presumpB = recB.reduce((sum, r) => sum + (r.presumptive || 0), 0);
+                  const convA = presumpA > 0 ? Math.round((testsA / presumpA) * 100) : 0;
+                  const convB = presumpB > 0 ? Math.round((testsB / presumpB) * 100) : 0;
+
                   const dbtA = recA.reduce((sum, r) => sum + (r.dbt || 0), 0);
                   const dbtB = recB.reduce((sum, r) => sum + (r.dbt || 0), 0);
                   const kmA = recA.reduce((sum, r) => sum + (r.total_km || 0), 0);
                   const kmB = recB.reduce((sum, r) => sum + (r.total_km || 0), 0);
 
                   const metrics = [
-                    { label: "Notifications", a: notifA, b: notifB },
-                    { label: "Samples Tested", a: testsA, b: testsB },
-                    { label: "DBT Processed", a: dbtA, b: dbtB },
-                    { label: "Travelled KM", a: kmA, b: kmB }
+                    { label: "Target Achievement", aVal: `${achievePctA}%`, bVal: `${achievePctB}%`, aSub: `${notifA}/${targetA}`, bSub: `${notifB}/${targetB}`, rawA: achievePctA, rawB: achievePctB },
+                    { label: "Testing Yield / Conv.", aVal: `${convA}%`, bVal: `${convB}%`, aSub: `${testsA} tests`, bSub: `${testsB} tests`, rawA: convA, rawB: convB },
+                    { label: "Notifications Volume", aVal: notifA, bVal: notifB, aSub: "Total Notif", bSub: "Total Notif", rawA: notifA, rawB: notifB },
+                    { label: "DBT Processed", aVal: dbtA, bVal: dbtB, aSub: "Bank Seeded", bSub: "Bank Seeded", rawA: dbtA, rawB: dbtB }
                   ];
 
                   return (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-auto">
-                      {metrics.map((m, idx) => (
-                        <div key={idx} className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 text-center">
-                          <span className="text-[10px] font-black uppercase text-slate-400 block mb-2">{m.label}</span>
-                          <div className="flex justify-between items-center text-xs font-black">
-                            <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg">{m.a}</span>
-                            <span className="text-[10px] text-slate-300">vs</span>
-                            <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded-lg">{m.b}</span>
+                      {metrics.map((m, idx) => {
+                        const totalVal = (Number(m.rawA) || 0) + (Number(m.rawB) || 0);
+                        const shareA = totalVal > 0 ? Math.round(((Number(m.rawA) || 0) / totalVal) * 100) : 50;
+                        const shareB = 100 - shareA;
+                        return (
+                          <div key={idx} className="bg-slate-50/80 p-3 rounded-2xl border border-slate-100 text-center flex flex-col justify-between">
+                            <span className="text-[10px] font-black uppercase text-slate-400 block mb-1.5">{m.label}</span>
+                            
+                            <div className="flex justify-between items-center text-xs font-black my-1">
+                              <div className="text-left">
+                                <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-lg block">{m.aVal}</span>
+                                <span className="text-[9px] text-slate-400 font-bold block mt-0.5">{m.aSub}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-300 font-bold px-1">vs</span>
+                              <div className="text-right">
+                                <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded-lg block">{m.bVal}</span>
+                                <span className="text-[9px] text-slate-400 font-bold block mt-0.5">{m.bSub}</span>
+                              </div>
+                            </div>
+
+                            {/* Relative split bar */}
+                            <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden flex mt-2">
+                              <div className="bg-indigo-500 h-full" style={{ width: `${shareA}%` }} title={`${compareDistA}: ${shareA}%`}></div>
+                              <div className="bg-purple-500 h-full" style={{ width: `${shareB}%` }} title={`${compareDistB}: ${shareB}%`}></div>
+                            </div>
+                            <div className="flex justify-between text-[8px] font-black text-slate-400 mt-1">
+                              <span>{shareA}%</span>
+                              <span>{shareB}%</span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -2361,7 +2461,7 @@ Keep this file safe in your Google Drive or personal diary.
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
                   <span>📊</span> DFY Executive Reports &amp; Export Studio
                 </h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {month} &bull; Bihar 10 Districts Mission</p>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {month} &bull; Bihar TB Mission ({Object.keys(staffDirectory).length || 22} Districts)</p>
               </div>
               <button onClick={() => setShowReportsStudio(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
             </div>
@@ -2416,20 +2516,22 @@ Keep this file safe in your Google Drive or personal diary.
                         onClick={handleDownloadKpi}
                         className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95"
                       >
-                        <span>📥</span> Download {reportsDistrict} KPI (.xlsx)
+                        <span>📥</span> {reportsDistrict ? `Download ${reportsDistrict} KPI (.xlsx)` : 'Download KPI (.xlsx)'}
                       </button>
                     </div>
 
                     <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-between">
                       <div>
-                        <span className="text-xs font-black text-emerald-900 block mb-1">All 10 Districts Master ZIP</span>
-                        <p className="text-[11px] text-emerald-700 font-medium">1-Click bundles all 10 Bihar district `.xlsx` workbooks into a single ZIP archive.</p>
+                        <span className="text-xs font-black text-emerald-900 block mb-1">
+                          {currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? 'Permitted Districts Master ZIP' : 'All Districts Master ZIP'}
+                        </span>
+                        <p className="text-[11px] text-emerald-700 font-medium">1-Click bundles all permitted Bihar district `.xlsx` workbooks into a single ZIP archive.</p>
                       </div>
                       <button
                         onClick={handleDownloadAllZip}
                         className="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
                       >
-                        <span>📦</span> Download All 10 Districts (ZIP)
+                        <span>📦</span> {currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `Download Permitted Districts (${currentUser.allowed_districts.length} ZIP)` : 'Download All Districts (ZIP)'}
                       </button>
                     </div>
                   </div>
@@ -2441,10 +2543,10 @@ Keep this file safe in your Google Drive or personal diary.
                 <div className="space-y-4">
                   <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                     <h4 className="text-sm font-black text-slate-800 mb-1">Consolidated State Performance Summary (.xlsx)</h4>
-                    <p className="text-xs text-slate-500 font-medium mb-4">Executive 1-page table comparing Target, Notifications Achieved, Samples Tested, DBT velocity, and Travel KM for all 10 districts.</p>
+                    <p className="text-xs text-slate-500 font-medium mb-4">Executive 1-page table comparing Target, Notifications Achieved, Samples Tested, DBT velocity, and Travel KM.</p>
                     
                     <a
-                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-state-summary?month=${month}`}
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-state-summary?month=${month}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md transition-all"
@@ -2463,7 +2565,7 @@ Keep this file safe in your Google Drive or personal diary.
                     <p className="text-xs text-slate-500 font-medium mb-4">Detailed staff breakdown containing active reporting days, total travel KM (for fuel reimbursement), and categorized ID achievements.</p>
                     
                     <a
-                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}`}
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all"

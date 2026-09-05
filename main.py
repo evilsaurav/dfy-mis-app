@@ -884,9 +884,15 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/download-all-kpi-workbooks")
-async def download_all_kpi_workbooks(month: Optional[str] = None):
+async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Optional[str] = None):
     try:
-        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        all_bihar = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_set = set([d.strip() for d in districts.split(",") if d.strip()])
+            bihar_districts = [d for d in all_bihar if d in allowed_set]
+        else:
+            bihar_districts = all_bihar
+
         zip_buffer = io.BytesIO()
         month_tag = month or datetime.now().strftime("%Y-%m")
         
@@ -897,8 +903,9 @@ async def download_all_kpi_workbooks(month: Optional[str] = None):
                     zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
                     
         zip_buffer.seek(0)
+        archive_name = "DFY_KPI_Scoped_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
         headers = {
-            'Content-Disposition': f'attachment; filename="DFY_Master_KPI_All_Districts_{month_tag}.zip"'
+            'Content-Disposition': f'attachment; filename="{archive_name}_{month_tag}.zip"'
         }
         return StreamingResponse(
             zip_buffer,
@@ -1074,24 +1081,31 @@ async def my_profile_stats(req: ProfileStatsRequest):
 
 
 @app.get("/admin/today-attendance")
-async def get_today_attendance(date: Optional[str] = None):
+async def get_today_attendance(date: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
             
-        cache_key = f"attendance_{date}"
+        cache_key = f"attendance_{date}_{districts or 'all'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
             
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
         # 1. Fetch all active staff
         staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         staff_list = []
         for doc in staff_docs:
             d = doc.to_dict()
-            if d.get("district") and d.get("name"):
+            dist = d.get("district")
+            if dist and d.get("name"):
+                if allowed_dist_set and dist not in allowed_dist_set:
+                    continue
                 staff_list.append({
-                    "district": d.get("district"),
+                    "district": dist,
                     "fo_name": d.get("name"),
                     "designation": d.get("designation", "Field Officer")
                 })
@@ -1101,7 +1115,10 @@ async def get_today_attendance(date: Optional[str] = None):
         reports_map = {}
         for doc in report_docs:
             d = doc.to_dict()
-            key = f"{d.get('working_place')}_{d.get('fo_name')}".replace(" ", "").lower()
+            dist = d.get('working_place')
+            if allowed_dist_set and dist not in allowed_dist_set:
+                continue
+            key = f"{dist}_{d.get('fo_name')}".replace(" ", "").lower()
             reports_map[key] = {
                 "submission_count": d.get("submission_count", 1),
                 "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
@@ -1146,13 +1163,17 @@ async def get_today_attendance(date: Optional[str] = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/duplicate-audit")
-async def duplicate_audit(month: Optional[str] = None):
+async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
         start_date = f"{month}-01"
         end_date = f"{month}-31"
+        
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
         
         docs = db.collection("daily_field_reports")\
             .where("date_of_reporting", ">=", start_date)\
@@ -1180,7 +1201,8 @@ async def duplicate_audit(month: Optional[str] = None):
             "tpt_treatment_start_ids": "TPT Treatment Start",
             "tpt_presumptive_ids": "TPT Presumptive",
             "adhar_face_authentication_ids": "Adhar Face Auth",
-            "consent_with_id_ids": "Consent with ID"
+            "consent_with_id_ids": "Consent with ID",
+            "culture_dst_ids": "Culture / DST"
         }
         
         for doc in docs:
@@ -1209,6 +1231,10 @@ async def duplicate_audit(month: Optional[str] = None):
         
         for pid, occurrences in id_registry.items():
             if len(occurrences) > 1:
+                # If district filter is active, at least one occurrence must belong to allowed districts
+                if allowed_dist_set and not any(o.get("district") in allowed_dist_set for o in occurrences):
+                    continue
+
                 # Check if any category was repeated
                 cat_counts = {}
                 for o in occurrences:
@@ -1356,7 +1382,7 @@ async def admin_update_credentials(req: AdminChangeSettingsReq):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/export-state-summary")
-async def export_state_summary(month: Optional[str] = None):
+async def export_state_summary(month: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
@@ -1386,7 +1412,13 @@ async def export_state_summary(month: Optional[str] = None):
             staff_by_dist[dist] = staff_by_dist.get(dist, 0) + 1
             
         # Aggregate by district
-        bihar_districts = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        all_bihar = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_set = set([d.strip() for d in districts.split(",") if d.strip()])
+            bihar_districts = [d for d in all_bihar if d in allowed_set]
+        else:
+            bihar_districts = all_bihar
+
         dist_data = {dist: {
             "District": dist,
             "Active Staff": staff_by_dist.get(dist, 0),
@@ -1441,7 +1473,7 @@ async def export_state_summary(month: Optional[str] = None):
 
 
 @app.get("/admin/export-fo-dossier")
-async def export_fo_dossier(month: Optional[str] = None):
+async def export_fo_dossier(month: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
@@ -1449,6 +1481,10 @@ async def export_fo_dossier(month: Optional[str] = None):
         start_date = f"{month}-01"
         end_date = f"{month}-31"
         
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+
         report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
             .where("date_of_reporting", ">=", start_date)
             .where("date_of_reporting", "<=", end_date)
@@ -1458,9 +1494,12 @@ async def export_fo_dossier(month: Optional[str] = None):
         staff_map = {}
         for sd in staff_docs:
             d = sd.to_dict()
-            key = (d.get("district", ""), d.get("name", ""))
+            dist = d.get("district", "")
+            if allowed_dist_set and dist not in allowed_dist_set:
+                continue
+            key = (dist, d.get("name", ""))
             staff_map[key] = {
-                "District": d.get("district", ""),
+                "District": dist,
                 "Officer Name": d.get("name", ""),
                 "Designation": d.get("designation", "Field Officer"),
                 "Active Reporting Days": 0,
@@ -1478,6 +1517,8 @@ async def export_fo_dossier(month: Optional[str] = None):
             d = doc.to_dict()
             dist = d.get("working_place", "")
             fo = d.get("fo_name", "")
+            if allowed_dist_set and dist not in allowed_dist_set:
+                continue
             key = (dist, fo)
             if key not in staff_map:
                 staff_map[key] = {
@@ -1509,16 +1550,15 @@ async def export_fo_dossier(month: Optional[str] = None):
             entry["Total All IDs"] += day_total_ids
             
         df = pd.DataFrame(list(staff_map.values()))
-        df.sort_values(by=["District", "Officer Name"], inplace=True)
+        if not df.empty:
+            df.sort_values(by=["District", "Officer Name"], inplace=True)
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name="FO Performance Dossier")
             ws = writer.sheets["FO Performance Dossier"]
-            for cell in ws[1]:
-                cell.font = openpyxl.styles.Font(bold=True, color="FFFFFF")
-                cell.fill = openpyxl.styles.PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
-                cell.alignment = openpyxl.styles.Alignment(horizontal="center")
+            # Formatting
+            style_excel_worksheet(ws, header_fill_color="047857")
                 
         output.seek(0)
         filename = f"DFY_FO_Performance_Dossier_{month}.xlsx"
