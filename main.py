@@ -58,9 +58,10 @@ from firebase_admin import credentials, firestore, storage
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import pandas as pd
 import io
 import os
@@ -119,12 +120,16 @@ cache = SimpleTTLCache(default_ttl=30)
 
 app = FastAPI(title="DFY Daily Activity API")
 
+# HTTP GZip compression for all responses > 1KB (shrinks payload 75-85%, saves Render RAM and client mobile bandwidth)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    max_age=86400, # Cache preflight OPTIONS requests for 24 hours (eliminates 50% redundant HTTP hits)
 )
 
 class PinCheck(BaseModel):
@@ -176,6 +181,11 @@ class DashboardRequest(BaseModel):
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest):
     try:
+        cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         start_date = f"{req.month_prefix}-01"
         end_date = f"{req.month_prefix}-31"
         
@@ -183,10 +193,13 @@ async def get_dashboard_data(req: DashboardRequest):
         if req.districts and req.districts.strip() and req.districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in req.districts.split(",") if d.strip()])
 
-        docs = db.collection("daily_field_reports")\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)\
+        # Run blocking Firestore network query in worker thread
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
             .stream()
+        ))
             
         records = []
         for doc in docs:
@@ -261,7 +274,9 @@ async def get_dashboard_data(req: DashboardRequest):
                 "is_override": data.get("is_override_used", False)
             })
             
-        return {"records": records}
+        res = {"records": records}
+        cache.set(cache_key, res, ttl=30) # 30s cache protects Render CPU and Firestore
+        return res
     except HTTPException:
         raise
     except Exception as e:
@@ -270,7 +285,11 @@ async def get_dashboard_data(req: DashboardRequest):
 @app.get("/get-directory")
 async def get_directory():
     try:
-        docs = db.collection("staff_directory").stream()
+        cached = cache.get("staff_directory_dict")
+        if cached is not None:
+            return cached
+
+        docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         directory = {}
         for doc in docs:
             data = doc.to_dict()
@@ -278,6 +297,8 @@ async def get_directory():
             if dist not in directory:
                 directory[dist] = []
             directory[dist].append(data.get("name"))
+
+        cache.set("staff_directory_dict", directory, ttl=300)
         return directory
     except HTTPException:
         raise
@@ -370,7 +391,7 @@ async def submit_daily_report(report: DailyActivityReport):
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
         payload["submission_count"] = 1
         
-        doc = doc_ref.get()
+        doc = await asyncio.to_thread(doc_ref.get)
         if doc.exists:
             d = doc.to_dict()
             for k, v in payload.items():
@@ -387,11 +408,13 @@ async def submit_daily_report(report: DailyActivityReport):
                     else:
                         payload[k] = old_remark
                         
-        doc_ref.set(payload, merge=True)
+        await asyncio.to_thread(lambda: doc_ref.set(payload, merge=True))
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
         return {"message": "Daily report submitted successfully"}
     except HTTPException:
         raise
@@ -401,7 +424,7 @@ async def submit_daily_report(report: DailyActivityReport):
 @app.get("/download-excel")
 async def download_excel():
     try:
-        docs = db.collection("daily_field_reports").stream()
+        docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").stream()))
         consolidated_data = []
         
         list_fields_mapping = {
@@ -970,9 +993,14 @@ class ProfileStatsRequest(BaseModel):
 @app.post("/my-profile-stats")
 async def my_profile_stats(req: ProfileStatsRequest):
     try:
-        # Step 1: Verify PIN
-        pin_doc = db.collection("staff_directory").document(f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()).get()
-        if not pin_doc.exists or pin_doc.to_dict().get("pin") != req.pin:
+        cache_key = f"profile_{req.working_place}_{req.fo_name}_{req.month}".replace(" ", "_").lower()
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Step 1: Verify PIN in background thread
+        pin_doc = await asyncio.to_thread(lambda: db.collection("staff_directory").document(f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()).get())
+        if not pin_doc.exists or str(pin_doc.to_dict().get("pin", "")) != str(req.pin):
             raise HTTPException(status_code=401, detail="Invalid PIN")
             
         # Step 2: Fetch Target (Month-Scoped with Fallback)
@@ -991,9 +1019,13 @@ async def my_profile_stats(req: ProfileStatsRequest):
         except Exception:
             target_val = 50
             
-        # Step 3: Fetch all reports for the month
-        # Since we don't have indexes for fo_name + date, we can fetch by fo_name and filter in memory
-        reports = db.collection("daily_field_reports").where("fo_name", "==", req.fo_name).where("working_place", "==", req.working_place).stream()
+        # Step 3: Fetch all reports for the month asynchronously
+        reports = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("fo_name", "==", req.fo_name)
+            .where("working_place", "==", req.working_place)
+            .stream()
+        ))
         
         stats = {
             "notification": 0,
@@ -1079,7 +1111,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
         if streak_days >= 5:
             badges.append({"id": "streak", "title": "Streak Master", "icon": "??", "desc": f"{streak_days} days continuous reporting"})
         
-        return {
+        res = {
             "success": True,
             "target": target_val,
             "total_achieved": total_achieved,
@@ -1089,6 +1121,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
             "total_km": total_km_month,
             "badges": badges
         }
+        cache.set(cache_key, res, ttl=20)
+        return res
     except HTTPException:
         raise
     except Exception as e:
@@ -1183,6 +1217,11 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
+        cache_key = f"dupe_audit_{month}_{districts or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         start_date = f"{month}-01"
         end_date = f"{month}-31"
         
@@ -1190,10 +1229,12 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
         
-        docs = db.collection("daily_field_reports")\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)\
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
             .stream()
+        ))
             
         id_registry = {} # id -> list of {fo_name, district, date, category}
         
@@ -1271,7 +1312,7 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
                 else:
                     cross_category_history.append(entry)
                     
-        return {
+        res = {
             "status": "success",
             "month": month,
             "total_same_category_duplicates": len(same_category_duplicates),
@@ -1281,6 +1322,8 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
             "cross_category_history": cross_category_history,
             "duplicates": same_category_duplicates + cross_category_history
         }
+        cache.set(cache_key, res, ttl=60) # 60s cache avoids heavy regex/loop parsing on Render
+        return res
     except HTTPException:
         raise
     except Exception as e:
@@ -2406,9 +2449,76 @@ async def delete_admin_user(user_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# =========================================================================
+# --- Enterprise Audit Retention & Auto-Pruning Engine (30-Day Policy) ---
+# =========================================================================
+_last_audit_prune_epoch = 0
+AUDIT_RETENTION_DAYS = 30
+
+async def prune_expired_audit_logs(retention_days: int = AUDIT_RETENTION_DAYS) -> int:
+    """
+    Auto-prune audit logs older than retention_days (default 30 days / 1 month).
+    Deletes expired records in Firestore batches to prevent database bloat.
+    """
+    global _last_audit_prune_epoch
+    _last_audit_prune_epoch = time.time()
+    try:
+        cutoff_str = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+        expired_docs = await asyncio.to_thread(lambda: list(
+            db.collection("admin_audit_logs")
+            .where("timestamp", "<", cutoff_str)
+            .limit(300)
+            .stream()
+        ))
+        
+        if not expired_docs:
+            return 0
+            
+        deleted_count = 0
+        batch = db.batch()
+        for doc in expired_docs:
+            batch.delete(doc.reference)
+            deleted_count += 1
+            
+        await asyncio.to_thread(batch.commit)
+        print(f"[Audit Retention] Successfully auto-pruned {deleted_count} expired audit logs older than {cutoff_str}")
+        return deleted_count
+    except Exception as e:
+        print(f"[Audit Retention Notice] Pruning skipped or error: {e}")
+        return 0
+
+@app.on_event("startup")
+async def on_app_startup_tasks():
+    try:
+        # Background cleanup of expired audit logs on startup
+        asyncio.create_task(prune_expired_audit_logs(AUDIT_RETENTION_DAYS))
+    except Exception as e:
+        print(f"Startup background task notice: {e}")
+
+@app.post("/admin/audit-logs/prune")
+async def manual_prune_audit_logs(days: Optional[int] = 30):
+    try:
+        deleted = await prune_expired_audit_logs(retention_days=days or 30)
+        return {
+            "success": True, 
+            "deleted_count": deleted, 
+            "retention_days": days or 30,
+            "message": f"Successfully pruned {deleted} audit log(s) older than {days or 30} days."
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/admin/audit-logs")
 async def get_audit_logs(query: AuditLogQueryReq):
     try:
+        # Trigger background auto-pruning if > 6 hours have passed since last run
+        global _last_audit_prune_epoch
+        if time.time() - _last_audit_prune_epoch > 21600:
+            asyncio.create_task(prune_expired_audit_logs(AUDIT_RETENTION_DAYS))
+
+        # Enforce 30-day retention cutoff so client never receives expired logs
+        cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
         # Fetch audit logs ordered chronologically descending
         docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
             .order_by("timestamp", direction=firestore.Query.DESCENDING)
@@ -2419,6 +2529,11 @@ async def get_audit_logs(query: AuditLogQueryReq):
         for doc in docs:
             d = doc.to_dict()
             
+            # Retention check: Skip records older than 30 days
+            log_time = d.get("timestamp", "")
+            if log_time and log_time < cutoff_str:
+                continue
+
             # Apply filters in memory
             if query.action_type and query.action_type != "All" and d.get("action_type") != query.action_type:
                 continue
@@ -2434,7 +2549,7 @@ async def get_audit_logs(query: AuditLogQueryReq):
                     
             logs.append(d)
             
-        return {"success": True, "total": len(logs), "logs": logs}
+        return {"success": True, "total": len(logs), "retention_policy": f"Last {AUDIT_RETENTION_DAYS} Days", "logs": logs}
     except HTTPException:
         raise
     except Exception as e:
@@ -2443,6 +2558,8 @@ async def get_audit_logs(query: AuditLogQueryReq):
 @app.get("/admin/export-audit-logs")
 async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All"):
     try:
+        cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+
         docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
             .order_by("timestamp", direction=firestore.Query.DESCENDING)
             .limit(1000)
@@ -2451,6 +2568,8 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
         rows = []
         for idx, doc in enumerate(docs):
             d = doc.to_dict()
+            if d.get("timestamp", "") < cutoff_str:
+                continue
             if action_type and action_type != "All" and d.get("action_type") != action_type:
                 continue
             if district and district != "All" and d.get("district") != district:

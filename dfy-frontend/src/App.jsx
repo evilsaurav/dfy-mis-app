@@ -1199,6 +1199,7 @@ function App() {
 
 
   const submitReport = async () => {
+    if (isSubmitting) return;
     if(!formData.working_place || !formData.fo_name || !formData.pin) {
       showToast("Pehle Zila, Naam aur PIN bharo!", "error");
       return;

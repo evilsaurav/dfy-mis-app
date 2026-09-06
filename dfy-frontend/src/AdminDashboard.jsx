@@ -131,6 +131,8 @@ export default function AdminDashboard() {
   const [pacingSortConfig, setPacingSortConfig] = useState({ key: 'pacingPct', direction: 'desc' });
   const [pacingViewMode, setPacingViewMode] = useState('matrix'); // 'matrix', 'cards'
   const [copiedCoachingOfficer, setCopiedCoachingOfficer] = useState(null);
+  const [isTickerPaused, setIsTickerPaused] = useState(false);
+  const [isPruningAudit, setIsPruningAudit] = useState(false);
 
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const canEditTargets = isSuperAdmin || currentUser?.permissions?.can_edit_targets !== false;
@@ -611,6 +613,30 @@ export default function AdminDashboard() {
   const exportAuditLogsExcel = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     window.open(`${API_BASE_URL}/admin/export-audit-logs?action_type=${auditFilterAction}&district=${auditFilterDistrict}`, '_blank');
+  };
+
+  const handleManualPruneAuditLogs = async () => {
+    if (!window.confirm("Are you sure you want to prune audit logs older than 30 days? Records older than 30 days will be permanently purged from the database.")) {
+      return;
+    }
+    setIsPruningAudit(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/admin/audit-logs/prune?days=30`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        alert(data.message || `Pruned ${data.deleted_count} logs older than 30 days.`);
+        fetchAuditLogs();
+      } else {
+        alert("Failed to prune audit logs.");
+      }
+    } catch (e) {
+      alert("Network error while pruning audit logs.");
+    } finally {
+      setIsPruningAudit(false);
+    }
   };
 
   const handleEmergencyReset = async (e) => {
@@ -1965,25 +1991,67 @@ Keep this file safe in your Google Drive or personal diary.
         {/* Tab 1: Overview & State Analytics */}
         {activeMainTab === 'overview' && (
           <>
-            {/* Real-Time Live Activity Ticker */}
-        {filteredRecords.length > 0 && (
-          <div className="bg-slate-900 text-white rounded-2xl px-5 py-3 shadow-md flex items-center justify-between gap-4 overflow-hidden border border-slate-800 animate-fade-in">
-            <div className="flex items-center gap-2 shrink-0">
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Live Activity Feed</span>
-            </div>
-            <div className="flex-1 overflow-x-auto whitespace-nowrap custom-scrollbar text-xs font-semibold text-slate-300 flex items-center gap-6">
-              {filteredRecords.slice(-6).reverse().map((r, i) => (
-                <span key={i} className="flex items-center gap-1.5">
-                  <strong className="text-white">{r.fo_name}</strong> ({r.working_place}) &bull; <span className="text-emerald-400">{r.notifications} Notif</span> &bull; {r.total_km} KM &bull; <span className="text-slate-400 text-[10px]">{r.date_of_reporting || r.date}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+            {/* Real-Time Live Activity Continuous Scrolling Marquee Ticker */}
+            {filteredRecords.length > 0 && (() => {
+              const recentActivity = filteredRecords.slice(-16).reverse();
+              const tickerItems = [...recentActivity, ...recentActivity];
+
+              return (
+                <div className="bg-slate-900 text-white rounded-2xl px-3 py-2.5 sm:px-5 sm:py-3 shadow-md flex items-center gap-3 overflow-hidden border border-slate-800 animate-fade-in group relative select-none">
+                  {/* Left Label & Live Indicator */}
+                  <div className="flex items-center gap-2 shrink-0 z-20 bg-slate-900 pr-2 sm:pr-3 border-r border-slate-800">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Live Activity Feed</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsTickerPaused(prev => !prev)}
+                      className="text-slate-400 hover:text-white text-[11px] p-1 rounded-md transition-colors ml-1"
+                      title={isTickerPaused ? "Resume Live Auto-Scroll" : "Pause Live Auto-Scroll (or hover mouse to pause)"}
+                    >
+                      {isTickerPaused ? "▶️" : "⏸️"}
+                    </button>
+                  </div>
+
+                  {/* Left edge gradient mask for seamless entry */}
+                  <div className="pointer-events-none absolute left-36 sm:left-44 top-0 bottom-0 w-8 bg-gradient-to-r from-slate-900 to-transparent z-10"></div>
+
+                  {/* Infinite Marquee Track */}
+                  <div className="flex-1 overflow-hidden relative">
+                    <div className={`animate-ticker flex items-center gap-8 ${isTickerPaused ? 'ticker-paused' : ''}`}>
+                      {tickerItems.map((r, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center gap-2 text-xs font-semibold shrink-0 bg-slate-800/80 hover:bg-indigo-900/60 transition-colors px-3 py-1.5 rounded-xl border border-slate-700/60 cursor-pointer"
+                          onClick={() => {
+                            setSelectedDistrict(r.working_place);
+                            setSelectedFO(r.fo_name);
+                          }}
+                          title={`Click to filter by ${r.fo_name} (${r.working_place})`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400"></span>
+                          <strong className="text-white tracking-tight">{r.fo_name}</strong>
+                          <span className="text-slate-400 text-[10px] bg-slate-700/60 px-1.5 py-0.5 rounded-md font-mono">{r.working_place}</span>
+                          <span className="text-emerald-400 font-bold flex items-center gap-0.5">
+                            <span>📈</span> {r.notifications} Notif
+                          </span>
+                          <span className="text-slate-400 text-[11px] font-medium">&bull; {r.total_km} KM</span>
+                          {r.tests > 0 && (
+                            <span className="text-amber-300 text-[11px] font-medium">&bull; 🧪 {r.tests}</span>
+                          )}
+                          <span className="text-slate-500 text-[10px] ml-1">{r.date_of_reporting || r.date}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Right edge gradient mask for seamless exit */}
+                  <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-12 bg-gradient-to-l from-slate-900 to-transparent z-10"></div>
+                </div>
+              );
+            })()}
 
         {/* Live Attendance Banner */}
         {attendance && (
@@ -5093,6 +5161,22 @@ Keep this file safe in your Google Drive or personal diary.
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black px-2.5 py-1.5 rounded-xl flex items-center gap-1 shadow-2xs">
+                  <span>🛡️</span>
+                  <span>Retention: 30 Days (Auto-Pruned)</span>
+                </span>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={handleManualPruneAuditLogs}
+                    disabled={isPruningAudit}
+                    className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                    title="Manually purge logs older than 30 days immediately"
+                  >
+                    <span>🧹</span>
+                    <span>{isPruningAudit ? "Pruning..." : "Prune Old (>30d)"}</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={exportAuditLogsExcel}
