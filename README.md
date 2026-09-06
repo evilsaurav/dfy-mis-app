@@ -11,6 +11,15 @@ An enterprise-grade, offline-first **Management Information System (MIS)** and *
 
 ---
 
+## 📚 Enterprise Technical Documentation
+
+For in-depth architectural blueprints, UI/UX design systems, and data processing specifications, refer to our dedicated documentation guides:
+- 🏗️ **[System Architecture Specification (ARCHITECTURE.md)](ARCHITECTURE.md)**: Cloud-native distributed topology, Render 512MB RAM concurrency hardening, in-memory TTL caching, Firestore schemas, and deployment runbooks.
+- 🎨 **[UI/UX Design System Specification (DESIGN.md)](DESIGN.md)**: Visual identity, color tokens, continuous live activity marquee ticker, dual officer peer comparator, traffic-light status badging, and accessibility.
+- 🔄 **[Data Processing & Feature Pipeline (DATA_PROCESSING.md)](DATA_PROCESSING.md)**: End-to-end data lifecycle, offline IndexedDB sync, working-days dynamic engine, velocity formulas, patient deduplication algorithms, 30-day auto-pruned audit engine, and complete 22-indicator catalog.
+
+---
+
 ## 📑 Table of Contents
 
 - [Overview & Architecture](#-overview--architecture)
