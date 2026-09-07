@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
