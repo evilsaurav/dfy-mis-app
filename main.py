@@ -3000,6 +3000,121 @@ async def delete_broadcast(req: BroadcastDeleteReq, admin: dict = Depends(get_cu
         raise HTTPException(status_code=500, detail=str(e))
 
 # =========================================================================
+# --- Nikshay Cumulative Verification Ledger Helper ---
+# =========================================================================
+def sync_nikshay_cumulative_ledger_sync(
+    patients_to_sync: Dict[str, Dict[str, Any]],
+    admin_user: str
+) -> Dict[str, int]:
+    """
+    Safely merges patient indicators into 'nikshay_verified_patients' in Firestore.
+    Ensures MONOTONIC RETENTION: once True, an indicator is NEVER reverted to False or deleted.
+    Uses batch reads (db.get_all) and batch writes (db.batch) in chunks of 300.
+    Only writes documents that have changes or new indicators to preserve Firestore quotas.
+    """
+    total_processed = len(patients_to_sync)
+    if total_processed == 0:
+        return {"total_processed": 0, "written": 0, "unchanged": 0}
+
+    pids = list(patients_to_sync.keys())
+    chunk_size = 300
+    total_written = 0
+    total_unchanged = 0
+    now_iso = datetime.utcnow().isoformat()
+    now_date = datetime.utcnow().strftime("%Y-%m-%d")
+
+    for i in range(0, len(pids), chunk_size):
+        chunk_pids = pids[i:i + chunk_size]
+        chunk_doc_map = {pid: str(pid).strip().replace("/", "_").replace(".", "_") for pid in chunk_pids}
+        chunk_refs = [db.collection("nikshay_verified_patients").document(chunk_doc_map[pid]) for pid in chunk_pids]
+
+        existing_docs = {}
+        try:
+            snapshots = db.get_all(chunk_refs)
+            for snap in snapshots:
+                if snap.exists:
+                    existing_docs[snap.id] = snap.to_dict()
+        except Exception as err:
+            print(f"[Ledger Sync] Batch get_all warning: {err}")
+            existing_docs = {}
+
+        batch = db.batch()
+        batch_count = 0
+
+        for pid in chunk_pids:
+            doc_id = chunk_doc_map[pid]
+            current = patients_to_sync[pid]
+            existing = existing_docs.get(doc_id, {})
+
+            is_new = not bool(existing)
+
+            notif_val = bool(existing.get("notification_verified", False) or current.get("notification_verified", False))
+            hiv_val = bool(existing.get("hiv_tested", False) or current.get("hiv_tested", False))
+            dm_val = bool(existing.get("dm_tested", False) or current.get("dm_tested", False))
+            hiv_dm_val = bool(existing.get("hiv_dm_tested", False) or current.get("hiv_dm_tested", False) or hiv_val or dm_val)
+            bank_val = bool(existing.get("bank_validated", False) or current.get("bank_validated", False))
+            udst_val = bool(existing.get("udst_done", False) or current.get("udst_done", False))
+            contact_val = bool(existing.get("contact_tracing_done", False) or current.get("contact_tracing_done", False))
+
+            has_changes = (
+                is_new or
+                (not existing.get("notification_verified") and notif_val) or
+                (not existing.get("hiv_tested") and hiv_val) or
+                (not existing.get("dm_tested") and dm_val) or
+                (not existing.get("hiv_dm_tested") and hiv_dm_val) or
+                (not existing.get("bank_validated") and bank_val) or
+                (not existing.get("udst_done") and udst_val) or
+                (not existing.get("contact_tracing_done") and contact_val) or
+                (not existing.get("patient_name") and current.get("name")) or
+                (not existing.get("phone") and current.get("phone"))
+            )
+
+            if not has_changes:
+                total_unchanged += 1
+                continue
+
+            merged_record = {
+                "patient_id": str(pid),
+                "patient_name": current.get("name") or existing.get("patient_name", ""),
+                "phone": current.get("phone") or existing.get("phone", ""),
+                "district": current.get("district") or existing.get("district", ""),
+                "notification_verified": notif_val,
+                "hiv_tested": hiv_val,
+                "dm_tested": dm_val,
+                "hiv_dm_tested": hiv_dm_val,
+                "bank_validated": bank_val,
+                "udst_done": udst_val,
+                "contact_tracing_done": contact_val,
+                "treatment_outcome": current.get("outcome") or existing.get("treatment_outcome", ""),
+                "first_verified_at": existing.get("first_verified_at", now_iso),
+                "last_reconciled_at": now_iso,
+                "reconciled_by": admin_user
+            }
+
+            if notif_val and not existing.get("notification_verified_date"):
+                merged_record["notification_verified_date"] = now_date
+            if hiv_val and not existing.get("hiv_verified_date"):
+                merged_record["hiv_verified_date"] = now_date
+            if dm_val and not existing.get("dm_verified_date"):
+                merged_record["dm_verified_date"] = now_date
+            if bank_val and not existing.get("bank_verified_date"):
+                merged_record["bank_verified_date"] = now_date
+            if udst_val and not existing.get("udst_verified_date"):
+                merged_record["udst_verified_date"] = now_date
+            if contact_val and not existing.get("contact_verified_date"):
+                merged_record["contact_verified_date"] = now_date
+
+            doc_ref = db.collection("nikshay_verified_patients").document(doc_id)
+            batch.set(doc_ref, merged_record, merge=True)
+            batch_count += 1
+            total_written += 1
+
+        if batch_count > 0:
+            batch.commit()
+
+    return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
+
+# =========================================================================
 # --- Nikshay Official Excel/CSV Importer & Auto-Reconciler ---
 # =========================================================================
 @app.post("/admin/reconcile-nikshay")
@@ -3277,6 +3392,72 @@ async def reconcile_nikshay(
                     "pending_actions": pending_actions
                 })
 
+        # 8. Permanent Cumulative Verification Ledger Synchronization
+        # Once an indicator is verified, it is permanently locked in Firestore and NEVER lost or erased!
+        patients_to_sync = {}
+        for pid, np in nikshay_patients.items():
+            dfy_info = dfy_details.get(pid)
+            has_dfy = dfy_info is not None
+            is_matched_pt = pid in matched
+            
+            n_hiv = np["hiv_done"]
+            n_dm = np["dm_done"]
+            d_hiv_dm = dfy_info["has_hiv_dm"] if has_dfy else False
+            
+            n_bank = np["bank_done"]
+            d_bank = dfy_info["has_dbt"] if has_dfy else False
+            
+            n_udst = np["udst_done"]
+            d_udst = dfy_info["has_udst"] if has_dfy else False
+            
+            n_ct = np["contact_done"]
+            d_ct = dfy_info["has_contact"] if has_dfy else False
+            
+            if (is_matched_pt or n_hiv or n_dm or d_hiv_dm or n_bank or d_bank or 
+                n_udst or d_udst or n_ct or d_ct or np.get("outcome")):
+                patients_to_sync[pid] = {
+                    "name": np["name"] or "",
+                    "phone": np["phone"] or "",
+                    "district": np["district"] or (dfy_info["district"] if has_dfy else ""),
+                    "notification_verified": is_matched_pt or (dfy_info["has_notification"] if has_dfy else False),
+                    "hiv_tested": n_hiv or d_hiv_dm,
+                    "dm_tested": n_dm or d_hiv_dm,
+                    "hiv_dm_tested": n_hiv or n_dm or d_hiv_dm,
+                    "bank_validated": n_bank or d_bank,
+                    "udst_done": n_udst or d_udst,
+                    "contact_tracing_done": n_ct or d_ct,
+                    "outcome": np.get("outcome", "")
+                }
+                
+        for pid, dfy_info in dfy_details.items():
+            if pid not in patients_to_sync:
+                has_any_service = (dfy_info["has_notification"] or dfy_info["has_hiv_dm"] or 
+                                   dfy_info["has_dbt"] or dfy_info["has_udst"] or dfy_info["has_contact"])
+                if has_any_service:
+                    patients_to_sync[pid] = {
+                        "name": "",
+                        "phone": "",
+                        "district": dfy_info.get("district", ""),
+                        "notification_verified": dfy_info.get("has_notification", False),
+                        "hiv_tested": dfy_info.get("has_hiv_dm", False),
+                        "dm_tested": dfy_info.get("has_hiv_dm", False),
+                        "hiv_dm_tested": dfy_info.get("has_hiv_dm", False),
+                        "bank_validated": dfy_info.get("has_dbt", False),
+                        "udst_done": dfy_info.get("has_udst", False),
+                        "contact_tracing_done": dfy_info.get("has_contact", False),
+                        "outcome": ""
+                    }
+                    
+        ledger_sync_res = {"total_processed": 0, "written": 0, "unchanged": 0}
+        try:
+            ledger_sync_res = await asyncio.to_thread(
+                sync_nikshay_cumulative_ledger_sync,
+                patients_to_sync,
+                admin.get("username", "Admin")
+            )
+        except Exception as sync_err:
+            print(f"[Ledger Sync] Non-blocking notice: {sync_err}")
+
         summary = {
             "month": month,
             "district": district,
@@ -3291,7 +3472,12 @@ async def reconcile_nikshay(
             "only_in_dfy_count": len(only_in_dfy),
             "ready_for_portal_count": len(ready_for_nikshay_list),
             "urgent_field_action_count": len(urgent_field_action_list),
-            "cascade": cascade_summary
+            "cascade": cascade_summary,
+            "cumulative_ledger": {
+                "patients_evaluated": ledger_sync_res.get("total_processed", 0),
+                "newly_locked_or_upgraded": ledger_sync_res.get("written", 0),
+                "already_locked_preserved": ledger_sync_res.get("unchanged", 0)
+            }
         }
         
         preview_missing_in_dfy = [{
@@ -3329,6 +3515,142 @@ async def reconcile_nikshay(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reconciliation error: {str(e)}")
+
+# =========================================================================
+# --- Nikshay Permanent Cumulative Verification Ledger API ---
+# =========================================================================
+@app.get("/admin/nikshay/cumulative-ledger")
+async def get_cumulative_ledger(
+    district: Optional[str] = Query("All"),
+    search: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        cache_key = f"ledger_{district}_{search}_{page}_{limit}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        query = db.collection("nikshay_verified_patients")
+        if district and district != "All":
+            query = query.where("district", "==", district)
+            
+        docs = await asyncio.to_thread(lambda: list(query.stream()))
+        total_in_db = len(docs)
+        
+        filtered = []
+        s_lower = search.strip().lower() if search else None
+        
+        total_hiv_dm = 0
+        total_bank = 0
+        total_udst = 0
+        total_contact = 0
+        
+        for doc in docs:
+            d = doc.to_dict()
+            if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"):
+                total_hiv_dm += 1
+            if d.get("bank_validated"):
+                total_bank += 1
+            if d.get("udst_done"):
+                total_udst += 1
+            if d.get("contact_tracing_done"):
+                total_contact += 1
+                
+            if s_lower:
+                pid = str(d.get("patient_id", "")).lower()
+                pname = str(d.get("patient_name", "")).lower()
+                pphone = str(d.get("phone", "")).lower()
+                pdist = str(d.get("district", "")).lower()
+                if not (s_lower in pid or s_lower in pname or s_lower in pphone or s_lower in pdist):
+                    continue
+                    
+            filtered.append(d)
+            
+        filtered.sort(key=lambda x: str(x.get("last_reconciled_at") or x.get("first_verified_at") or ""), reverse=True)
+        
+        total_matched = len(filtered)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated = filtered[start_idx:end_idx]
+        
+        res = {
+            "success": True,
+            "total_records": total_matched,
+            "total_in_collection": total_in_db,
+            "page": page,
+            "limit": limit,
+            "total_pages": max(1, (total_matched + limit - 1) // limit),
+            "metrics": {
+                "total_verified": total_in_db,
+                "hiv_dm_verified": total_hiv_dm,
+                "bank_validated": total_bank,
+                "udst_done": total_udst,
+                "contact_tracing_done": total_contact
+            },
+            "patients": paginated
+        }
+        
+        cache.set(cache_key, res, ttl=20)
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ledger retrieval error: {str(e)}")
+
+@app.get("/admin/nikshay/cumulative-ledger/export")
+async def export_cumulative_ledger(
+    district: Optional[str] = Query("All"),
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        query = db.collection("nikshay_verified_patients")
+        if district and district != "All":
+            query = query.where("district", "==", district)
+            
+        docs = await asyncio.to_thread(lambda: list(query.stream()))
+        
+        rows = []
+        for doc in docs:
+            d = doc.to_dict()
+            rows.append({
+                "Episode ID": d.get("patient_id", ""),
+                "Patient Name": d.get("patient_name", ""),
+                "Phone": d.get("phone", ""),
+                "District": d.get("district", ""),
+                "Notification Verified": "Yes" if d.get("notification_verified") else "Pending",
+                "HIV/DM Screened": "Yes" if (d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested")) else "Pending",
+                "DBT Bank Validated": "Yes" if d.get("bank_validated") else "Pending",
+                "UDST Done": "Yes" if d.get("udst_done") else "Pending",
+                "Contact Tracing Done": "Yes" if d.get("contact_tracing_done") else "Pending",
+                "Treatment Outcome": d.get("treatment_outcome", ""),
+                "First Verified Date": str(d.get("first_verified_at", ""))[:10],
+                "Last Reconciled Date": str(d.get("last_reconciled_at", ""))[:10],
+                "Reconciled By": d.get("reconciled_by", "")
+            })
+            
+        df_export = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_export.to_excel(writer, index=False, sheet_name="Cumulative Ledger")
+            ws = writer.sheets["Cumulative Ledger"]
+            style_excel_worksheet(ws, header_fill_color="059669")
+            
+        output.seek(0)
+        dist_slug = district.replace(" ", "_") if district else "All"
+        filename = f"Nikshay_Cumulative_Ledger_{dist_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export error: {str(e)}")
 
 # =========================================================================
 # --- Patient Longitudinal Journey Timeline Drawer API ---
@@ -3387,6 +3709,37 @@ async def get_patient_journey(patient_id: str):
                         "district": dist,
                         "order": order
                     })
+
+        # Check Permanent Nikshay Cumulative Ledger
+        ledger_doc_id = clean_id.replace("/", "_").replace(".", "_")
+        try:
+            ledger_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(ledger_doc_id).get())
+            if ledger_doc.exists:
+                ld = ledger_doc.to_dict()
+                if not patient_meta["district"] and ld.get("district"):
+                    patient_meta["district"] = ld.get("district")
+                if not patient_meta.get("patient_name") and ld.get("patient_name"):
+                    patient_meta["patient_name"] = ld.get("patient_name")
+                    
+                active_nikshay_indicators = []
+                if ld.get("bank_validated"): active_nikshay_indicators.append("💳 DBT Bank Validated")
+                if ld.get("hiv_dm_tested") or ld.get("hiv_tested") or ld.get("dm_tested"): active_nikshay_indicators.append("🩺 HIV/DM Screened")
+                if ld.get("udst_done"): active_nikshay_indicators.append("🔬 UDST Tested")
+                if ld.get("contact_tracing_done"): active_nikshay_indicators.append("👥 Contact Traced")
+                
+                milestones.append({
+                    "date": str(ld.get("last_reconciled_at") or ld.get("first_verified_at") or "Permanent")[:10],
+                    "action": f"Nikshay Official Ledger Verified: {', '.join(active_nikshay_indicators) if active_nikshay_indicators else 'Enrolled & Monitored'}",
+                    "icon": "🔒",
+                    "category": "nikshay_verified",
+                    "fo_name": f"Nikshay Ledger ({ld.get('reconciled_by', 'Admin')})",
+                    "district": ld.get("district", patient_meta["district"]),
+                    "order": 0
+                })
+                patient_meta["nikshay_verified"] = True
+                patient_meta["nikshay_indicators"] = active_nikshay_indicators
+        except Exception as l_err:
+            print(f"[Patient Journey] Ledger lookup note: {l_err}")
                     
         milestones.sort(key=lambda m: (m["date"], m["order"]))
         
