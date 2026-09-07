@@ -72,14 +72,24 @@ firebase_creds_env = os.environ.get("FIREBASE_CREDENTIALS")
 if firebase_creds_env:
     cred_dict = json.loads(firebase_creds_env)
     cred = credentials.Certificate(cred_dict)
+    project_id = cred_dict.get("project_id", "dfy-reporting-mis-18b9a")
 else:
     cred = credentials.Certificate("firebase_key.json")
+    try:
+        with open("firebase_key.json", "r", encoding="utf-8") as f:
+            project_id = json.load(f).get("project_id", "dfy-reporting-mis-18b9a")
+    except Exception:
+        project_id = "dfy-reporting-mis-18b9a"
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred, {
-        'storageBucket': 'dfy-reporting-mis.appspot.com'
+        'storageBucket': f'{project_id}.appspot.com'
     })
-db = firestore.client()
+
+try:
+    db = firestore.client(database_id="default")
+except Exception:
+    db = firestore.client()
 
 import time
 import asyncio
