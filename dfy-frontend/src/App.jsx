@@ -1935,23 +1935,7 @@ function App() {
                 </div>
               )}
 
-              {/* ⚡ Pending Interventions Action Center for Field Officers */}
-              <PendingInterventionsActionCenter 
-                cascadeAlerts={cascadeAlerts}
-                cascadeSummary={cascadeSummary}
-                loading={loadingCascadeAlerts}
-                formData={formData}
-                onAutofill={handleAutofillPendingId}
-                showToast={showToast}
-                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
-              />
-
-              <div className="grid grid-cols-1 gap-4">
-
-              </div>
-
-              
-                <Accordion title="1. Patient Registration" defaultOpen={true}>
+              <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
                     <IdBucket 
                       key={cat.key} 
