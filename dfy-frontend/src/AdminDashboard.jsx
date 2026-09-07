@@ -3522,7 +3522,7 @@ Keep this file safe in your Google Drive or personal diary.
             </div>
 
             {/* Quick KPI Summary Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 my-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 my-3">
               <div className="bg-rose-50 border border-rose-100 p-3 rounded-2xl text-center">
                 <span className="text-[10px] font-black uppercase text-rose-500 block">High Risk (2+ Missing)</span>
                 <p className="text-xl font-black text-rose-700">{cascadeData.summary.high_risk_count || 0}</p>
@@ -3542,6 +3542,10 @@ Keep this file safe in your Google Drive or personal diary.
               <div className="bg-emerald-50 border border-emerald-100 p-3 rounded-2xl text-center">
                 <span className="text-[10px] font-black uppercase text-emerald-600 block">UDST / Testing</span>
                 <p className="text-xl font-black text-emerald-700">{cascadeData.summary.udst_pending || 0}</p>
+              </div>
+              <div className="bg-pink-50 border border-pink-100 p-3 rounded-2xl text-center">
+                <span className="text-[10px] font-black uppercase text-pink-600 block">Diff TB Care</span>
+                <p className="text-xl font-black text-pink-700">{cascadeData.summary.diff_tb_pending || 0}</p>
               </div>
             </div>
 
@@ -3573,6 +3577,7 @@ Keep this file safe in your Google Drive or personal diary.
                   <option value="DBT">💳 DBT Missing Only</option>
                   <option value="CONTACT">👥 Contact Tracing Missing</option>
                   <option value="UDST">🔬 UDST Testing Missing</option>
+                  <option value="DIFF_TB">🩺 Diff TB Care Missing</option>
                   <option value="PRESUMPTIVE">🔍 Presumptive Not Tested</option>
                 </select>
 
@@ -3610,6 +3615,7 @@ Keep this file safe in your Google Drive or personal diary.
                   if (cascadeRiskFilter === 'DBT' && a.has_dbt) return false;
                   if (cascadeRiskFilter === 'CONTACT' && a.has_contact) return false;
                   if (cascadeRiskFilter === 'UDST' && a.has_udst) return false;
+                  if (cascadeRiskFilter === 'DIFF_TB' && a.has_diff_tb) return false;
                   if (cascadeRiskFilter === 'PRESUMPTIVE' && a.cascade_type !== 'Presumptive') return false;
                   return true;
                 });

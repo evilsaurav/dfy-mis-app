@@ -288,7 +288,7 @@ const MyProfileDashboard = ({ formData, showToast }) => {
             </span>
           </div>
           <p className="text-[11px] text-slate-600 font-semibold mb-3 px-1">
-            Niche diye gaye patients ka TB Notification ho chuka hai lekin unke DBT ya TPT interventions baaki hain:
+            Niche diye gaye patients ka TB Notification ho chuka hai lekin unke HIV/DM, DBT, UDST, Contact Tracing ya Diff TB interventions baaki hain:
           </p>
 
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">

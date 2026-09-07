@@ -2029,7 +2029,8 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             ("contact_tracing_ids", "contact_tracing"),
             ("sample_tested_ids", "sample_tested"),
             ("presumptive_ids", "presumptive"),
-            ("outcome_assigned_ids", "outcome")
+            ("outcome_assigned_ids", "outcome"),
+            ("differentiated_tb_ids", "differentiated_tb")
         ]:
             ids = d.get(cat_key, [])
             if isinstance(ids, list):
@@ -2048,7 +2049,8 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                                 "contact_tracing": False,
                                 "sample_tested": False,
                                 "presumptive": False,
-                                "outcome": False
+                                "outcome": False,
+                                "differentiated_tb": False
                             }
                         patient_map[pid_clean][flag] = True
                         if flag in ["notification", "presumptive"] and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
@@ -2065,6 +2067,7 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
         "dbt_pending": 0,
         "contact_pending": 0,
         "udst_pending": 0,
+        "diff_tb_pending": 0,
         "presumptive_untested": 0,
         "high_risk_count": 0
     }
@@ -2095,6 +2098,9 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             if not p["sample_tested"]:
                 missing_actions.append("UDST / Testing Missing")
                 summary["udst_pending"] += 1
+            if not p.get("differentiated_tb"):
+                missing_actions.append("Diff TB Care Assessment Missing")
+                summary["diff_tb_pending"] += 1
                 
             risk_level = "LOW"
             if len(missing_actions) >= 2:
@@ -2117,6 +2123,7 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                     "has_dbt": p["dbt"],
                     "has_contact": p["contact_tracing"],
                     "has_udst": p["sample_tested"],
+                    "has_diff_tb": p.get("differentiated_tb", False),
                     "has_outcome": p["outcome"]
                 })
                 
@@ -2183,9 +2190,11 @@ async def export_cascade_alerts(month: Optional[str] = None, district: Optional[
                 "Days Elapsed": a["days_elapsed"],
                 "Risk Level": a["risk_level"],
                 "Missing Interventions": " | ".join(a["missing_actions"]),
-                "DBT Status": "Completed" if a["has_dbt"] else "PENDING",
-                "HIV/DM Status": "Completed" if a["has_hiv"] else "PENDING",
-                "TPT Status": "Completed" if a["has_tpt"] else "PENDING"
+                "HIV/DM Status": "Completed" if a.get("has_hiv") else "PENDING",
+                "DBT Status": "Completed" if a.get("has_dbt") else "PENDING",
+                "UDST Status": "Completed" if a.get("has_udst") else "PENDING",
+                "Contact Tracing": "Completed" if a.get("has_contact") else "PENDING",
+                "Diff TB Status": "Completed" if a.get("has_diff_tb") else "PENDING"
             })
             
         df = pd.DataFrame(rows)
