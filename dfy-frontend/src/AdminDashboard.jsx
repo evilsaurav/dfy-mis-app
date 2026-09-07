@@ -134,11 +134,105 @@ export default function AdminDashboard() {
   const [isTickerPaused, setIsTickerPaused] = useState(false);
   const [isPruningAudit, setIsPruningAudit] = useState(false);
 
+  // Phase 3: Nikshay Reconciler & Patient Journey State
+  const [showNikshayModal, setShowNikshayModal] = useState(false);
+  const [nikshayFile, setNikshayFile] = useState(null);
+  const [nikshayMonth, setNikshayMonth] = useState(() => month);
+  const [nikshayDistrict, setNikshayDistrict] = useState('All');
+  const [nikshayLoading, setNikshayLoading] = useState(false);
+  const [nikshayResult, setNikshayResult] = useState(null);
+  const [nikshayError, setNikshayError] = useState('');
+  const [nikshayActiveTab, setNikshayActiveTab] = useState('missing_in_dfy');
+
+  const [showJourneyModal, setShowJourneyModal] = useState(false);
+  const [journeySearchId, setJourneySearchId] = useState('');
+  const [journeyLoading, setJourneyLoading] = useState(false);
+  const [journeyResult, setJourneyResult] = useState(null);
+  const [journeyError, setJourneyError] = useState('');
+
+  const handleReconcileNikshay = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!nikshayFile) {
+      setNikshayError('Please select an official Nikshay .xlsx or .csv file first.');
+      return;
+    }
+    setNikshayLoading(true);
+    setNikshayError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', nikshayFile);
+      formData.append('month', nikshayMonth || month);
+      formData.append('district', nikshayDistrict);
+      
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem('dfy_admin_token') || '';
+      const res = await fetch(`${API_BASE_URL}/admin/reconcile-nikshay`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || 'Reconciliation failed');
+      }
+      const data = await res.json();
+      setNikshayResult(data);
+    } catch (err) {
+      setNikshayError(err.message || 'Error running reconciliation');
+    } finally {
+      setNikshayLoading(false);
+    }
+  };
+
+  const handleFetchJourney = async (patientIdToFetch) => {
+    const pid = (patientIdToFetch || journeySearchId || '').trim();
+    if (!pid) return;
+    setJourneyLoading(true);
+    setJourneyError('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/patient-journey/${encodeURIComponent(pid)}`);
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || 'Patient not found');
+      }
+      const data = await res.json();
+      setJourneyResult(data);
+    } catch (err) {
+      setJourneyError(err.message || 'Error fetching patient timeline');
+    } finally {
+      setJourneyLoading(false);
+    }
+  };
+
+
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const canEditTargets = isSuperAdmin || currentUser?.permissions?.can_edit_targets !== false;
   const canManageStaff = isSuperAdmin || currentUser?.permissions?.can_manage_staff !== false;
   const canEditPatientIds = isSuperAdmin || currentUser?.permissions?.can_edit_patient_ids !== false;
   const canExportReports = isSuperAdmin || currentUser?.permissions?.can_export_reports !== false;
+
+  const getAdminToken = useCallback(() => {
+    return encodeURIComponent(localStorage.getItem('dfy_admin_token') || '');
+  }, []);
+
+  const authFetch = useCallback(async (url, options = {}) => {
+    const token = localStorage.getItem('dfy_admin_token') || '';
+    const headers = {
+      ...(options.headers || {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      localStorage.removeItem('dfy_admin_auth');
+      localStorage.removeItem('dfy_admin_user');
+      localStorage.removeItem('dfy_admin_token');
+      setIsAuthenticated(false);
+      setError('Your admin session has expired. Please log in again.');
+    }
+    return res;
+  }, []);
+
 
   const fetchActiveBroadcasts = async () => {
     try {
@@ -148,7 +242,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         distParam = `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/api/broadcasts/active?${roleParam}${distParam}`);
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/active?${roleParam}${distParam}`);
       if (res.ok) {
         const data = await res.json();
         const active = data.broadcasts || [];
@@ -176,7 +270,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         distParam = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/api/broadcasts/all${distParam}`);
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/all${distParam}`);
       if (res.ok) {
         const data = await res.json();
         setBroadcastsList(data.broadcasts || []);
@@ -208,7 +302,7 @@ export default function AdminDashboard() {
     setNewBroadcastModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/broadcasts/create`, {
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -239,7 +333,7 @@ export default function AdminDashboard() {
     if (!window.confirm("Kya aap sach me yeh broadcast alert delete karna chahte hain? Sabhi staff aur sub-admins ke portal se turant hat jayega.")) return;
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/broadcasts/delete`, {
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -283,7 +377,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/admin/today-attendance${q}`);
+      const res = await authFetch(`${API_BASE_URL}/admin/today-attendance${q}`);
       if (res.ok) {
         const data = await res.json();
         setAttendance(data);
@@ -349,7 +443,7 @@ export default function AdminDashboard() {
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
       distParam = `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
     }
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}`, "_blank");
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}&token=${getAdminToken()}`, "_blank");
   };
 
   const fetchDuplicateAudit = async () => {
@@ -359,7 +453,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/admin/duplicate-audit${q}`);
+      const res = await authFetch(`${API_BASE_URL}/admin/duplicate-audit${q}`);
       if (res.ok) {
         const data = await res.json();
         setDuplicateAudit(data);
@@ -425,7 +519,7 @@ export default function AdminDashboard() {
                   if (isSubAdmin && !currentUser.allowed_districts.includes(t.district)) {
                     continue;
                   }
-                  await fetch(API_BASE_URL + "/update-target", {
+                  await authFetch(API_BASE_URL + "/update-target", {
                       method: "POST", headers:{"Content-Type":"application/json"},
                       body: JSON.stringify({ 
                           fo_name: t.fo_name, 
@@ -473,6 +567,7 @@ export default function AdminDashboard() {
         try {
           localStorage.setItem('dfy_admin_user', JSON.stringify(userObj));
           localStorage.setItem('dfy_admin_auth', 'true');
+        if (data.token) localStorage.setItem('dfy_admin_token', data.token);
         } catch (e) {}
 
         if (userObj.role === 'SUB_ADMIN' && userObj.allowed_districts && !userObj.allowed_districts.includes('All')) {
@@ -510,7 +605,7 @@ export default function AdminDashboard() {
     setLoadingAdminUsers(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/users/list`);
+      const res = await authFetch(`${API_BASE_URL}/admin/users/list`);
       if (res.ok) {
         const data = await res.json();
         setAdminUsersList(data.users || []);
@@ -548,7 +643,7 @@ export default function AdminDashboard() {
         status: "ACTIVE"
       };
 
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
+      const res = await authFetch(`${API_BASE_URL}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -569,7 +664,7 @@ export default function AdminDashboard() {
     if (!window.confirm(`Are you sure you want to delete admin user "${userId}"?`)) return;
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/users/delete?user_id=${encodeURIComponent(userId)}`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/users/delete?user_id=${encodeURIComponent(userId)}`, {
         method: "POST"
       });
       if (res.ok) {
@@ -588,7 +683,7 @@ export default function AdminDashboard() {
     setLoadingAuditLogs(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/audit-logs`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/audit-logs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -612,7 +707,7 @@ export default function AdminDashboard() {
 
   const exportAuditLogsExcel = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/admin/export-audit-logs?action_type=${auditFilterAction}&district=${auditFilterDistrict}`, '_blank');
+    window.open(`${API_BASE_URL}/admin/export-audit-logs?action_type=${auditFilterAction}&district=${auditFilterDistrict}&token=${getAdminToken()}`, '_blank');
   };
 
   const handleManualPruneAuditLogs = async () => {
@@ -622,7 +717,7 @@ export default function AdminDashboard() {
     setIsPruningAudit(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/audit-logs/prune?days=30`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/audit-logs/prune?days=30`, {
         method: "POST"
       });
       if (res.ok) {
@@ -689,7 +784,7 @@ export default function AdminDashboard() {
     setIsSavingSecurity(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/auth/update-credentials`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/auth/update-credentials`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ current_password: changeCurrentPw, new_password: changeNewPw })
@@ -723,7 +818,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts${q}`);
+      const res = await authFetch(`${API_BASE_URL}/api/reports/cascade-alerts${q}`);
       if (res.ok) {
         const json = await res.json();
         setCascadeData(json.data || { summary: {}, alerts: [] });
@@ -742,7 +837,7 @@ export default function AdminDashboard() {
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
       }
-      const res = await fetch(`${API_BASE_URL}/admin/staff/list${q}`);
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/list${q}`);
       if (res.ok) {
         const data = await res.json();
         setStaffList(data.staff || []);
@@ -763,7 +858,7 @@ export default function AdminDashboard() {
     setPinChangeModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/staff/update-pin`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/update-pin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ district, name, new_pin: newPin.trim() })
@@ -795,7 +890,7 @@ export default function AdminDashboard() {
     setAddStaffModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/staff/add`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -826,7 +921,7 @@ export default function AdminDashboard() {
     setDeleteStaffModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/staff/delete`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ district, name })
@@ -858,7 +953,7 @@ export default function AdminDashboard() {
 
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/reports/edit-id`, {
+      const res = await authFetch(`${API_BASE_URL}/api/reports/edit-id`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -913,7 +1008,7 @@ export default function AdminDashboard() {
       return;
     }
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}`, "_blank");
+    window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}&token=${getAdminToken()}`, "_blank");
   };
 
   const handleDownloadAllZip = () => {
@@ -921,7 +1016,7 @@ export default function AdminDashboard() {
     const subAdminParam = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
       ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`
       : '';
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${subAdminParam}`, "_blank");
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${subAdminParam}&token=${getAdminToken()}`, "_blank");
   };
 
   const copyWhatsAppBulletin = () => {
@@ -1003,7 +1098,7 @@ Keep this file safe in your Google Drive or personal diary.
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         payload.districts = currentUser.allowed_districts.join(',');
       }
-      const res = await fetch(`${API_BASE_URL}/admin/dashboard-data`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/dashboard-data`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -1748,6 +1843,24 @@ Keep this file safe in your Google Drive or personal diary.
                 </button>
               </>
             )}
+
+            <button 
+              onClick={() => setShowNikshayModal(true)} 
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
+              title="Upload official Nikshay Excel/CSV dump and auto-reconcile against field reports"
+            >
+              <span>⚖️</span>
+              <span>Nikshay Reconciler</span>
+            </button>
+
+            <button 
+              onClick={() => setShowJourneyModal(true)} 
+              className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
+              title="Track complete longitudinal clinical pathway of any patient ID"
+            >
+              <span>🔍</span>
+              <span>Patient Journey</span>
+            </button>
 
             <button 
               onClick={() => {
@@ -3590,7 +3703,7 @@ Keep this file safe in your Google Drive or personal diary.
               </div>
 
               <a
-                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${month}&district=${cascadeFilterDist}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
+                href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-cascade-alerts?month=${month}&district=${cascadeFilterDist}&token=${getAdminToken()}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-md shadow-rose-600/20 active:scale-95 transition-all flex items-center gap-1.5"
@@ -4190,7 +4303,7 @@ Keep this file safe in your Google Drive or personal diary.
                     <p className="text-xs text-slate-500 font-medium mb-4">Executive 1-page table comparing Target, Notifications Achieved, Samples Tested, DBT velocity, and Travel KM.</p>
                     
                     <a
-                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-state-summary?month=${month}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-state-summary?month=${month}&token=${getAdminToken()}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md transition-all"
@@ -4209,7 +4322,7 @@ Keep this file safe in your Google Drive or personal diary.
                     <p className="text-xs text-slate-500 font-medium mb-4">Detailed staff breakdown containing active reporting days, total travel KM (for fuel reimbursement), and categorized ID achievements.</p>
                     
                     <a
-                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
+                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}&token=${getAdminToken()}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all"
