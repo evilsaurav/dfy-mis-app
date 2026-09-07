@@ -2085,22 +2085,28 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
         if p["notification"]:
             summary["total_notified"] += 1
             missing_actions = []
+            missing_items = []
             
             if not p["hiv_dm"]:
                 missing_actions.append("HIV & DM Testing Missing")
+                missing_items.append({"key": "hiv_dm_ids", "label": "HIV & DM", "icon": "🧪", "color": "purple"})
                 summary["hiv_pending"] += 1
             if not p["dbt"]:
                 missing_actions.append("DBT Bank Seeding Missing")
+                missing_items.append({"key": "dbt_ids", "label": "DBT Bank", "icon": "💳", "color": "amber"})
                 summary["dbt_pending"] += 1
+            if not p.get("differentiated_tb"):
+                missing_actions.append("Diff TB Care Assessment Missing")
+                missing_items.append({"key": "differentiated_tb_ids", "label": "Diff TB", "icon": "🩺", "color": "pink"})
+                summary["diff_tb_pending"] += 1
             if not p["contact_tracing"]:
                 missing_actions.append("Contact Tracing Missing")
+                missing_items.append({"key": "contact_tracing_ids", "label": "Contact Tracing", "icon": "👥", "color": "blue"})
                 summary["contact_pending"] += 1
             if not p["sample_tested"]:
                 missing_actions.append("UDST / Testing Missing")
+                missing_items.append({"key": "sample_tested_ids", "label": "UDST Testing", "icon": "🔬", "color": "emerald"})
                 summary["udst_pending"] += 1
-            if not p.get("differentiated_tb"):
-                missing_actions.append("Diff TB Care Assessment Missing")
-                summary["diff_tb_pending"] += 1
                 
             risk_level = "LOW"
             if len(missing_actions) >= 2:
@@ -2117,6 +2123,7 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                     "notified_date": p["first_date"],
                     "days_elapsed": days_elapsed,
                     "missing_actions": missing_actions,
+                    "missing_items": missing_items,
                     "risk_level": risk_level,
                     "cascade_type": "Notification",
                     "has_hiv": p["hiv_dm"],
@@ -2137,12 +2144,14 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                 "notified_date": p["first_date"],
                 "days_elapsed": days_elapsed,
                 "missing_actions": ["Presumptive TB Testing Pending"],
+                "missing_items": [{"key": "sample_tested_ids", "label": "UDST Testing", "icon": "🔬", "color": "emerald"}],
                 "risk_level": "HIGH" if days_elapsed > 7 else "MEDIUM",
                 "cascade_type": "Presumptive",
                 "has_hiv": p["hiv_dm"],
                 "has_dbt": p["dbt"],
                 "has_contact": p["contact_tracing"],
                 "has_udst": False,
+                "has_diff_tb": p.get("differentiated_tb", False),
                 "has_outcome": p["outcome"]
             })
                 

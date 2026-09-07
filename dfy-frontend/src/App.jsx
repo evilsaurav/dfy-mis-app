@@ -572,7 +572,7 @@ const MyProfileDashboard = ({ formData, showToast }) => {
 };
 
 // --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk }) => {
+const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk, pendingCascadeIds = [] }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
 
@@ -617,12 +617,61 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
         <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
       </label>
 
+      {/* ⚡ Smart Pending Patient Interventions Suggestion Chips */}
+      {pendingCascadeIds && pendingCascadeIds.length > 0 && (
+        <div className="mb-3 bg-amber-50/90 p-2.5 rounded-xl border border-amber-200/90 animate-fade-in shadow-2xs">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1">
+              <span>⚡</span> Pending Follow-up Patients ({pendingCascadeIds.length}):
+            </span>
+            {pendingCascadeIds.some(pid => !safeIds.includes(pid)) && onAddBulk && (
+              <button
+                type="button"
+                onClick={() => {
+                  const missing = pendingCascadeIds.filter(pid => !safeIds.includes(pid));
+                  onAddBulk(missing);
+                  if (showToast) showToast(`Added ${missing.length} pending IDs to ${title}!`, "success");
+                }}
+                className="text-[9px] font-bold text-amber-900 bg-white hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 transition-colors active:scale-95 shadow-2xs"
+              >
+                + Add All Pending ({pendingCascadeIds.filter(pid => !safeIds.includes(pid)).length})
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+            {pendingCascadeIds.map((pid, pIdx) => {
+              const isAdded = safeIds.includes(pid);
+              return (
+                <button
+                  key={pIdx}
+                  type="button"
+                  disabled={isAdded}
+                  onClick={() => {
+                    onAdd(pid);
+                    if (showToast) showToast(`Patient #${pid} added to ${title}!`, "success");
+                  }}
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
+                    isAdded 
+                      ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
+                      : 'bg-white hover:bg-amber-600 hover:text-white border-amber-200 text-amber-900 shadow-2xs'
+                  }`}
+                  title={isAdded ? "Already Added" : `Tap to add ID #${pid} to ${title}`}
+                >
+                  <span>{pid}</span>
+                  <span>{isAdded ? '✓' : '+'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Smart Notification ID Suggestion Chips */}
       {suggestedIds && suggestedIds.length > 0 && (
         <div className="mb-3 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
           <div className="flex justify-between items-center mb-1.5">
             <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
-              <span>💡</span> Notification IDs ({suggestedIds.length}):
+              <span>💡</span> Today's Notified IDs ({suggestedIds.length}):
             </span>
             {suggestedIds.some(sid => !safeIds.includes(sid)) && onAddBulk && (
               <button
@@ -698,6 +747,287 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+};
+
+// --- Pending Interventions Action Center for Field Officers ---
+const PendingInterventionsActionCenter = ({
+  cascadeAlerts = [],
+  cascadeSummary = {},
+  loading = false,
+  formData,
+  onAutofill,
+  showToast
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('ALL');
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-xs mb-5 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold animate-pulse">
+        <span className="animate-spin text-base">⏳</span>
+        <span>Checking pending patient follow-ups...</span>
+      </div>
+    );
+  }
+
+  if (!cascadeAlerts || cascadeAlerts.length === 0) {
+    return null;
+  }
+
+  const hivCount = cascadeSummary.hiv_pending || 0;
+  const diffTbCount = cascadeSummary.diff_tb_pending || 0;
+  const dbtCount = cascadeSummary.dbt_pending || 0;
+  const contactCount = cascadeSummary.contact_pending || 0;
+  const udstCount = cascadeSummary.udst_pending || 0;
+
+  const filteredAlerts = cascadeAlerts.filter(a => {
+    if (selectedFilter === 'ALL') return true;
+    if (selectedFilter === 'HIV') return !a.has_hiv;
+    if (selectedFilter === 'DIFF_TB') return !a.has_diff_tb;
+    if (selectedFilter === 'DBT') return !a.has_dbt;
+    if (selectedFilter === 'CONTACT') return !a.has_contact;
+    if (selectedFilter === 'UDST') return !a.has_udst;
+    return true;
+  });
+
+  const displayedAlerts = isExpanded ? filteredAlerts : filteredAlerts.slice(0, 3);
+
+  const copyWhatsAppList = () => {
+    let msg = `*DFY TB MIS: Pending Follow-up Action List*\n`;
+    msg += `Field Officer: *${formData.fo_name}* (${formData.working_place})\n`;
+    msg += `Total Pending Patients: *${cascadeAlerts.length}*\n`;
+    msg += `Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
+
+    cascadeAlerts.forEach((a, idx) => {
+      msg += `${idx + 1}. Patient ID: *${a.id}*\n`;
+      msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
+      msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
+    });
+    msg += `_Kripya in sabhi patients ka priority follow-up karein!_`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg).then(() => {
+        showToast("📋 Follow-up task list WhatsApp ke liye copy ho gayi!", "success");
+      }).catch(() => {
+        showToast("Failed to copy", "error");
+      });
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-rose-50/90 via-amber-50/70 to-purple-50/70 rounded-3xl p-4 sm:p-5 border border-rose-200/80 shadow-sm mb-6 animate-fade-in">
+      {/* Header Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-0.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">⚡</span>
+          <div>
+            <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <span>Pending Interventions</span>
+              <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
+                {cascadeAlerts.length}
+              </span>
+            </h3>
+            <p className="text-[10px] text-slate-500 font-bold">
+              In notified patients ke follow-up actions baaki hain
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={copyWhatsAppList}
+          className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-xl transition-all active:scale-95 flex items-center gap-1 shrink-0 shadow-2xs"
+          title="Share on WhatsApp"
+        >
+          <span>📱</span> WhatsApp List
+        </button>
+      </div>
+
+      {/* Quick Category Summary Filter Pills */}
+      <div className="flex flex-wrap gap-1.5 mb-3.5">
+        <button
+          type="button"
+          onClick={() => setSelectedFilter('ALL')}
+          className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all ${
+            selectedFilter === 'ALL'
+              ? 'bg-slate-800 text-white shadow-xs'
+              : 'bg-white/80 text-slate-600 hover:bg-white border border-slate-200/70'
+          }`}
+        >
+          All ({cascadeAlerts.length})
+        </button>
+
+        {hivCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('HIV')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'HIV'
+                ? 'bg-purple-700 text-white shadow-xs'
+                : 'bg-purple-50 text-purple-800 border border-purple-200/80 hover:bg-purple-100'
+            }`}
+          >
+            <span>🧪</span> HIV &amp; DM ({hivCount})
+          </button>
+        )}
+
+        {diffTbCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('DIFF_TB')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'DIFF_TB'
+                ? 'bg-pink-700 text-white shadow-xs'
+                : 'bg-pink-50 text-pink-800 border border-pink-200/80 hover:bg-pink-100'
+            }`}
+          >
+            <span>🩺</span> Diff TB ({diffTbCount})
+          </button>
+        )}
+
+        {dbtCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('DBT')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'DBT'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100'
+            }`}
+          >
+            <span>💳</span> DBT ({dbtCount})
+          </button>
+        )}
+
+        {contactCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('CONTACT')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'CONTACT'
+                ? 'bg-blue-700 text-white shadow-xs'
+                : 'bg-blue-50 text-blue-800 border border-blue-200/80 hover:bg-blue-100'
+            }`}
+          >
+            <span>👥</span> Contact ({contactCount})
+          </button>
+        )}
+
+        {udstCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('UDST')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'UDST'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100'
+            }`}
+          >
+            <span>🔬</span> UDST ({udstCount})
+          </button>
+        )}
+      </div>
+
+      {/* Patients Action Cards */}
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+        {displayedAlerts.map((alt, idx) => {
+          const isUrgent = alt.days_elapsed > 7;
+          return (
+            <div
+              key={idx}
+              className="bg-white p-3 rounded-2xl border border-rose-100/90 shadow-2xs hover:border-indigo-200 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                    #{alt.id}
+                  </span>
+                  <span
+                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                      isUrgent
+                        ? 'bg-red-100 text-red-700 border border-red-200'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {isUrgent ? `🔴 Urgent (${alt.days_elapsed}d)` : `${alt.days_elapsed}d ago`}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(alt.id);
+                      showToast(`Patient #${alt.id} copied!`, "success");
+                    }
+                  }}
+                  className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                  title="Copy Patient ID"
+                >
+                  📋
+                </button>
+              </div>
+
+              {/* 1-Tap Action Autofill Buttons */}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {(alt.missing_items || []).map((m, mIdx) => {
+                  const alreadyAdded = (formData[m.key] || []).includes(alt.id);
+                  const btnColorClass =
+                    m.color === 'purple'
+                      ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-600 hover:text-white'
+                      : m.color === 'pink'
+                      ? 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-600 hover:text-white'
+                      : m.color === 'amber'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-600 hover:text-white'
+                      : m.color === 'blue'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-600 hover:text-white'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-600 hover:text-white';
+
+                  if (alreadyAdded) {
+                    return (
+                      <span
+                        key={mIdx}
+                        className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-xl flex items-center gap-1 opacity-90"
+                      >
+                        <span>✓ Added to</span>
+                        <span className="font-extrabold">{m.label}</span>
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={mIdx}
+                      type="button"
+                      onClick={() => onAutofill(m.key, alt.id, m.label)}
+                      className={`text-[10px] font-bold border px-2.5 py-1 rounded-xl transition-all active:scale-95 flex items-center gap-1 shadow-2xs ${btnColorClass}`}
+                      title={`Tap to autofill #${alt.id} into ${m.label}`}
+                    >
+                      <span>+ {m.label}</span>
+                      <span>{m.icon || '➕'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Expand / Collapse Footer */}
+      {filteredAlerts.length > 3 && (
+        <div className="text-center mt-2.5 pt-2 border-t border-rose-200/50">
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 transition-colors"
+          >
+            {isExpanded ? '▴ Show Less' : `▾ View All ${filteredAlerts.length} Pending Patients`}
+          </button>
+        </div>
       )}
     </div>
   );
@@ -797,6 +1127,29 @@ function App() {
   const [unreadBroadcastPopup, setUnreadBroadcastPopup] = useState(null);
   const [showAllAlertsModal, setShowAllAlertsModal] = useState(false);
 
+  // Field Staff Pending Interventions State
+  const [cascadeAlerts, setCascadeAlerts] = useState([]);
+  const [cascadeSummary, setCascadeSummary] = useState({});
+  const [loadingCascadeAlerts, setLoadingCascadeAlerts] = useState(false);
+
+  const fetchFoCascadeAlerts = async (district, fo_name) => {
+    if (!district || !fo_name) return;
+    try {
+      setLoadingCascadeAlerts(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?district=${encodeURIComponent(district)}&fo_name=${encodeURIComponent(fo_name)}`);
+      if (res.ok) {
+        const json = await res.json();
+        setCascadeAlerts(json.data?.alerts || []);
+        setCascadeSummary(json.data?.summary || {});
+      }
+    } catch (e) {
+      console.warn("Failed to fetch FO cascade alerts", e);
+    } finally {
+      setLoadingCascadeAlerts(false);
+    }
+  };
+
   const fetchFoBroadcasts = async (district) => {
     if (!district) return;
     try {
@@ -889,6 +1242,7 @@ function App() {
           setPinStatus("success");
           setIsLoggedIn(true);
           fetchFoBroadcasts(session.working_place);
+          fetchFoCascadeAlerts(session.working_place, session.fo_name);
         }
       }
     } catch (e) {
@@ -1077,6 +1431,7 @@ function App() {
         setIsLoggedIn(true);
         setIsSubmitting(false);
         fetchFoBroadcasts(formData.working_place);
+        fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
         showToast(`Welcome back, ${formData.fo_name}!`, 'success');
       }
     }
@@ -1117,6 +1472,29 @@ function App() {
   const removeId = (field, idx) => {
     setFormData({ ...formData, [field]: formData[field].filter((_, i) => i !== idx) });
   };
+
+  const handleAutofillPendingId = (fieldKey, patientId, label) => {
+    const current = formData[fieldKey] || [];
+    if (current.includes(patientId)) {
+      showToast(`ID #${patientId} pehle se ${label} me add hai!`, "error");
+      return;
+    }
+    addId(fieldKey, patientId);
+    showToast(`✓ #${patientId} added to ${label}!`, "success");
+  };
+
+  const pendingMap = useMemo(() => {
+    const map = {};
+    (cascadeAlerts || []).forEach(alt => {
+      (alt.missing_items || []).forEach(m => {
+        if (!map[m.key]) map[m.key] = [];
+        if (!map[m.key].includes(alt.id)) {
+          map[m.key].push(alt.id);
+        }
+      });
+    });
+    return map;
+  }, [cascadeAlerts]);
   
   const addDoctor = () => {
     const trimmed = docName.trim();
@@ -1510,12 +1888,17 @@ function App() {
                 </div>
               )}
 
+              {/* ⚡ Prominent Pending Interventions Action Center for Field Officers */}
+              <PendingInterventionsActionCenter 
+                cascadeAlerts={cascadeAlerts}
+                cascadeSummary={cascadeSummary}
+                loading={loadingCascadeAlerts}
+                formData={formData}
+                onAutofill={handleAutofillPendingId}
+                showToast={showToast}
+              />
+
               <div className="grid grid-cols-1 gap-4">
-
-
-
-
-
 
               </div>
 
@@ -1531,6 +1914,7 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={cat.key !== 'notification_ids' ? (formData.notification_ids || []) : []}
+                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1546,6 +1930,7 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
+                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1559,6 +1944,7 @@ function App() {
                       onRemove={(idx) => removeId('culture_dst_ids', idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
+                      pendingCascadeIds={pendingMap['culture_dst_ids'] || []}
                       onAddBulk={(newIds) => addMultipleIds('culture_dst_ids', newIds)}
                     />
                   )}
@@ -1574,6 +1960,7 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
+                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1589,6 +1976,7 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
+                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1604,6 +1992,7 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
+                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
