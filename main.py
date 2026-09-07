@@ -86,9 +86,12 @@ if not firebase_admin._apps:
         'storageBucket': f'{project_id}.appspot.com'
     })
 
-try:
+db_id = os.environ.get("FIRESTORE_DATABASE_ID")
+if db_id:
+    db = firestore.client(database_id=db_id)
+elif project_id == "dfy-reporting-mis-18b9a":
     db = firestore.client(database_id="default")
-except Exception:
+else:
     db = firestore.client()
 
 import time
