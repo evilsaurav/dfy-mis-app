@@ -52,8 +52,298 @@ const Accordion = ({ title, children, defaultOpen = false }) => {
 };
 
 
+// --- Pending Interventions Action Center for Field Officers ---
+const PendingInterventionsActionCenter = ({
+  cascadeAlerts = [],
+  cascadeSummary = {},
+  loading = false,
+  formData,
+  onAutofill,
+  showToast
+}) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedFilter, setSelectedFilter] = useState('ALL');
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-xs mb-5 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold animate-pulse">
+        <span className="animate-spin text-base">⏳</span>
+        <span>Checking pending patient follow-ups...</span>
+      </div>
+    );
+  }
+
+  if (!cascadeAlerts || cascadeAlerts.length === 0) {
+    return null;
+  }
+
+  const hivCount = cascadeSummary.hiv_pending || 0;
+  const diffTbCount = cascadeSummary.diff_tb_pending || 0;
+  const dbtCount = cascadeSummary.dbt_pending || 0;
+  const contactCount = cascadeSummary.contact_pending || 0;
+  const udstCount = cascadeSummary.udst_pending || 0;
+
+  const filteredAlerts = cascadeAlerts.filter(a => {
+    if (selectedFilter === 'ALL') return true;
+    if (selectedFilter === 'HIV') return !a.has_hiv;
+    if (selectedFilter === 'DIFF_TB') return !a.has_diff_tb;
+    if (selectedFilter === 'DBT') return !a.has_dbt;
+    if (selectedFilter === 'CONTACT') return !a.has_contact;
+    if (selectedFilter === 'UDST') return !a.has_udst;
+    return true;
+  });
+
+  const displayedAlerts = isExpanded ? filteredAlerts : filteredAlerts.slice(0, 3);
+
+  const copyWhatsAppList = () => {
+    const foName = formData?.fo_name || '';
+    const workingPlace = formData?.working_place || '';
+    let msg = `*DFY TB MIS: Pending Follow-up Action List*\n`;
+    if (foName) msg += `Field Officer: *${foName}* (${workingPlace})\n`;
+    msg += `Total Pending Patients: *${cascadeAlerts.length}*\n`;
+    msg += `Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
+
+    cascadeAlerts.forEach((a, idx) => {
+      msg += `${idx + 1}. Patient ID: *${a.id}*\n`;
+      msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
+      msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
+    });
+    msg += `_Kripya in sabhi patients ka priority follow-up karein!_`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg).then(() => {
+        showToast("📋 Follow-up task list WhatsApp ke liye copy ho gayi!", "success");
+      }).catch(() => {
+        showToast("Failed to copy", "error");
+      });
+    }
+  };
+
+  return (
+    <div className="bg-gradient-to-br from-rose-50/90 via-amber-50/70 to-purple-50/70 rounded-3xl p-4 sm:p-5 border border-rose-200/80 shadow-sm mb-6 animate-fade-in">
+      {/* Header Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-0.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">⚡</span>
+          <div>
+            <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+              <span>Pending Interventions</span>
+              <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
+                {cascadeAlerts.length}
+              </span>
+            </h3>
+            <p className="text-[10px] text-slate-500 font-bold">
+              In notified patients ke follow-up actions baaki hain
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={copyWhatsAppList}
+          className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-xl transition-all active:scale-95 flex items-center gap-1 shrink-0 shadow-2xs"
+          title="Share on WhatsApp"
+        >
+          <span>📱</span> WhatsApp List
+        </button>
+      </div>
+
+      {/* Quick Category Summary Filter Pills */}
+      <div className="flex flex-wrap gap-1.5 mb-3.5">
+        <button
+          type="button"
+          onClick={() => setSelectedFilter('ALL')}
+          className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all ${
+            selectedFilter === 'ALL'
+              ? 'bg-slate-800 text-white shadow-xs'
+              : 'bg-white/80 text-slate-600 hover:bg-white border border-slate-200/70'
+          }`}
+        >
+          All ({cascadeAlerts.length})
+        </button>
+
+        {hivCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('HIV')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'HIV'
+                ? 'bg-purple-700 text-white shadow-xs'
+                : 'bg-purple-50 text-purple-800 border border-purple-200/80 hover:bg-purple-100'
+            }`}
+          >
+            <span>🧪</span> HIV &amp; DM ({hivCount})
+          </button>
+        )}
+
+        {diffTbCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('DIFF_TB')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'DIFF_TB'
+                ? 'bg-pink-700 text-white shadow-xs'
+                : 'bg-pink-50 text-pink-800 border border-pink-200/80 hover:bg-pink-100'
+            }`}
+          >
+            <span>🩺</span> Diff TB ({diffTbCount})
+          </button>
+        )}
+
+        {dbtCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('DBT')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'DBT'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100'
+            }`}
+          >
+            <span>💳</span> DBT ({dbtCount})
+          </button>
+        )}
+
+        {contactCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('CONTACT')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'CONTACT'
+                ? 'bg-blue-700 text-white shadow-xs'
+                : 'bg-blue-50 text-blue-800 border border-blue-200/80 hover:bg-blue-100'
+            }`}
+          >
+            <span>👥</span> Contact ({contactCount})
+          </button>
+        )}
+
+        {udstCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setSelectedFilter('UDST')}
+            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
+              selectedFilter === 'UDST'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100'
+            }`}
+          >
+            <span>🔬</span> UDST ({udstCount})
+          </button>
+        )}
+      </div>
+
+      {/* Patients Action Cards */}
+      <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+        {displayedAlerts.map((alt, idx) => {
+          const isUrgent = alt.days_elapsed > 7;
+          return (
+            <div
+              key={idx}
+              className="bg-white p-3 rounded-2xl border border-rose-100/90 shadow-2xs hover:border-indigo-200 transition-colors"
+            >
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                    #{alt.id}
+                  </span>
+                  <span
+                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                      isUrgent
+                        ? 'bg-red-100 text-red-700 border border-red-200'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {isUrgent ? `🔴 Urgent (${alt.days_elapsed}d)` : `${alt.days_elapsed}d ago`}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(alt.id);
+                      showToast(`Patient #${alt.id} copied!`, "success");
+                    }
+                  }}
+                  className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                  title="Copy Patient ID"
+                >
+                  📋
+                </button>
+              </div>
+
+              {/* 1-Tap Action Autofill Buttons */}
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {(alt.missing_items || []).map((m, mIdx) => {
+                  const alreadyAdded = (formData && formData[m.key] ? formData[m.key] : []).includes(alt.id);
+                  const btnColorClass =
+                    m.color === 'purple'
+                      ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-600 hover:text-white'
+                      : m.color === 'pink'
+                      ? 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-600 hover:text-white'
+                      : m.color === 'amber'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-600 hover:text-white'
+                      : m.color === 'blue'
+                      ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-600 hover:text-white'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-600 hover:text-white';
+
+                  if (alreadyAdded) {
+                    return (
+                      <span
+                        key={mIdx}
+                        className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-xl flex items-center gap-1 opacity-90"
+                      >
+                        <span>✓ Added to</span>
+                        <span className="font-extrabold">{m.label}</span>
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <button
+                      key={mIdx}
+                      type="button"
+                      onClick={() => onAutofill && onAutofill(m.key, alt.id, m.label)}
+                      className={`text-[10px] font-bold border px-2.5 py-1 rounded-xl transition-all active:scale-95 flex items-center gap-1 shadow-2xs ${btnColorClass}`}
+                      title={`Tap to autofill #${alt.id} into ${m.label}`}
+                    >
+                      <span>+ {m.label}</span>
+                      <span>{m.icon || '➕'}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Expand / Collapse Footer */}
+      {filteredAlerts.length > 3 && (
+        <div className="text-center mt-2.5 pt-2 border-t border-rose-200/50">
+          <button
+            type="button"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 transition-colors"
+          >
+            {isExpanded ? '▴ Show Less' : `▾ View All ${filteredAlerts.length} Pending Patients`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- My Profile Dashboard ---
-const MyProfileDashboard = ({ formData, showToast }) => {
+const MyProfileDashboard = ({ 
+  formData, 
+  showToast, 
+  cascadeAlerts: propCascadeAlerts, 
+  cascadeSummary: propCascadeSummary, 
+  loadingAlerts: propLoadingAlerts,
+  onAutofill 
+}) => {
   const [stats, setStats] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [copiedKey, setCopiedKey] = useState(null);
@@ -275,55 +565,15 @@ const MyProfileDashboard = ({ formData, showToast }) => {
         </div>
       </div>
 
-      {/* 🚨 FO Predictive Cascade & Dropout Alerts */}
-      {cascadeAlerts.length > 0 && (
-        <div className="bg-gradient-to-r from-rose-50 to-amber-50 rounded-3xl p-5 shadow-sm border border-rose-100/80 mb-6 animate-fade-in">
-          <div className="flex items-center justify-between mb-3 px-1">
-            <h3 className="text-xs font-black text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
-              <span>🚨</span>
-              <span>Pending Patient Interventions ({cascadeAlerts.length})</span>
-            </h3>
-            <span className="text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full border border-rose-200">
-              Action Required
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-600 font-semibold mb-3 px-1">
-            Niche diye gaye patients ka TB Notification ho chuka hai lekin unke HIV/DM, DBT, UDST, Contact Tracing ya Diff TB interventions baaki hain:
-          </p>
-
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
-            {cascadeAlerts.map((alt, altIdx) => (
-              <div key={altIdx} className="bg-white p-3 rounded-2xl border border-rose-100 flex items-center justify-between shadow-xs">
-                <div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">{alt.id}</span>
-                    <span className="text-[10px] font-bold text-slate-400">Notified {alt.notified_date} ({alt.days_elapsed}d ago)</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {alt.missing_actions.map((m, mIdx) => (
-                      <span key={mIdx} className="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">
-                        {m}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (navigator.clipboard) {
-                      navigator.clipboard.writeText(alt.id);
-                      showToast(`Patient ID #${alt.id} copied!`, "success");
-                    }
-                  }}
-                  className="text-xs font-bold text-indigo-600 hover:text-white hover:bg-indigo-600 bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-xl transition-all active:scale-95 shrink-0 ml-2"
-                >
-                  Copy ID 📋
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center */}
+      <PendingInterventionsActionCenter 
+        cascadeAlerts={propCascadeAlerts || cascadeAlerts}
+        cascadeSummary={propCascadeSummary || {}}
+        loading={propLoadingAlerts !== undefined ? propLoadingAlerts : loadingAlerts}
+        formData={formData}
+        onAutofill={onAutofill}
+        showToast={showToast}
+      />
 
       {/* 30-Day Activity Calendar */}
       <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-6">
@@ -751,288 +1001,6 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
     </div>
   );
 };
-
-// --- Pending Interventions Action Center for Field Officers ---
-const PendingInterventionsActionCenter = ({
-  cascadeAlerts = [],
-  cascadeSummary = {},
-  loading = false,
-  formData,
-  onAutofill,
-  showToast
-}) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [selectedFilter, setSelectedFilter] = useState('ALL');
-
-  if (loading) {
-    return (
-      <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-xs mb-5 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold animate-pulse">
-        <span className="animate-spin text-base">⏳</span>
-        <span>Checking pending patient follow-ups...</span>
-      </div>
-    );
-  }
-
-  if (!cascadeAlerts || cascadeAlerts.length === 0) {
-    return null;
-  }
-
-  const hivCount = cascadeSummary.hiv_pending || 0;
-  const diffTbCount = cascadeSummary.diff_tb_pending || 0;
-  const dbtCount = cascadeSummary.dbt_pending || 0;
-  const contactCount = cascadeSummary.contact_pending || 0;
-  const udstCount = cascadeSummary.udst_pending || 0;
-
-  const filteredAlerts = cascadeAlerts.filter(a => {
-    if (selectedFilter === 'ALL') return true;
-    if (selectedFilter === 'HIV') return !a.has_hiv;
-    if (selectedFilter === 'DIFF_TB') return !a.has_diff_tb;
-    if (selectedFilter === 'DBT') return !a.has_dbt;
-    if (selectedFilter === 'CONTACT') return !a.has_contact;
-    if (selectedFilter === 'UDST') return !a.has_udst;
-    return true;
-  });
-
-  const displayedAlerts = isExpanded ? filteredAlerts : filteredAlerts.slice(0, 3);
-
-  const copyWhatsAppList = () => {
-    let msg = `*DFY TB MIS: Pending Follow-up Action List*\n`;
-    msg += `Field Officer: *${formData.fo_name}* (${formData.working_place})\n`;
-    msg += `Total Pending Patients: *${cascadeAlerts.length}*\n`;
-    msg += `Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
-
-    cascadeAlerts.forEach((a, idx) => {
-      msg += `${idx + 1}. Patient ID: *${a.id}*\n`;
-      msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
-      msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
-    });
-    msg += `_Kripya in sabhi patients ka priority follow-up karein!_`;
-
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(msg).then(() => {
-        showToast("📋 Follow-up task list WhatsApp ke liye copy ho gayi!", "success");
-      }).catch(() => {
-        showToast("Failed to copy", "error");
-      });
-    }
-  };
-
-  return (
-    <div className="bg-gradient-to-br from-rose-50/90 via-amber-50/70 to-purple-50/70 rounded-3xl p-4 sm:p-5 border border-rose-200/80 shadow-sm mb-6 animate-fade-in">
-      {/* Header Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-3 px-0.5">
-        <div className="flex items-center gap-2">
-          <span className="text-xl">⚡</span>
-          <div>
-            <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-              <span>Pending Interventions</span>
-              <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
-                {cascadeAlerts.length}
-              </span>
-            </h3>
-            <p className="text-[10px] text-slate-500 font-bold">
-              In notified patients ke follow-up actions baaki hain
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={copyWhatsAppList}
-          className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 hover:bg-emerald-200 border border-emerald-300 px-3 py-1.5 rounded-xl transition-all active:scale-95 flex items-center gap-1 shrink-0 shadow-2xs"
-          title="Share on WhatsApp"
-        >
-          <span>📱</span> WhatsApp List
-        </button>
-      </div>
-
-      {/* Quick Category Summary Filter Pills */}
-      <div className="flex flex-wrap gap-1.5 mb-3.5">
-        <button
-          type="button"
-          onClick={() => setSelectedFilter('ALL')}
-          className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all ${
-            selectedFilter === 'ALL'
-              ? 'bg-slate-800 text-white shadow-xs'
-              : 'bg-white/80 text-slate-600 hover:bg-white border border-slate-200/70'
-          }`}
-        >
-          All ({cascadeAlerts.length})
-        </button>
-
-        {hivCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelectedFilter('HIV')}
-            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
-              selectedFilter === 'HIV'
-                ? 'bg-purple-700 text-white shadow-xs'
-                : 'bg-purple-50 text-purple-800 border border-purple-200/80 hover:bg-purple-100'
-            }`}
-          >
-            <span>🧪</span> HIV &amp; DM ({hivCount})
-          </button>
-        )}
-
-        {diffTbCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelectedFilter('DIFF_TB')}
-            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
-              selectedFilter === 'DIFF_TB'
-                ? 'bg-pink-700 text-white shadow-xs'
-                : 'bg-pink-50 text-pink-800 border border-pink-200/80 hover:bg-pink-100'
-            }`}
-          >
-            <span>🩺</span> Diff TB ({diffTbCount})
-          </button>
-        )}
-
-        {dbtCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelectedFilter('DBT')}
-            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
-              selectedFilter === 'DBT'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-amber-50 text-amber-800 border border-amber-200/80 hover:bg-amber-100'
-            }`}
-          >
-            <span>💳</span> DBT ({dbtCount})
-          </button>
-        )}
-
-        {contactCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelectedFilter('CONTACT')}
-            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
-              selectedFilter === 'CONTACT'
-                ? 'bg-blue-700 text-white shadow-xs'
-                : 'bg-blue-50 text-blue-800 border border-blue-200/80 hover:bg-blue-100'
-            }`}
-          >
-            <span>👥</span> Contact ({contactCount})
-          </button>
-        )}
-
-        {udstCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setSelectedFilter('UDST')}
-            className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-xl transition-all flex items-center gap-1 ${
-              selectedFilter === 'UDST'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'bg-emerald-50 text-emerald-800 border border-emerald-200/80 hover:bg-emerald-100'
-            }`}
-          >
-            <span>🔬</span> UDST ({udstCount})
-          </button>
-        )}
-      </div>
-
-      {/* Patients Action Cards */}
-      <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
-        {displayedAlerts.map((alt, idx) => {
-          const isUrgent = alt.days_elapsed > 7;
-          return (
-            <div
-              key={idx}
-              className="bg-white p-3 rounded-2xl border border-rose-100/90 shadow-2xs hover:border-indigo-200 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
-                    #{alt.id}
-                  </span>
-                  <span
-                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
-                      isUrgent
-                        ? 'bg-red-100 text-red-700 border border-red-200'
-                        : 'bg-slate-100 text-slate-500'
-                    }`}
-                  >
-                    {isUrgent ? `🔴 Urgent (${alt.days_elapsed}d)` : `${alt.days_elapsed}d ago`}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (navigator.clipboard) {
-                      navigator.clipboard.writeText(alt.id);
-                      showToast(`Patient #${alt.id} copied!`, "success");
-                    }
-                  }}
-                  className="text-[10px] font-bold text-slate-400 hover:text-indigo-600 transition-colors p-1"
-                  title="Copy Patient ID"
-                >
-                  📋
-                </button>
-              </div>
-
-              {/* 1-Tap Action Autofill Buttons */}
-              <div className="flex flex-wrap gap-1.5 items-center">
-                {(alt.missing_items || []).map((m, mIdx) => {
-                  const alreadyAdded = (formData[m.key] || []).includes(alt.id);
-                  const btnColorClass =
-                    m.color === 'purple'
-                      ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-600 hover:text-white'
-                      : m.color === 'pink'
-                      ? 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-600 hover:text-white'
-                      : m.color === 'amber'
-                      ? 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-600 hover:text-white'
-                      : m.color === 'blue'
-                      ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-600 hover:text-white'
-                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-600 hover:text-white';
-
-                  if (alreadyAdded) {
-                    return (
-                      <span
-                        key={mIdx}
-                        className="text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-xl flex items-center gap-1 opacity-90"
-                      >
-                        <span>✓ Added to</span>
-                        <span className="font-extrabold">{m.label}</span>
-                      </span>
-                    );
-                  }
-
-                  return (
-                    <button
-                      key={mIdx}
-                      type="button"
-                      onClick={() => onAutofill(m.key, alt.id, m.label)}
-                      className={`text-[10px] font-bold border px-2.5 py-1 rounded-xl transition-all active:scale-95 flex items-center gap-1 shadow-2xs ${btnColorClass}`}
-                      title={`Tap to autofill #${alt.id} into ${m.label}`}
-                    >
-                      <span>+ {m.label}</span>
-                      <span>{m.icon || '➕'}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Expand / Collapse Footer */}
-      {filteredAlerts.length > 3 && (
-        <div className="text-center mt-2.5 pt-2 border-t border-rose-200/50">
-          <button
-            type="button"
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="text-[11px] font-bold text-slate-600 hover:text-indigo-600 transition-colors"
-          >
-            {isExpanded ? '▴ Show Less' : `▾ View All ${filteredAlerts.length} Pending Patients`}
-          </button>
-        </div>
-      )}
-    </div>
-  );
-};
-
 
 const sanitizeIncomingFormData = (d, base) => {
   const arrayKeys = [
@@ -1737,8 +1705,20 @@ function App() {
                     </span>
                   </button>
                 )}
-                <button onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider hover:bg-indigo-200 transition-colors">
-                  {currentView === 'form' ? 'Profile' : 'Form'}
+                <button 
+                  onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} 
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+                    currentView === 'form' && cascadeAlerts.length > 0
+                      ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-200 shadow-2xs'
+                      : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                  }`}
+                >
+                  <span>{currentView === 'form' ? 'Profile' : 'Form'}</span>
+                  {currentView === 'form' && cascadeAlerts.length > 0 && (
+                    <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full">
+                      {cascadeAlerts.length}
+                    </span>
+                  )}
                 </button>
                 <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors ml-1">
                   <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -1837,7 +1817,14 @@ function App() {
             </div>
           </div>
           ) : currentView === 'profile' ? (
-            <MyProfileDashboard formData={formData} showToast={showToast} />
+            <MyProfileDashboard 
+              formData={formData} 
+              showToast={showToast} 
+              cascadeAlerts={cascadeAlerts}
+              cascadeSummary={cascadeSummary}
+              loadingAlerts={loadingCascadeAlerts}
+              onAutofill={handleAutofillPendingId}
+            />
           ) : (
             /* Main Dashboard */
             <div className="animate-fade-in w-full max-w-md mx-auto overflow-x-hidden">
@@ -1887,16 +1874,6 @@ function App() {
                   })}
                 </div>
               )}
-
-              {/* ⚡ Prominent Pending Interventions Action Center for Field Officers */}
-              <PendingInterventionsActionCenter 
-                cascadeAlerts={cascadeAlerts}
-                cascadeSummary={cascadeSummary}
-                loading={loadingCascadeAlerts}
-                formData={formData}
-                onAutofill={handleAutofillPendingId}
-                showToast={showToast}
-              />
 
               <div className="grid grid-cols-1 gap-4">
 
