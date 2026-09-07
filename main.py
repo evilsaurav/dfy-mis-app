@@ -145,6 +145,15 @@ app.add_middleware(
     max_age=86400, # Cache preflight OPTIONS requests for 24 hours (eliminates 50% redundant HTTP hits)
 )
 
+@app.get("/")
+@app.get("/health")
+def health_status():
+    return {
+        "status": "healthy",
+        "active_firebase_project": project_id,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
 class PinCheck(BaseModel):
     working_place: str
     fo_name: str
