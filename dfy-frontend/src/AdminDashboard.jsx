@@ -142,7 +142,8 @@ export default function AdminDashboard() {
   const [nikshayLoading, setNikshayLoading] = useState(false);
   const [nikshayResult, setNikshayResult] = useState(null);
   const [nikshayError, setNikshayError] = useState('');
-  const [nikshayActiveTab, setNikshayActiveTab] = useState('missing_in_dfy');
+  const [nikshayActiveTab, setNikshayActiveTab] = useState('flagged_review');
+  const [reviewExporting, setReviewExporting] = useState(false);
 
   // Permanent Cumulative Verification Ledger State
   const [ledgerViewMode, setLedgerViewMode] = useState('reconcile'); // 'reconcile' | 'ledger'
@@ -204,6 +205,33 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDownloadReviewSheet = async () => {
+    setReviewExporting(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem('dfy_admin_token') || '';
+      const res = await fetch(`${API_BASE_URL}/admin/nikshay/download-review-sheet?district=${encodeURIComponent(nikshayDistrict || 'All')}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || 'Failed to download review sheet');
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DFY_Field_Review_Sheet_${nikshayDistrict || 'All'}_${nikshayMonth || new Date().toISOString().slice(0,7)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      alert('Failed to download review sheet: ' + err.message);
+    } finally {
+      setReviewExporting(false);
+    }
+  };
+
   const [showJourneyModal, setShowJourneyModal] = useState(false);
   const [journeySearchId, setJourneySearchId] = useState('');
   const [journeyLoading, setJourneyLoading] = useState(false);
@@ -237,6 +265,13 @@ export default function AdminDashboard() {
       }
       const data = await res.json();
       setNikshayResult(data);
+      if (data.summary?.flagged_review_count > 0) {
+        setNikshayActiveTab('flagged_review');
+      } else if (data.summary?.ready_for_portal_count > 0) {
+        setNikshayActiveTab('ready_for_portal');
+      } else {
+        setNikshayActiveTab('missing_in_dfy');
+      }
       // Auto-refresh ledger cache in background
       fetchCumulativeLedger(1, '', nikshayDistrict);
     } catch (err) {
@@ -6053,6 +6088,16 @@ Keep this file safe in your Google Drive or personal diary.
                         </span>
                         <button
                           type="button"
+                          onClick={handleDownloadReviewSheet}
+                          disabled={reviewExporting}
+                          className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold px-3 py-1 rounded-lg transition-all shadow-2xs active:scale-95 cursor-pointer flex items-center gap-1 whitespace-nowrap"
+                          title="Download Excel review sheet of flagged discrepancies for staff 1-on-1 meeting"
+                        >
+                          <span>📥</span>
+                          <span>{reviewExporting ? 'Exporting...' : 'Review Sheet (.xlsx)'}</span>
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => {
                             setNikshayResult(null);
                             setNikshayFile(null);
@@ -6090,7 +6135,7 @@ Keep this file safe in your Google Drive or personal diary.
                     )}
 
                     {/* Top KPI Metrics */}
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                    <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
                       <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl text-center">
                         <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Nikshay Total</span>
                         <span className="text-xl font-black text-slate-800">{nikshayResult.summary?.total_nikshay_uploaded || 0}</span>
@@ -6104,14 +6149,20 @@ Keep this file safe in your Google Drive or personal diary.
                         <span className="text-xl font-black text-emerald-700">{nikshayResult.summary?.match_rate_pct || 0}%</span>
                         <span className="text-[10px] text-emerald-600 font-bold block">({nikshayResult.summary?.matched_count || 0} matched)</span>
                       </div>
+                      <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-center">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 block">⚠️ Flagged Review</span>
+                        <span className="text-xl font-black text-rose-700">{nikshayResult.summary?.flagged_review_count || 0}</span>
+                        <span className="text-[10px] text-rose-600 font-bold block">&gt; 3 days lag</span>
+                      </div>
+                      <div className="bg-blue-50 border border-blue-200 p-3 rounded-2xl text-center">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-blue-600 block">⏳ 72h Grace</span>
+                        <span className="text-xl font-black text-blue-700">{nikshayResult.summary?.grace_window_count || 0}</span>
+                        <span className="text-[10px] text-blue-600 font-bold block">≤ 3 days sync lag</span>
+                      </div>
                       <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl text-center">
                         <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 block">Ready for Portal</span>
                         <span className="text-xl font-black text-amber-700">{nikshayResult.summary?.ready_for_portal_count || 0}</span>
                         <span className="text-[10px] text-amber-600 font-bold block">DFY completed</span>
-                      </div>
-                      <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-center col-span-2 sm:col-span-1">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 block">Missing in DFY</span>
-                        <span className="text-xl font-black text-rose-700">{nikshayResult.summary?.missing_in_dfy_count || 0}</span>
                       </div>
                     </div>
 
@@ -6185,6 +6236,18 @@ Keep this file safe in your Google Drive or personal diary.
                     {/* Sub-tabs Navigation */}
                     <div className="border-b border-slate-200 flex flex-wrap gap-1">
                       <button
+                        onClick={() => setNikshayActiveTab('flagged_review')}
+                        className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'flagged_review' ? 'border-rose-600 text-rose-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        ⚠️ Flagged Discrepancies ({nikshayResult.summary?.flagged_review_count || 0})
+                      </button>
+                      <button
+                        onClick={() => setNikshayActiveTab('grace_window')}
+                        className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'grace_window' ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                      >
+                        ⏳ 72h Grace Window ({nikshayResult.summary?.grace_window_count || 0})
+                      </button>
+                      <button
                         onClick={() => setNikshayActiveTab('ready_for_portal')}
                         className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'ready_for_portal' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                       >
@@ -6192,7 +6255,7 @@ Keep this file safe in your Google Drive or personal diary.
                       </button>
                       <button
                         onClick={() => setNikshayActiveTab('missing_in_dfy')}
-                        className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'missing_in_dfy' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                        className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'missing_in_dfy' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                       >
                         Missing in DFY MIS ({nikshayResult.summary?.missing_in_dfy_count || 0})
                       </button>
@@ -6200,15 +6263,186 @@ Keep this file safe in your Google Drive or personal diary.
                         onClick={() => setNikshayActiveTab('only_in_dfy')}
                         className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'only_in_dfy' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                       >
-                        Only in DFY MIS / Typos ({nikshayResult.summary?.only_in_dfy_count || 0})
+                        Only in DFY / Typos ({nikshayResult.summary?.only_in_dfy_count || 0})
                       </button>
                       <button
                         onClick={() => setNikshayActiveTab('urgent_field_action')}
                         className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'urgent_field_action' ? 'border-red-600 text-red-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                       >
-                        ⚠️ Urgent Action ({nikshayResult.summary?.urgent_field_action_count || 0})
+                        🚨 High Risk Dropout ({nikshayResult.summary?.urgent_field_action_count || 0})
                       </button>
                     </div>
+
+                    {/* Tab: Flagged Discrepancies (>3 Days) */}
+                    {nikshayActiveTab === 'flagged_review' && (
+                      <div className="space-y-2.5">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-medium text-amber-900">
+                          <div>
+                            <p className="font-bold text-amber-950 flex items-center gap-1.5">
+                              <span>⚠️</span>
+                              <span>Staff Review List (Reported &gt; 3 Days Ago)</span>
+                            </p>
+                            <p className="text-[11px] text-amber-800 mt-0.5">
+                              In cases me reporting kiye hue 3 din se zyada ho chuke hain par Nikshay portal par indicator blank hai ya ID match nahi hui. District Coordinator in cases par staff se 1-on-1 review karein. (Staff target par koi penalty nahi hai).
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleDownloadReviewSheet}
+                            disabled={reviewExporting}
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all whitespace-nowrap active:scale-95 cursor-pointer flex items-center gap-1 self-end sm:self-center"
+                          >
+                            <span>📥</span>
+                            <span>{reviewExporting ? 'Exporting...' : 'Export Excel'}</span>
+                          </button>
+                        </div>
+
+                        <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-100 text-slate-600 font-bold sticky top-0">
+                              <tr>
+                                <th className="p-2">Episode ID</th>
+                                <th className="p-2">Category</th>
+                                <th className="p-2">District</th>
+                                <th className="p-2">Field Officer</th>
+                                <th className="p-2">Date &amp; Aging</th>
+                                <th className="p-2">Services Claimed</th>
+                                <th className="p-2">Nikshay Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-medium">
+                              {(nikshayResult.preview_flagged_discrepancies || []).map((item, i) => (
+                                <tr key={i} className="hover:bg-amber-50/50">
+                                  <td className="p-2 font-mono font-bold text-amber-900">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setJourneySearchId(item.id);
+                                        setShowJourneyModal(true);
+                                        handleFetchJourney(item.id);
+                                      }}
+                                      className="hover:underline flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <span>🔍</span>
+                                      <span>#{item.id}</span>
+                                    </button>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                      item.category_type === 'matched_indicator_pending'
+                                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                        : 'bg-rose-100 text-rose-800 border border-rose-200'
+                                    }`}>
+                                      {item.category || 'Discrepancy'}
+                                    </span>
+                                  </td>
+                                  <td className="p-2 text-slate-700 font-semibold">{item.district || '-'}</td>
+                                  <td className="p-2 text-slate-800 font-bold">{item.fo_name || '-'}</td>
+                                  <td className="p-2 font-mono text-[11px]">
+                                    <div className="text-slate-600">{item.date || '-'}</div>
+                                    <div className="text-rose-600 font-bold text-[10px]">({item.days_elapsed} days pending)</div>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="bg-slate-100 text-slate-700 text-[11px] font-semibold px-2 py-0.5 rounded">
+                                      {item.services_claimed || '-'}
+                                    </span>
+                                  </td>
+                                  <td className="p-2 text-[11px] text-amber-700 font-bold">
+                                    {item.nikshay_status || 'Pending'}
+                                  </td>
+                                </tr>
+                              ))}
+                              {(nikshayResult.preview_flagged_discrepancies || []).length === 0 && (
+                                <tr>
+                                  <td colSpan="7" className="p-6 text-center text-emerald-600 font-bold">
+                                    ✓ Shabaash! No discrepancies &gt; 3 days old detected.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Tab: 72h Grace Window (<= 3 Days) */}
+                    {nikshayActiveTab === 'grace_window' && (
+                      <div className="space-y-2.5">
+                        <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs font-medium text-blue-900">
+                          <p className="font-bold text-blue-950 flex items-center gap-1.5">
+                            <span>⏳</span>
+                            <span>72-Hour Server Sync Grace Window (Reported ≤ 3 Days Ago)</span>
+                          </p>
+                          <p className="text-[11px] text-blue-800 mt-0.5">
+                            Yeh sabhi reports pichle 72 ghanto ke andar submit hui hain. Sarkari Nikshay server entry aur sync me 2-3 din ka samay lagta hai, isliye inhe koi discrepancy nahi mana gaya hai.
+                          </p>
+                        </div>
+
+                        <div className="max-h-64 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-100 text-slate-600 font-bold sticky top-0">
+                              <tr>
+                                <th className="p-2">Episode ID</th>
+                                <th className="p-2">Category</th>
+                                <th className="p-2">District</th>
+                                <th className="p-2">Field Officer</th>
+                                <th className="p-2">Date Reported</th>
+                                <th className="p-2">Services Claimed</th>
+                                <th className="p-2">Sync Status</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-medium">
+                              {(nikshayResult.preview_grace_window || []).map((item, i) => (
+                                <tr key={i} className="hover:bg-blue-50/40">
+                                  <td className="p-2 font-mono font-bold text-blue-900">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setJourneySearchId(item.id);
+                                        setShowJourneyModal(true);
+                                        handleFetchJourney(item.id);
+                                      }}
+                                      className="hover:underline flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <span>🔍</span>
+                                      <span>#{item.id}</span>
+                                    </button>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 border border-blue-200">
+                                      {item.category || 'Grace Period'}
+                                    </span>
+                                  </td>
+                                  <td className="p-2 text-slate-700 font-semibold">{item.district || '-'}</td>
+                                  <td className="p-2 text-slate-800 font-bold">{item.fo_name || '-'}</td>
+                                  <td className="p-2 font-mono text-[11px]">
+                                    <div className="text-slate-600">{item.date || '-'}</div>
+                                    <div className="text-blue-600 font-semibold text-[10px]">({item.days_elapsed}d ago)</div>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="bg-slate-100 text-slate-700 text-[11px] font-semibold px-2 py-0.5 rounded">
+                                      {item.services_claimed || '-'}
+                                    </span>
+                                  </td>
+                                  <td className="p-2">
+                                    <span className="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                      ⏳ Awaiting Portal Sync
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                              {(nikshayResult.preview_grace_window || []).length === 0 && (
+                                <tr>
+                                  <td colSpan="7" className="p-6 text-center text-slate-400 italic">
+                                    No recent submissions awaiting sync.
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Tab 1: Ready for Nikshay Portal Update */}
                     {nikshayActiveTab === 'ready_for_portal' && (

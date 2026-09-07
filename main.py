@@ -3291,6 +3291,9 @@ async def reconcile_nikshay(
                             "has_udst": False,
                             "has_contact": False
                         }
+                    else:
+                        if dt and (not dfy_details[clean_pid].get("date") or dt > dfy_details[clean_pid].get("date")):
+                            dfy_details[clean_pid]["date"] = dt
                     dfy_details[clean_pid]["services"].add(service_label)
                     if cat_key == "notification_ids":
                         dfy_details[clean_pid]["has_notification"] = True
@@ -3392,7 +3395,122 @@ async def reconcile_nikshay(
                     "pending_actions": pending_actions
                 })
 
-        # 8. Permanent Cumulative Verification Ledger Synchronization
+        # 8. 3-Day Aging Audit & 2-Part Discrepancy Classification
+        # Segregates normal Govt portal sync lag (<= 3 days) from actionable discrepancies (> 3 days)
+        # Does NOT alter field officer daily targets or monthly evaluations.
+        now_dt = datetime.now()
+        flagged_review_list = []
+        grace_window_list = []
+
+        # PART 1: Matched IDs (Episode ID exists in Nikshay, but claimed indicator is blank/pending)
+        for pid in matched:
+            np = nikshay_patients.get(pid, {})
+            dfy_info = dfy_details.get(pid, {})
+            
+            n_hiv = np.get("hiv_done", False) or np.get("dm_done", False)
+            d_hiv = dfy_info.get("has_hiv_dm", False)
+            
+            n_dbt = np.get("bank_done", False)
+            d_dbt = dfy_info.get("has_dbt", False)
+            
+            n_udst = np.get("udst_done", False)
+            d_udst = dfy_info.get("has_udst", False)
+            
+            n_ct = np.get("contact_done", False)
+            d_ct = dfy_info.get("has_contact", False)
+            
+            unmatched_services = []
+            if d_hiv and not n_hiv:
+                unmatched_services.append("HIV/DM Screening")
+            if d_dbt and not n_dbt:
+                unmatched_services.append("DBT Bank Details")
+            if d_udst and not n_udst:
+                unmatched_services.append("UDST Lab Sample")
+            if d_ct and not n_ct:
+                unmatched_services.append("Contact Tracing")
+                
+            if unmatched_services:
+                rep_date_str = dfy_info.get("date", "")
+                days_elapsed = 0
+                if rep_date_str:
+                    try:
+                        rep_dt = datetime.strptime(str(rep_date_str).strip()[:10], "%Y-%m-%d")
+                        days_elapsed = max(0, (now_dt - rep_dt).days)
+                    except Exception:
+                        days_elapsed = 0
+                
+                record = {
+                    "id": pid,
+                    "patient_name": np.get("name") or "Patient",
+                    "phone": np.get("phone", ""),
+                    "district": dfy_info.get("district") or np.get("district", ""),
+                    "fo_name": dfy_info.get("fo_name", ""),
+                    "date": rep_date_str,
+                    "days_elapsed": days_elapsed,
+                    "category": "Part 1: Matched ID (Indicator Blank)",
+                    "category_type": "matched_indicator_pending",
+                    "services_claimed": ", ".join(unmatched_services),
+                    "nikshay_status": "Blank / Pending on Nikshay Portal",
+                    "action_required": "Discuss with FO: Check physical test slips / DEO entry status"
+                }
+                
+                if days_elapsed <= 3:
+                    record["grace_reason"] = f"Reported {days_elapsed}d ago (≤3d) - Govt Portal Sync Lag"
+                    grace_window_list.append(record)
+                else:
+                    flagged_review_list.append(record)
+
+        # PART 2: Unverified IDs (Claimed in DFY MIS, but NOT found in uploaded Nikshay Registry)
+        for pid in only_in_dfy:
+            dfy_info = dfy_details.get(pid, {})
+            rep_date_str = dfy_info.get("date", "")
+            days_elapsed = 0
+            if rep_date_str:
+                try:
+                    rep_dt = datetime.strptime(str(rep_date_str).strip()[:10], "%Y-%m-%d")
+                    days_elapsed = max(0, (now_dt - rep_dt).days)
+                except Exception:
+                    days_elapsed = 0
+                    
+            services_claimed_str = ", ".join(sorted(list(dfy_info.get("services", [])))) or "Reported in MIS"
+            
+            record = {
+                "id": pid,
+                "patient_name": "Unregistered / Not in Nikshay",
+                "phone": "-",
+                "district": dfy_info.get("district", ""),
+                "fo_name": dfy_info.get("fo_name", ""),
+                "date": rep_date_str,
+                "days_elapsed": days_elapsed,
+                "category": "Part 2: Unverified ID (Not Found)",
+                "category_type": "unverified_id",
+                "services_claimed": services_claimed_str,
+                "nikshay_status": "Episode ID Not Found on Nikshay",
+                "action_required": "Discuss with FO: Check for Episode ID digit typos or enrollment slips"
+            }
+            
+            if days_elapsed <= 3:
+                record["grace_reason"] = f"Enrolled {days_elapsed}d ago (≤3d) - Nikshay Portal Enrollment Lag"
+                grace_window_list.append(record)
+            else:
+                flagged_review_list.append(record)
+
+        # Sort district-wise, then FO name, then days_elapsed descending (oldest discrepancies first)
+        flagged_review_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
+        grace_window_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
+
+        # Cache the review sheet data for rapid Excel export (2h TTL, 0 DB storage)
+        cache_data_review = {
+            "records": flagged_review_list,
+            "month": month,
+            "district": district,
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        admin_user = admin.get("username", "Admin")
+        cache.set(f"review_sheet_{admin_user}", cache_data_review, ttl=7200)
+        cache.set("review_sheet_latest", cache_data_review, ttl=7200)
+
+        # 9. Permanent Cumulative Verification Ledger Synchronization
         # Once an indicator is verified, it is permanently locked in Firestore and NEVER lost or erased!
         patients_to_sync = {}
         for pid, np in nikshay_patients.items():
@@ -3470,6 +3588,8 @@ async def reconcile_nikshay(
             "match_rate_pct": round((len(matched) / len(nikshay_ids) * 100), 1) if nikshay_ids else 0,
             "missing_in_dfy_count": len(only_in_nikshay),
             "only_in_dfy_count": len(only_in_dfy),
+            "flagged_review_count": len(flagged_review_list),
+            "grace_window_count": len(grace_window_list),
             "ready_for_portal_count": len(ready_for_nikshay_list),
             "urgent_field_action_count": len(urgent_field_action_list),
             "cascade": cascade_summary,
@@ -3500,7 +3620,7 @@ async def reconcile_nikshay(
         
         await log_admin_activity(
             action_type="NIKSHAY_RECONCILE",
-            details=f"Reconciled {sheet_used} for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(ready_for_nikshay_list)} ready for portal update",
+            details=f"Reconciled {sheet_used} for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(ready_for_nikshay_list)} ready for portal update, {len(flagged_review_list)} flagged for staff review",
             district=district,
             user_name=admin.get("username", "Admin"),
             role=admin.get("role", "SUB_ADMIN")
@@ -3509,6 +3629,8 @@ async def reconcile_nikshay(
         return {
             "success": True,
             "summary": summary,
+            "preview_flagged_discrepancies": flagged_review_list[:150],
+            "preview_grace_window": grace_window_list[:150],
             "preview_missing_in_dfy": preview_missing_in_dfy_legacy,
             "preview_missing_in_dfy_details": preview_missing_in_dfy_details,
             "preview_only_in_dfy": preview_only_in_dfy,
@@ -3519,6 +3641,85 @@ async def reconcile_nikshay(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reconciliation error: {str(e)}")
+
+# =========================================================================
+# --- Nikshay District-Wise Discrepancy Review Sheet Export ---
+# =========================================================================
+@app.get("/admin/nikshay/download-review-sheet")
+async def download_nikshay_review_sheet(
+    district: Optional[str] = Query("All"),
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Exports a formatted Excel sheet with 9 columns grouped by District & Field Officer.
+    Contains cases where reporting > 3 days old has indicators missing in Nikshay or IDs unverified.
+    Includes a blank column 'Staff Resolution Notes' for 1-on-1 review meetings.
+    """
+    try:
+        admin_user = admin.get("username", "Admin")
+        cached = cache.get(f"review_sheet_{admin_user}")
+        if not cached:
+            cached = cache.get("review_sheet_latest")
+            
+        if not cached or "records" not in cached:
+            raise HTTPException(
+                status_code=400,
+                detail="No review sheet data available. Please upload and reconcile a Nikshay file first."
+            )
+            
+        records = cached.get("records", [])
+        sheet_month = cached.get("month", datetime.now().strftime("%Y-%m"))
+        
+        if district and district != "All":
+            records = [r for r in records if str(r.get("district", "")).strip().lower() == district.strip().lower()]
+            
+        rows = []
+        for r in records:
+            rows.append({
+                "District": r.get("district", ""),
+                "Field Officer Name": r.get("fo_name", ""),
+                "Date Reported": r.get("date", ""),
+                "Days Pending": r.get("days_elapsed", 0),
+                "Episode ID": r.get("id", ""),
+                "Discrepancy Category": r.get("category", ""),
+                "Services Claimed by FO": r.get("services_claimed", ""),
+                "Nikshay Portal Status": r.get("nikshay_status", ""),
+                "Staff Resolution Notes (Admin Discussion)": ""
+            })
+            
+        if not rows:
+            rows.append({
+                "District": district if district != "All" else "All Districts",
+                "Field Officer Name": "None",
+                "Date Reported": "-",
+                "Days Pending": 0,
+                "Episode ID": "-",
+                "Discrepancy Category": "No discrepancies > 3 days detected",
+                "Services Claimed by FO": "-",
+                "Nikshay Portal Status": "All Synchronized",
+                "Staff Resolution Notes (Admin Discussion)": "All verified or within 72h grace window"
+            })
+            
+        df_export = pd.DataFrame(rows)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df_export.to_excel(writer, index=False, sheet_name="Field Review Sheet")
+            ws = writer.sheets["Field Review Sheet"]
+            style_excel_worksheet(ws, header_fill_color="D97706")
+            
+        output.seek(0)
+        dist_slug = district.replace(" ", "_") if district else "All"
+        filename = f"DFY_Field_Review_Sheet_{dist_slug}_{sheet_month}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Review sheet export error: {str(e)}")
 
 # =========================================================================
 # --- Nikshay Permanent Cumulative Verification Ledger API ---
