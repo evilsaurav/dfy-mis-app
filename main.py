@@ -3012,38 +3012,120 @@ async def reconcile_nikshay(
     try:
         content = await file.read()
         filename = file.filename.lower()
+        sheet_used = "Default"
+        
+        # 1. Multi-sheet Excel Parser targeting 'mastersheet'
         if filename.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
         elif filename.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(io.BytesIO(content))
+            excel_file = pd.ExcelFile(io.BytesIO(content))
+            sheet_names = excel_file.sheet_names
+            target_sheet = sheet_names[0]
+            for s in sheet_names:
+                if "master" in str(s).strip().lower():
+                    target_sheet = s
+                    break
+            sheet_used = target_sheet
+            df = pd.read_excel(excel_file, sheet_name=target_sheet)
         else:
             raise HTTPException(status_code=400, detail="Invalid file format. Please upload an official Nikshay .xlsx or .csv export.")
-            
-        # Dynamically locate the patient ID column
+
+        cols_lower = {str(c).strip().lower(): c for c in df.columns}
+        
+        # 2. Dynamically locate Patient/Episode ID column
         id_col = None
-        for col in df.columns:
-            clean_col = str(col).strip().lower().replace(" ", "_").replace(".", "")
-            if any(k in clean_col for k in ["nikshay_id", "patient_id", "episode_id", "tb_id"]):
-                id_col = col
+        for candidate in ["episode_id", "episodeid", "nikshay_id", "nikshayid", "patient_id", "patientid", "tb_id"]:
+            if candidate in cols_lower:
+                id_col = cols_lower[candidate]
                 break
-                
         if not id_col:
-            # Fallback to column with numeric IDs of length 7-10
             for col in df.columns:
-                sample_vals = [str(x).split(".")[0].strip() for x in df[col].dropna()[:10]]
+                clean_col = str(col).strip().lower().replace(" ", "_").replace(".", "")
+                if any(k in clean_col for k in ["episode_id", "nikshay_id", "patient_id", "tb_id", "case_id", "beneficiary_id"]):
+                    id_col = col
+                    break
+        if not id_col:
+            for col in df.columns:
+                sample_vals = [str(x).split(".")[0].strip() for x in df[col].dropna()[:15]]
                 if any(v.isdigit() and len(v) >= 7 for v in sample_vals):
                     id_col = col
                     break
-            if not id_col:
-                id_col = df.columns[0]
-            
-        nikshay_ids = set()
-        for val in df[id_col].dropna():
+        if not id_col:
+            id_col = df.columns[0]
+
+        # 3. Detect demographics, district & date columns
+        name_col = cols_lower.get("patient_name") or next((c for c in df.columns if "patient_name" in str(c).lower() or "name" in str(c).lower()), None)
+        phone_col = cols_lower.get("primaryphone") or cols_lower.get("phone") or cols_lower.get("mobile") or next((c for c in df.columns if "phone" in str(c).lower() or "mobile" in str(c).lower()), None)
+        address_col = cols_lower.get("address") or next((c for c in df.columns if "address" in str(c).lower()), None)
+
+        district_col = None
+        for candidate in ["spectrum_enrolment_district", "spectrum_diagnosing_district", "district", "district_name"]:
+            if candidate in cols_lower:
+                district_col = cols_lower[candidate]
+                break
+        if not district_col:
+            district_col = next((c for c in df.columns if "district" in str(c).lower()), None)
+
+        date_col = None
+        for candidate in ["spectrum_enrollment_date", "spectrum_diagnosis_date", "diagnosis_date", "treatment_initiation_date", "date_of_notification"]:
+            if candidate in cols_lower:
+                date_col = cols_lower[candidate]
+                break
+        if not date_col:
+            date_col = next((c for c in df.columns if "date" in str(c).lower()), None)
+
+        # 4. Detect Indicator columns
+        hiv_col = cols_lower.get("hiv_tested") or cols_lower.get("status_of_hiv") or next((c for c in df.columns if "hiv" in str(c).lower()), None)
+        dm_col = cols_lower.get("diabetes_tested") or cols_lower.get("status_of_diabetes") or next((c for c in df.columns if "diabetes" in str(c).lower()), None)
+        bank_col = cols_lower.get("bank_validated") or cols_lower.get("bank_details_entered") or cols_lower.get("beneficiary_status") or next((c for c in df.columns if "bank" in str(c).lower() or "dbt" in str(c).lower()), None)
+        udst_col = cols_lower.get("udst_done") or next((c for c in df.columns if "udst" in str(c).lower() or "dst" in str(c).lower()), None)
+        contact_col = cols_lower.get("contact_tracing_done") or next((c for c in df.columns if "contact" in str(c).lower()), None)
+        outcome_col = cols_lower.get("treatment_outcome") or next((c for c in df.columns if "outcome" in str(c).lower()), None)
+
+        def is_yes(val):
+            if val is None or pd.isna(val):
+                return False
+            s = str(val).strip().lower()
+            return s in ["yes", "y", "done", "true", "1", "reactive", "positive", "tested", "validated"]
+
+        # 5. Parse Nikshay Master Records
+        nikshay_patients = {}
+        for _, row in df.iterrows():
+            val = row.get(id_col)
+            if val is None or pd.isna(val):
+                continue
             s = str(val).strip().split(".")[0]
-            if s and s.isalnum() and len(s) >= 5:
-                nikshay_ids.add(s)
-                
-        # Fetch reported IDs in DFY MIS
+            if not (s and s.isalnum() and len(s) >= 5):
+                continue
+
+            row_dist = str(row.get(district_col, "")).strip() if district_col and not pd.isna(row.get(district_col)) else ""
+            if district and district != "All" and row_dist and row_dist.lower() != district.lower():
+                continue
+
+            if month and date_col:
+                row_dt = str(row.get(date_col, "")).strip()
+                if row_dt and len(row_dt) >= 7 and not row_dt.startswith(month):
+                    continue
+
+            p_name = str(row.get(name_col, "")).strip() if name_col and not pd.isna(row.get(name_col)) else ""
+            p_phone = str(row.get(phone_col, "")).split(".")[0].strip() if phone_col and not pd.isna(row.get(phone_col)) else ""
+
+            nikshay_patients[s] = {
+                "id": s,
+                "name": p_name,
+                "phone": p_phone,
+                "district": row_dist,
+                "hiv_done": is_yes(row.get(hiv_col)) if hiv_col else False,
+                "dm_done": is_yes(row.get(dm_col)) if dm_col else False,
+                "bank_done": is_yes(row.get(bank_col)) if bank_col else False,
+                "udst_done": is_yes(row.get(udst_col)) if udst_col else False,
+                "contact_done": is_yes(row.get(contact_col)) if contact_col else False,
+                "outcome": str(row.get(outcome_col, "")).strip() if outcome_col and not pd.isna(row.get(outcome_col)) else ""
+            }
+
+        nikshay_ids = set(nikshay_patients.keys())
+
+        # 6. Fetch reported IDs in DFY MIS from Firestore
         if not month:
             month = datetime.now().strftime("%Y-%m")
         start_date = f"{month}-01"
@@ -3057,54 +3139,179 @@ async def reconcile_nikshay(
         ))
         
         dfy_reported_ids = set()
-        dfy_details = {} # id -> {district, fo_name, date, services: []}
+        dfy_details = {} # id -> metadata & boolean flags
         
+        categories_map = {
+            "notification_ids": "Notification",
+            "hiv_dm_ids": "HIV_DM",
+            "dbt_ids": "DBT_Bank",
+            "sample_tested_ids": "UDST_Testing",
+            "sample_collection_ids": "Sample_Collection",
+            "contact_tracing_ids": "Contact_Tracing",
+            "differentiated_tb_ids": "Diff_TB"
+        }
+
         for doc in report_docs:
             d = doc.to_dict()
             doc_dist = d.get("working_place", "")
-            if district != "All" and doc_dist != district:
+            if district != "All" and doc_dist.lower() != district.lower():
                 continue
                 
             fo = d.get("fo_name", "")
             dt = d.get("date_of_reporting", "")
             
-            for cat_key in ["notification_ids", "hiv_dm_ids", "dbt_ids", "sample_tested_ids", "contact_tracing_ids", "differentiated_tb_ids"]:
+            for cat_key, service_label in categories_map.items():
                 for pid in d.get(cat_key, []):
                     clean_pid = str(pid).strip()
                     dfy_reported_ids.add(clean_pid)
                     if clean_pid not in dfy_details:
-                        dfy_details[clean_pid] = {"district": doc_dist, "fo_name": fo, "date": dt, "services": []}
-                    dfy_details[clean_pid]["services"].append(cat_key.replace("_ids", ""))
-                    
-        # Compute reconciliation breakdown
+                        dfy_details[clean_pid] = {
+                            "district": doc_dist,
+                            "fo_name": fo,
+                            "date": dt,
+                            "services": set(),
+                            "has_notification": False,
+                            "has_hiv_dm": False,
+                            "has_dbt": False,
+                            "has_udst": False,
+                            "has_contact": False
+                        }
+                    dfy_details[clean_pid]["services"].add(service_label)
+                    if cat_key == "notification_ids":
+                        dfy_details[clean_pid]["has_notification"] = True
+                    elif cat_key == "hiv_dm_ids":
+                        dfy_details[clean_pid]["has_hiv_dm"] = True
+                    elif cat_key == "dbt_ids":
+                        dfy_details[clean_pid]["has_dbt"] = True
+                    elif cat_key in ["sample_tested_ids", "sample_collection_ids"]:
+                        dfy_details[clean_pid]["has_udst"] = True
+                    elif cat_key == "contact_tracing_ids":
+                        dfy_details[clean_pid]["has_contact"] = True
+
+        # 7. Compute Set Reconciliation & Multi-Cascade Breakdown
         matched = list(nikshay_ids.intersection(dfy_reported_ids))
         only_in_nikshay = list(nikshay_ids - dfy_reported_ids)
         only_in_dfy = list(dfy_reported_ids - nikshay_ids)
-        
+
+        cascade_summary = {
+            "hiv_dm": {"nikshay_done": 0, "dfy_done": 0, "ready_for_portal": 0, "both_done": 0, "pending_both": 0},
+            "dbt": {"nikshay_done": 0, "dfy_done": 0, "ready_for_portal": 0, "both_done": 0, "pending_both": 0},
+            "udst": {"nikshay_done": 0, "dfy_done": 0, "ready_for_portal": 0, "both_done": 0, "pending_both": 0},
+            "contact_tracing": {"nikshay_done": 0, "dfy_done": 0, "ready_for_portal": 0, "both_done": 0, "pending_both": 0},
+        }
+
+        ready_for_nikshay_list = []
+        urgent_field_action_list = []
+
+        for pid, np in nikshay_patients.items():
+            dfy_info = dfy_details.get(pid)
+            has_dfy = dfy_info is not None
+            
+            # HIV & DM (either HIV or DM tested in Nikshay)
+            n_hiv = np["hiv_done"] or np["dm_done"]
+            d_hiv = dfy_info["has_hiv_dm"] if has_dfy else False
+            if n_hiv: cascade_summary["hiv_dm"]["nikshay_done"] += 1
+            if d_hiv: cascade_summary["hiv_dm"]["dfy_done"] += 1
+            if n_hiv and d_hiv: cascade_summary["hiv_dm"]["both_done"] += 1
+            elif not n_hiv and d_hiv: cascade_summary["hiv_dm"]["ready_for_portal"] += 1
+            elif not n_hiv and not d_hiv: cascade_summary["hiv_dm"]["pending_both"] += 1
+
+            # DBT Bank
+            n_dbt = np["bank_done"]
+            d_dbt = dfy_info["has_dbt"] if has_dfy else False
+            if n_dbt: cascade_summary["dbt"]["nikshay_done"] += 1
+            if d_dbt: cascade_summary["dbt"]["dfy_done"] += 1
+            if n_dbt and d_dbt: cascade_summary["dbt"]["both_done"] += 1
+            elif not n_dbt and d_dbt: cascade_summary["dbt"]["ready_for_portal"] += 1
+            elif not n_dbt and not d_dbt: cascade_summary["dbt"]["pending_both"] += 1
+
+            # UDST Testing
+            n_udst = np["udst_done"]
+            d_udst = dfy_info["has_udst"] if has_dfy else False
+            if n_udst: cascade_summary["udst"]["nikshay_done"] += 1
+            if d_udst: cascade_summary["udst"]["dfy_done"] += 1
+            if n_udst and d_udst: cascade_summary["udst"]["both_done"] += 1
+            elif not n_udst and d_udst: cascade_summary["udst"]["ready_for_portal"] += 1
+            elif not n_udst and not d_udst: cascade_summary["udst"]["pending_both"] += 1
+
+            # Contact Tracing
+            n_ct = np["contact_done"]
+            d_ct = dfy_info["has_contact"] if has_dfy else False
+            if n_ct: cascade_summary["contact_tracing"]["nikshay_done"] += 1
+            if d_ct: cascade_summary["contact_tracing"]["dfy_done"] += 1
+            if n_ct and d_ct: cascade_summary["contact_tracing"]["both_done"] += 1
+            elif not n_ct and d_ct: cascade_summary["contact_tracing"]["ready_for_portal"] += 1
+            elif not n_ct and not d_ct: cascade_summary["contact_tracing"]["pending_both"] += 1
+
+            # Actionable List 1: Ready for Nikshay Portal Update (Pending in Nikshay, but Done in DFY!)
+            services_ready = []
+            if not n_dbt and d_dbt: services_ready.append("💳 DBT Bank Seeded")
+            if not n_hiv and d_hiv: services_ready.append("🩺 HIV/DM Screened")
+            if not n_udst and d_udst: services_ready.append("🔬 Sample Tested (UDST)")
+            if not n_ct and d_ct: services_ready.append("👥 Contact Traced")
+
+            if services_ready:
+                ready_for_nikshay_list.append({
+                    "id": pid,
+                    "name": np["name"] or "Patient",
+                    "phone": np["phone"],
+                    "district": np["district"] or (dfy_info["district"] if has_dfy else ""),
+                    "services_ready": services_ready,
+                    "fo_name": dfy_info["fo_name"] if has_dfy else "",
+                    "date": dfy_info["date"] if has_dfy else ""
+                })
+
+            # Actionable List 2: Urgent Field Action (Pending in both Nikshay and DFY!)
+            pending_actions = []
+            if not n_dbt and not d_dbt: pending_actions.append("DBT Bank")
+            if not n_hiv and not d_hiv: pending_actions.append("HIV/DM")
+            if not n_udst and not d_udst: pending_actions.append("UDST")
+            if not n_ct and not d_ct: pending_actions.append("Contact Tracing")
+
+            if len(pending_actions) >= 2:
+                urgent_field_action_list.append({
+                    "id": pid,
+                    "name": np["name"] or "Patient",
+                    "phone": np["phone"],
+                    "district": np["district"],
+                    "pending_actions": pending_actions
+                })
+
         summary = {
             "month": month,
             "district": district,
+            "detected_sheet": sheet_used,
             "detected_id_column": str(id_col),
+            "is_mastersheet_format": bool("master" in sheet_used.lower() or "episode_id" in cols_lower),
             "total_nikshay_uploaded": len(nikshay_ids),
             "total_dfy_reported": len(dfy_reported_ids),
             "matched_count": len(matched),
             "match_rate_pct": round((len(matched) / len(nikshay_ids) * 100), 1) if nikshay_ids else 0,
             "missing_in_dfy_count": len(only_in_nikshay),
             "only_in_dfy_count": len(only_in_dfy),
+            "ready_for_portal_count": len(ready_for_nikshay_list),
+            "urgent_field_action_count": len(urgent_field_action_list),
+            "cascade": cascade_summary
         }
         
-        preview_missing_in_dfy = only_in_nikshay[:150]
+        preview_missing_in_dfy = [{
+            "id": pid,
+            "name": nikshay_patients[pid]["name"] or "Patient",
+            "phone": nikshay_patients[pid]["phone"],
+            "district": nikshay_patients[pid]["district"]
+        } for pid in only_in_nikshay[:150]]
+
         preview_only_in_dfy = [{
             "id": pid,
             "district": dfy_details.get(pid, {}).get("district", ""),
             "fo_name": dfy_details.get(pid, {}).get("fo_name", ""),
             "date": dfy_details.get(pid, {}).get("date", ""),
-            "services": dfy_details.get(pid, {}).get("services", [])
+            "services": list(dfy_details.get(pid, {}).get("services", []))
         } for pid in only_in_dfy[:150]]
         
         await log_admin_activity(
             action_type="NIKSHAY_RECONCILE",
-            details=f"Nikshay reconciliation for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(only_in_nikshay)} missing in DFY",
+            details=f"Reconciled {sheet_used} for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(ready_for_nikshay_list)} ready for portal update",
             district=district,
             user_name=admin.get("username", "Admin"),
             role=admin.get("role", "SUB_ADMIN")
@@ -3114,7 +3321,9 @@ async def reconcile_nikshay(
             "success": True,
             "summary": summary,
             "preview_missing_in_dfy": preview_missing_in_dfy,
-            "preview_only_in_dfy": preview_only_in_dfy
+            "preview_only_in_dfy": preview_only_in_dfy,
+            "preview_ready_for_portal": ready_for_nikshay_list[:150],
+            "preview_urgent_field_action": urgent_field_action_list[:150]
         }
     except HTTPException:
         raise

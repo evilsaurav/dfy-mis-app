@@ -5940,10 +5940,22 @@ Keep this file safe in your Google Drive or personal diary.
 
             {/* Reconciliation Results Display */}
             {nikshayResult && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-5">
+                {/* Detected Source Metadata Banner */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-emerald-50/80 border border-emerald-200 px-4 py-2.5 rounded-2xl text-xs font-bold text-emerald-800">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">📑</span>
+                    <span>Source: Sheet <strong>"{nikshayResult.summary?.detected_sheet || 'mastersheet'}"</strong> | ID Column: <strong className="font-mono text-emerald-950">"{nikshayResult.summary?.detected_id_column}"</strong></span>
+                  </div>
+                  <span className="bg-emerald-600 text-white text-[10px] px-2.5 py-0.5 rounded-lg font-black uppercase tracking-wider">
+                    {nikshayResult.summary?.is_mastersheet_format ? 'Consolidated Master Dataset Active' : 'Standard Sheet Active'}
+                  </span>
+                </div>
+
+                {/* Top KPI Metrics */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                   <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl text-center">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Nikshay Uploaded</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Nikshay Total</span>
                     <span className="text-xl font-black text-slate-800">{nikshayResult.summary?.total_nikshay_uploaded || 0}</span>
                   </div>
                   <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-2xl text-center">
@@ -5951,49 +5963,207 @@ Keep this file safe in your Google Drive or personal diary.
                     <span className="text-xl font-black text-indigo-700">{nikshayResult.summary?.total_dfy_reported || 0}</span>
                   </div>
                   <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-center">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 block">Matched ({nikshayResult.summary?.match_rate_pct || 0}%)</span>
-                    <span className="text-xl font-black text-emerald-700">{nikshayResult.summary?.matched_count || 0}</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 block">Match Rate</span>
+                    <span className="text-xl font-black text-emerald-700">{nikshayResult.summary?.match_rate_pct || 0}%</span>
+                    <span className="text-[10px] text-emerald-600 font-bold block">({nikshayResult.summary?.matched_count || 0} matched)</span>
                   </div>
-                  <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-center">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 block">Missing in DFY MIS</span>
+                  <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl text-center">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 block">Ready for Portal</span>
+                    <span className="text-xl font-black text-amber-700">{nikshayResult.summary?.ready_for_portal_count || 0}</span>
+                    <span className="text-[10px] text-amber-600 font-bold block">DFY completed</span>
+                  </div>
+                  <div className="bg-rose-50 border border-rose-200 p-3 rounded-2xl text-center col-span-2 sm:col-span-1">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 block">Missing in DFY</span>
                     <span className="text-xl font-black text-rose-700">{nikshayResult.summary?.missing_in_dfy_count || 0}</span>
                   </div>
                 </div>
 
-                {/* Sub-tabs: Missing in DFY vs Only in DFY */}
-                <div className="border-b border-slate-200 flex gap-2">
+                {/* 4-Indicator Cascade Comparison Grid */}
+                {nikshayResult.summary?.cascade && (
+                  <div className="bg-slate-50/70 border border-slate-200/80 rounded-2xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-600">⚡ 4-Indicator Cascade Cross-Concordance</span>
+                      <span className="text-[10px] text-slate-400 font-semibold">Government Nikshay vs DFY Field Reality</span>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      {/* HIV & DM */}
+                      <div className="bg-white border border-purple-200 p-3 rounded-xl space-y-1 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-purple-900 flex items-center gap-1"><span>🩺</span> HIV & DM</span>
+                          <span className="text-[10px] font-black bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">
+                            {nikshayResult.summary.cascade.hiv_dm?.ready_for_portal || 0} Ready
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium flex justify-between pt-1 border-t border-slate-100">
+                          <span>Nikshay: <strong className="text-slate-800">{nikshayResult.summary.cascade.hiv_dm?.nikshay_done || 0}</strong></span>
+                          <span>DFY: <strong className="text-purple-700">{nikshayResult.summary.cascade.hiv_dm?.dfy_done || 0}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* DBT Bank */}
+                      <div className="bg-white border border-amber-200 p-3 rounded-xl space-y-1 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-amber-900 flex items-center gap-1"><span>💳</span> DBT Bank</span>
+                          <span className="text-[10px] font-black bg-amber-50 text-amber-700 px-1.5 py-0.5 rounded">
+                            {nikshayResult.summary.cascade.dbt?.ready_for_portal || 0} Ready
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium flex justify-between pt-1 border-t border-slate-100">
+                          <span>Nikshay: <strong className="text-slate-800">{nikshayResult.summary.cascade.dbt?.nikshay_done || 0}</strong></span>
+                          <span>DFY: <strong className="text-amber-700">{nikshayResult.summary.cascade.dbt?.dfy_done || 0}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* UDST Testing */}
+                      <div className="bg-white border border-emerald-200 p-3 rounded-xl space-y-1 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-900 flex items-center gap-1"><span>🔬</span> UDST Lab</span>
+                          <span className="text-[10px] font-black bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded">
+                            {nikshayResult.summary.cascade.udst?.ready_for_portal || 0} Ready
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium flex justify-between pt-1 border-t border-slate-100">
+                          <span>Nikshay: <strong className="text-slate-800">{nikshayResult.summary.cascade.udst?.nikshay_done || 0}</strong></span>
+                          <span>DFY: <strong className="text-emerald-700">{nikshayResult.summary.cascade.udst?.dfy_done || 0}</strong></span>
+                        </div>
+                      </div>
+
+                      {/* Contact Tracing */}
+                      <div className="bg-white border border-blue-200 p-3 rounded-xl space-y-1 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-blue-900 flex items-center gap-1"><span>👥</span> Contact Tracing</span>
+                          <span className="text-[10px] font-black bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">
+                            {nikshayResult.summary.cascade.contact_tracing?.ready_for_portal || 0} Ready
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 font-medium flex justify-between pt-1 border-t border-slate-100">
+                          <span>Nikshay: <strong className="text-slate-800">{nikshayResult.summary.cascade.contact_tracing?.nikshay_done || 0}</strong></span>
+                          <span>DFY: <strong className="text-blue-700">{nikshayResult.summary.cascade.contact_tracing?.dfy_done || 0}</strong></span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Sub-tabs Navigation */}
+                <div className="border-b border-slate-200 flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setNikshayActiveTab('ready_for_portal')}
+                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'ready_for_portal' ? 'border-amber-600 text-amber-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                  >
+                    ⭐ Ready for Nikshay Portal ({nikshayResult.summary?.ready_for_portal_count || 0})
+                  </button>
                   <button
                     onClick={() => setNikshayActiveTab('missing_in_dfy')}
-                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2 cursor-pointer ${nikshayActiveTab === 'missing_in_dfy' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'missing_in_dfy' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                   >
                     Missing in DFY MIS ({nikshayResult.summary?.missing_in_dfy_count || 0})
                   </button>
                   <button
                     onClick={() => setNikshayActiveTab('only_in_dfy')}
-                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2 cursor-pointer ${nikshayActiveTab === 'only_in_dfy' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'only_in_dfy' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
                   >
-                    Only in DFY MIS ({nikshayResult.summary?.only_in_dfy_count || 0})
+                    Only in DFY MIS / Typos ({nikshayResult.summary?.only_in_dfy_count || 0})
+                  </button>
+                  <button
+                    onClick={() => setNikshayActiveTab('urgent_field_action')}
+                    className={`pb-2 text-xs font-bold border-b-2 transition-all px-2.5 cursor-pointer ${nikshayActiveTab === 'urgent_field_action' ? 'border-red-600 text-red-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
+                  >
+                    ⚠️ Urgent Action ({nikshayResult.summary?.urgent_field_action_count || 0})
                   </button>
                 </div>
 
-                {nikshayActiveTab === 'missing_in_dfy' ? (
+                {/* Tab 1: Ready for Nikshay Portal Update */}
+                {nikshayActiveTab === 'ready_for_portal' && (
                   <div className="space-y-2">
-                    <p className="text-xs text-slate-500 font-medium">These patient IDs exist in Nikshay portal but were never reported in DFY MIS by field staff this month:</p>
-                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl">
-                      {(nikshayResult.preview_missing_in_dfy || []).map((id, i) => (
-                        <span key={i} className="font-mono text-xs font-bold bg-white border border-rose-200 text-rose-800 px-2 py-1 rounded-lg">
-                          #{id}
-                        </span>
-                      ))}
-                      {(nikshayResult.preview_missing_in_dfy || []).length === 0 && (
-                        <span className="text-xs text-emerald-600 font-bold p-2">✓ 100% matched! All Nikshay patients are reported in DFY MIS.</span>
-                      )}
+                    <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 p-2.5 rounded-xl font-medium">
+                      🎯 <strong>Action for DTO / District Coordinator:</strong> In sabhi patients ke service documents DFY Field Officers ne already collect kar liye hain. Inhe Nikshay portal par turant Update/Validated mark karein!
+                    </p>
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold">
+                          <tr>
+                            <th className="p-2">Episode ID</th>
+                            <th className="p-2">Patient Name</th>
+                            <th className="p-2">District</th>
+                            <th className="p-2">Services Completed by DFY</th>
+                            <th className="p-2">Officer</th>
+                            <th className="p-2">Date</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {(nikshayResult.preview_ready_for_portal || []).map((item, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="p-2 font-mono font-bold text-amber-900">#{item.id}</td>
+                              <td className="p-2 text-slate-800 font-bold">{item.name}</td>
+                              <td className="p-2 text-slate-600">{item.district}</td>
+                              <td className="p-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {(item.services_ready || []).map((s, idx) => (
+                                    <span key={idx} className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                              <td className="p-2 text-slate-600">{item.fo_name || '-'}</td>
+                              <td className="p-2 text-slate-400 font-mono text-[11px]">{item.date || '-'}</td>
+                            </tr>
+                          ))}
+                          {(nikshayResult.preview_ready_for_portal || []).length === 0 && (
+                            <tr>
+                              <td colSpan="6" className="p-6 text-center text-slate-400 italic">
+                                No pending portal updates detected for this dataset.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
-                ) : (
+                )}
+
+                {/* Tab 2: Missing in DFY MIS */}
+                {nikshayActiveTab === 'missing_in_dfy' && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-500 font-medium">These patient IDs exist in Nikshay portal but were never reported in DFY MIS by field staff this month:</p>
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold">
+                          <tr>
+                            <th className="p-2">Episode ID</th>
+                            <th className="p-2">Patient Name</th>
+                            <th className="p-2">Phone</th>
+                            <th className="p-2">District</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(nikshayResult.preview_missing_in_dfy || []).map((item, i) => (
+                            <tr key={i} className="hover:bg-slate-50 font-mono">
+                              <td className="p-2 font-bold text-rose-700">#{item.id}</td>
+                              <td className="p-2 font-sans text-slate-800 font-semibold">{item.name}</td>
+                              <td className="p-2 text-slate-600">{item.phone || '-'}</td>
+                              <td className="p-2 font-sans text-slate-600">{item.district || '-'}</td>
+                            </tr>
+                          ))}
+                          {(nikshayResult.preview_missing_in_dfy || []).length === 0 && (
+                            <tr>
+                              <td colSpan="4" className="p-6 text-center text-emerald-600 font-bold">
+                                ✓ 100% matched! All Nikshay patients are reported in DFY MIS.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 3: Only in DFY MIS */}
+                {nikshayActiveTab === 'only_in_dfy' && (
                   <div className="space-y-2">
                     <p className="text-xs text-slate-500 font-medium">These patient IDs were entered by field officers in DFY MIS but are not in this Nikshay export (check for typos):</p>
-                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
                       <table className="w-full text-left text-xs">
                         <thead className="bg-slate-100 text-slate-600 font-bold">
                           <tr>
@@ -6001,6 +6171,7 @@ Keep this file safe in your Google Drive or personal diary.
                             <th className="p-2">District</th>
                             <th className="p-2">Field Officer</th>
                             <th className="p-2">Date</th>
+                            <th className="p-2">Services Logged</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -6010,8 +6181,62 @@ Keep this file safe in your Google Drive or personal diary.
                               <td className="p-2 font-sans text-slate-700">{item.district}</td>
                               <td className="p-2 font-sans text-slate-700">{item.fo_name}</td>
                               <td className="p-2 text-slate-500">{item.date}</td>
+                              <td className="p-2 font-sans text-[11px] text-slate-600">{(item.services || []).join(', ')}</td>
                             </tr>
                           ))}
+                          {(nikshayResult.preview_only_in_dfy || []).length === 0 && (
+                            <tr>
+                              <td colSpan="5" className="p-6 text-center text-slate-400 italic">
+                                No unrecognized DFY IDs detected.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 4: Urgent Action (Pending in both) */}
+                {nikshayActiveTab === 'urgent_field_action' && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-red-700 bg-red-50 border border-red-200 p-2.5 rounded-xl font-medium">
+                      ⚠️ <strong>High Risk Dropout:</strong> In patients ke 2 ya zyada clinical cascade services Nikshay aur DFY dono me pending hain. Field Officers ko immediate home visit ke liye assign karein.
+                    </p>
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-100 text-slate-600 font-bold">
+                          <tr>
+                            <th className="p-2">Episode ID</th>
+                            <th className="p-2">Patient Name</th>
+                            <th className="p-2">District</th>
+                            <th className="p-2">Pending Cascade Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium">
+                          {(nikshayResult.preview_urgent_field_action || []).map((item, i) => (
+                            <tr key={i} className="hover:bg-slate-50">
+                              <td className="p-2 font-mono font-bold text-red-900">#{item.id}</td>
+                              <td className="p-2 text-slate-800 font-bold">{item.name}</td>
+                              <td className="p-2 text-slate-600">{item.district || '-'}</td>
+                              <td className="p-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {(item.pending_actions || []).map((a, idx) => (
+                                    <span key={idx} className="bg-rose-100 text-rose-800 border border-rose-200 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                      {a} Missing
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                          {(nikshayResult.preview_urgent_field_action || []).length === 0 && (
+                            <tr>
+                              <td colSpan="4" className="p-6 text-center text-emerald-600 font-bold">
+                                ✓ Zero high-risk dropout patients!
+                              </td>
+                            </tr>
+                          )}
                         </tbody>
                       </table>
                     </div>
