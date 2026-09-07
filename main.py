@@ -237,26 +237,17 @@ app = FastAPI(title="DFY Daily Activity API")
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Strict CORS configuration
-_DEFAULT_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:5173",
-    "http://127.0.0.1:3000",
-    "https://dfy-mis-app.vercel.app",
-    "https://dfy-mis-app.onrender.com"
-]
+# Permissive CORS configuration ensuring all Vercel domains, Render domains, and mobile apps work seamlessly
 _env_origins = os.environ.get("ALLOWED_ORIGINS")
-if _env_origins and _env_origins.strip() == "*":
-    cors_allowed = ["*"]
-elif _env_origins:
+if _env_origins and _env_origins.strip() != "*":
     cors_allowed = [o.strip() for o in _env_origins.split(",") if o.strip()]
 else:
-    cors_allowed = _DEFAULT_ALLOWED_ORIGINS
+    cors_allowed = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_allowed,
-    allow_credentials=True if cors_allowed != ["*"] else False,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     max_age=86400,

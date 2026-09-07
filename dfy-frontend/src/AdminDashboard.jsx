@@ -1103,13 +1103,19 @@ Keep this file safe in your Google Drive or personal diary.
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error("Failed to fetch data");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server responded with status ${res.status}`);
+      }
       const data = await res.json();
-      setRawRecords(data.records);
-      setSelectedDistrict('All');
+      setRawRecords(Array.isArray(data.records) ? data.records : []);
+      if (currentUser?.role !== 'SUB_ADMIN') {
+        setSelectedDistrict('All');
+      }
       setSelectedFO('All');
     } catch (err) {
-      setError('Failed to load dashboard data. Ensure backend is running.');
+      console.error("Dashboard fetch error:", err);
+      setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
     } finally {
       setIsLoading(false);
     }
@@ -2205,8 +2211,69 @@ Keep this file safe in your Google Drive or personal diary.
 
         {isLoading ? (
           <div className="text-center py-20 font-bold text-slate-500">Loading Data...</div>
+        ) : error ? (
+          <div className="text-center py-12 bg-rose-50 border border-rose-200 rounded-3xl p-6 space-y-3 shadow-sm max-w-xl mx-auto my-8">
+            <span className="text-3xl">⚠️</span>
+            <h3 className="text-base font-black text-rose-800">Unable to Load Dashboard Records</h3>
+            <p className="text-xs font-semibold text-rose-600">{error}</p>
+            <div className="pt-2 flex justify-center gap-3">
+              <button 
+                onClick={fetchData} 
+                className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all shadow active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🔄</span> Retry Loading
+              </button>
+              <button 
+                onClick={() => {
+                  localStorage.removeItem('dfy_admin_auth');
+                  localStorage.removeItem('dfy_admin_token');
+                  localStorage.removeItem('dfy_admin_user');
+                  setIsAuthenticated(false);
+                }} 
+                className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm active:scale-95"
+              >
+                Re-login as Admin
+              </button>
+            </div>
+          </div>
         ) : filteredRecords.length === 0 ? (
-          <div className="text-center py-20 font-bold text-slate-500 bg-white rounded-2xl shadow-sm border border-slate-100">No data found for selected filters</div>
+          <div className="text-center py-14 bg-white rounded-3xl shadow-sm border border-slate-200/80 p-6 sm:p-8 space-y-4 max-w-2xl mx-auto my-8">
+            <div className="w-14 h-14 bg-indigo-50 rounded-2xl border border-indigo-100 flex items-center justify-center text-2xl mx-auto">
+              📂
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-800 mb-1">No Data Found For Selected Filters</h3>
+              <p className="text-xs text-slate-500 font-medium">
+                {rawRecords.length === 0
+                  ? `There are no field reports recorded in the database for ${month}.`
+                  : `There are ${rawRecords.length} total reports for ${month}, but none match District: "${selectedDistrict}" and Officer: "${selectedFO}".`}
+              </p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2 pt-2">
+              {selectedDistrict !== 'All' && (
+                <button 
+                  onClick={() => { setSelectedDistrict('All'); setSelectedFO('All'); }}
+                  className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm active:scale-95 flex items-center gap-1.5"
+                >
+                  <span>🌐</span> View All Districts ({rawRecords.length} reports)
+                </button>
+              )}
+              {month !== '2026-09' && (
+                <button 
+                  onClick={() => setMonth('2026-09')}
+                  className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-4 py-2.5 rounded-xl transition-all shadow-sm active:scale-95 flex items-center gap-1.5"
+                >
+                  <span>📅</span> Switch to September 2026 (59 Reports)
+                </button>
+              )}
+              <button 
+                onClick={fetchData}
+                className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl border border-slate-200 transition-all active:scale-95 flex items-center gap-1.5"
+              >
+                <span>🔄</span> Refresh
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {selectedFO !== 'All' && (
