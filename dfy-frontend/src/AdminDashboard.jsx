@@ -1870,221 +1870,329 @@ Keep this file safe in your Google Drive or personal diary.
       <div className="max-w-7xl mx-auto space-y-6">
         
         {/* Header & Controls */}
-        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-2xl font-black text-slate-800 tracking-tight">Analytics Dashboard</h1>
-                <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-xl shadow-2xs">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span className="text-xs font-black text-indigo-900">{currentUser?.name || 'Super Admin'}</span>
-                  <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-200/70 text-indigo-800 px-1.5 py-0.2 rounded-md">
-                    {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
-                  </span>
-                </div>
+        {/* ========================================================================= */}
+        {/* --- TIER 1: BRAND IDENTITY, GLOBAL SCOPE FILTERS & ESSENTIAL UTILITIES --- */}
+        {/* ========================================================================= */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            
+            {/* 1. Left: Brand & Admin Identity */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-sm shadow-indigo-600/30 shrink-0">
+                📊
               </div>
-              <p className="text-slate-500 text-sm font-medium mt-0.5">Monitoring {rawRecords.length} daily reports across Bihar</p>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">Analytics Dashboard</h1>
+                  <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span className="text-xs font-black text-indigo-900">{currentUser?.name || 'Super Admin'}</span>
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-200/70 text-indigo-800 px-1.5 py-0.2 rounded-md">
+                      {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-slate-500 text-xs sm:text-sm font-medium mt-0.5">Monitoring {rawRecords.length} daily reports across Bihar</p>
+              </div>
             </div>
+
+            {/* 2. Middle & Right: Scope Filters + Global Utilities */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+              {/* Scope Filters Group */}
+              <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200/80 p-1.5 rounded-xl">
+                <input 
+                  type="month" 
+                  value={month} 
+                  onChange={(e) => setMonth(e.target.value)} 
+                  className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs" 
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDistrict('All');
+                    setSelectedFO('All');
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
+                    selectedDistrict === 'All'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs'
+                  }`}
+                  title="View All Districts"
+                >
+                  <span>🌐</span>
+                  <span>All</span>
+                </button>
+                <select 
+                  value={selectedDistrict} 
+                  onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
+                  className={`border px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer ${
+                    selectedDistrict !== 'All'
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-800 ring-1 ring-indigo-300'
+                      : 'bg-white border-slate-200 text-slate-700 shadow-2xs'
+                  }`}
+                >
+                  {districts.map(d => <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>)}
+                </select>
+                <select 
+                  value={selectedFO} 
+                  onChange={(e) => setSelectedFO(e.target.value)} 
+                  disabled={selectedDistrict === 'All'} 
+                  className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 shadow-2xs cursor-pointer"
+                >
+                  {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
+                </select>
+              </div>
+
+              {/* Utility Action Buttons: Refresh, Security, Logout */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => {
+                    fetchData();
+                    fetchAttendance();
+                    fetchDirectory();
+                    loadTargets('All');
+                    fetchDuplicateAudit();
+                    fetchStaffList();
+                    fetchActiveBroadcasts();
+                    if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
+                  }}
+                  disabled={isLoading}
+                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Refresh Dashboard & Sync Latest Reports"
+                >
+                  <span className={isLoading ? "animate-spin" : ""}>🔄</span>
+                  <span className="hidden sm:inline">{isLoading ? "Syncing..." : "Refresh"}</span>
+                </button>
+
+                {isSuperAdmin && (
+                  <button 
+                    onClick={() => { setSecurityStatusMsg(''); setShowSecurityModal(true); }} 
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
+                    title="Admin Security Settings & Change Password"
+                  >
+                    <span>⚙️</span>
+                    <span className="hidden sm:inline">Security</span>
+                  </button>
+                )}
+
+                <button 
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem('dfy_admin_auth');
+                      localStorage.removeItem('dfy_admin_user');
+                    } catch (e) {}
+                    setCurrentUser(null);
+                    setIsAuthenticated(false);
+                    window.location.href = '/';
+                  }} 
+                  className="bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="Logout from Admin Portal"
+                >
+                  <span>🚪</span>
+                  <span>Logout</span>
+                </button>
+              </div>
+            </div>
+
           </div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500" />
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedDistrict('All');
-                setSelectedFO('All');
-              }}
-              className={`px-3 py-2 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 ${
-                selectedDistrict === 'All'
-                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-              }`}
-              title="View All Districts"
-            >
-              <span>🌐</span>
-              <span>All</span>
-            </button>
-            <select 
-              value={selectedDistrict} 
-              onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
-              className={`border px-3 py-2 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all ${
-                selectedDistrict !== 'All'
-                  ? 'bg-indigo-50 border-indigo-300 text-indigo-800 ring-1 ring-indigo-300'
-                  : 'bg-slate-50 border border-slate-200 text-slate-700'
-              }`}
-            >
-              {districts.map(d => <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>)}
-            </select>
-            <select value={selectedFO} onChange={(e) => setSelectedFO(e.target.value)} disabled={selectedDistrict === 'All'} className="bg-slate-50 border border-slate-200 px-3 py-2 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50">
-              {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
-            </select>
 
-            {/* Super Admin Control Buttons */}
-            {isSuperAdmin && (
-              <>
+          {/* ========================================================================= */}
+          {/* --- TIER 2: COMMAND DECK (ORGANIZED FUNCTIONAL CLUSTERS) --- */}
+          {/* ========================================================================= */}
+          <div className="pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
+            
+            {/* CLUSTER 1: 🩺 CLINICAL & RECONCILIATION (5 cols on LG) */}
+            <div className="lg:col-span-5 bg-gradient-to-br from-emerald-50/60 to-teal-50/40 border border-emerald-200/80 rounded-2xl p-3 flex flex-col justify-between space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1">
+                  <span>🩺</span>
+                  <span>Clinical &amp; Nikshay Verification</span>
+                </span>
+                <span className="text-[9px] font-bold text-emerald-600 bg-emerald-100/70 px-1.5 py-0.2 rounded">4 Tools</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => setShowNikshayModal(true)} 
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer" 
+                  title="Upload official Nikshay Excel/CSV dump and auto-reconcile against field reports"
+                >
+                  <span>⚖️</span>
+                  <span className="truncate">Nikshay Reconciler</span>
+                </button>
+
+                <button 
+                  onClick={() => setShowJourneyModal(true)} 
+                  className="bg-sky-600 hover:bg-sky-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer" 
+                  title="Track complete longitudinal clinical pathway of any patient ID"
+                >
+                  <span>🔍</span>
+                  <span className="truncate">Patient Journey</span>
+                </button>
+
                 <button 
                   onClick={() => {
-                    fetchAdminUsers();
-                    setShowAdminUsersModal(true);
+                    fetchDuplicateAudit();
+                    setShowDuplicateModal(true);
                   }} 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
-                  title="Manage Admin & MIS Accounts, Permitted Districts and Permissions"
+                  className="bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer relative" 
+                  title="Cross-Officer Duplicate Patient ID Radar"
                 >
+                  <span>🛡️</span>
+                  <span className="truncate">Duplicate Radar</span>
+                  {duplicateAudit && duplicateAudit.total_duplicate_ids > 0 && (
+                    <span className="bg-rose-600 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black">
+                      {duplicateAudit.total_duplicate_ids}
+                    </span>
+                  )}
+                </button>
+
+                <button 
+                  onClick={() => {
+                    fetchCascadeAlerts();
+                    setShowCascadeModal(true);
+                  }} 
+                  className="bg-rose-600 hover:bg-rose-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 animate-pulse cursor-pointer" 
+                  title="Predictive Clinical Cascade & Patient Dropout Radar"
+                >
+                  <span>🚨</span>
+                  <span className="truncate">Cascade Alerts</span>
+                </button>
+              </div>
+            </div>
+
+            {/* CLUSTER 2: 👥 STAFF OPERATIONS & TARGETS (4 cols on LG) */}
+            <div className="lg:col-span-4 bg-gradient-to-br from-indigo-50/60 to-purple-50/40 border border-indigo-200/80 rounded-2xl p-3 flex flex-col justify-between space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
                   <span>👥</span>
-                  <span>Admin Users</span>
+                  <span>Staff Ops &amp; Targets</span>
+                </span>
+                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-100/70 px-1.5 py-0.2 rounded">4 Tools</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button 
+                  onClick={() => setActiveMainTab('staff_pacing')} 
+                  className={`px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 relative cursor-pointer ${
+                    activeMainTab === 'staff_pacing'
+                      ? 'bg-amber-500 text-white shadow-amber-500/20 ring-2 ring-amber-300'
+                      : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                  }`}
+                  title="Open Staff Target Pacing, Forecasting & Comparison Studio"
+                >
+                  <span>🎯</span>
+                  <span className="truncate">Staff Pacing</span>
+                  {pacingStats.critical > 0 && (
+                    <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black animate-pulse">
+                      {pacingStats.critical}
+                    </span>
+                  )}
                 </button>
+
+                {canManageStaff && (
+                  <button 
+                    onClick={() => {
+                      fetchStaffList();
+                      setShowStaffSuite(true);
+                    }} 
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer" 
+                    title="Manage Staff Members, Reset PINs & Export PIN Directory"
+                  >
+                    <span>👥</span>
+                    <span className="truncate">Staff &amp; PINs</span>
+                  </button>
+                )}
+
+                {canEditTargets && (
+                  <button 
+                    onClick={() => {
+                      setTargetModalDistrict(selectedDistrict !== 'All' ? selectedDistrict : 'All');
+                      loadTargets('All');
+                      fetchDirectory();
+                      setShowTargetModal(true);
+                    }} 
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer" 
+                    title="Set Monthly Notification Targets for All Staff"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
+                    <span className="truncate">Set Targets</span>
+                  </button>
+                )}
+
                 <button 
                   onClick={() => {
-                    fetchAuditLogs();
-                    setShowAuditModal(true);
+                    fetchAllBroadcasts();
+                    setShowBroadcastStudio(true);
                   }} 
-                  className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
-                  title="View Audit Logs of all Target changes, ID edits, and Admin actions"
+                  className="bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center justify-center gap-1.5 active:scale-95 relative cursor-pointer" 
+                  title="Broadcast urgent alerts and notices to field staff and sub-admins"
                 >
-                  <span>📜</span>
-                  <span>Audit Trail</span>
+                  <span>📢</span>
+                  <span className="truncate">Broadcasts</span>
+                  {activeAdminBroadcasts.length > 0 && (
+                    <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black animate-pulse">
+                      {activeAdminBroadcasts.length}
+                    </span>
+                  )}
                 </button>
-              </>
-            )}
+              </div>
+            </div>
 
-            <button 
-              onClick={() => setShowNikshayModal(true)} 
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
-              title="Upload official Nikshay Excel/CSV dump and auto-reconcile against field reports"
-            >
-              <span>⚖️</span>
-              <span>Nikshay Reconciler</span>
-            </button>
-
-            <button 
-              onClick={() => setShowJourneyModal(true)} 
-              className="bg-sky-600 hover:bg-sky-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" 
-              title="Track complete longitudinal clinical pathway of any patient ID"
-            >
-              <span>🔍</span>
-              <span>Patient Journey</span>
-            </button>
-
-            <button 
-              onClick={() => {
-                fetchAllBroadcasts();
-                setShowBroadcastStudio(true);
-              }} 
-              className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 relative" 
-              title="Broadcast urgent alerts and notices to field staff and sub-admins"
-            >
-              <span>📢</span>
-              <span>Broadcasts</span>
-              {activeAdminBroadcasts.length > 0 && (
-                <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black animate-pulse">
-                  {activeAdminBroadcasts.length}
-                </span>
-              )}
-            </button>
-
-            <button 
-              onClick={() => setActiveMainTab('staff_pacing')} 
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 relative ${
-                activeMainTab === 'staff_pacing'
-                  ? 'bg-amber-500 text-white shadow-amber-500/20 ring-2 ring-amber-300'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
-              }`}
-              title="Open Staff Target Pacing, Forecasting & Comparison Studio"
-            >
-              <span>🎯</span>
-              <span>Staff Pacing</span>
-              {pacingStats.critical > 0 && (
-                <span className="bg-rose-500 text-white px-1.5 py-0.2 rounded-full text-[9px] font-black animate-pulse">
-                  {pacingStats.critical}
-                </span>
-              )}
-            </button>
-
-            <button onClick={() => setShowReportsStudio(true)} className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white px-4 py-2.5 rounded-xl text-xs font-black shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5" title="Open 5-in-1 Executive Reports & Export Studio">
-              <span>📊</span>
-              <span>Reports Studio</span>
-            </button>
-            <button onClick={() => {
-              fetchDuplicateAudit();
-              setShowDuplicateModal(true);
-            }} className="bg-rose-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-rose-700 transition-colors shadow-sm flex items-center gap-1.5" title="Cross-Officer Duplicate Patient ID Radar">
-              <span>🛡️</span>
-              <span>Duplicate Radar</span>
-              {duplicateAudit && duplicateAudit.total_duplicate_ids > 0 && (
-                <span className="bg-white text-rose-700 px-1.5 py-0.2 rounded-full text-[9px] font-black">{duplicateAudit.total_duplicate_ids}</span>
-              )}
-            </button>
-            <button onClick={() => {
-              fetchCascadeAlerts();
-              setShowCascadeModal(true);
-            }} className="bg-rose-600 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 animate-pulse" title="Predictive Clinical Cascade & Patient Dropout Radar">
-              <span>🚨</span>
-              <span>Cascade Alerts</span>
-            </button>
-
-            {canManageStaff && (
-              <button onClick={() => {
-                fetchStaffList();
-                setShowStaffSuite(true);
-              }} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95" title="Manage Staff Members, Reset PINs & Export PIN Directory">
-                <span>👥</span>
-                <span>Staff &amp; PINs</span>
+            {/* CLUSTER 3 & 4: 📊 REPORTS & 🔐 GOVERNANCE (3 cols on LG) */}
+            <div className="lg:col-span-3 flex flex-col gap-2.5">
+              {/* Reports Studio High-Priority Box */}
+              <button 
+                onClick={() => setShowReportsStudio(true)} 
+                className="w-full bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-800 text-white p-2.5 rounded-2xl text-xs font-black shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center justify-between cursor-pointer border border-indigo-400/30 group" 
+                title="Open 5-in-1 Executive Reports & Export Studio"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-base p-1 bg-white/20 rounded-lg group-hover:scale-110 transition-transform">📊</span>
+                  <div className="text-left">
+                    <span className="block font-black text-xs">Reports Studio</span>
+                    <span className="block text-[10px] text-indigo-100 font-medium">5-in-1 DTO &amp; MIS Exports</span>
+                  </div>
+                </div>
+                <span className="text-white/80 group-hover:translate-x-1 transition-transform">&rarr;</span>
               </button>
-            )}
 
-            {canEditTargets && (
-              <button onClick={() => {
-                setTargetModalDistrict(selectedDistrict !== 'All' ? selectedDistrict : 'All');
-                loadTargets('All');
-                fetchDirectory();
-                setShowTargetModal(true);
-              }} className="bg-purple-600 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-purple-700 transition-colors shadow-sm flex items-center gap-1.5" title="Set Monthly Notification Targets for All Staff">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="6"></circle><circle cx="12" cy="12" r="2"></circle></svg>
-                Set Targets
-              </button>
-            )}
+              {/* Governance Cluster (Super Admin Only) */}
+              {isSuperAdmin && (
+                <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-2.5 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+                      <span>🔐</span>
+                      <span>Governance</span>
+                    </span>
+                    <span className="text-[9px] font-bold text-slate-400">Admin</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button 
+                      onClick={() => {
+                        fetchAdminUsers();
+                        setShowAdminUsersModal(true);
+                      }} 
+                      className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1.5 rounded-xl text-[11px] font-bold transition-all shadow-2xs flex items-center justify-center gap-1 active:scale-95 cursor-pointer" 
+                      title="Manage Admin & MIS Accounts, Permitted Districts and Permissions"
+                    >
+                      <span>👥</span>
+                      <span className="truncate">Admins</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        fetchAuditLogs();
+                        setShowAuditModal(true);
+                      }} 
+                      className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1.5 rounded-xl text-[11px] font-bold transition-all shadow-2xs flex items-center justify-center gap-1 active:scale-95 cursor-pointer" 
+                      title="View Audit Logs of all Target changes, ID edits, and Admin actions"
+                    >
+                      <span>📜</span>
+                      <span className="truncate">Audit Trail</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
-            {isSuperAdmin && (
-              <button onClick={() => { setSecurityStatusMsg(''); setShowSecurityModal(true); }} className="bg-slate-700 text-white px-3.5 py-2 rounded-lg text-xs font-bold hover:bg-slate-800 transition-colors shadow-sm flex items-center gap-1.5" title="Admin Security Settings & Change Password">
-                <span>⚙️</span>
-                <span>Security</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => {
-                fetchData();
-                fetchAttendance();
-                fetchDirectory();
-                loadTargets('All');
-                fetchDuplicateAudit();
-                fetchStaffList();
-                fetchActiveBroadcasts();
-                if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
-              }}
-              disabled={isLoading}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
-              title="Refresh Dashboard & Sync Latest Reports"
-            >
-              <span className={isLoading ? "animate-spin" : ""}>🔄</span>
-              <span>{isLoading ? "Syncing..." : "Refresh"}</span>
-            </button>
-            <button 
-              onClick={() => {
-                try {
-                  localStorage.removeItem('dfy_admin_auth');
-                  localStorage.removeItem('dfy_admin_user');
-                } catch (e) {}
-                setCurrentUser(null);
-                setIsAuthenticated(false);
-                window.location.href = '/';
-              }} 
-              className="bg-slate-800 hover:bg-rose-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-colors shadow-sm flex items-center gap-1.5 active:scale-95"
-              title="Logout from Admin Portal"
-            >
-              <span>🚪</span>
-              <span>Logout</span>
-            </button>
           </div>
         </div>
 
