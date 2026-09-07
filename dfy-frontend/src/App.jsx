@@ -874,8 +874,8 @@ const MyProfileDashboard = ({
   );
 };
 
-// --- Id Bucket ---// --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk, pendingCascadeIds = [] }) => {
+// --- Id Bucket ---
+const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
 
@@ -920,56 +920,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
         <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
       </label>
 
-      {/* ⚡ Smart Pending Patient Interventions Suggestion Chips */}
-      {pendingCascadeIds && pendingCascadeIds.length > 0 && (
-        <div className="mb-3 bg-amber-50/90 p-2.5 rounded-xl border border-amber-200/90 animate-fade-in shadow-2xs">
-          <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider text-amber-900 flex items-center gap-1">
-              <span>⚡</span> Pending Follow-up Patients ({pendingCascadeIds.length}):
-            </span>
-            {pendingCascadeIds.some(pid => !safeIds.includes(pid)) && onAddBulk && (
-              <button
-                type="button"
-                onClick={() => {
-                  const missing = pendingCascadeIds.filter(pid => !safeIds.includes(pid));
-                  onAddBulk(missing);
-                  if (showToast) showToast(`Added ${missing.length} pending IDs to ${title}!`, "success");
-                }}
-                className="text-[9px] font-bold text-amber-900 bg-white hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 transition-colors active:scale-95 shadow-2xs"
-              >
-                + Add All Pending ({pendingCascadeIds.filter(pid => !safeIds.includes(pid)).length})
-              </button>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
-            {pendingCascadeIds.map((pid, pIdx) => {
-              const isAdded = safeIds.includes(pid);
-              return (
-                <button
-                  key={pIdx}
-                  type="button"
-                  disabled={isAdded}
-                  onClick={() => {
-                    onAdd(pid);
-                    if (showToast) showToast(`Patient #${pid} added to ${title}!`, "success");
-                  }}
-                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
-                    isAdded 
-                      ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
-                      : 'bg-white hover:bg-amber-600 hover:text-white border-amber-200 text-amber-900 shadow-2xs'
-                  }`}
-                  title={isAdded ? "Already Added" : `Tap to add ID #${pid} to ${title}`}
-                >
-                  <span>{pid}</span>
-                  <span>{isAdded ? '✓' : '+'}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Smart Notification ID Suggestion Chips */}
+      {/* Smart Notification ID Suggestion Chips (Only Today's Notified IDs) */}
       {suggestedIds && suggestedIds.length > 0 && (
         <div className="mb-3 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
           <div className="flex justify-between items-center mb-1.5">
@@ -1509,19 +1460,6 @@ function App() {
     addId(fieldKey, patientId);
     showToast(`✓ #${patientId} added to ${label}!`, "success");
   };
-
-  const pendingMap = useMemo(() => {
-    const map = {};
-    (cascadeAlerts || []).forEach(alt => {
-      (alt.missing_items || []).forEach(m => {
-        if (!map[m.key]) map[m.key] = [];
-        if (!map[m.key].includes(alt.id)) {
-          map[m.key].push(alt.id);
-        }
-      });
-    });
-    return map;
-  }, [cascadeAlerts]);
   
   const addDoctor = () => {
     const trimmed = docName.trim();
@@ -1946,7 +1884,6 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={cat.key !== 'notification_ids' ? (formData.notification_ids || []) : []}
-                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1962,7 +1899,6 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
-                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -1976,7 +1912,6 @@ function App() {
                       onRemove={(idx) => removeId('culture_dst_ids', idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
-                      pendingCascadeIds={pendingMap['culture_dst_ids'] || []}
                       onAddBulk={(newIds) => addMultipleIds('culture_dst_ids', newIds)}
                     />
                   )}
@@ -1992,7 +1927,6 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
-                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -2008,7 +1942,6 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
-                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
@@ -2024,7 +1957,6 @@ function App() {
                       onRemove={(idx) => removeId(cat.key, idx)} 
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
-                      pendingCascadeIds={pendingMap[cat.key] || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
                     />
                   ))}
