@@ -3480,12 +3480,15 @@ async def reconcile_nikshay(
             }
         }
         
-        preview_missing_in_dfy = [{
+        preview_missing_in_dfy_details = [{
             "id": pid,
             "name": nikshay_patients[pid]["name"] or "Patient",
             "phone": nikshay_patients[pid]["phone"],
             "district": nikshay_patients[pid]["district"]
         } for pid in only_in_nikshay[:150]]
+
+        # Backward compatibility: Keep string list for any client with cached frontend JS
+        preview_missing_in_dfy_legacy = [str(pid) for pid in only_in_nikshay[:150]]
 
         preview_only_in_dfy = [{
             "id": pid,
@@ -3506,7 +3509,8 @@ async def reconcile_nikshay(
         return {
             "success": True,
             "summary": summary,
-            "preview_missing_in_dfy": preview_missing_in_dfy,
+            "preview_missing_in_dfy": preview_missing_in_dfy_legacy,
+            "preview_missing_in_dfy_details": preview_missing_in_dfy_details,
             "preview_only_in_dfy": preview_only_in_dfy,
             "preview_ready_for_portal": ready_for_nikshay_list[:150],
             "preview_urgent_field_action": urgent_field_action_list[:150]

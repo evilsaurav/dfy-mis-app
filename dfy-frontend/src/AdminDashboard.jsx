@@ -6288,15 +6288,15 @@ Keep this file safe in your Google Drive or personal diary.
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                              {(nikshayResult.preview_missing_in_dfy || []).map((item, i) => (
+                              {(nikshayResult.preview_missing_in_dfy_details || nikshayResult.preview_missing_in_dfy || []).map((item, i) => (
                                 <tr key={i} className="hover:bg-slate-50 font-mono">
-                                  <td className="p-2 font-bold text-rose-700">#{item.id}</td>
-                                  <td className="p-2 font-sans text-slate-800 font-semibold">{item.name}</td>
-                                  <td className="p-2 text-slate-600">{item.phone || '-'}</td>
-                                  <td className="p-2 font-sans text-slate-600">{item.district || '-'}</td>
+                                  <td className="p-2 font-bold text-rose-700">#{typeof item === 'object' && item !== null ? item.id : String(item)}</td>
+                                  <td className="p-2 font-sans text-slate-800 font-semibold">{typeof item === 'object' && item !== null ? (item.name || 'Patient') : 'Patient'}</td>
+                                  <td className="p-2 text-slate-600">{typeof item === 'object' && item !== null ? (item.phone || '-') : '-'}</td>
+                                  <td className="p-2 font-sans text-slate-600">{typeof item === 'object' && item !== null ? (item.district || '-') : '-'}</td>
                                 </tr>
                               ))}
-                              {(nikshayResult.preview_missing_in_dfy || []).length === 0 && (
+                              {(!nikshayResult.preview_missing_in_dfy_details && !nikshayResult.preview_missing_in_dfy || (nikshayResult.preview_missing_in_dfy_details || nikshayResult.preview_missing_in_dfy || []).length === 0) && (
                                 <tr>
                                   <td colSpan="4" className="p-6 text-center text-emerald-600 font-bold">
                                     ✓ 100% matched! All Nikshay patients are reported in DFY MIS.
