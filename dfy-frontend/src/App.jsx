@@ -59,7 +59,8 @@ const PendingInterventionsActionCenter = ({
   loading = false,
   formData,
   onAutofill,
-  showToast
+  showToast,
+  onRefresh
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState('ALL');
@@ -74,7 +75,36 @@ const PendingInterventionsActionCenter = ({
   }
 
   if (!cascadeAlerts || cascadeAlerts.length === 0) {
-    return null;
+    return (
+      <div className="bg-gradient-to-br from-emerald-50/90 via-teal-50/70 to-blue-50/70 rounded-3xl p-4 sm:p-5 border border-emerald-200/80 shadow-sm mb-6 animate-fade-in">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">⚡</span>
+            <div>
+              <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
+                <span>Pending Interventions</span>
+                <span className="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
+                  0 Pending
+                </span>
+              </h3>
+              <p className="text-[10px] text-emerald-800 font-bold mt-0.5">
+                🎉 Sabhi notified patients ke interventions (HIV & DM, Diff TB, DBT, UDST, Contact) complete hain!
+              </p>
+            </div>
+          </div>
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              className="text-[10px] font-bold text-slate-600 bg-white hover:bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded-xl transition-all active:scale-95 flex items-center gap-1 shrink-0 shadow-2xs"
+              title="Check for updates"
+            >
+              <span>🔄</span> Refresh
+            </button>
+          )}
+        </div>
+      </div>
+    );
   }
 
   const hivCount = cascadeSummary.hiv_pending || 0;
@@ -342,30 +372,34 @@ const MyProfileDashboard = ({
   cascadeAlerts: propCascadeAlerts, 
   cascadeSummary: propCascadeSummary, 
   loadingAlerts: propLoadingAlerts,
-  onAutofill 
+  onAutofill,
+  onRefreshCascade
 }) => {
   const [stats, setStats] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [copiedKey, setCopiedKey] = useState(null);
   const [cascadeAlerts, setCascadeAlerts] = useState([]);
+  const [cascadeSummary, setCascadeSummary] = useState({});
   const [loadingAlerts, setLoadingAlerts] = useState(false);
 
-  useEffect(() => {
-    const fetchFoCascadeAlerts = async () => {
-      try {
-        setLoadingAlerts(true);
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-        const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?district=${formData.working_place}&fo_name=${formData.fo_name}`);
-        if (res.ok) {
-          const json = await res.json();
-          setCascadeAlerts(json.data?.alerts || []);
-        }
-      } catch (e) {
-        console.warn("Failed to fetch FO cascade alerts", e);
-      } finally {
-        setLoadingAlerts(false);
+  const fetchFoCascadeAlerts = async () => {
+    try {
+      setLoadingAlerts(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?district=${encodeURIComponent(formData.working_place)}&fo_name=${encodeURIComponent(formData.fo_name)}`);
+      if (res.ok) {
+        const json = await res.json();
+        setCascadeAlerts(json.data?.alerts || []);
+        setCascadeSummary(json.data?.summary || {});
       }
-    };
+    } catch (e) {
+      console.warn("Failed to fetch FO cascade alerts", e);
+    } finally {
+      setLoadingAlerts(false);
+    }
+  };
+
+  useEffect(() => {
     if (formData.fo_name && formData.working_place) {
       fetchFoCascadeAlerts();
     }
@@ -403,19 +437,15 @@ const MyProfileDashboard = ({
     fetchStats();
   }, [formData]);
 
-  if(loading) return (
-    <div className="flex flex-col items-center justify-center p-10 mt-10">
-      <svg className="animate-spin h-10 w-10 text-indigo-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-      <p className="text-slate-500 font-bold tracking-widest text-sm uppercase">Loading Profile...</p>
-    </div>
-  );
-
-  if (!stats) return (
-    <div className="w-full max-w-lg mx-auto text-center p-8 bg-white rounded-3xl border border-slate-100 shadow-sm mt-6">
-      <p className="text-slate-500 font-bold text-sm">Profile data load nahi ho paya.</p>
-      <button onClick={() => window.location.reload()} className="mt-3 bg-indigo-50 text-indigo-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-100">Retry</button>
-    </div>
-  );
+  const activeAlerts = (propCascadeAlerts && propCascadeAlerts.length > 0) 
+    ? propCascadeAlerts 
+    : cascadeAlerts;
+  const activeSummary = (propCascadeSummary && Object.keys(propCascadeSummary).length > 0) 
+    ? propCascadeSummary 
+    : (cascadeSummary || {});
+  const activeLoading = (propLoadingAlerts !== undefined && propLoadingAlerts !== false) 
+    ? propLoadingAlerts 
+    : loadingAlerts;
 
 
   const handleExecuteIdEdit = async (e) => {
@@ -482,13 +512,28 @@ const MyProfileDashboard = ({
     }
   };
 
-  const targetVal = Number(stats.target) || 0;
-  const breakdown = stats.breakdown || {};
+  const targetVal = stats ? (Number(stats.target) || 0) : 0;
+  const breakdown = stats ? (stats.breakdown || {}) : {};
   const notifAchieved = Number(breakdown.notification) || 0;
   const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
+      {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center ALWAYS AT TOP */}
+      <PendingInterventionsActionCenter 
+        cascadeAlerts={activeAlerts}
+        cascadeSummary={activeSummary}
+        loading={activeLoading}
+        formData={formData}
+        onAutofill={onAutofill}
+        showToast={showToast}
+        onRefresh={() => {
+          if (onRefreshCascade) onRefreshCascade();
+          fetchFoCascadeAlerts();
+        }}
+      />
+
+      {/* Profile Header & Monthly Target Card */}
       <div className="bg-white rounded-3xl p-6 shadow-xl shadow-indigo-100/50 border border-slate-100 mb-6 text-center">
         <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 font-black">
           {(formData.fo_name || 'U').charAt(0)}
@@ -496,87 +541,93 @@ const MyProfileDashboard = ({
         <h2 className="text-2xl font-black text-slate-800">{formData.fo_name}</h2>
         <p className="text-slate-500 font-bold text-sm tracking-wider uppercase">{formData.working_place}</p>
         
-        {/* Streak Counter & Milestone Badges */}
-        <div className="mt-3 flex items-center justify-center gap-2">
-          <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full text-xs font-black shadow-sm">
-            <span>🔥</span>
-            <span>{stats.streak_days || 0} Day Streak</span>
-          </span>
-          {stats.total_km > 0 && (
-            <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1 rounded-full text-xs font-black shadow-sm">
-              <span>🛵</span>
-              <span>{stats.total_km} KM Travelled</span>
-            </span>
-          )}
-        </div>
+        {loading ? (
+          <div className="flex flex-col items-center justify-center p-6 mt-4">
+            <svg className="animate-spin h-7 w-7 text-indigo-500 mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <p className="text-slate-400 font-bold tracking-widest text-[11px] uppercase">Loading Stats & Target...</p>
+          </div>
+        ) : !stats ? (
+          <div className="w-full text-center p-4 border-t border-slate-100 mt-4">
+            <p className="text-slate-500 font-bold text-xs">Profile target data load nahi ho paya.</p>
+            <button onClick={() => window.location.reload()} className="mt-2 bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-xl text-xs font-bold hover:bg-indigo-100">Retry</button>
+          </div>
+        ) : (
+          <>
+            {/* Streak Counter & Milestone Badges */}
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <span className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full text-xs font-black shadow-sm">
+                <span>🔥</span>
+                <span>{stats.streak_days || 0} Day Streak</span>
+              </span>
+              {stats.total_km > 0 && (
+                <span className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1 rounded-full text-xs font-black shadow-sm">
+                  <span>🛵</span>
+                  <span>{stats.total_km} KM Travelled</span>
+                </span>
+              )}
+            </div>
 
-        {stats.badges && stats.badges.length > 0 && (
-          <div className="mt-4 flex flex-wrap justify-center gap-2">
-            {stats.badges.map(b => (
-              <div key={b.id} className="bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all" title={b.desc}>
-                <span className="text-sm">{b.icon}</span>
-                <span className="text-[11px] font-black text-slate-700">{b.title}</span>
+            {stats.badges && stats.badges.length > 0 && (
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {stats.badges.map(b => (
+                  <div key={b.id} className="bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all" title={b.desc}>
+                    <span className="text-sm">{b.icon}</span>
+                    <span className="text-[11px] font-black text-slate-700">{b.title}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-        
-        <div className="mt-8 flex justify-center items-center">
-          <div className="relative w-40 h-40">
-            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-              <path className="text-slate-100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-              <path className="text-indigo-500 transition-all duration-1000 ease-out" strokeDasharray={`${percent}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-3xl font-black text-slate-800">{percent}%</span>
-              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Target</span>
+            )}
+            
+            <div className="mt-8 flex justify-center items-center">
+              <div className="relative w-40 h-40">
+                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+                  <path className="text-slate-100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
+                  <path className="text-indigo-500 transition-all duration-1000 ease-out" strokeDasharray={`${percent}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
+                </svg>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                  <span className="text-3xl font-black text-slate-800">{percent}%</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Target</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-100">
-           <div>
-             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Target</p>
-             <p className="text-xl font-black text-slate-700">{targetVal}</p>
-           </div>
-           <div>
-             <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Achieved</p>
-             <p className="text-xl font-black text-indigo-600">{notifAchieved}</p>
-           </div>
-        </div>
+            <div className="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-100">
+               <div>
+                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Target</p>
+                 <p className="text-xl font-black text-slate-700">{targetVal}</p>
+               </div>
+               <div>
+                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Achieved</p>
+                 <p className="text-xl font-black text-indigo-600">{notifAchieved}</p>
+               </div>
+            </div>
 
-        {/* Target Status Indicator */}
-        <div className="mt-4 pt-4 border-t border-slate-100">
-          {notifAchieved >= targetVal && targetVal > 0 ? (
-            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 flex items-center justify-center gap-2 text-emerald-700 text-xs font-bold">
-              <span>🎉</span>
-              <span>Target Completed! Mubarak ho bhai!</span>
+            {/* Target Status Indicator */}
+            <div className="mt-4 pt-4 border-t border-slate-100">
+              {notifAchieved >= targetVal && targetVal > 0 ? (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 flex items-center justify-center gap-2 text-emerald-700 text-xs font-bold">
+                  <span>🎉</span>
+                  <span>Target Completed! Mubarak ho bhai!</span>
+                </div>
+              ) : (
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 flex items-center justify-between text-xs font-bold text-amber-800">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                    Pending Target:
+                  </span>
+                  <span className="bg-white px-2.5 py-1 rounded-xl text-amber-700 shadow-sm border border-amber-200">
+                    {Math.max(0, targetVal - notifAchieved)} Notifications baaki hain
+                  </span>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 flex items-center justify-between text-xs font-bold text-amber-800">
-              <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                Pending Target:
-              </span>
-              <span className="bg-white px-2.5 py-1 rounded-xl text-amber-700 shadow-sm border border-amber-200">
-                {Math.max(0, targetVal - notifAchieved)} Notifications baaki hain
-              </span>
-            </div>
-          )}
-        </div>
+          </>
+        )}
       </div>
 
-      {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center */}
-      <PendingInterventionsActionCenter 
-        cascadeAlerts={propCascadeAlerts || cascadeAlerts}
-        cascadeSummary={propCascadeSummary || {}}
-        loading={propLoadingAlerts !== undefined ? propLoadingAlerts : loadingAlerts}
-        formData={formData}
-        onAutofill={onAutofill}
-        showToast={showToast}
-      />
-
       {/* 30-Day Activity Calendar */}
-      <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-6">
+      {stats && (
+        <>
+          <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 mb-6">
         <div className="flex items-center justify-between mb-4 px-1">
           <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
@@ -815,8 +866,10 @@ const MyProfileDashboard = ({
                <span className="text-lg font-black text-slate-800">{v}</span>
              </div>
            )
-        })}
+         })}
       </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1117,6 +1170,12 @@ function App() {
       setLoadingCascadeAlerts(false);
     }
   };
+
+  useEffect(() => {
+    if (isLoggedIn && formData.working_place && formData.fo_name) {
+      fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+    }
+  }, [isLoggedIn, formData.working_place, formData.fo_name]);
 
   const fetchFoBroadcasts = async (district) => {
     if (!district) return;
@@ -1824,6 +1883,7 @@ function App() {
               cascadeSummary={cascadeSummary}
               loadingAlerts={loadingCascadeAlerts}
               onAutofill={handleAutofillPendingId}
+              onRefreshCascade={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
             />
           ) : (
             /* Main Dashboard */
@@ -1874,6 +1934,17 @@ function App() {
                   })}
                 </div>
               )}
+
+              {/* ⚡ Pending Interventions Action Center for Field Officers */}
+              <PendingInterventionsActionCenter 
+                cascadeAlerts={cascadeAlerts}
+                cascadeSummary={cascadeSummary}
+                loading={loadingCascadeAlerts}
+                formData={formData}
+                onAutofill={handleAutofillPendingId}
+                showToast={showToast}
+                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+              />
 
               <div className="grid grid-cols-1 gap-4">
 
