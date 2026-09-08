@@ -378,32 +378,10 @@ const MyProfileDashboard = ({
   const [stats, setStats] = useState(null);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [copiedKey, setCopiedKey] = useState(null);
-  const [cascadeAlerts, setCascadeAlerts] = useState([]);
-  const [cascadeSummary, setCascadeSummary] = useState({});
-  const [loadingAlerts, setLoadingAlerts] = useState(false);
-
-  const fetchFoCascadeAlerts = async () => {
-    try {
-      setLoadingAlerts(true);
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/api/reports/cascade-alerts?district=${encodeURIComponent(formData.working_place)}&fo_name=${encodeURIComponent(formData.fo_name)}`);
-      if (res.ok) {
-        const json = await res.json();
-        setCascadeAlerts(json.data?.alerts || []);
-        setCascadeSummary(json.data?.summary || {});
-      }
-    } catch (e) {
-      console.warn("Failed to fetch FO cascade alerts", e);
-    } finally {
-      setLoadingAlerts(false);
-    }
-  };
-
-  useEffect(() => {
-    if (formData.fo_name && formData.working_place) {
-      fetchFoCascadeAlerts();
-    }
-  }, [formData.fo_name, formData.working_place]);
+  const cascadeAlerts = propCascadeAlerts || [];
+  const cascadeSummary = propCascadeSummary || {};
+  const loadingAlerts = propLoadingAlerts || false;
+  const fetchFoCascadeAlerts = onRefreshCascade || (() => {});
   const [editingModal, setEditingModal] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -1243,9 +1221,36 @@ const sanitizeIncomingFormData = (d, base) => {
   return clean;
 };
 
+const DEFAULT_BIHAR_DISTRICTS = [
+  "Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad",
+  "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"
+];
+
 function App() {
-  const [directory, setDirectory] = useState({});
-  const [districts, setDistricts] = useState([]);
+  const [directory, setDirectory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dfy_staff_directory');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) return parsed;
+      }
+    } catch (e) {}
+    const initDir = {};
+    DEFAULT_BIHAR_DISTRICTS.forEach(d => { initDir[d] = []; });
+    return initDir;
+  });
+  
+  const [districts, setDistricts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('dfy_staff_directory');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const keys = Object.keys(parsed);
+        if (keys.length > 0) return keys.sort();
+      }
+    } catch (e) {}
+    return DEFAULT_BIHAR_DISTRICTS;
+  });
   
   useEffect(() => {
     const fetchDirectory = async () => {
@@ -1253,12 +1258,19 @@ function App() {
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const res = await fetch(`${API_BASE_URL}/staff-directory`);
         const data = await res.json();
-        if (data.status === 'success') {
+        if (data.status === 'success' && data.data && typeof data.data === 'object') {
           setDirectory(data.data);
-          setDistricts(Object.keys(data.data).sort());
+          const distList = Object.keys(data.data).sort();
+          setDistricts(distList.length > 0 ? distList : DEFAULT_BIHAR_DISTRICTS);
+          try {
+            localStorage.setItem('dfy_staff_directory', JSON.stringify(data.data));
+          } catch (e) {}
+        } else {
+          setDistricts(prev => prev && prev.length > 0 ? prev : DEFAULT_BIHAR_DISTRICTS);
         }
       } catch (err) {
         console.error("Failed to fetch staff directory", err);
+        setDistricts(prev => prev && prev.length > 0 ? prev : DEFAULT_BIHAR_DISTRICTS);
       }
     };
     fetchDirectory();
@@ -2028,11 +2040,22 @@ function App() {
                 
                 {formData.working_place && (
                   <div className="animate-fade-in">
-                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1">Select Name</label>
-                    <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm">
-                      <option value="">Select Name</option>
-                      {directory[formData.working_place].map(name => <option key={name} value={name}>{name}</option>)}
-                    </select>
+                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1">Select / Enter Name</label>
+                    {directory[formData.working_place] && directory[formData.working_place].length > 0 ? (
+                      <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm">
+                        <option value="">Select Name</option>
+                        {directory[formData.working_place].map(name => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={formData.fo_name}
+                        onChange={handleNameChange}
+                        placeholder="Apna Naam Likhein (e.g. Rajesh Kumar)"
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm"
+                        required
+                      />
+                    )}
                   </div>
                 )}
 
