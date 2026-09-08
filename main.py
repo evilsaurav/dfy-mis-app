@@ -232,9 +232,46 @@ login_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600
 pin_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600)
 
 DEFAULT_BIHAR_DISTRICTS = [
-    "Aurangabad", "Bhojpur", "Buxar", "Jamui", "Jehanabad",
-    "Kaimur", "Lakhisarai", "Munger", "Nawada", "Sheikhpura"
+    "Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar",
+    "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar",
+    "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur",
+    "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran",
+    "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"
 ]
+
+def load_baseline_staff_directory():
+    directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
+    if os.path.exists("staff_directory_snapshot.json"):
+        try:
+            with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
+                snap = json.load(f)
+                if snap and isinstance(snap, dict):
+                    for dist, staff in snap.items():
+                        directory[dist] = sorted(list(set(directory.get(dist, []) + staff)))
+                    return directory
+        except Exception:
+            pass
+
+    if os.path.exists("staff_master.csv"):
+        try:
+            import csv
+            with open("staff_master.csv", "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    dist = row.get("District", "").strip()
+                    name = row.get("Name", "").strip()
+                    if dist and name:
+                        if dist not in directory:
+                            directory[dist] = []
+                        if name not in directory[dist]:
+                            directory[dist].append(name)
+            for d in directory:
+                directory[d] = sorted(directory[d])
+            return directory
+        except Exception:
+            pass
+
+    return directory
 
 app = FastAPI(title="DFY Daily Activity API")
 
@@ -353,72 +390,72 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 if allowed_dist_set and wp not in allowed_dist_set:
                     continue
 
-            records.append({
-                "date": data.get("date_of_reporting", ""),
-                "working_place": wp,
-                "fo_name": data.get("fo_name", "Unknown"),
-                
-                # Big 5
-                "total_km": data.get("total_km", 0) or 0,
-                "notifications": len(data.get("notification_ids", [])),
-                "tests": len(data.get("sample_tested_ids", [])),
-                "presumptive": len(data.get("presumptive_ids", [])),
-                "doctor_visits": len(data.get("visited_names", [])),
-                
-                # Group 1
-                "hiv_dm": len(data.get("hiv_dm_ids", [])),
-                "dbt": len(data.get("dbt_ids", [])),
-                
-                # Group 2
-                "sample_collection": len(data.get("sample_collection_ids", [])),
-                "outcome_assigned": len(data.get("outcome_assigned_ids", [])),
-                
-                # Group 3
-                "home_visits": len(data.get("home_visit_ids", [])),
-                "contact_tracing": len(data.get("contact_tracing_ids", [])),
-                "follow_ups": len(data.get("follow_up_ids", [])),
-                "face_to_face": len(data.get("face_to_face_ids", [])),
-                
-                # Group 4
-                "documents": len(data.get("documents_ids", [])),
-                "fdc_provided": len(data.get("fdc_provided_ids", [])),
-                "kit_consumption": len(data.get("kit_consumption_ids", [])),
-                
-                # Group 5 (New Fields & Special)
-                "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
-                "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
-                "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
-                "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
-                "consent_with_id": len(data.get("consent_with_id_ids", [])),
-                "culture_dst": len(data.get("culture_dst_ids", [])),
-                
-                # Raw ID Lists for FO Drill-Down Inspector
-                "notification_ids": data.get("notification_ids", []),
-                "hiv_dm_ids": data.get("hiv_dm_ids", []),
-                "dbt_ids": data.get("dbt_ids", []),
-                "sample_collection_ids": data.get("sample_collection_ids", []),
-                "sample_tested_ids": data.get("sample_tested_ids", []),
-                "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
-                "home_visit_ids": data.get("home_visit_ids", []),
-                "contact_tracing_ids": data.get("contact_tracing_ids", []),
-                "follow_up_ids": data.get("follow_up_ids", []),
-                "face_to_face_ids": data.get("face_to_face_ids", []),
-                "presumptive_ids": data.get("presumptive_ids", []),
-                "documents_ids": data.get("documents_ids", []),
-                "fdc_provided_ids": data.get("fdc_provided_ids", []),
-                "fdc_details": data.get("fdc_details", []),
-                "kit_consumption_ids": data.get("kit_consumption_ids", []),
-                "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
-                "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
-                "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
-                "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
-                "consent_with_id_ids": data.get("consent_with_id_ids", []),
-                "culture_dst_ids": data.get("culture_dst_ids", []),
-                "visited_names": data.get("visited_names", []),
-                "remark": data.get("remark", ""),
-                
-                "is_override": data.get("is_override_used", False)
-            })
+                records.append({
+                    "date": data.get("date_of_reporting", ""),
+                    "working_place": wp,
+                    "fo_name": data.get("fo_name", "Unknown"),
+                    
+                    # Big 5
+                    "total_km": data.get("total_km", 0) or 0,
+                    "notifications": len(data.get("notification_ids", [])),
+                    "tests": len(data.get("sample_tested_ids", [])),
+                    "presumptive": len(data.get("presumptive_ids", [])),
+                    "doctor_visits": len(data.get("visited_names", [])),
+                    
+                    # Group 1
+                    "hiv_dm": len(data.get("hiv_dm_ids", [])),
+                    "dbt": len(data.get("dbt_ids", [])),
+                    
+                    # Group 2
+                    "sample_collection": len(data.get("sample_collection_ids", [])),
+                    "outcome_assigned": len(data.get("outcome_assigned_ids", [])),
+                    
+                    # Group 3
+                    "home_visits": len(data.get("home_visit_ids", [])),
+                    "contact_tracing": len(data.get("contact_tracing_ids", [])),
+                    "follow_ups": len(data.get("follow_up_ids", [])),
+                    "face_to_face": len(data.get("face_to_face_ids", [])),
+                    
+                    # Group 4
+                    "documents": len(data.get("documents_ids", [])),
+                    "fdc_provided": len(data.get("fdc_provided_ids", [])),
+                    "kit_consumption": len(data.get("kit_consumption_ids", [])),
+                    
+                    # Group 5 (New Fields & Special)
+                    "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
+                    "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
+                    "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
+                    "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
+                    "consent_with_id": len(data.get("consent_with_id_ids", [])),
+                    "culture_dst": len(data.get("culture_dst_ids", [])),
+                    
+                    # Raw ID Lists for FO Drill-Down Inspector
+                    "notification_ids": data.get("notification_ids", []),
+                    "hiv_dm_ids": data.get("hiv_dm_ids", []),
+                    "dbt_ids": data.get("dbt_ids", []),
+                    "sample_collection_ids": data.get("sample_collection_ids", []),
+                    "sample_tested_ids": data.get("sample_tested_ids", []),
+                    "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
+                    "home_visit_ids": data.get("home_visit_ids", []),
+                    "contact_tracing_ids": data.get("contact_tracing_ids", []),
+                    "follow_up_ids": data.get("follow_up_ids", []),
+                    "face_to_face_ids": data.get("face_to_face_ids", []),
+                    "presumptive_ids": data.get("presumptive_ids", []),
+                    "documents_ids": data.get("documents_ids", []),
+                    "fdc_provided_ids": data.get("fdc_provided_ids", []),
+                    "fdc_details": data.get("fdc_details", []),
+                    "kit_consumption_ids": data.get("kit_consumption_ids", []),
+                    "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
+                    "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
+                    "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
+                    "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
+                    "consent_with_id_ids": data.get("consent_with_id_ids", []),
+                    "culture_dst_ids": data.get("culture_dst_ids", []),
+                    "visited_names": data.get("visited_names", []),
+                    "remark": data.get("remark", ""),
+                    
+                    "is_override": data.get("is_override_used", False)
+                })
             
             if records:
                 try:
@@ -451,7 +488,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 async def get_directory():
     try:
         cached = cache.get("staff_directory_dict")
-        if cached is not None:
+        if cached is not None and isinstance(cached, dict) and len(cached) >= len(DEFAULT_BIHAR_DISTRICTS):
             return cached
 
         try:
@@ -472,9 +509,9 @@ async def get_directory():
             return directory
         except Exception as fe:
             print(f"get_directory read notice (quota/network): {fe}")
-            return {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
+            return load_baseline_staff_directory()
     except Exception as e:
-        return {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
+        return load_baseline_staff_directory()
 
 @app.post("/verify-pin")
 async def verify_pin(data: PinCheck):
@@ -1167,7 +1204,7 @@ async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Opt
 async def get_staff_directory():
     try:
         cached = cache.get("staff_directory_list")
-        if cached is not None:
+        if cached is not None and isinstance(cached, dict) and len(cached) >= len(DEFAULT_BIHAR_DISTRICTS):
             return {"status": "success", "data": cached}
 
         try:
@@ -1185,7 +1222,7 @@ async def get_staff_directory():
             for d in directory:
                 directory[d] = sorted(directory[d])
 
-            # Ensure all 10 Bihar districts exist
+            # Ensure all 38 Bihar districts exist
             for d in DEFAULT_BIHAR_DISTRICTS:
                 if d not in directory:
                     directory[d] = []
@@ -1193,7 +1230,7 @@ async def get_staff_directory():
             # Save snapshot to disk
             try:
                 with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
-                    json.dump(directory, f)
+                    json.dump(directory, f, indent=2)
             except Exception:
                 pass
                 
@@ -1201,22 +1238,11 @@ async def get_staff_directory():
             return {"status": "success", "data": directory}
         except Exception as fe:
             print(f"Firestore staff-directory query notice (quota/network): {fe}")
-            # Try reading from disk snapshot
-            if os.path.exists("staff_directory_snapshot.json"):
-                try:
-                    with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
-                        disk_data = json.load(f)
-                        if disk_data:
-                            cache.set("staff_directory_list", disk_data, ttl=3600)
-                            return {"status": "success", "data": disk_data, "source": "disk_cache"}
-                except Exception:
-                    pass
-            # Baseline fallback with all 10 Bihar districts
-            fallback_dir = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
+            fallback_dir = load_baseline_staff_directory()
             cache.set("staff_directory_list", fallback_dir, ttl=300)
             return {"status": "success", "data": fallback_dir, "fallback": True}
     except Exception as e:
-        fallback_dir = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
+        fallback_dir = load_baseline_staff_directory()
         return {"status": "success", "data": fallback_dir, "fallback": True}
 
 class ProfileStatsRequest(BaseModel):
