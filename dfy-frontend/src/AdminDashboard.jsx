@@ -1130,119 +1130,6 @@ export default function AdminDashboard() {
     }
   };
 
-  const availableDistrictsForFeed = useMemo(() => {
-    const allDists = Object.keys(staffDirectory).length > 0 
-      ? Object.keys(staffDirectory).sort() 
-      : (districts || []).filter(d => d !== 'All');
-    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      return allDists.filter(d => currentUser.allowed_districts.includes(d));
-    }
-    return allDists;
-  }, [staffDirectory, districts, currentUser]);
-
-  const availableFosForFeed = useMemo(() => {
-    if (!feedDistrict) return [];
-    const fromDir = staffDirectory[feedDistrict] || [];
-    if (fromDir.length > 0) return fromDir;
-    const fromRecs = Array.from(new Set(rawRecords.filter(r => r.working_place === feedDistrict).map(r => r.fo_name))).filter(Boolean).sort();
-    return fromRecs;
-  }, [staffDirectory, feedDistrict, rawRecords]);
-
-  const handleAdminFeedSubmit = async (e) => {
-    if (e) e.preventDefault();
-    setFeedError('');
-    setFeedSuccess('');
-
-    if (!feedDistrict || feedDistrict === 'All') {
-      setFeedError('Please select a specific District.');
-      return;
-    }
-    if (!feedFoName || !feedFoName.trim()) {
-      setFeedError('Please select or specify a Field Officer name.');
-      return;
-    }
-    if (!feedDate || !/^\d{4}-\d{2}-\d{2}$/.test(feedDate)) {
-      setFeedError('Please enter a valid reporting date (YYYY-MM-DD).');
-      return;
-    }
-
-    const payload = {
-      district: feedDistrict.trim(),
-      fo_name: feedFoName.trim(),
-      date_of_reporting: feedDate.trim(),
-      remark: feedRemarks ? feedRemarks.trim() : `Admin feed by ${currentUser?.name || currentUser?.username || 'Admin'}`
-    };
-
-    let totalIdsCount = 0;
-    const invalidTokens = [];
-
-    const idKeys = [
-      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_tested_ids',
-      'sample_collection_ids', 'contact_tracing_ids', 'differentiated_tb_ids',
-      'outcome_assigned_ids', 'home_visit_ids', 'follow_up_ids',
-      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
-      'kit_consumption_ids', 'tpt_treatment_start_ids', 'tpt_presumptive_ids',
-      'adhar_face_authentication_ids', 'consent_with_id_ids', 'culture_dst_ids'
-    ];
-
-    idKeys.forEach(k => {
-      const rawText = feedCategoryInputs[k] || '';
-      if (rawText && rawText.trim()) {
-        const tokens = rawText.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
-        const validList = [];
-        tokens.forEach(tok => {
-          if (/^\d{9}$/.test(tok)) {
-            validList.push(tok);
-          } else {
-            invalidTokens.push(tok);
-          }
-        });
-        const uniqueList = Array.from(new Set(validList));
-        payload[k] = uniqueList;
-        totalIdsCount += uniqueList.length;
-      } else {
-        payload[k] = [];
-      }
-    });
-
-    if (totalIdsCount === 0) {
-      setFeedError('Please enter at least one valid 9-digit Patient ID in any category.');
-      return;
-    }
-
-    if (invalidTokens.length > 0) {
-      setFeedError(`The following ${invalidTokens.length} item(s) are NOT 9-digit numbers: ${invalidTokens.slice(0, 6).join(', ')}${invalidTokens.length > 6 ? '...' : ''}. All IDs must be strictly 9 digits.`);
-      return;
-    }
-
-    setFeedLoading(true);
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/feed-officer-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setFeedSuccess(`✓ Success: ${data.detail || 'Data saved successfully!'}`);
-        await fetchData();
-        setTimeout(() => {
-          setFeedCategoryInputs({});
-          setFeedRemarks('');
-          setFeedSuccess('');
-          setShowAdminFeedModal(false);
-        }, 1800);
-      } else {
-        setFeedError(data.detail || 'Failed to feed data.');
-      }
-    } catch (err) {
-      setFeedError('Network error connecting to backend.');
-    } finally {
-      setFeedLoading(false);
-    }
-  };
-
   const handleDownloadKpi = () => {
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
@@ -1420,6 +1307,119 @@ Keep this file safe in your Google Drive or personal diary.
     if (selectedDistrict !== 'All') filtered = filtered.filter(r => r.working_place === selectedDistrict);
     return ['All', ...new Set(filtered.map(r => r.fo_name))];
   }, [rawRecords, selectedDistrict]);
+
+const availableDistrictsForFeed = useMemo(() => {
+    const allDists = Object.keys(staffDirectory).length > 0 
+      ? Object.keys(staffDirectory).sort() 
+      : (districts || []).filter(d => d !== 'All');
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      return allDists.filter(d => currentUser.allowed_districts.includes(d));
+    }
+    return allDists;
+  }, [staffDirectory, districts, currentUser]);
+
+  const availableFosForFeed = useMemo(() => {
+    if (!feedDistrict) return [];
+    const fromDir = staffDirectory[feedDistrict] || [];
+    if (fromDir.length > 0) return fromDir;
+    const fromRecs = Array.from(new Set(rawRecords.filter(r => r.working_place === feedDistrict).map(r => r.fo_name))).filter(Boolean).sort();
+    return fromRecs;
+  }, [staffDirectory, feedDistrict, rawRecords]);
+
+  const handleAdminFeedSubmit = async (e) => {
+    if (e) e.preventDefault();
+    setFeedError('');
+    setFeedSuccess('');
+
+    if (!feedDistrict || feedDistrict === 'All') {
+      setFeedError('Please select a specific District.');
+      return;
+    }
+    if (!feedFoName || !feedFoName.trim()) {
+      setFeedError('Please select or specify a Field Officer name.');
+      return;
+    }
+    if (!feedDate || !/^\d{4}-\d{2}-\d{2}$/.test(feedDate)) {
+      setFeedError('Please enter a valid reporting date (YYYY-MM-DD).');
+      return;
+    }
+
+    const payload = {
+      district: feedDistrict.trim(),
+      fo_name: feedFoName.trim(),
+      date_of_reporting: feedDate.trim(),
+      remark: feedRemarks ? feedRemarks.trim() : `Admin feed by ${currentUser?.name || currentUser?.username || 'Admin'}`
+    };
+
+    let totalIdsCount = 0;
+    const invalidTokens = [];
+
+    const idKeys = [
+      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_tested_ids',
+      'sample_collection_ids', 'contact_tracing_ids', 'differentiated_tb_ids',
+      'outcome_assigned_ids', 'home_visit_ids', 'follow_up_ids',
+      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+      'kit_consumption_ids', 'tpt_treatment_start_ids', 'tpt_presumptive_ids',
+      'adhar_face_authentication_ids', 'consent_with_id_ids', 'culture_dst_ids'
+    ];
+
+    idKeys.forEach(k => {
+      const rawText = feedCategoryInputs[k] || '';
+      if (rawText && rawText.trim()) {
+        const tokens = rawText.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
+        const validList = [];
+        tokens.forEach(tok => {
+          if (/^\d{9}$/.test(tok)) {
+            validList.push(tok);
+          } else {
+            invalidTokens.push(tok);
+          }
+        });
+        const uniqueList = Array.from(new Set(validList));
+        payload[k] = uniqueList;
+        totalIdsCount += uniqueList.length;
+      } else {
+        payload[k] = [];
+      }
+    });
+
+    if (totalIdsCount === 0) {
+      setFeedError('Please enter at least one valid 9-digit Patient ID in any category.');
+      return;
+    }
+
+    if (invalidTokens.length > 0) {
+      setFeedError(`The following ${invalidTokens.length} item(s) are NOT 9-digit numbers: ${invalidTokens.slice(0, 6).join(', ')}${invalidTokens.length > 6 ? '...' : ''}. All IDs must be strictly 9 digits.`);
+      return;
+    }
+
+    setFeedLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/feed-officer-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedSuccess(`✓ Success: ${data.detail || 'Data saved successfully!'}`);
+        await fetchData();
+        setTimeout(() => {
+          setFeedCategoryInputs({});
+          setFeedRemarks('');
+          setFeedSuccess('');
+          setShowAdminFeedModal(false);
+        }, 1800);
+      } else {
+        setFeedError(data.detail || 'Failed to feed data.');
+      }
+    } catch (err) {
+      setFeedError('Network error connecting to backend.');
+    } finally {
+      setFeedLoading(false);
+    }
+  };
 
   // Filtered Records
   const filteredRecords = useMemo(() => {
