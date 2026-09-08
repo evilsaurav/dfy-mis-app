@@ -1,5 +1,5 @@
 {
-  "AURANGABAD-BI": [
+  "Aurangabad": [
     "Prince Kumar",
     "Rahul Kumar",
     "Ram Ji Singh",
@@ -18,7 +18,7 @@
     "Sonu kumar 1",
     "Vikash kumar"
   ],
-  "BHOJPUR": [
+  "Bhojpur": [
     "Ashwani Kr Keshri",
     "Mukesh Tiwari",
     "Naveen Kumar",
@@ -49,6 +49,24 @@
     "RITU KUMAR",
     "SUMAN KUMAR",
     "VIVEK KUMAR"
+  ],
+  "East Champaran": [
+    "ABHISHEK KUMAR",
+    "ADITYA SHRIVASTAVA",
+    "AMIT DUBEY",
+    "ANAND MOHAN",
+    "DIWAKAR KUMAR",
+    "KRINESH KUMAR",
+    "NAVIN KUMAR",
+    "PAPPU PATEL",
+    "POOJA KUMARI",
+    "PURUSHOTTAM KUMAR",
+    "RAHUL DEY",
+    "RAVI RANJAN",
+    "SAHIL KUMAR",
+    "SOURABH KUMAR",
+    "SUMIT KUMAR",
+    "VISHAL DEY"
   ],
   "Gaya": [
     "Amit Kr Tiwary",
@@ -136,24 +154,6 @@
     "Devraj Kumar",
     "Rajesh Kumar",
     "Rajiv Kumar"
-  ],
-  "Purba Champaran": [
-    "ABHISHEK KUMAR",
-    "ADITYA SHRIVASTAVA",
-    "AMIT DUBEY",
-    "ANAND MOHAN",
-    "DIWAKAR KUMAR",
-    "KRINESH KUMAR",
-    "NAVIN KUMAR",
-    "PAPPU PATEL",
-    "POOJA KUMARI",
-    "PURUSHOTTAM KUMAR",
-    "RAHUL DEY",
-    "RAVI RANJAN",
-    "SAHIL KUMAR",
-    "SOURABH KUMAR",
-    "SUMIT KUMAR",
-    "VISHAL DEY"
   ],
   "Rohtas": [
     "Abhay Kumar",

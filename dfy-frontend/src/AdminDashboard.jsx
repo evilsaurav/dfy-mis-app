@@ -24,11 +24,27 @@ const feedCategoriesConfig = [
   { key: 'culture_dst_ids', label: 'Culture & DST', isPrimary: false, icon: '🧫' }
 ];
 
+const CANONICAL_DISTRICT_MAP = {
+  'aurangabad-bi': 'Aurangabad',
+  'aurangabad bi': 'Aurangabad',
+  'aurangabad': 'Aurangabad',
+  'bhojpur': 'Bhojpur',
+  'purba champaran': 'East Champaran',
+  'purbi champaran': 'East Champaran',
+  'east champaran': 'East Champaran',
+  'motihari': 'East Champaran',
+};
+const canonicalizeDistrict = (d) => {
+  if (!d) return '';
+  const clean = String(d).trim();
+  return CANONICAL_DISTRICT_MAP[clean.toLowerCase()] || clean;
+};
+
 const DEFAULT_BIHAR_DISTRICTS = [
-  "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
-  "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
-  "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
-  "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+  "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
+  "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",
+  "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur",
+  "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
   "Sitamarhi", "Vaishali"
 ];
 
@@ -1295,19 +1311,14 @@ Keep this file safe in your Google Drive or personal diary.
   const districts = useMemo(() => {
     const rawSet = new Set([
       ...DEFAULT_BIHAR_DISTRICTS,
-      ...Object.keys(staffDirectory || {}),
-      ...rawRecords.map(r => r.working_place)
+      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict),
+      ...rawRecords.map(r => canonicalizeDistrict(r.working_place))
     ]);
     const allList = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
     if (!currentUser || currentUser.role === 'SUPER_ADMIN' || !currentUser.allowed_districts || currentUser.allowed_districts.includes('All')) {
       return ['All', ...allList];
     }
-    const userAllowed = currentUser.allowed_districts.map(d => {
-      if (d === 'Aurangabad') return 'AURANGABAD-BI';
-      if (d === 'Bhojpur') return 'BHOJPUR';
-      if (d === 'East Champaran') return 'Purba Champaran';
-      return d;
-    });
+    const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
     const filtered = allList.filter(d => userAllowed.includes(d));
     const permittedOnly = filtered.length > 0 ? filtered : userAllowed.filter(d => d !== 'All');
     return permittedOnly.length > 0 ? permittedOnly : (allList.length > 0 ? [allList[0]] : ['Jamui']);
@@ -1316,16 +1327,11 @@ Keep this file safe in your Google Drive or personal diary.
   const targetModalDistricts = useMemo(() => {
     const rawSet = new Set([
       ...DEFAULT_BIHAR_DISTRICTS,
-      ...Object.keys(staffDirectory || {})
+      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict)
     ]);
     const allDists = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      const userAllowed = currentUser.allowed_districts.map(d => {
-        if (d === 'Aurangabad') return 'AURANGABAD-BI';
-        if (d === 'Bhojpur') return 'BHOJPUR';
-        if (d === 'East Champaran') return 'Purba Champaran';
-        return d;
-      });
+      const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
       return allDists.filter(d => userAllowed.includes(d));
     }
     return allDists;
@@ -1544,18 +1550,13 @@ const availableDistrictsForFeed = useMemo(() => {
   const leaderboardData = useMemo(() => {
     let distList = DEFAULT_BIHAR_DISTRICTS;
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      const userAllowed = currentUser.allowed_districts.map(d => {
-        if (d === 'Aurangabad') return 'AURANGABAD-BI';
-        if (d === 'Bhojpur') return 'BHOJPUR';
-        if (d === 'East Champaran') return 'Purba Champaran';
-        return d;
-      });
+      const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
       distList = distList.filter(d => userAllowed.includes(d));
     }
     const result = distList.map(dist => {
-      const distRecords = rawRecords.filter(r => r.working_place === dist);
+      const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
       const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
-      const target = targetsData.filter(t => t.district === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+      const target = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
       const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
       return {
         district: dist,
@@ -1874,21 +1875,16 @@ const availableDistrictsForFeed = useMemo(() => {
   const districtPacingData = useMemo(() => {
     let distList = DEFAULT_BIHAR_DISTRICTS;
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      const userAllowed = currentUser.allowed_districts.map(d => {
-        if (d === 'Aurangabad') return 'AURANGABAD-BI';
-        if (d === 'Bhojpur') return 'BHOJPUR';
-        if (d === 'East Champaran') return 'Purba Champaran';
-        return d;
-      });
+      const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
       distList = distList.filter(d => userAllowed.includes(d));
     }
     const { totalWorkingDays, elapsedWorkingDays, remainingWorkingDays } = workingDaysInfo;
 
     return distList.map(dist => {
-      const distStaff = staffPacingData.filter(s => s.district === dist);
+      const distStaff = staffPacingData.filter(s => canonicalizeDistrict(s.district) === dist);
       const staffCount = distStaff.length;
-      const target = distStaff.reduce((sum, s) => sum + s.target, 0) || (targetsData.filter(t => t.district === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0) || 100);
-      const distRecords = rawRecords.filter(r => r.working_place === dist);
+      const target = distStaff.reduce((sum, s) => sum + s.target, 0) || (targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0) || 100);
+      const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
       const achieved = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
 
       const expectedPace = Math.min(target, Math.round((target / Math.max(1, totalWorkingDays)) * elapsedWorkingDays));

@@ -233,22 +233,22 @@ login_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600
 pin_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600)
 
 DEFAULT_BIHAR_DISTRICTS = [
-    "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
-    "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
-    "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
-    "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+    "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
+    "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",
+    "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur",
+    "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
     "Sitamarhi", "Vaishali"
 ]
 
 DISTRICT_CANONICAL_MAP = {
-    "aurangabad": "AURANGABAD-BI",
-    "aurangabad-bi": "AURANGABAD-BI",
-    "aurangabad bi": "AURANGABAD-BI",
-    "bhojpur": "BHOJPUR",
-    "east champaran": "Purba Champaran",
-    "purba champaran": "Purba Champaran",
-    "purbi champaran": "Purba Champaran",
-    "motihari": "Purba Champaran"
+    "aurangabad-bi": "Aurangabad",
+    "aurangabad bi": "Aurangabad",
+    "aurangabad": "Aurangabad",
+    "bhojpur": "Bhojpur",
+    "east champaran": "East Champaran",
+    "purba champaran": "East Champaran",
+    "purbi champaran": "East Champaran",
+    "motihari": "East Champaran"
 }
 
 def canonicalize_district(name: str) -> str:
@@ -537,39 +537,57 @@ async def get_directory():
 @app.post("/verify-pin")
 async def verify_pin(data: PinCheck):
     try:
-        doc_id = f"{data.working_place}_{data.fo_name}".replace(" ", "").lower()
+        c_wp = canonicalize_district(data.working_place)
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', data.fo_name).lower()
         
+        # Candidate doc_ids to ensure alias resilience
+        candidate_ids = [
+            f"{c_wp}_{data.fo_name}".replace(" ", "").lower(),
+            f"{data.working_place}_{data.fo_name}".replace(" ", "").lower(),
+            f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
+        ]
+        if "aurangabad" in c_wp.lower():
+            candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{data.fo_name}".replace(" ", "").lower()])
+        if "champaran" in c_wp.lower():
+            candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+        if "bhojpur" in c_wp.lower():
+            candidate_ids.extend([f"bhojpur_{clean_fo}"])
+            
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+        primary_id = candidate_ids[0]
+
         # Check rate limiter against brute force (max 5 failed attempts per 10 minutes)
-        if pin_rate_limiter.is_rate_limited(doc_id):
+        if pin_rate_limiter.is_rate_limited(primary_id):
             return {"valid": False, "error": "Too many failed PIN attempts. Account locked for 10 minutes."}
             
-        cache_key = f"pin_{doc_id}"
+        cache_key = f"pin_{primary_id}"
         cached_pin = cache.get(cache_key)
         
         if cached_pin is not None:
-            if verify_password(str(data.pin), str(cached_pin)):
-                pin_rate_limiter.reset(doc_id)
+            if verify_password(str(data.pin), str(cached_pin)) or str(data.pin) == str(cached_pin):
+                pin_rate_limiter.reset(primary_id)
                 return {"valid": True}
-            pin_rate_limiter.record_failure(doc_id)
+            pin_rate_limiter.record_failure(primary_id)
             return {"valid": False}
 
         try:
-            staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(doc_id).get)
-            if staff_doc.exists:
-                real_pin = staff_doc.to_dict().get("pin")
-                cache.set(cache_key, str(real_pin), ttl=3600)
-                if verify_password(str(data.pin), str(real_pin)) or str(data.pin) == str(real_pin):
-                    pin_rate_limiter.reset(doc_id)
-                    return {"valid": True}
-                pin_rate_limiter.record_failure(doc_id)
-                return {"valid": False}
+            for doc_id in candidate_ids:
+                staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(doc_id).get)
+                if staff_doc.exists:
+                    real_pin = staff_doc.to_dict().get("pin")
+                    cache.set(cache_key, str(real_pin), ttl=3600)
+                    if verify_password(str(data.pin), str(real_pin)) or str(data.pin) == str(real_pin):
+                        pin_rate_limiter.reset(primary_id)
+                        return {"valid": True}
+                    pin_rate_limiter.record_failure(primary_id)
+                    return {"valid": False}
         except Exception as fe:
             print(f"PIN Firestore check notice (quota/network): {fe}")
             # If 4-digit PIN entered during Firestore read quota outage, allow in fallback mode
             if str(data.pin).isdigit() and len(str(data.pin)) == 4:
                 return {"valid": True, "fallback": True}
 
-        pin_rate_limiter.record_failure(doc_id)
+        pin_rate_limiter.record_failure(primary_id)
         return {"valid": False}
     except Exception:
         if str(data.pin).isdigit() and len(str(data.pin)) == 4:
@@ -584,19 +602,36 @@ class CheckStatusRequest(BaseModel):
 @app.post("/check-today-status")
 async def check_today_status(req: CheckStatusRequest):
     try:
-        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
-        cache_key = f"status_{doc_id}"
+        c_wp = canonicalize_district(req.working_place)
+        candidate_ids = [
+            f"{c_wp}_{req.fo_name}_{req.date}".replace(" ", "_").lower(),
+            f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower(),
+        ]
+        if "aurangabad" in c_wp.lower():
+            candidate_ids.append(f"aurangabad-bi_{req.fo_name}_{req.date}".replace(" ", "_").lower())
+            candidate_ids.append(f"aurangabad_{req.fo_name}_{req.date}".replace(" ", "_").lower())
+        if "champaran" in c_wp.lower():
+            candidate_ids.append(f"purba champaran_{req.fo_name}_{req.date}".replace(" ", "_").lower())
+            candidate_ids.append(f"east champaran_{req.fo_name}_{req.date}".replace(" ", "_").lower())
+        if "bhojpur" in c_wp.lower():
+            candidate_ids.append(f"bhojpur_{req.fo_name}_{req.date}".replace(" ", "_").lower())
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+
+        primary_id = candidate_ids[0]
+        cache_key = f"status_{primary_id}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
 
         res = {"status": "not_started"}
         try:
-            doc_ref = db.collection("daily_field_reports").document(doc_id)
-            doc = await asyncio.to_thread(doc_ref.get)
-            if doc.exists:
-                d = doc.to_dict()
-                res = {"status": "completed", "submission_count": 1, "data": d}
+            for cid in candidate_ids:
+                doc_ref = db.collection("daily_field_reports").document(cid)
+                doc = await asyncio.to_thread(doc_ref.get)
+                if doc.exists:
+                    d = doc.to_dict()
+                    res = {"status": "completed", "submission_count": 1, "data": d}
+                    break
         except Exception as fe:
             print(f"Check status read notice (quota/network): {fe}")
                 
@@ -1015,13 +1050,27 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         print(f"Target fetch notice for {district}: {e}")
                     
     # 2. Fetch and Sort Daily Field Reports for this District and Month
-    docs = db.collection("daily_field_reports").where("working_place", "==", district).stream()
+    c_dist = canonicalize_district(district)
+    alias_queries = [c_dist, district]
+    if "aurangabad" in c_dist.lower():
+        alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
+    elif "champaran" in c_dist.lower():
+        alias_queries.extend(["Purba Champaran", "East Champaran"])
+    elif "bhojpur" in c_dist.lower():
+        alias_queries.extend(["BHOJPUR", "Bhojpur"])
+    alias_queries = list(dict.fromkeys(alias_queries))
+
+    seen_report_ids = set()
     reports = []
-    for doc in docs:
-        d = doc.to_dict()
-        date_str = str(d.get("date_of_reporting", "")).strip()
-        if date_str and date_str.startswith(month_prefix):
-            reports.append(d)
+    for aq in alias_queries:
+        docs = db.collection("daily_field_reports").where("working_place", "==", aq).stream()
+        for doc in docs:
+            if doc.id not in seen_report_ids:
+                seen_report_ids.add(doc.id)
+                d = doc.to_dict()
+                date_str = str(d.get("date_of_reporting", "")).strip()
+                if date_str and date_str.startswith(month_prefix):
+                    reports.append(d)
             
     reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
     
@@ -1289,24 +1338,47 @@ async def my_profile_stats(req: ProfileStatsRequest):
         if cached is not None:
             return cached
 
+        c_wp = canonicalize_district(req.working_place)
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+        candidate_ids = [
+            f"{c_wp}_{req.fo_name}".replace(" ", "").lower(),
+            f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
+            f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
+        ]
+        if "aurangabad" in c_wp.lower():
+            candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
+        if "champaran" in c_wp.lower():
+            candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+        if "bhojpur" in c_wp.lower():
+            candidate_ids.extend([f"bhojpur_{clean_fo}"])
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+
         # Step 1: Verify PIN in background thread
-        pin_doc = await asyncio.to_thread(lambda: db.collection("staff_directory").document(f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()).get())
-        if not pin_doc.exists or str(pin_doc.to_dict().get("pin", "")) != str(req.pin):
-            raise HTTPException(status_code=401, detail="Invalid PIN")
+        pin_valid = False
+        for doc_id in candidate_ids:
+            try:
+                pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
+                if pin_doc.exists:
+                    real_pin = pin_doc.to_dict().get("pin", "")
+                    if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
+                        pin_valid = True
+                        break
+            except Exception:
+                pass
+        if not pin_valid:
+            # Check fallback if offline/quota
+            if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
+                raise HTTPException(status_code=401, detail="Invalid PIN")
             
         # Step 2: Fetch Target (Month-Scoped with Fallback)
         target_val = 50
         try:
             req_month = req.month or datetime.now().strftime("%Y-%m")
-            m_doc_id = f"{req_month}_{req.working_place}_{req.fo_name}".replace(" ", "").lower()
-            m_doc = await asyncio.to_thread(db.collection("staff_targets").document(m_doc_id).get)
-            if m_doc.exists:
-                target_val = int(m_doc.to_dict().get("target", 50))
-            else:
-                fb_id = f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()
-                fb_doc = await asyncio.to_thread(db.collection("staff_targets").document(fb_id).get)
-                if fb_doc.exists:
-                    target_val = int(fb_doc.to_dict().get("target", 50))
+            for tid in [f"{req_month}_{c_wp}_{req.fo_name}".replace(" ", "").lower(), f"{c_wp}_{req.fo_name}".replace(" ", "").lower()]:
+                m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
+                if m_doc.exists:
+                    target_val = int(m_doc.to_dict().get("target", 50))
+                    break
         except Exception:
             target_val = 50
             
@@ -1314,9 +1386,15 @@ async def my_profile_stats(req: ProfileStatsRequest):
         reports = await asyncio.to_thread(lambda: list(
             db.collection("daily_field_reports")
             .where("fo_name", "==", req.fo_name)
-            .where("working_place", "==", req.working_place)
             .stream()
         ))
+        # Fallback to trimmed FO name if no reports found
+        if not reports and req.fo_name.strip() != req.fo_name:
+            reports = await asyncio.to_thread(lambda: list(
+                db.collection("daily_field_reports")
+                .where("fo_name", "==", req.fo_name.strip())
+                .stream()
+            ))
         
         stats = {
             "notification": 0,
@@ -1433,20 +1511,22 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
             
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":
-            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+            allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
 
         # 1. Fetch all active staff
         staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         staff_list = []
         for doc in staff_docs:
             d = doc.to_dict()
-            dist = d.get("district")
-            if dist and d.get("name"):
-                if allowed_dist_set and dist not in allowed_dist_set:
+            raw_dist = d.get("district")
+            dist = canonicalize_district(raw_dist) if raw_dist else ""
+            clean_fo = d.get("name", "").strip()
+            if dist and clean_fo:
+                if allowed_dist_set and dist.lower() not in allowed_dist_set:
                     continue
                 staff_list.append({
                     "district": dist,
-                    "fo_name": d.get("name"),
+                    "fo_name": clean_fo,
                     "designation": d.get("designation", "Field Officer")
                 })
                 
@@ -1455,10 +1535,11 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
         reports_map = {}
         for doc in report_docs:
             d = doc.to_dict()
-            dist = d.get('working_place')
-            if allowed_dist_set and dist not in allowed_dist_set:
+            dist = canonicalize_district(d.get('working_place', ''))
+            if allowed_dist_set and dist.lower() not in allowed_dist_set:
                 continue
-            key = f"{dist}_{d.get('fo_name')}".replace(" ", "").lower()
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', d.get('fo_name', '')).lower()
+            key = f"{dist}_{clean_fo}".replace(" ", "").lower()
             reports_map[key] = {
                 "submission_count": d.get("submission_count", 1),
                 "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
@@ -1469,7 +1550,8 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
         missing_fos = []
         
         for s in staff_list:
-            key = f"{s['district']}_{s['fo_name']}".replace(" ", "").lower()
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
+            key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
             if key in reports_map:
                 rep = reports_map[key]
                 info = {**s, **rep}
@@ -1975,9 +2057,11 @@ class EditIdRequest(BaseModel):
 @app.post("/api/reports/edit-id")
 async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_admin)):
     try:
+        c_wp = canonicalize_district(req.working_place)
         if admin.get("role") == "SUB_ADMIN":
             allowed = admin.get("allowed_districts", [])
-            if "All" not in allowed and req.working_place not in allowed:
+            allowed_c = [canonicalize_district(a).lower() for a in allowed]
+            if "All" not in allowed and c_wp.lower() not in allowed_c and req.working_place.lower() not in allowed_c:
                 raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit IDs in district '{req.working_place}'.")
         cat_key = req.category if req.category.endswith("_ids") else f"{req.category}_ids"
         
@@ -1991,27 +2075,51 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             req.new_id = clean_new_id
             
         if req.edited_by == "FO" and req.pin:
-            pin_doc_id = f"{req.working_place}_{req.fo_name}".replace(" ", "").lower()
-            staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(pin_doc_id).get)
-            if staff_doc.exists and str(staff_doc.to_dict().get("pin")) != str(req.pin):
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+            candidate_pin_ids = [
+                f"{c_wp}_{req.fo_name}".replace(" ", "").lower(),
+                f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
+                f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
+            ]
+            pin_match = False
+            for pid in candidate_pin_ids:
+                staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(pid).get)
+                if staff_doc.exists:
+                    real_p = str(staff_doc.to_dict().get("pin", ""))
+                    if verify_password(str(req.pin), real_p) or str(req.pin) == real_p:
+                        pin_match = True
+                        break
+            if not pin_match and not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
                 raise HTTPException(status_code=401, detail="Invalid PIN authorization.")
 
-        doc_id = f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
-        doc_ref = db.collection("daily_field_reports").document(doc_id)
-        doc = await asyncio.to_thread(doc_ref.get)
+        candidate_doc_ids = [
+            f"{c_wp}_{req.fo_name}_{req.date}".replace(" ", "_").lower(),
+            f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
+        ]
+        doc_ref = None
+        data = None
+        for cid in candidate_doc_ids:
+            cand_ref = db.collection("daily_field_reports").document(cid)
+            doc_snap = await asyncio.to_thread(cand_ref.get)
+            if doc_snap.exists:
+                doc_ref = cand_ref
+                data = doc_snap.to_dict()
+                doc_id = cid
+                break
         
-        if not doc.exists:
+        if not doc_ref:
             docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
-                .where("working_place", "==", req.working_place)
                 .where("fo_name", "==", req.fo_name)
                 .where("date_of_reporting", "==", req.date)
                 .stream()))
-            if not docs:
+            matching_docs = [d for d in docs if canonicalize_district(d.to_dict().get("working_place", "")) == c_wp]
+            if not matching_docs and docs:
+                matching_docs = docs
+            if not matching_docs:
                 raise HTTPException(status_code=404, detail="No report found for this date and officer.")
-            doc_ref = docs[0].reference
-            data = docs[0].to_dict()
-        else:
-            data = doc.to_dict()
+            doc_ref = matching_docs[0].reference
+            data = matching_docs[0].to_dict()
+            doc_id = matching_docs[0].id
 
         # ?? Strict 24-Hour Editing Window Rule for Field Officers
         if req.edited_by == "FO":
@@ -2150,18 +2258,19 @@ async def admin_feed_officer_data(
         admin_user = admin.get("username", "Admin")
         allowed_dists = admin.get("allowed_districts", [])
 
+        clean_wp = canonicalize_district(req.district)
+        clean_fo = req.fo_name.strip()
+        if not clean_wp or not clean_fo:
+            raise HTTPException(status_code=400, detail="District and Field Officer name are required.")
+
         # 1. RBAC check: Sub-Admin can only feed data for permitted districts
         if admin_role == "SUB_ADMIN":
-            if allowed_dists and not ("All" in allowed_dists or req.district.strip() in allowed_dists):
+            allowed_c = [canonicalize_district(a).lower() for a in allowed_dists]
+            if allowed_dists and not ("All" in allowed_dists or clean_wp.lower() in allowed_c or req.district.strip().lower() in allowed_c):
                 raise HTTPException(
                     status_code=403, 
                     detail=f"Permission denied: You do not have access to feed data for {req.district} district."
                 )
-
-        clean_wp = req.district.strip()
-        clean_fo = req.fo_name.strip()
-        if not clean_wp or not clean_fo:
-            raise HTTPException(status_code=400, detail="District and Field Officer name are required.")
 
         # 2. Date validation (accepts any valid YYYY-MM-DD date)
         try:
@@ -2208,11 +2317,26 @@ async def admin_feed_officer_data(
         if total_ids_added == 0 and not req.remark.strip():
             raise HTTPException(status_code=400, detail="Please enter at least one valid patient ID or remark.")
 
-        # 4. Target Report Document
-        doc_id = f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
-        doc_ref = db.collection("daily_field_reports").document(doc_id)
-        doc_snap = await asyncio.to_thread(doc_ref.get)
-        new_report_created = not doc_snap.exists
+        # 4. Target Report Document with alias candidate search
+        candidate_doc_ids = [
+            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{req.district}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
+        ]
+        doc_ref = None
+        doc_snap = None
+        for cid in candidate_doc_ids:
+            cand_ref = db.collection("daily_field_reports").document(cid)
+            snap = await asyncio.to_thread(cand_ref.get)
+            if snap.exists:
+                doc_ref = cand_ref
+                doc_snap = snap
+                break
+        if not doc_ref:
+            doc_id = candidate_doc_ids[0]
+            doc_ref = db.collection("daily_field_reports").document(doc_id)
+            new_report_created = True
+        else:
+            new_report_created = False
 
         now_iso = datetime.utcnow().isoformat()
         feed_note = f"Fed by {admin_user} ({admin_role}) on {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
@@ -2234,6 +2358,7 @@ async def admin_feed_officer_data(
                 "admin_fed": True,
                 "fed_by": admin_user,
                 "remark": feed_note,
+                "fdc_details": req.fdc_details or [],
                 **cleaned_payload
             }
             for cat in categories:
@@ -2261,6 +2386,14 @@ async def admin_feed_officer_data(
                 count_key = cat.replace("_ids", "")
                 update_data[count_key] = len(merged_list)
             update_data["notifications"] = len(update_data.get("notification_ids", []))
+
+            if req.fdc_details:
+                old_fdc = existing_data.get("fdc_details", [])
+                f_map = {item.get("id"): item for item in old_fdc if isinstance(item, dict) and item.get("id")}
+                for item in req.fdc_details:
+                    if isinstance(item, dict) and item.get("id"):
+                        f_map[item.get("id")] = item
+                update_data["fdc_details"] = list(f_map.values())
             
             await asyncio.to_thread(lambda: doc_ref.set(update_data, merge=True))
 
@@ -2533,9 +2666,20 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     start_date = f"{month}-01"
     end_date = f"{month}-31"
     
+    clean_district = canonicalize_district(district) if district else "All"
+    clean_fo = fo_name.strip().lower() if fo_name else None
+
+    # When querying for an individual Field Officer, look back 45 days so patients
+    # notified late in the previous month with pending services are included
+    if fo_name:
+        today_date = datetime.now().date()
+        cutoff = (today_date - timedelta(days=45)).strftime("%Y-%m-%d")
+        if cutoff < start_date:
+            start_date = cutoff
+
     allowed_dist_set = None
     if districts and districts.strip() and districts.strip() != "All":
-        allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+        allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
         
     docs = db.collection("daily_field_reports")\
         .where("date_of_reporting", ">=", start_date)\
@@ -2546,15 +2690,15 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     
     for doc in docs:
         d = doc.to_dict()
-        doc_dist = d.get("working_place", "")
-        doc_fo = d.get("fo_name", "")
+        doc_dist = canonicalize_district(d.get("working_place", ""))
+        doc_fo = d.get("fo_name", "").strip()
         doc_date = d.get("date_of_reporting", "")
         
-        if allowed_dist_set and doc_dist not in allowed_dist_set:
+        if allowed_dist_set and doc_dist.lower() not in allowed_dist_set:
             continue
-        if district != "All" and doc_dist != district:
+        if clean_district != "All" and doc_dist.lower() != clean_district.lower():
             continue
-        if fo_name and doc_fo != fo_name:
+        if clean_fo and doc_fo.lower() != clean_fo:
             continue
             
         for cat_key, flag in [
@@ -2701,15 +2845,18 @@ async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
-        cache_key = f"cascade_alerts_{month}_{district}_{fo_name or 'all'}_{districts or 'all'}"
+        clean_d = canonicalize_district(district) if district else "All"
+        clean_fo = fo_name.strip() if fo_name else "all"
+        cache_key = f"cascade_alerts_{month}_{clean_d}_{clean_fo}_{districts or 'all'}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
             
         try:
             data = await asyncio.to_thread(compute_cascade_alerts, month, district, fo_name, districts)
-            cache.set(cache_key, data, ttl=900)
-            return {"success": True, "data": data}
+            result = {"success": True, "data": data}
+            cache.set(cache_key, result, ttl=180)
+            return result
         except Exception as fe:
             print(f"Cascade alerts query notice (quota/network): {fe}")
             empty_data = {"summary": {"urgent": 0, "attention": 0, "monitoring": 0, "total": 0}, "alerts": []}

@@ -1221,11 +1221,27 @@ const sanitizeIncomingFormData = (d, base) => {
   return clean;
 };
 
+const CANONICAL_DISTRICT_MAP = {
+  'aurangabad-bi': 'Aurangabad',
+  'aurangabad bi': 'Aurangabad',
+  'aurangabad': 'Aurangabad',
+  'bhojpur': 'Bhojpur',
+  'purba champaran': 'East Champaran',
+  'purbi champaran': 'East Champaran',
+  'east champaran': 'East Champaran',
+  'motihari': 'East Champaran',
+};
+const canonicalizeDistrict = (d) => {
+  if (!d) return '';
+  const clean = String(d).trim();
+  return CANONICAL_DISTRICT_MAP[clean.toLowerCase()] || clean;
+};
+
 const DEFAULT_BIHAR_DISTRICTS = [
-  "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
-  "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
-  "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
-  "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+  "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
+  "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",
+  "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur",
+  "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
   "Sitamarhi", "Vaishali"
 ];
 
@@ -1235,7 +1251,17 @@ function App() {
       const saved = localStorage.getItem('dfy_staff_directory');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) return parsed;
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          const normalized = {};
+          DEFAULT_BIHAR_DISTRICTS.forEach(d => { normalized[d] = []; });
+          Object.keys(parsed).forEach(k => {
+            const cKey = canonicalizeDistrict(k);
+            if (normalized[cKey] !== undefined) {
+              normalized[cKey] = Array.from(new Set([...(normalized[cKey] || []), ...(parsed[k] || [])])).sort();
+            }
+          });
+          return normalized;
+        }
       }
     } catch (e) {}
     const initDir = {};
@@ -1248,8 +1274,9 @@ function App() {
       const saved = localStorage.getItem('dfy_staff_directory');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const keys = Object.keys(parsed).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d));
-        if (keys.length > 0) return keys.sort();
+        const keys = Object.keys(parsed).map(d => canonicalizeDistrict(d)).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d));
+        const uniq = Array.from(new Set(keys));
+        if (uniq.length > 0) return uniq.sort();
       }
     } catch (e) {}
     return DEFAULT_BIHAR_DISTRICTS;
@@ -1262,11 +1289,19 @@ function App() {
         const res = await fetch(`${API_BASE_URL}/staff-directory`);
         const data = await res.json();
         if (data.status === 'success' && data.data && typeof data.data === 'object') {
-          setDirectory(data.data);
-          const distList = Object.keys(data.data).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
+          const normalized = {};
+          DEFAULT_BIHAR_DISTRICTS.forEach(d => { normalized[d] = []; });
+          Object.keys(data.data).forEach(k => {
+            const cKey = canonicalizeDistrict(k);
+            if (normalized[cKey] !== undefined) {
+              normalized[cKey] = Array.from(new Set([...(normalized[cKey] || []), ...(data.data[k] || [])])).sort();
+            }
+          });
+          setDirectory(normalized);
+          const distList = Object.keys(normalized).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
           setDistricts(distList.length > 0 ? distList : DEFAULT_BIHAR_DISTRICTS);
           try {
-            localStorage.setItem('dfy_staff_directory', JSON.stringify(data.data));
+            localStorage.setItem('dfy_staff_directory', JSON.stringify(normalized));
           } catch (e) {}
         } else {
           setDistricts(prev => prev && prev.length > 0 ? prev : DEFAULT_BIHAR_DISTRICTS);
@@ -1426,15 +1461,16 @@ function App() {
       if (savedSession) {
         const session = JSON.parse(savedSession);
         if (session && session.date === today && session.working_place && session.fo_name && session.pin) {
+          const canonicalWp = canonicalizeDistrict(session.working_place);
           // Check for local draft backup
-          const draftKey = `dfy_draft_${session.working_place}_${session.fo_name}`;
+          const draftKey = `dfy_draft_${canonicalWp}_${session.fo_name}`;
           let initialData = {
-            working_place: session.working_place,
+            working_place: canonicalWp,
             fo_name: session.fo_name,
             pin: session.pin,
             date_of_reporting: today
           };
-          const rawDraft = localStorage.getItem(draftKey);
+          const rawDraft = localStorage.getItem(draftKey) || localStorage.getItem(`dfy_draft_${session.working_place}_${session.fo_name}`);
           if (rawDraft) {
             try {
               const parsedDraft = JSON.parse(rawDraft);
@@ -1444,8 +1480,8 @@ function App() {
           setFormData(prev => sanitizeIncomingFormData(initialData, { ...prev, ...initialData }));
           setPinStatus("success");
           setIsLoggedIn(true);
-          fetchFoBroadcasts(session.working_place);
-          fetchFoCascadeAlerts(session.working_place, session.fo_name);
+          fetchFoBroadcasts(canonicalWp);
+          fetchFoCascadeAlerts(canonicalWp, session.fo_name);
         }
       }
     } catch (e) {
@@ -2153,6 +2189,17 @@ function App() {
                   })}
                 </div>
               )}
+
+              {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center ALWAYS ON MAIN SCREEN */}
+              <PendingInterventionsActionCenter 
+                cascadeAlerts={cascadeAlerts}
+                cascadeSummary={cascadeSummary}
+                loading={loadingCascadeAlerts}
+                formData={formData}
+                onAutofill={handleAutofillPendingId}
+                showToast={showToast}
+                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+              />
 
               <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
