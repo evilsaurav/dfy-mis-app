@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
 
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
@@ -1252,8 +1253,7 @@ function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          const normalized = {};
-          DEFAULT_BIHAR_DISTRICTS.forEach(d => { normalized[d] = []; });
+          const normalized = { ...INITIAL_STAFF_DIRECTORY };
           Object.keys(parsed).forEach(k => {
             const cKey = canonicalizeDistrict(k);
             if (normalized[cKey] !== undefined) {
@@ -1264,23 +1264,10 @@ function App() {
         }
       }
     } catch (e) {}
-    const initDir = {};
-    DEFAULT_BIHAR_DISTRICTS.forEach(d => { initDir[d] = []; });
-    return initDir;
+    return INITIAL_STAFF_DIRECTORY || {};
   });
   
-  const [districts, setDistricts] = useState(() => {
-    try {
-      const saved = localStorage.getItem('dfy_staff_directory');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const keys = Object.keys(parsed).map(d => canonicalizeDistrict(d)).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d));
-        const uniq = Array.from(new Set(keys));
-        if (uniq.length > 0) return uniq.sort();
-      }
-    } catch (e) {}
-    return DEFAULT_BIHAR_DISTRICTS;
-  });
+  const [districts, setDistricts] = useState(DEFAULT_BIHAR_DISTRICTS);
   
   useEffect(() => {
     const fetchDirectory = async () => {

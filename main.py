@@ -656,10 +656,47 @@ async def submit_daily_report(report: DailyActivityReport):
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
         payload["submission_count"] = 1
         
+        # Storage Guard: Prevent massive base64 strings from inflating Firestore document size
+        if report.morning_km_photo_url and len(report.morning_km_photo_url) > 1000:
+            payload["morning_km_photo_url"] = ""
+        if report.evening_km_photo_url and len(report.evening_km_photo_url) > 1000:
+            payload["evening_km_photo_url"] = ""
+
+        is_new_submission = True
+        delta_counts = {
+            "notifications": len(report.notification_ids or []),
+            "tests": len(report.sample_tested_ids or []),
+            "hiv_dm": len(report.hiv_dm_ids or []),
+            "dbt": len(report.dbt_ids or []),
+            "contact_tracing": len(report.contact_tracing_ids or []),
+            "diff_tb": len(report.differentiated_tb_ids or []),
+        }
+
         try:
             doc = await asyncio.to_thread(doc_ref.get)
             if doc.exists:
+                is_new_submission = False
                 d = doc.to_dict()
+                
+                # Compute delta for each category to ensure accurate rollup increments
+                old_notifs = set(d.get("notification_ids", []))
+                delta_counts["notifications"] = len(set(report.notification_ids or []) - old_notifs)
+
+                old_tests = set(d.get("sample_tested_ids", []))
+                delta_counts["tests"] = len(set(report.sample_tested_ids or []) - old_tests)
+
+                old_hiv = set(d.get("hiv_dm_ids", []))
+                delta_counts["hiv_dm"] = len(set(report.hiv_dm_ids or []) - old_hiv)
+
+                old_dbt = set(d.get("dbt_ids", []))
+                delta_counts["dbt"] = len(set(report.dbt_ids or []) - old_dbt)
+
+                old_contact = set(d.get("contact_tracing_ids", []))
+                delta_counts["contact_tracing"] = len(set(report.contact_tracing_ids or []) - old_contact)
+
+                old_diff = set(d.get("differentiated_tb_ids", []))
+                delta_counts["diff_tb"] = len(set(report.differentiated_tb_ids or []) - old_diff)
+
                 for k, v in payload.items():
                     if isinstance(v, list) and k.endswith("_ids"):
                         combined = d.get(k, []) + v
@@ -691,19 +728,23 @@ async def submit_daily_report(report: DailyActivityReport):
             clean_date = report.date_of_reporting
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
             rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-            await asyncio.to_thread(lambda: rollup_ref.set({
+
+            rollup_update = {
                 "date": clean_date,
                 "district": clean_wp,
-                "notifications": firestore.Increment(len(report.notification_ids or [])),
-                "tests": firestore.Increment(len(report.sample_tested_ids or [])),
-                "hiv_dm": firestore.Increment(len(report.hiv_dm_ids or [])),
-                "dbt": firestore.Increment(len(report.dbt_ids or [])),
-                "contact_tracing": firestore.Increment(len(report.contact_tracing_ids or [])),
-                "diff_tb": firestore.Increment(len(report.differentiated_tb_ids or [])),
                 "submitted_fos": firestore.ArrayUnion([report.fo_name]),
-                "submission_count": firestore.Increment(1),
                 "last_updated": firestore.SERVER_TIMESTAMP
-            }, merge=True))
+            }
+            # Only increment submission count on the first report of the day
+            if is_new_submission:
+                rollup_update["submission_count"] = firestore.Increment(1)
+
+            # Only increment metrics by newly added IDs
+            for metric_k, delta_v in delta_counts.items():
+                if delta_v > 0:
+                    rollup_update[metric_k] = firestore.Increment(delta_v)
+
+            await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
@@ -1226,7 +1267,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
-    return output.getvalue()
+    res_bytes = output.getvalue()
+    try:
+        wb.close()
+    except Exception:
+        pass
+    return res_bytes
 
 @app.get("/download-kpi-workbook")
 async def download_kpi_workbook(district: str, month: Optional[str] = None, admin: dict = Depends(get_current_admin)):
@@ -1268,6 +1314,9 @@ async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Opt
                 excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
                 if excel_bytes:
                     zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
+                    del excel_bytes
+                    import gc
+                    gc.collect()
                     
         zip_buffer.seek(0)
         archive_name = "DFY_KPI_Scoped_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
@@ -3289,7 +3338,14 @@ async def prune_expired_audit_logs(retention_days: int = AUDIT_RETENTION_DAYS) -
 @app.on_event("startup")
 async def on_app_startup_tasks():
     try:
-        # Background cleanup of expired audit logs on startup
+        # 1. Immediate memory pre-warm from disk snapshot (0ms cold start latency)
+        baseline_dir = load_baseline_staff_directory()
+        if baseline_dir and len(baseline_dir) == len(DEFAULT_BIHAR_DISTRICTS):
+            cache.set("staff_directory_list", baseline_dir, ttl=86400)
+            cache.set("staff_directory_dict", baseline_dir, ttl=86400)
+            print(f"[Startup Pre-Warm] Pre-loaded {sum(len(v) for v in baseline_dir.values())} staff across {len(baseline_dir)} districts into memory cache.")
+
+        # 2. Background cleanup of expired audit logs on startup
         asyncio.create_task(prune_expired_audit_logs(AUDIT_RETENTION_DAYS))
     except Exception as e:
         print(f"Startup background task notice: {e}")
@@ -3400,6 +3456,41 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/system/storage-health")
+async def get_storage_health(admin: dict = Depends(get_current_admin)):
+    """
+    Returns document count and estimated storage footprint across collections
+    to verify database remains safely under the 1 GB storage threshold.
+    """
+    try:
+        collections = ["daily_field_reports", "daily_district_rollups", "staff_directory", "staff_targets", "admin_audit_logs", "id_edit_logs", "nikshay_verified_patients"]
+        counts = {}
+        for c in collections:
+            try:
+                coll_ref = db.collection(c)
+                count_query = coll_ref.count()
+                count_res = await asyncio.to_thread(count_query.get)
+                counts[c] = count_res[0][0].value
+            except Exception:
+                counts[c] = "N/A"
+                
+        total_docs = sum(v for v in counts.values() if isinstance(v, int))
+        estimated_mb = round((total_docs * 2.0) / 1024, 2)
+        
+        return {
+            "success": True,
+            "counts": counts,
+            "total_documents": total_docs,
+            "estimated_storage_mb": estimated_mb,
+            "storage_limit_mb": 1024,
+            "status": "HEALTHY (< 1GB)" if estimated_mb < 800 else "ATTENTION NEEDED",
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
     except HTTPException:
         raise
     except Exception as e:
