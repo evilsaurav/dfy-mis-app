@@ -1222,11 +1222,11 @@ const sanitizeIncomingFormData = (d, base) => {
 };
 
 const DEFAULT_BIHAR_DISTRICTS = [
-  "Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar",
-  "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar",
-  "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur",
-  "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran",
-  "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"
+  "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
+  "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
+  "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
+  "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+  "Sitamarhi", "Vaishali"
 ];
 
 function App() {
@@ -1248,7 +1248,7 @@ function App() {
       const saved = localStorage.getItem('dfy_staff_directory');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const keys = Object.keys(parsed);
+        const keys = Object.keys(parsed).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d));
         if (keys.length > 0) return keys.sort();
       }
     } catch (e) {}
@@ -1263,7 +1263,7 @@ function App() {
         const data = await res.json();
         if (data.status === 'success' && data.data && typeof data.data === 'object') {
           setDirectory(data.data);
-          const distList = Object.keys(data.data).sort();
+          const distList = Object.keys(data.data).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
           setDistricts(distList.length > 0 ? distList : DEFAULT_BIHAR_DISTRICTS);
           try {
             localStorage.setItem('dfy_staff_directory', JSON.stringify(data.data));

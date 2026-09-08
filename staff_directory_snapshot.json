@@ -1,31 +1,39 @@
 {
-  "Munger": [
-    "Amit Kumar",
-    "Devrath Kumar",
-    "Jayant Kumar",
-    "Md. Raza Uddin",
-    "Saif Khan",
-    "Shyam Kumar Gupta",
-    "Sudhanshu Prasad",
-    "Sumit Kr Singh"
+  "AURANGABAD-BI": [
+    "Prince Kumar",
+    "Rahul Kumar",
+    "Ram Ji Singh",
+    "Rishu Kumar"
   ],
-  "East Champaran": [
-    "ABHISHEK KUMAR",
-    "ADITYA SHRIVASTAVA",
-    "AMIT DUBEY",
-    "ANAND MOHAN",
-    "DIWAKAR KUMAR",
-    "KRINESH KUMAR",
-    "NAVIN KUMAR",
-    "PAPPU PATEL",
-    "POOJA KUMARI",
-    "PURUSHOTTAM KUMAR",
-    "RAHUL DEY",
-    "RAVI RANJAN",
-    "SAHIL KUMAR",
-    "SOURABH KUMAR",
-    "SUMIT KUMAR",
-    "VISHAL DEY"
+  "Begusarai": [
+    "Gulshan kumar Jha",
+    "Gunjan kumar jha",
+    "Manjesh kumar",
+    "Md Sahnawaj",
+    "Md.Imran",
+    "Neeraj kumar",
+    "Omprakash Saw",
+    "Ramruchi jha",
+    "Sonu kumar",
+    "Sonu kumar 1",
+    "Vikash kumar"
+  ],
+  "BHOJPUR": [
+    "Ashwani Kr Keshri",
+    "Mukesh Tiwari",
+    "Naveen Kumar",
+    "Rahul Kumar",
+    "Ram Prasad",
+    "Surya Pratap"
+  ],
+  "Buxar": [
+    "Krishna Kumar",
+    "Mukul Kumar",
+    "Nilesh Ranjan",
+    "Raj Tiwari",
+    "Randhir Kumar",
+    "Shailesh Kumar",
+    "Srishty Singh"
   ],
   "Darbhanga": [
     "AMIT SHARAN",
@@ -41,6 +49,71 @@
     "RITU KUMAR",
     "SUMAN KUMAR",
     "VIVEK KUMAR"
+  ],
+  "Gaya": [
+    "Amit Kr Tiwary",
+    "Bikki Kumar",
+    "Kundan Kumar",
+    "Lila Manjhi",
+    "Manish Kumar",
+    "Mukesh Kumar",
+    "Niraj Kumar",
+    "Nitish",
+    "Rita Kumari",
+    "Shashank Sourabh",
+    "Vikash Kr Pathak"
+  ],
+  "Jamui": [
+    "Bablu Kumar",
+    "Monu Kumar",
+    "Rajiv Kumar",
+    "Rinki Kumari"
+  ],
+  "Jehanabad": [
+    "Sammer Arya",
+    "Shashi Ranjan",
+    "Suraj Kumar"
+  ],
+  "Kaimur": [
+    "Durgesh Kumar",
+    "Praphull Kumar",
+    "Raushan Kumar",
+    "Vinit Kumar"
+  ],
+  "Khagaria": [
+    "Ghanshyam kumar",
+    "Rajnish Kumar",
+    "Rambilash Paswan"
+  ],
+  "Lakhisarai": [
+    "Ankit Kumar",
+    "Ram Prakash"
+  ],
+  "Madhubani": [
+    "Aazad kumar pandey",
+    "Amit kumar thakur",
+    "Guddu Kumar",
+    "Md Sadakat",
+    "Prafulla Kumar",
+    "Rakesh kumar",
+    "Ram kuamr gupta",
+    "Ramudgar Rajak",
+    "Ranjeet Kumar Sahu",
+    "Rohit Kumar",
+    "Satish Kumar Yadav",
+    "Sharda kumari",
+    "Sudha kumari",
+    "krishna kumar"
+  ],
+  "Munger": [
+    "Amit Kumar",
+    "Devrath Kumar",
+    "Jayant Kumar",
+    "Md. Raza Uddin",
+    "Saif Khan",
+    "Shyam Kumar Gupta",
+    "Sudhanshu Prasad",
+    "Sumit Kr Singh"
   ],
   "Muzaffarpur": [
     "Bishram Kumar",
@@ -59,10 +132,38 @@
     "Vijit Kumar",
     "Vinay Prakash"
   ],
-  "Khagaria": [
-    "Ghanshyam kumar",
-    "Rajnish Kumar",
-    "Rambilash Paswan"
+  "Nawada": [
+    "Devraj Kumar",
+    "Rajesh Kumar",
+    "Rajiv Kumar"
+  ],
+  "Purba Champaran": [
+    "ABHISHEK KUMAR",
+    "ADITYA SHRIVASTAVA",
+    "AMIT DUBEY",
+    "ANAND MOHAN",
+    "DIWAKAR KUMAR",
+    "KRINESH KUMAR",
+    "NAVIN KUMAR",
+    "PAPPU PATEL",
+    "POOJA KUMARI",
+    "PURUSHOTTAM KUMAR",
+    "RAHUL DEY",
+    "RAVI RANJAN",
+    "SAHIL KUMAR",
+    "SOURABH KUMAR",
+    "SUMIT KUMAR",
+    "VISHAL DEY"
+  ],
+  "Rohtas": [
+    "Abhay Kumar",
+    "Ameet Kumar Pathak",
+    "Avnish kumar",
+    "Manish Kumar",
+    "Md Arsalan Ansari",
+    "Md Danish Ansari",
+    "Sandeep Kumar Mehta",
+    "Santosh kumar"
   ],
   "Samastipur": [
     "AJEET KUMAR",
@@ -78,53 +179,12 @@
     "SUBODH KUMAR I",
     "SUBODH KUMAR II"
   ],
-  "Vaishali": [
-    "ASHISH KUMAR",
-    "BABY KUMARI",
-    "CHANDAN KUMAR",
-    "Chintu Kumar",
-    "Deepak kumar",
-    "Dinesh Kumar",
-    "Gautam Kumar",
-    "Gurudayal Das",
-    "MADHUSUDAN KUMAR",
-    "Neeraj Kumar",
-    "Nitesh Kumar",
-    "Raushan Kumar",
-    "Vishal Kumar"
+  "Sheikhpura": [
+    "Dhiraj Kumar",
+    "Nilkamal Kumar"
   ],
-  "Aurangabad": [
-    "Prince Kumar",
-    "Rahul Kumar",
-    "Ram Ji Singh",
-    "Rishu Kumar"
-  ],
-  "Jamui": [
-    "Bablu Kumar",
-    "Monu Kumar",
-    "Rajiv Kumar",
-    "Rinki Kumari"
-  ],
-  "Bhojpur": [
-    "Ashwani Kr Keshri",
-    "Mukesh Tiwari",
-    "Naveen Kumar",
-    "Rahul Kumar",
-    "Ram Prasad",
-    "Surya Pratap"
-  ],
-  "Gaya": [
-    "Amit Kr Tiwary",
-    "Bikki Kumar",
-    "Kundan Kumar",
-    "Lila Manjhi",
-    "Manish Kumar",
-    "Mukesh Kumar",
-    "Niraj Kumar",
-    "Nitish",
-    "Rita Kumari",
-    "Shashank Sourabh",
-    "Vikash Kr Pathak"
+  "Sheohar": [
+    "Ashish Jha"
   ],
   "Sitamarhi": [
     "ALOK KUMAR",
@@ -139,95 +199,19 @@
     "SATYENDRA KUMAR",
     "SUJAY KUMAR"
   ],
-  "Sheikhpura": [
-    "Dhiraj Kumar",
-    "Nilkamal Kumar"
-  ],
-  "Madhubani": [
-    "Aazad kumar pandey",
-    "Amit kumar thakur",
-    "Guddu Kumar",
-    "Md Sadakat",
-    "Prafulla Kumar",
-    "Rakesh kumar",
-    "Ram kuamr gupta",
-    "Ramudgar Rajak",
-    "Ranjeet Kumar Sahu",
-    "Rohit Kumar",
-    "Satish Kumar Yadav",
-    "Sharda kumari",
-    "Sudha kumari",
-    "krishna kumar"
-  ],
-  "Jehanabad": [
-    "Sammer Arya",
-    "Shashi Ranjan",
-    "Suraj Kumar"
-  ],
-  "Begusarai": [
-    "Gulshan kumar Jha",
-    "Gunjan kumar jha",
-    "Manjesh kumar",
-    "Md Sahnawaj",
-    "Md.Imran",
-    "Neeraj kumar",
-    "Omprakash Saw",
-    "Ramruchi jha",
-    "Sonu kumar",
-    "Sonu kumar 1",
-    "Vikash kumar"
-  ],
-  "Buxar": [
-    "Krishna Kumar",
-    "Mukul Kumar",
-    "Nilesh Ranjan",
-    "Raj Tiwari",
-    "Randhir Kumar",
-    "Shailesh Kumar",
-    "Srishty Singh"
-  ],
-  "Kaimur": [
-    "Durgesh Kumar",
-    "Praphull Kumar",
+  "Vaishali": [
+    "ASHISH KUMAR",
+    "BABY KUMARI",
+    "CHANDAN KUMAR",
+    "Chintu Kumar",
+    "Deepak kumar",
+    "Dinesh Kumar",
+    "Gautam Kumar",
+    "Gurudayal Das",
+    "MADHUSUDAN KUMAR",
+    "Neeraj Kumar",
+    "Nitesh Kumar",
     "Raushan Kumar",
-    "Vinit Kumar"
-  ],
-  "Lakhisarai": [
-    "Ankit Kumar",
-    "Ram Prakash"
-  ],
-  "Rohtas": [
-    "Abhay Kumar",
-    "Ameet Kumar Pathak",
-    "Avnish kumar",
-    "Manish Kumar",
-    "Md Arsalan Ansari",
-    "Md Danish Ansari",
-    "Sandeep Kumar Mehta",
-    "Santosh kumar"
-  ],
-  "Sheohar": [
-    "Ashish Jha"
-  ],
-  "Nawada": [
-    "Devraj Kumar",
-    "Rajesh Kumar",
-    "Rajiv Kumar"
-  ],
-  "Araria": [],
-  "Arwal": [],
-  "Banka": [],
-  "Bhagalpur": [],
-  "Gopalganj": [],
-  "Katihar": [],
-  "Kishanganj": [],
-  "Madhepura": [],
-  "Nalanda": [],
-  "Patna": [],
-  "Purnia": [],
-  "Saharsa": [],
-  "Saran": [],
-  "Siwan": [],
-  "Supaul": [],
-  "West Champaran": []
+    "Vishal Kumar"
+  ]
 }

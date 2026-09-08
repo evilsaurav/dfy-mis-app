@@ -164,6 +164,7 @@ def create_access_token(user_data: dict) -> str:
         "username": user_data.get("username", "admin"),
         "role": user_data.get("role", "SUB_ADMIN"),
         "districts": user_data.get("allowed_districts", ["All"]),
+        "allowed_districts": user_data.get("allowed_districts", ["All"]),
         "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
         "iat": datetime.utcnow()
     }
@@ -232,12 +233,29 @@ login_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600
 pin_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600)
 
 DEFAULT_BIHAR_DISTRICTS = [
-    "Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar",
-    "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar",
-    "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur",
-    "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran",
-    "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"
+    "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
+    "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
+    "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
+    "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+    "Sitamarhi", "Vaishali"
 ]
+
+DISTRICT_CANONICAL_MAP = {
+    "aurangabad": "AURANGABAD-BI",
+    "aurangabad-bi": "AURANGABAD-BI",
+    "aurangabad bi": "AURANGABAD-BI",
+    "bhojpur": "BHOJPUR",
+    "east champaran": "Purba Champaran",
+    "purba champaran": "Purba Champaran",
+    "purbi champaran": "Purba Champaran",
+    "motihari": "Purba Champaran"
+}
+
+def canonicalize_district(name: str) -> str:
+    if not name:
+        return ""
+    clean = str(name).strip()
+    return DISTRICT_CANONICAL_MAP.get(clean.lower(), clean)
 
 def load_baseline_staff_directory():
     directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
@@ -247,7 +265,9 @@ def load_baseline_staff_directory():
                 snap = json.load(f)
                 if snap and isinstance(snap, dict):
                     for dist, staff in snap.items():
-                        directory[dist] = sorted(list(set(directory.get(dist, []) + staff)))
+                        c_dist = canonicalize_district(dist)
+                        if c_dist in directory:
+                            directory[c_dist] = sorted(list(set(directory.get(c_dist, []) + staff)))
                     return directory
         except Exception:
             pass
@@ -255,14 +275,12 @@ def load_baseline_staff_directory():
     if os.path.exists("staff_master.csv"):
         try:
             import csv
-            with open("staff_master.csv", "r", encoding="utf-8") as f:
+            with open("staff_master.csv", "r", encoding="utf-8-sig") as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    dist = row.get("District", "").strip()
+                    dist = canonicalize_district(row.get("District", "").strip())
                     name = row.get("Name", "").strip()
-                    if dist and name:
-                        if dist not in directory:
-                            directory[dist] = []
+                    if dist in directory and name:
                         if name not in directory[dist]:
                             directory[dist].append(name)
             for d in directory:
@@ -354,7 +372,8 @@ class DashboardRequest(BaseModel):
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_current_admin)):
     try:
-        cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}"
+        user_tag = admin.get("user_id") or admin.get("username") or "admin"
+        cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -364,11 +383,12 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         
         allowed_dist_set = None
         if req.districts and req.districts.strip() and req.districts.strip() != "All":
-            allowed_dist_set = set([d.strip() for d in req.districts.split(",") if d.strip()])
+            allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
 
         # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
         if admin.get("role") == "SUB_ADMIN":
-            user_allowed = set(admin.get("allowed_districts", []))
+            raw_dists = admin.get("allowed_districts") or admin.get("districts") or []
+            user_allowed = set([canonicalize_district(d) for d in raw_dists])
             if "All" not in user_allowed:
                 if allowed_dist_set:
                     allowed_dist_set = allowed_dist_set.intersection(user_allowed)
@@ -387,12 +407,13 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
             for doc in docs:
                 data = doc.to_dict()
                 wp = data.get("working_place", "Unknown")
-                if allowed_dist_set and wp not in allowed_dist_set:
+                c_wp = canonicalize_district(wp)
+                if allowed_dist_set and c_wp not in allowed_dist_set:
                     continue
 
                 records.append({
                     "date": data.get("date_of_reporting", ""),
-                    "working_place": wp,
+                    "working_place": c_wp,
                     "fo_name": data.get("fo_name", "Unknown"),
                     
                     # Big 5
@@ -493,17 +514,17 @@ async def get_directory():
 
         try:
             docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
-            directory = {}
+            directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
             for doc in docs:
                 data = doc.to_dict()
-                dist = data.get("district")
-                if dist not in directory:
-                    directory[dist] = []
-                directory[dist].append(data.get("name"))
+                dist = canonicalize_district(data.get("district"))
+                name = data.get("name")
+                if dist in directory and name:
+                    if name not in directory[dist]:
+                        directory[dist].append(name)
 
-            for d in DEFAULT_BIHAR_DISTRICTS:
-                if d not in directory:
-                    directory[d] = []
+            for d in directory:
+                directory[d] = sorted(directory[d])
 
             cache.set("staff_directory_dict", directory, ttl=3600)
             return directory
@@ -589,6 +610,8 @@ async def submit_daily_report(report: DailyActivityReport):
     try:
         if not report.date_of_reporting:
             report.date_of_reporting = datetime.now().strftime("%Y-%m-%d")
+        if report.working_place:
+            report.working_place = canonicalize_district(report.working_place)
             
         doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
@@ -950,6 +973,19 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     safe_dist = safe_filename(district)
     template_path = f"templates/template_{safe_dist}.xlsx"
     if not os.path.exists(template_path):
+        alt_dist = None
+        if district in ["AURANGABAD-BI", "Aurangabad"]:
+            alt_dist = "Aurangabad"
+        elif district in ["Purba Champaran", "East Champaran"]:
+            alt_dist = "East Champaran"
+        elif district in ["BHOJPUR", "Bhojpur"]:
+            alt_dist = "Bhojpur"
+        if alt_dist:
+            alt_path = f"templates/template_{safe_filename(alt_dist)}.xlsx"
+            if os.path.exists(alt_path):
+                template_path = alt_path
+
+    if not os.path.exists(template_path):
         return None
         
     # Load workbook preserving all formulas
@@ -1168,10 +1204,10 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
 @app.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
-        all_bihar = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        all_bihar = DEFAULT_BIHAR_DISTRICTS
         if districts and districts.strip() and districts.strip() != "All":
-            allowed_set = set([d.strip() for d in districts.split(",") if d.strip()])
-            bihar_districts = [d for d in all_bihar if d in allowed_set]
+            allowed_set = set([canonicalize_district(d.strip()) for d in districts.split(",") if d.strip()])
+            bihar_districts = [d for d in all_bihar if d in allowed_set or canonicalize_district(d) in allowed_set]
         else:
             bihar_districts = all_bihar
 
@@ -1204,29 +1240,23 @@ async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Opt
 async def get_staff_directory():
     try:
         cached = cache.get("staff_directory_list")
-        if cached is not None and isinstance(cached, dict) and len(cached) >= len(DEFAULT_BIHAR_DISTRICTS):
+        if cached is not None and isinstance(cached, dict) and len(cached) == len(DEFAULT_BIHAR_DISTRICTS):
             return {"status": "success", "data": cached}
 
         try:
             docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
-            directory = {}
+            directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
             for doc in docs:
                 data = doc.to_dict()
-                district = data.get("district")
+                district = canonicalize_district(data.get("district"))
                 name = data.get("name")
-                if district and name:
-                    if district not in directory:
-                        directory[district] = []
-                    directory[district].append(name)
+                if district in directory and name:
+                    if name not in directory[district]:
+                        directory[district].append(name)
             
             for d in directory:
                 directory[d] = sorted(directory[d])
 
-            # Ensure all 38 Bihar districts exist
-            for d in DEFAULT_BIHAR_DISTRICTS:
-                if d not in directory:
-                    directory[d] = []
-                
             # Save snapshot to disk
             try:
                 with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
@@ -1774,10 +1804,10 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
             staff_by_dist[dist] = staff_by_dist.get(dist, 0) + 1
             
         # Aggregate by district
-        all_bihar = ["Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga", "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria", "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar", "Sitamarhi", "Vaishali"]
+        all_bihar = DEFAULT_BIHAR_DISTRICTS
         if districts and districts.strip() and districts.strip() != "All":
-            allowed_set = set([d.strip() for d in districts.split(",") if d.strip()])
-            bihar_districts = [d for d in all_bihar if d in allowed_set]
+            allowed_set = set([canonicalize_district(d.strip()) for d in districts.split(",") if d.strip()])
+            bihar_districts = [d for d in all_bihar if d in allowed_set or canonicalize_district(d) in allowed_set]
         else:
             bihar_districts = all_bihar
 

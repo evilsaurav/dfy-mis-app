@@ -25,11 +25,11 @@ const feedCategoriesConfig = [
 ];
 
 const DEFAULT_BIHAR_DISTRICTS = [
-  "Araria", "Arwal", "Aurangabad", "Banka", "Begusarai", "Bhagalpur", "Bhojpur", "Buxar",
-  "Darbhanga", "East Champaran", "Gaya", "Gopalganj", "Jamui", "Jehanabad", "Kaimur", "Katihar",
-  "Khagaria", "Kishanganj", "Lakhisarai", "Madhepura", "Madhubani", "Munger", "Muzaffarpur",
-  "Nalanda", "Nawada", "Patna", "Purnia", "Rohtas", "Saharsa", "Samastipur", "Saran",
-  "Sheikhpura", "Sheohar", "Sitamarhi", "Siwan", "Supaul", "Vaishali", "West Champaran"
+  "AURANGABAD-BI", "Begusarai", "BHOJPUR", "Buxar", "Darbhanga",
+  "Gaya", "Jamui", "Jehanabad", "Kaimur", "Khagaria",
+  "Lakhisarai", "Madhubani", "Munger", "Muzaffarpur", "Nawada",
+  "Purba Champaran", "Rohtas", "Samastipur", "Sheikhpura", "Sheohar",
+  "Sitamarhi", "Vaishali"
 ];
 
 export default function AdminDashboard() {
@@ -1298,11 +1298,16 @@ Keep this file safe in your Google Drive or personal diary.
       ...Object.keys(staffDirectory || {}),
       ...rawRecords.map(r => r.working_place)
     ]);
-    const allList = Array.from(rawSet).filter(Boolean).sort();
+    const allList = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
     if (!currentUser || currentUser.role === 'SUPER_ADMIN' || !currentUser.allowed_districts || currentUser.allowed_districts.includes('All')) {
       return ['All', ...allList];
     }
-    const userAllowed = currentUser.allowed_districts;
+    const userAllowed = currentUser.allowed_districts.map(d => {
+      if (d === 'Aurangabad') return 'AURANGABAD-BI';
+      if (d === 'Bhojpur') return 'BHOJPUR';
+      if (d === 'East Champaran') return 'Purba Champaran';
+      return d;
+    });
     const filtered = allList.filter(d => userAllowed.includes(d));
     const permittedOnly = filtered.length > 0 ? filtered : userAllowed.filter(d => d !== 'All');
     return permittedOnly.length > 0 ? permittedOnly : (allList.length > 0 ? [allList[0]] : ['Jamui']);
@@ -1313,9 +1318,15 @@ Keep this file safe in your Google Drive or personal diary.
       ...DEFAULT_BIHAR_DISTRICTS,
       ...Object.keys(staffDirectory || {})
     ]);
-    const allDists = Array.from(rawSet).filter(Boolean).sort();
+    const allDists = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      return allDists.filter(d => currentUser.allowed_districts.includes(d));
+      const userAllowed = currentUser.allowed_districts.map(d => {
+        if (d === 'Aurangabad') return 'AURANGABAD-BI';
+        if (d === 'Bhojpur') return 'BHOJPUR';
+        if (d === 'East Champaran') return 'Purba Champaran';
+        return d;
+      });
+      return allDists.filter(d => userAllowed.includes(d));
     }
     return allDists;
   }, [staffDirectory, currentUser]);
@@ -1531,9 +1542,15 @@ const availableDistrictsForFeed = useMemo(() => {
 
   // District Performance Leaderboard
   const leaderboardData = useMemo(() => {
-    let distList = Object.keys(staffDirectory).length > 0 ? Object.keys(staffDirectory).sort() : DEFAULT_BIHAR_DISTRICTS;
+    let distList = DEFAULT_BIHAR_DISTRICTS;
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      distList = distList.filter(d => currentUser.allowed_districts.includes(d));
+      const userAllowed = currentUser.allowed_districts.map(d => {
+        if (d === 'Aurangabad') return 'AURANGABAD-BI';
+        if (d === 'Bhojpur') return 'BHOJPUR';
+        if (d === 'East Champaran') return 'Purba Champaran';
+        return d;
+      });
+      distList = distList.filter(d => userAllowed.includes(d));
     }
     const result = distList.map(dist => {
       const distRecords = rawRecords.filter(r => r.working_place === dist);
@@ -1855,9 +1872,15 @@ const availableDistrictsForFeed = useMemo(() => {
   }, [staffPacingData, selectedDistrict, pacingFilterStatus, pacingSearchQuery, pacingSortConfig]);
 
   const districtPacingData = useMemo(() => {
-    let distList = Object.keys(staffDirectory).length > 0 ? Object.keys(staffDirectory).sort() : DEFAULT_BIHAR_DISTRICTS;
+    let distList = DEFAULT_BIHAR_DISTRICTS;
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      distList = distList.filter(d => currentUser.allowed_districts.includes(d));
+      const userAllowed = currentUser.allowed_districts.map(d => {
+        if (d === 'Aurangabad') return 'AURANGABAD-BI';
+        if (d === 'Bhojpur') return 'BHOJPUR';
+        if (d === 'East Champaran') return 'Purba Champaran';
+        return d;
+      });
+      distList = distList.filter(d => userAllowed.includes(d));
     }
     const { totalWorkingDays, elapsedWorkingDays, remainingWorkingDays } = workingDaysInfo;
 
