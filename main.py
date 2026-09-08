@@ -2373,13 +2373,34 @@ async def admin_feed_officer_data(
         ]
         doc_ref = None
         doc_snap = None
+        doc_id = candidate_doc_ids[0]
+
         for cid in candidate_doc_ids:
             cand_ref = db.collection("daily_field_reports").document(cid)
             snap = await asyncio.to_thread(cand_ref.get)
             if snap.exists:
                 doc_ref = cand_ref
                 doc_snap = snap
+                doc_id = cid
                 break
+
+        if not doc_ref:
+            # Fallback search by fo_name and date_of_reporting in case of spacing/casing variations
+            try:
+                query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                    .where("fo_name", "==", clean_fo)
+                    .where("date_of_reporting", "==", clean_date)
+                    .stream()))
+                matching = [d for d in query_docs if canonicalize_district(d.to_dict().get("working_place", "")) == clean_wp]
+                if not matching and query_docs:
+                    matching = query_docs
+                if matching:
+                    doc_ref = matching[0].reference
+                    doc_snap = matching[0]
+                    doc_id = matching[0].id
+            except Exception as qe:
+                print(f"[Admin Feed Fallback Notice] {qe}")
+
         if not doc_ref:
             doc_id = candidate_doc_ids[0]
             doc_ref = db.collection("daily_field_reports").document(doc_id)
@@ -2392,7 +2413,10 @@ async def admin_feed_officer_data(
         if req.remark and req.remark.strip():
             feed_note += f": {req.remark.strip()}"
 
+        delta_counts = {}
         if new_report_created:
+            for cat in categories:
+                delta_counts[cat] = len(cleaned_payload[cat])
             # Create a brand new daily report
             doc_data = {
                 "working_place": clean_wp,
@@ -2419,6 +2443,10 @@ async def admin_feed_officer_data(
         else:
             # Merge with existing daily report (monotonic union)
             existing_data = doc_snap.to_dict()
+            for cat in categories:
+                existing_set = set(existing_data.get(cat, []))
+                delta_counts[cat] = len(set(cleaned_payload[cat]) - existing_set)
+
             update_data = {
                 "status": "completed",
                 "admin_fed": True,
@@ -2450,19 +2478,29 @@ async def admin_feed_officer_data(
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
             rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-            await asyncio.to_thread(lambda: rollup_ref.set({
+            rollup_update = {
                 "date": clean_date,
                 "district": clean_wp,
-                "notifications": firestore.Increment(len(cleaned_payload.get("notification_ids", []))),
-                "tests": firestore.Increment(len(cleaned_payload.get("sample_tested_ids", []))),
-                "hiv_dm": firestore.Increment(len(cleaned_payload.get("hiv_dm_ids", []))),
-                "dbt": firestore.Increment(len(cleaned_payload.get("dbt_ids", []))),
-                "contact_tracing": firestore.Increment(len(cleaned_payload.get("contact_tracing_ids", []))),
-                "diff_tb": firestore.Increment(len(cleaned_payload.get("differentiated_tb_ids", []))),
                 "submitted_fos": firestore.ArrayUnion([clean_fo]),
-                "submission_count": firestore.Increment(1 if new_report_created else 0),
                 "last_updated": firestore.SERVER_TIMESTAMP
-            }, merge=True))
+            }
+            if new_report_created:
+                rollup_update["submission_count"] = firestore.Increment(1)
+
+            metric_map = {
+                "notification_ids": "notifications",
+                "sample_tested_ids": "tests",
+                "hiv_dm_ids": "hiv_dm",
+                "dbt_ids": "dbt",
+                "contact_tracing_ids": "contact_tracing",
+                "differentiated_tb_ids": "diff_tb"
+            }
+            for cat_k, rollup_k in metric_map.items():
+                d_cnt = delta_counts.get(cat_k, 0)
+                if d_cnt > 0:
+                    rollup_update[rollup_k] = firestore.Increment(d_cnt)
+
+            await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
         except Exception as rollup_err:
             print(f"[Admin Feed Rollup Notice] Non-fatal error: {rollup_err}")
 
@@ -2480,7 +2518,9 @@ async def admin_feed_officer_data(
         )
 
         # 7. Invalidate caches for immediate live reflection
-        cache.delete(f"status_{doc_id}")
+        if doc_id:
+            cache.delete(f"status_{doc_id}")
+        cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("attendance_")
