@@ -1,6 +1,29 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line } from 'recharts';
 
+const feedCategoriesConfig = [
+  { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
+  { key: 'hiv_dm_ids', label: 'HIV & DM Screening', isPrimary: true, icon: '🩸' },
+  { key: 'dbt_ids', label: 'DBT (Bank Seeding)', isPrimary: true, icon: '💰' },
+  { key: 'sample_tested_ids', label: 'Sample Tested', isPrimary: true, icon: '🔬' },
+  { key: 'sample_collection_ids', label: 'Sample Collection', isPrimary: true, icon: '🧪' },
+  { key: 'contact_tracing_ids', label: 'Contact Tracing', isPrimary: true, icon: '👥' },
+  { key: 'differentiated_tb_ids', label: 'Diff TB Care', isPrimary: true, icon: '🏥' },
+  { key: 'outcome_assigned_ids', label: 'Treatment Outcome', isPrimary: true, icon: '🎯' },
+  { key: 'home_visit_ids', label: 'Home Visit', isPrimary: false, icon: '🏠' },
+  { key: 'follow_up_ids', label: 'Follow Up', isPrimary: false, icon: '🔄' },
+  { key: 'face_to_face_ids', label: 'Face to Face', isPrimary: false, icon: '🗣️' },
+  { key: 'presumptive_ids', label: 'Presumptive TB', isPrimary: false, icon: '🩺' },
+  { key: 'documents_ids', label: 'Documents Collected', isPrimary: false, icon: '📁' },
+  { key: 'fdc_provided_ids', label: 'FDC Provided', isPrimary: false, icon: '💊' },
+  { key: 'kit_consumption_ids', label: 'Kit Consumption', isPrimary: false, icon: '📦' },
+  { key: 'tpt_treatment_start_ids', label: 'TPT Treatment Start', isPrimary: false, icon: '🛡️' },
+  { key: 'tpt_presumptive_ids', label: 'TPT Presumptive', isPrimary: false, icon: '🔍' },
+  { key: 'adhar_face_authentication_ids', label: 'Aadhaar Face Auth', isPrimary: false, icon: '👤' },
+  { key: 'consent_with_id_ids', label: 'Consent with ID', isPrimary: false, icon: '📝' },
+  { key: 'culture_dst_ids', label: 'Culture & DST', isPrimary: false, icon: '🧫' }
+];
+
 export default function AdminDashboard() {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -70,6 +93,19 @@ export default function AdminDashboard() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [copiedAttendance, setCopiedAttendance] = useState(false);
+
+  // --- Admin/Sub-Admin Data Feeding Modal State ---
+  const [showAdminFeedModal, setShowAdminFeedModal] = useState(false);
+  const [feedDistrict, setFeedDistrict] = useState("");
+  const [feedFoName, setFeedFoName] = useState("");
+  const [feedDate, setFeedDate] = useState(new Date().toISOString().slice(0, 10));
+  const [feedCategoryInputs, setFeedCategoryInputs] = useState({});
+  const [feedRemarks, setFeedRemarks] = useState("");
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedError, setFeedError] = useState("");
+  const [feedSuccess, setFeedSuccess] = useState("");
+  const [feedActiveCategory, setFeedActiveCategory] = useState("notification_ids");
+  const [feedShowAllCategories, setFeedShowAllCategories] = useState(false);
 
   // --- Multi-Admin RBAC & Audit Trail State ---
   const [currentUser, setCurrentUser] = useState(() => {
@@ -1091,6 +1127,119 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       setAdminEditModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
+
+  const availableDistrictsForFeed = useMemo(() => {
+    const allDists = Object.keys(staffDirectory).length > 0 
+      ? Object.keys(staffDirectory).sort() 
+      : (districts || []).filter(d => d !== 'All');
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      return allDists.filter(d => currentUser.allowed_districts.includes(d));
+    }
+    return allDists;
+  }, [staffDirectory, districts, currentUser]);
+
+  const availableFosForFeed = useMemo(() => {
+    if (!feedDistrict) return [];
+    const fromDir = staffDirectory[feedDistrict] || [];
+    if (fromDir.length > 0) return fromDir;
+    const fromRecs = Array.from(new Set(rawRecords.filter(r => r.working_place === feedDistrict).map(r => r.fo_name))).filter(Boolean).sort();
+    return fromRecs;
+  }, [staffDirectory, feedDistrict, rawRecords]);
+
+  const handleAdminFeedSubmit = async (e) => {
+    if (e) e.preventDefault();
+    setFeedError('');
+    setFeedSuccess('');
+
+    if (!feedDistrict || feedDistrict === 'All') {
+      setFeedError('Please select a specific District.');
+      return;
+    }
+    if (!feedFoName || !feedFoName.trim()) {
+      setFeedError('Please select or specify a Field Officer name.');
+      return;
+    }
+    if (!feedDate || !/^\d{4}-\d{2}-\d{2}$/.test(feedDate)) {
+      setFeedError('Please enter a valid reporting date (YYYY-MM-DD).');
+      return;
+    }
+
+    const payload = {
+      district: feedDistrict.trim(),
+      fo_name: feedFoName.trim(),
+      date_of_reporting: feedDate.trim(),
+      remark: feedRemarks ? feedRemarks.trim() : `Admin feed by ${currentUser?.name || currentUser?.username || 'Admin'}`
+    };
+
+    let totalIdsCount = 0;
+    const invalidTokens = [];
+
+    const idKeys = [
+      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_tested_ids',
+      'sample_collection_ids', 'contact_tracing_ids', 'differentiated_tb_ids',
+      'outcome_assigned_ids', 'home_visit_ids', 'follow_up_ids',
+      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+      'kit_consumption_ids', 'tpt_treatment_start_ids', 'tpt_presumptive_ids',
+      'adhar_face_authentication_ids', 'consent_with_id_ids', 'culture_dst_ids'
+    ];
+
+    idKeys.forEach(k => {
+      const rawText = feedCategoryInputs[k] || '';
+      if (rawText && rawText.trim()) {
+        const tokens = rawText.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
+        const validList = [];
+        tokens.forEach(tok => {
+          if (/^\d{9}$/.test(tok)) {
+            validList.push(tok);
+          } else {
+            invalidTokens.push(tok);
+          }
+        });
+        const uniqueList = Array.from(new Set(validList));
+        payload[k] = uniqueList;
+        totalIdsCount += uniqueList.length;
+      } else {
+        payload[k] = [];
+      }
+    });
+
+    if (totalIdsCount === 0) {
+      setFeedError('Please enter at least one valid 9-digit Patient ID in any category.');
+      return;
+    }
+
+    if (invalidTokens.length > 0) {
+      setFeedError(`The following ${invalidTokens.length} item(s) are NOT 9-digit numbers: ${invalidTokens.slice(0, 6).join(', ')}${invalidTokens.length > 6 ? '...' : ''}. All IDs must be strictly 9 digits.`);
+      return;
+    }
+
+    setFeedLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/feed-officer-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setFeedSuccess(`✓ Success: ${data.detail || 'Data saved successfully!'}`);
+        await fetchData();
+        setTimeout(() => {
+          setFeedCategoryInputs({});
+          setFeedRemarks('');
+          setFeedSuccess('');
+          setShowAdminFeedModal(false);
+        }, 1800);
+      } else {
+        setFeedError(data.detail || 'Failed to feed data.');
+      }
+    } catch (err) {
+      setFeedError('Network error connecting to backend.');
+    } finally {
+      setFeedLoading(false);
     }
   };
 
@@ -2133,6 +2282,25 @@ Keep this file safe in your Google Drive or personal diary.
                       {activeAdminBroadcasts.length}
                     </span>
                   )}
+                </button>
+
+                <button 
+                  onClick={() => {
+                    const fallbackDist = selectedDistrict !== 'All' ? selectedDistrict : (availableDistrictsForFeed[0] || '');
+                    setFeedDistrict(fallbackDist);
+                    setFeedFoName(selectedFO !== 'All' ? selectedFO : '');
+                    setFeedDate(new Date().toISOString().slice(0, 10));
+                    setFeedCategoryInputs({});
+                    setFeedRemarks('');
+                    setFeedError('');
+                    setFeedSuccess('');
+                    setShowAdminFeedModal(true);
+                  }} 
+                  className="col-span-2 bg-gradient-to-r from-indigo-600 via-purple-600 to-indigo-700 hover:from-indigo-700 hover:to-purple-700 text-white px-2.5 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer" 
+                  title="Feed or backfill patient IDs for any Field Officer on any date (Backdated / Current)"
+                >
+                  <span>📝</span>
+                  <span className="truncate">Feed Field Officer IDs (Any Date)</span>
                 </button>
               </div>
             </div>
@@ -4232,7 +4400,7 @@ Keep this file safe in your Google Drive or personal diary.
 
       {/* Change PIN Modal */}
       {pinChangeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 animate-fade-in">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
               <div>
@@ -4287,7 +4455,7 @@ Keep this file safe in your Google Drive or personal diary.
 
       {/* Add New Employee Modal */}
       {addStaffModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
           <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
               <div>
@@ -4379,7 +4547,7 @@ Keep this file safe in your Google Drive or personal diary.
 
       {/* Delete Staff Confirmation Modal */}
       {deleteStaffModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 animate-fade-in">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
               <h4 className="text-sm font-black text-red-600">🗑️ Confirm Remove Staff</h4>
@@ -4415,7 +4583,7 @@ Keep this file safe in your Google Drive or personal diary.
 
       {/* Admin Patient ID Correction / Edit Modal */}
       {adminEditModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
             <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
               <div>
@@ -4890,6 +5058,25 @@ Keep this file safe in your Google Drive or personal diary.
                 >
                   {copiedFoCategory === 'ALL' ? '✓ Copied All!' : 'Copy All IDs'}
                 </button>
+                <button
+                  onClick={() => {
+                    const foDist = (inspectingFO.district && inspectingFO.district !== 'All') 
+                      ? inspectingFO.district 
+                      : (foRecords[0]?.working_place || (selectedDistrict !== 'All' ? selectedDistrict : ''));
+                    setFeedDistrict(foDist);
+                    setFeedFoName(inspectingFO.fo_name);
+                    setFeedDate(new Date().toISOString().slice(0, 10));
+                    setFeedCategoryInputs({});
+                    setFeedRemarks(`Direct feed for ${inspectingFO.fo_name}`);
+                    setFeedError('');
+                    setFeedSuccess('');
+                    setShowAdminFeedModal(true);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl transition-all shrink-0 active:scale-95 flex items-center gap-1 shadow-xs"
+                  title="Feed / backfill date report for this Field Officer"
+                >
+                  <span>➕</span> Feed Date Data
+                </button>
               </div>
 
               {/* Dates & Submitted IDs Accordion */}
@@ -5032,6 +5219,311 @@ Keep this file safe in your Google Drive or personal diary.
               </button>
               <button onClick={() => setShowAttendanceModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 px-5 rounded-xl transition-colors">Close</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📝 Admin & Sub-Admin Backdated Data Feeding Modal */}
+      {showAdminFeedModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+          <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg font-black shrink-0">
+                  📝
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+                    Feed Field Officer Data
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                    {currentUser?.role === 'SUPER_ADMIN' ? 'Super Admin Portal' : `Sub-Admin Portal (${(currentUser?.allowed_districts || []).join(', ')})`}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowAdminFeedModal(false);
+                  setFeedError('');
+                  setFeedSuccess('');
+                }} 
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Context Callout */}
+            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-3 mb-4 text-xs text-indigo-900 flex items-start gap-2 shrink-0">
+              <span className="text-sm shrink-0">💡</span>
+              <div className="text-[11px] leading-relaxed">
+                Feed or backfill patient IDs for any Field Officer on <strong>any date</strong>. If a report already exists for that date, newly fed IDs will be safely merged. All targets, KPIs, and monthly metrics recalculate automatically.
+              </div>
+            </div>
+
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleAdminFeedSubmit} className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+              {/* Row 1: District, FO, Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* District Dropdown */}
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    District <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={feedDistrict}
+                    onChange={(e) => {
+                      setFeedDistrict(e.target.value);
+                      setFeedFoName('');
+                    }}
+                    className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                    required
+                  >
+                    <option value="">-- Select District --</option>
+                    {availableDistrictsForFeed.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Field Officer Dropdown / Input */}
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Field Officer <span className="text-red-500">*</span>
+                  </label>
+                  {availableFosForFeed.length > 0 ? (
+                    <select
+                      value={feedFoName}
+                      onChange={(e) => setFeedFoName(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    >
+                      <option value="">-- Select Officer --</option>
+                      {availableFosForFeed.map(fo => (
+                        <option key={fo} value={fo}>{fo}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={feedFoName}
+                      onChange={(e) => setFeedFoName(e.target.value)}
+                      placeholder="e.g. Rajesh Kumar"
+                      className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                      required
+                    />
+                  )}
+                </div>
+
+                {/* Reporting Date */}
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Date of Reporting <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={feedDate}
+                    onChange={(e) => setFeedDate(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Indicator Category Tabs & Multi-ID Paste Section */}
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <span>📋</span> Patient Indicator Categories &amp; IDs
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setFeedShowAllCategories(prev => !prev)}
+                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    {feedShowAllCategories ? '− Show Primary Indicators Only' : '+ Show All Indicators (20)'}
+                  </button>
+                </div>
+
+                {/* Category Pills */}
+                <div className="flex flex-wrap gap-1.5 pb-1">
+                  {(feedShowAllCategories ? feedCategoriesConfig : feedCategoriesConfig.filter(c => c.isPrimary)).map(cat => {
+                    const currentVal = feedCategoryInputs[cat.key] || '';
+                    const parsedTokens = currentVal.split(/[\s,;\n\r\t]+/).filter(Boolean);
+                    const validCount = parsedTokens.filter(t => /^\d{9}$/.test(t)).length;
+                    const isSelected = feedActiveCategory === cat.key;
+
+                    return (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => setFeedActiveCategory(cat.key)}
+                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer border ${
+                          isSelected 
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' 
+                            : validCount > 0 
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-black' 
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                        }`}
+                      >
+                        <span>{cat.icon}</span>
+                        <span>{cat.label}</span>
+                        {validCount > 0 && (
+                          <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-600 text-white'}`}>
+                            {validCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Active Category Textarea Box */}
+                {(() => {
+                  const activeCatObj = feedCategoriesConfig.find(c => c.key === feedActiveCategory) || feedCategoriesConfig[0];
+                  const currentVal = feedCategoryInputs[activeCatObj.key] || '';
+                  const tokens = currentVal.split(/[\s,;\n\r\t]+/).filter(Boolean);
+                  const validTokens = Array.from(new Set(tokens.filter(t => /^\d{9}$/.test(t))));
+                  const invalidTokens = tokens.filter(t => !/^\d{9}$/.test(t));
+
+                  return (
+                    <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                          <span>{activeCatObj.icon}</span>
+                          <span>{activeCatObj.label} IDs:</span>
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {validTokens.length > 0 && (
+                            <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
+                              ✓ {validTokens.length} Valid 9-Digit IDs
+                            </span>
+                          )}
+                          {invalidTokens.length > 0 && (
+                            <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md">
+                              ⚠️ {invalidTokens.length} Invalid Token(s)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <textarea
+                        rows={4}
+                        value={currentVal}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFeedCategoryInputs(prev => ({
+                            ...prev,
+                            [activeCatObj.key]: val
+                          }));
+                        }}
+                        placeholder={`Paste or type 9-digit patient IDs for ${activeCatObj.label}...\nExample: 332882518, 332882519 or space/newline separated`}
+                        className="w-full bg-white border border-slate-200 rounded-xl p-3 font-mono text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400 placeholder:font-sans"
+                      />
+
+                      {invalidTokens.length > 0 && (
+                        <div className="p-2 bg-rose-50 rounded-xl border border-rose-100 text-[10px] font-bold text-rose-700">
+                          ⚠️ The following tokens are not 9 digits and will cause validation to fail: <span className="font-mono">{invalidTokens.slice(0, 5).join(', ')}{invalidTokens.length > 5 ? '...' : ''}</span>
+                        </div>
+                      )}
+
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                        <span>💡 You can paste large clumps of IDs directly from WhatsApp, Excel or paper registers.</span>
+                        {currentVal && (
+                          <button
+                            type="button"
+                            onClick={() => setFeedCategoryInputs(prev => ({ ...prev, [activeCatObj.key]: '' }))}
+                            className="text-slate-400 hover:text-red-500 font-bold underline cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Remarks / Reason */}
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Feeding Remarks / Note (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={feedRemarks}
+                  onChange={(e) => setFeedRemarks(e.target.value)}
+                  placeholder="e.g. Backfilled from WhatsApp register / Verified by DTO"
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Error and Success Alerts */}
+              {feedError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-start gap-2">
+                  <span className="text-base shrink-0">⚠️</span>
+                  <span>{feedError}</span>
+                </div>
+              )}
+
+              {feedSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 flex items-start gap-2 animate-fade-in">
+                  <span className="text-base shrink-0">✅</span>
+                  <span>{feedSuccess}</span>
+                </div>
+              )}
+
+              {/* Modal Actions */}
+              {(() => {
+                let totalReady = 0;
+                feedCategoriesConfig.forEach(cat => {
+                  const raw = feedCategoryInputs[cat.key] || '';
+                  const validCount = raw.split(/[\s,;\n\r\t]+/).filter(t => /^\d{9}$/.test(t)).length;
+                  totalReady += validCount;
+                });
+
+                return (
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3 shrink-0">
+                    <div className="text-xs font-bold text-slate-600">
+                      Total Ready: <span className="font-mono font-black text-indigo-600 text-sm">{totalReady}</span> Patient IDs
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAdminFeedModal(false);
+                          setFeedError('');
+                          setFeedSuccess('');
+                        }}
+                        className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={feedLoading}
+                        className={`px-5 py-2.5 rounded-xl text-xs font-black text-white shadow-md transition-all flex items-center gap-1.5 cursor-pointer ${
+                          feedLoading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20 active:scale-95'
+                        }`}
+                      >
+                        {feedLoading ? (
+                          <>
+                            <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            <span>Saving &amp; Updating...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>✓</span>
+                            <span>Save &amp; Update Dashboard</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </form>
           </div>
         </div>
       )}

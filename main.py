@@ -1938,6 +1938,212 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# =========================================================================
+# --- Admin & Sub-Admin Data Feeding & Backdated ID Entry Suite ---
+# =========================================================================
+class AdminFeedDataRequest(BaseModel):
+    district: str
+    fo_name: str
+    date_of_reporting: str  # YYYY-MM-DD
+    notification_ids: Optional[List[str]] = []
+    hiv_dm_ids: Optional[List[str]] = []
+    dbt_ids: Optional[List[str]] = []
+    sample_tested_ids: Optional[List[str]] = []
+    sample_collection_ids: Optional[List[str]] = []
+    contact_tracing_ids: Optional[List[str]] = []
+    differentiated_tb_ids: Optional[List[str]] = []
+    outcome_assigned_ids: Optional[List[str]] = []
+    home_visit_ids: Optional[List[str]] = []
+    follow_up_ids: Optional[List[str]] = []
+    face_to_face_ids: Optional[List[str]] = []
+    presumptive_ids: Optional[List[str]] = []
+    documents_ids: Optional[List[str]] = []
+    fdc_provided_ids: Optional[List[str]] = []
+    kit_consumption_ids: Optional[List[str]] = []
+    tpt_treatment_start_ids: Optional[List[str]] = []
+    tpt_presumptive_ids: Optional[List[str]] = []
+    adhar_face_authentication_ids: Optional[List[str]] = []
+    consent_with_id_ids: Optional[List[str]] = []
+    culture_dst_ids: Optional[List[str]] = []
+    remark: Optional[str] = ""
+
+@app.post("/admin/feed-officer-data")
+async def admin_feed_officer_data(
+    req: AdminFeedDataRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_user = admin.get("username", "Admin")
+        allowed_dists = admin.get("allowed_districts", [])
+
+        # 1. RBAC check: Sub-Admin can only feed data for permitted districts
+        if admin_role == "SUB_ADMIN":
+            if allowed_dists and not ("All" in allowed_dists or req.district.strip() in allowed_dists):
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Permission denied: You do not have access to feed data for {req.district} district."
+                )
+
+        clean_wp = req.district.strip()
+        clean_fo = req.fo_name.strip()
+        if not clean_wp or not clean_fo:
+            raise HTTPException(status_code=400, detail="District and Field Officer name are required.")
+
+        # 2. Date validation (accepts any valid YYYY-MM-DD date)
+        try:
+            clean_date = datetime.strptime(req.date_of_reporting.strip(), "%Y-%m-%d").strftime("%Y-%m-%d")
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+
+        # 3. Clean & validate all IDs (must be 9 digits)
+        categories = [
+            "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_tested_ids",
+            "sample_collection_ids", "contact_tracing_ids", "differentiated_tb_ids",
+            "outcome_assigned_ids", "home_visit_ids", "follow_up_ids",
+            "face_to_face_ids", "presumptive_ids", "documents_ids", "fdc_provided_ids",
+            "kit_consumption_ids", "tpt_treatment_start_ids", "tpt_presumptive_ids",
+            "adhar_face_authentication_ids", "consent_with_id_ids", "culture_dst_ids"
+        ]
+
+        cleaned_payload = {}
+        total_ids_added = 0
+        invalid_ids = []
+
+        for cat in categories:
+            raw_list = getattr(req, cat, []) or []
+            clean_list = []
+            for pid in raw_list:
+                s = str(pid).strip()
+                if not s:
+                    continue
+                if not (s.isdigit() and len(s) == 9):
+                    invalid_ids.append(s)
+                else:
+                    clean_list.append(s)
+            clean_list = list(dict.fromkeys(clean_list)) # deduplicate within input
+            cleaned_payload[cat] = clean_list
+            total_ids_added += len(clean_list)
+
+        if invalid_ids:
+            sample_invalids = ", ".join(invalid_ids[:5])
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Invalid Patient IDs detected (must be 9 digits numbers): {sample_invalids}"
+            )
+
+        if total_ids_added == 0 and not req.remark.strip():
+            raise HTTPException(status_code=400, detail="Please enter at least one valid patient ID or remark.")
+
+        # 4. Target Report Document
+        doc_id = f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
+        doc_ref = db.collection("daily_field_reports").document(doc_id)
+        doc_snap = await asyncio.to_thread(doc_ref.get)
+        new_report_created = not doc_snap.exists
+
+        now_iso = datetime.utcnow().isoformat()
+        feed_note = f"Fed by {admin_user} ({admin_role}) on {datetime.now().strftime('%d %b %Y, %I:%M %p')}"
+        if req.remark and req.remark.strip():
+            feed_note += f": {req.remark.strip()}"
+
+        if new_report_created:
+            # Create a brand new daily report
+            doc_data = {
+                "working_place": clean_wp,
+                "fo_name": clean_fo,
+                "date_of_reporting": clean_date,
+                "date": clean_date,
+                "pin": "ADMIN_FEED",
+                "status": "completed",
+                "timestamp": now_iso,
+                "timestamp_completed": firestore.SERVER_TIMESTAMP,
+                "submission_count": 1,
+                "admin_fed": True,
+                "fed_by": admin_user,
+                "remark": feed_note,
+                **cleaned_payload
+            }
+            for cat in categories:
+                count_key = cat.replace("_ids", "")
+                doc_data[count_key] = len(cleaned_payload[cat])
+            doc_data["notifications"] = len(cleaned_payload.get("notification_ids", []))
+            
+            await asyncio.to_thread(lambda: doc_ref.set(doc_data))
+        else:
+            # Merge with existing daily report (monotonic union)
+            existing_data = doc_snap.to_dict()
+            update_data = {
+                "status": "completed",
+                "admin_fed": True,
+                "last_fed_by": admin_user,
+                "last_fed_at": now_iso
+            }
+            old_remark = existing_data.get("remark", "")
+            update_data["remark"] = f"{old_remark} | {feed_note}".strip(" |")
+
+            for cat in categories:
+                combined = existing_data.get(cat, []) + cleaned_payload[cat]
+                merged_list = list(dict.fromkeys(combined))
+                update_data[cat] = merged_list
+                count_key = cat.replace("_ids", "")
+                update_data[count_key] = len(merged_list)
+            update_data["notifications"] = len(update_data.get("notification_ids", []))
+            
+            await asyncio.to_thread(lambda: doc_ref.set(update_data, merge=True))
+
+        # 5. Atomic Update to Daily District Rollups
+        try:
+            rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
+            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+            await asyncio.to_thread(lambda: rollup_ref.set({
+                "date": clean_date,
+                "district": clean_wp,
+                "notifications": firestore.Increment(len(cleaned_payload.get("notification_ids", []))),
+                "tests": firestore.Increment(len(cleaned_payload.get("sample_tested_ids", []))),
+                "hiv_dm": firestore.Increment(len(cleaned_payload.get("hiv_dm_ids", []))),
+                "dbt": firestore.Increment(len(cleaned_payload.get("dbt_ids", []))),
+                "contact_tracing": firestore.Increment(len(cleaned_payload.get("contact_tracing_ids", []))),
+                "diff_tb": firestore.Increment(len(cleaned_payload.get("differentiated_tb_ids", []))),
+                "submitted_fos": firestore.ArrayUnion([clean_fo]),
+                "submission_count": firestore.Increment(1 if new_report_created else 0),
+                "last_updated": firestore.SERVER_TIMESTAMP
+            }, merge=True))
+        except Exception as rollup_err:
+            print(f"[Admin Feed Rollup Notice] Non-fatal error: {rollup_err}")
+
+        # 6. Immutable Audit Trail
+        summary_items = [f"{cat.replace('_ids', '')}: {len(cleaned_payload[cat])}" for cat in categories if cleaned_payload[cat]]
+        summary_str = ", ".join(summary_items) if summary_items else "Remark only"
+        await log_admin_activity(
+            action_type="ADMIN_DATA_FEED",
+            details=f"Admin {admin_user} ({admin_role}) fed data for {clean_fo} ({clean_wp}) on date {clean_date}: {summary_str}",
+            district=clean_wp,
+            target_officer=clean_fo,
+            user_name=admin_user,
+            role=admin_role,
+            diff={"date": clean_date, "created_new_report": new_report_created, "summary": summary_str}
+        )
+
+        # 7. Invalidate caches for immediate live reflection
+        cache.delete(f"status_{doc_id}")
+        cache.delete_prefix("profile_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("attendance_")
+
+        return {
+            "success": True,
+            "message": f"Successfully {'created report & credited' if new_report_created else 'merged'} {total_ids_added} IDs for {clean_fo} on {clean_date}.",
+            "created_new_report": new_report_created,
+            "district": clean_wp,
+            "fo_name": clean_fo,
+            "date": clean_date,
+            "ids_credited": {cat: len(cleaned_payload[cat]) for cat in categories if cleaned_payload[cat]}
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to feed officer data: {str(e)}")
+
 # --- Admin Staff & PIN Management Suite ---
 class AddStaffReq(BaseModel):
     district: str
