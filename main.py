@@ -369,6 +369,30 @@ class DashboardRequest(BaseModel):
     month_prefix: str
     districts: Optional[str] = None
 
+async def get_raw_monthly_reports(month_prefix: str) -> list:
+    """
+    Shared in-memory cache for monthly daily_field_reports.
+    Avoids redundant 2,000-read collection streams when /admin/dashboard-data,
+    /admin/duplicate-audit, and pacing queries run concurrently.
+    """
+    cache_key = f"shared_raw_month_{month_prefix}"
+    cached = cache.get(cache_key)
+    if cached is not None and isinstance(cached, list):
+        return cached
+
+    start_date = f"{month_prefix}-01"
+    end_date = f"{month_prefix}-31"
+
+    docs = await asyncio.to_thread(lambda: list(
+        db.collection("daily_field_reports")
+        .where("date_of_reporting", ">=", start_date)
+        .where("date_of_reporting", "<=", end_date)
+        .stream()
+    ))
+    raw_list = [d.to_dict() for d in docs]
+    cache.set(cache_key, raw_list, ttl=180) # 3-minute shared cache
+    return raw_list
+
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_current_admin)):
     try:
@@ -378,9 +402,6 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         if cached is not None:
             return cached
 
-        start_date = f"{req.month_prefix}-01"
-        end_date = f"{req.month_prefix}-31"
-        
         allowed_dist_set = None
         if req.districts and req.districts.strip() and req.districts.strip() != "All":
             allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
@@ -395,17 +416,11 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 else:
                     allowed_dist_set = user_allowed
 
-        # Run blocking Firestore network query in worker thread
+        # Load from shared monthly reports cache
         records = []
         try:
-            docs = await asyncio.to_thread(lambda: list(
-                db.collection("daily_field_reports")
-                .where("date_of_reporting", ">=", start_date)
-                .where("date_of_reporting", "<=", end_date)
-                .stream()
-            ))
-            for doc in docs:
-                data = doc.to_dict()
+            raw_docs = await get_raw_monthly_reports(req.month_prefix)
+            for data in raw_docs:
                 wp = data.get("working_place", "Unknown")
                 c_wp = canonicalize_district(wp)
                 if allowed_dist_set and c_wp not in allowed_dist_set:
@@ -751,6 +766,7 @@ async def submit_daily_report(report: DailyActivityReport):
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("dupe_audit_")
         cache.delete_prefix("cascade_alerts_")
@@ -955,7 +971,7 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             
         targets.sort(key=lambda x: (x["district"], x["fo_name"]))
         res = {"success": True, "month": month, "targets": targets}
-        cache.set(cache_key, res, ttl=30)
+        cache.set(cache_key, res, ttl=1800) # 30 min cache
         return res
     except HTTPException:
         raise
@@ -1103,15 +1119,18 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
 
     seen_report_ids = set()
     reports = []
+    start_date = f"{month_prefix}-01"
+    end_date = f"{month_prefix}-31"
     for aq in alias_queries:
-        docs = db.collection("daily_field_reports").where("working_place", "==", aq).stream()
+        docs = db.collection("daily_field_reports")\
+            .where("working_place", "==", aq)\
+            .where("date_of_reporting", ">=", start_date)\
+            .where("date_of_reporting", "<=", end_date)\
+            .stream()
         for doc in docs:
             if doc.id not in seen_report_ids:
                 seen_report_ids.add(doc.id)
-                d = doc.to_dict()
-                date_str = str(d.get("date_of_reporting", "")).strip()
-                if date_str and date_str.startswith(month_prefix):
-                    reports.append(d)
+                reports.append(doc.to_dict())
             
     reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
     
@@ -1432,9 +1451,13 @@ async def my_profile_stats(req: ProfileStatsRequest):
             target_val = 50
             
         # Step 3: Fetch all reports for the month asynchronously
+        start_date = f"{req_month}-01"
+        end_date = f"{req_month}-31"
         reports = await asyncio.to_thread(lambda: list(
             db.collection("daily_field_reports")
             .where("fo_name", "==", req.fo_name)
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
             .stream()
         ))
         # Fallback to trimmed FO name if no reports found
@@ -1442,6 +1465,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
             reports = await asyncio.to_thread(lambda: list(
                 db.collection("daily_field_reports")
                 .where("fo_name", "==", req.fo_name.strip())
+                .where("date_of_reporting", ">=", start_date)
+                .where("date_of_reporting", "<=", end_date)
                 .stream()
             ))
         
@@ -1562,22 +1587,36 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
 
-        # 1. Fetch all active staff
-        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        # 1. Fetch all active staff (from memory cache/baseline to save 22 reads)
         staff_list = []
-        for doc in staff_docs:
-            d = doc.to_dict()
-            raw_dist = d.get("district")
-            dist = canonicalize_district(raw_dist) if raw_dist else ""
-            clean_fo = d.get("name", "").strip()
-            if dist and clean_fo:
-                if allowed_dist_set and dist.lower() not in allowed_dist_set:
+        cached_dir = cache.get("staff_directory_list") or load_baseline_staff_directory()
+        if cached_dir and isinstance(cached_dir, dict):
+            for dist, names in cached_dir.items():
+                c_dist = canonicalize_district(dist)
+                if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
                     continue
-                staff_list.append({
-                    "district": dist,
-                    "fo_name": clean_fo,
-                    "designation": d.get("designation", "Field Officer")
-                })
+                for clean_fo in names:
+                    if clean_fo and str(clean_fo).strip():
+                        staff_list.append({
+                            "district": c_dist,
+                            "fo_name": str(clean_fo).strip(),
+                            "designation": "Field Officer"
+                        })
+        else:
+            staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+            for doc in staff_docs:
+                d = doc.to_dict()
+                raw_dist = d.get("district")
+                dist = canonicalize_district(raw_dist) if raw_dist else ""
+                clean_fo = d.get("name", "").strip()
+                if dist and clean_fo:
+                    if allowed_dist_set and dist.lower() not in allowed_dist_set:
+                        continue
+                    staff_list.append({
+                        "district": dist,
+                        "fo_name": clean_fo,
+                        "designation": d.get("designation", "Field Officer")
+                    })
                 
         # 2. Fetch daily field reports for this date
         report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", date).stream()))
@@ -1626,7 +1665,7 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
             "submitted_partial": submitted_partial,
             "missing_fos": missing_fos
         }
-        cache.set(cache_key, res, ttl=15)
+        cache.set(cache_key, res, ttl=60)
         return res
     except HTTPException:
         raise
@@ -1651,12 +1690,7 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
         
-        docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
+        raw_reports = await get_raw_monthly_reports(month)
             
         id_registry = {} # id -> list of {fo_name, district, date, category}
         
@@ -1683,8 +1717,8 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
             "culture_dst_ids": "Culture / DST"
         }
         
-        for doc in docs:
-            d = doc.to_dict()
+        for doc in raw_reports:
+            d = doc if isinstance(doc, dict) else doc.to_dict()
             fo = d.get("fo_name", "Unknown")
             dist = d.get("working_place", "Unknown")
             rep_date = d.get("date_of_reporting", "")
@@ -1744,7 +1778,7 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
             "cross_category_history": cross_category_history,
             "duplicates": same_category_duplicates + cross_category_history
         }
-        cache.set(cache_key, res, ttl=60) # 60s cache avoids heavy regex/loop parsing on Render
+        cache.set(cache_key, res, ttl=180) # 180s cache avoids heavy regex/loop parsing on Render
         return res
     except HTTPException:
         raise
@@ -1913,11 +1947,8 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         start_date = f"{month}-01"
         end_date = f"{month}-31"
         
-        # 1. Fetch reports
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()))
+        # 1. Fetch reports from shared cache
+        report_docs = await get_raw_monthly_reports(month)
             
         # 2. Fetch targets
         target_docs = await asyncio.to_thread(lambda: list(db.collection("staff_targets").stream()))
@@ -1958,7 +1989,7 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         } for dist in bihar_districts}
         
         for doc in report_docs:
-            d = doc.to_dict()
+            d = doc if isinstance(doc, dict) else doc.to_dict()
             dist = d.get("working_place", "")
             if dist in dist_data:
                 dist_data[dist]["Notifications"] += len(d.get("notification_ids", []))
@@ -1980,23 +2011,24 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         df = pd.DataFrame(rows)
         
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name="State Performance Summary")
-            ws = writer.sheets["State Performance Summary"]
-            # Formatting
-            style_excel_worksheet(ws, header_fill_color="1E3A8A")
-                
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name="State Pacing Summary")
+            
         output.seek(0)
-        filename = f"DFY_State_Summary_{month}.xlsx"
-        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+        filename = f"DFY_State_Pacing_Summary_{month}.xlsx"
+        return StreamingResponse(
+            output, 
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/admin/export-fo-dossier")
-async def export_fo_dossier(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+@app.get("/admin/export-summary-metrics")
+async def export_summary_metrics(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
         if not month:
             month = datetime.now().strftime("%Y-%m")
@@ -2008,10 +2040,7 @@ async def export_fo_dossier(month: Optional[str] = None, districts: Optional[str
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
 
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()))
+        report_docs = await get_raw_monthly_reports(month)
             
         staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         staff_map = {}
@@ -2037,7 +2066,7 @@ async def export_fo_dossier(month: Optional[str] = None, districts: Optional[str
             }
             
         for doc in report_docs:
-            d = doc.to_dict()
+            d = doc if isinstance(doc, dict) else doc.to_dict()
             dist = d.get("working_place", "")
             fo = d.get("fo_name", "")
             if allowed_dist_set and dist not in allowed_dist_set:
@@ -2254,7 +2283,10 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
         cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
         
         return {
             "success": True,
@@ -2523,7 +2555,10 @@ async def admin_feed_officer_data(
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
         cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
 
         return {
             "success": True,
@@ -2559,6 +2594,11 @@ class DeleteStaffReq(BaseModel):
 @app.get("/admin/staff/list")
 async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
+        cache_key = f"admin_staff_full_list_{districts or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None and isinstance(cached, dict):
+            return cached
+
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
@@ -2580,7 +2620,9 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
                     "created_at": d.get("created_at", "")
                 })
         staff.sort(key=lambda s: (s["district"], s["name"]))
-        return {"success": True, "staff": staff}
+        res = {"success": True, "staff": staff}
+        cache.set(cache_key, res, ttl=1800) # 30-minute cache
+        return res
     except HTTPException:
         raise
     except Exception as e:
@@ -2628,6 +2670,7 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         }, merge=True))
         
         cache.delete("staff_directory_list")
+        cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
         
@@ -2665,6 +2708,7 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
         
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
+        cache.delete_prefix("admin_staff_full_list")
         
         return {"success": True, "message": f"PIN for '{clean_name}' successfully updated to {clean_pin}!"}
     except HTTPException:
@@ -2693,6 +2737,7 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
+        cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         
         return {"success": True, "message": f"Officer '{clean_name}' removed from directory."}
@@ -2770,10 +2815,46 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     if districts and districts.strip() and districts.strip() != "All":
         allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
         
-    docs = db.collection("daily_field_reports")\
-        .where("date_of_reporting", ">=", start_date)\
-        .where("date_of_reporting", "<=", end_date)\
-        .stream()
+    if fo_name:
+        raw_fo = fo_name.strip()
+        q = db.collection("daily_field_reports")\
+            .where("fo_name", "==", raw_fo)\
+            .where("date_of_reporting", ">=", start_date)\
+            .where("date_of_reporting", "<=", end_date)
+        docs = list(q.stream())
+        if not docs and raw_fo != fo_name:
+            docs = list(db.collection("daily_field_reports")
+                .where("fo_name", "==", fo_name)
+                .where("date_of_reporting", ">=", start_date)
+                .where("date_of_reporting", "<=", end_date)
+                .stream())
+    elif clean_district != "All":
+        alias_dists = [clean_district]
+        if "aurangabad" in clean_district.lower():
+            alias_dists.extend(["AURANGABAD-BI", "Aurangabad"])
+        elif "champaran" in clean_district.lower():
+            alias_dists.extend(["Purba Champaran", "East Champaran"])
+        elif "bhojpur" in clean_district.lower():
+            alias_dists.extend(["BHOJPUR", "Bhojpur"])
+        alias_dists = list(dict.fromkeys(alias_dists))
+
+        seen_ids = set()
+        docs = []
+        for ad in alias_dists:
+            q_docs = db.collection("daily_field_reports")\
+                .where("working_place", "==", ad)\
+                .where("date_of_reporting", ">=", start_date)\
+                .where("date_of_reporting", "<=", end_date)\
+                .stream()
+            for doc in q_docs:
+                if doc.id not in seen_ids:
+                    seen_ids.add(doc.id)
+                    docs.append(doc)
+    else:
+        docs = list(db.collection("daily_field_reports")\
+            .where("date_of_reporting", ">=", start_date)\
+            .where("date_of_reporting", "<=", end_date)\
+            .stream())
         
     patient_map = {}
     
@@ -3840,6 +3921,9 @@ def sync_nikshay_cumulative_ledger_sync(
         if batch_count > 0:
             batch.commit()
 
+    if total_written > 0:
+        cache.delete_prefix("ledger_")
+
     return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
 
 # =========================================================================
@@ -4466,12 +4550,17 @@ async def get_cumulative_ledger(
         if cached is not None:
             return cached
 
-        query = db.collection("nikshay_verified_patients")
-        if district and district != "All":
-            query = query.where("district", "==", district)
-            
-        docs = await asyncio.to_thread(lambda: list(query.stream()))
-        total_in_db = len(docs)
+        ledger_docs_key = f"ledger_docs_{district}"
+        docs_data = cache.get(ledger_docs_key)
+        if docs_data is None:
+            query = db.collection("nikshay_verified_patients")
+            if district and district != "All":
+                query = query.where("district", "==", district)
+            docs = await asyncio.to_thread(lambda: list(query.stream()))
+            docs_data = [d.to_dict() for d in docs]
+            cache.set(ledger_docs_key, docs_data, ttl=180)
+
+        total_in_db = len(docs_data)
         
         filtered = []
         s_lower = search.strip().lower() if search else None
@@ -4481,8 +4570,7 @@ async def get_cumulative_ledger(
         total_udst = 0
         total_contact = 0
         
-        for doc in docs:
-            d = doc.to_dict()
+        for d in docs_data:
             if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"):
                 total_hiv_dm += 1
             if d.get("bank_validated"):
@@ -4526,7 +4614,7 @@ async def get_cumulative_ledger(
             "patients": paginated
         }
         
-        cache.set(cache_key, res, ttl=20)
+        cache.set(cache_key, res, ttl=120)
         return res
     except HTTPException:
         raise
