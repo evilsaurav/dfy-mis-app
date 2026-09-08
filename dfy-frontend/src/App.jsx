@@ -1006,6 +1006,215 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
   );
 };
 
+// --- FDC Bucket (With Regimen FDC 3 / FDC 4 and Strip Count Selection) ---
+const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemoveFdc, showToast, suggestedIds = [] }) => {
+  const [currentId, setCurrentId] = useState("");
+  const [selectedRegimen, setSelectedRegimen] = useState("FDC 4");
+  const [selectedStrips, setSelectedStrips] = useState(1);
+  const safeIds = Array.isArray(ids) ? ids : [];
+
+  const handleAdd = () => {
+    const raw = currentId.trim();
+    if (!raw) return;
+
+    const matches = raw.match(/\b\d{9}\b/g);
+    if (matches && matches.length > 1) {
+      matches.forEach(m => onAddFdc(m, selectedRegimen, selectedStrips));
+      setCurrentId("");
+      return;
+    }
+
+    if (raw.length === 9 && !isNaN(raw)) {
+      onAddFdc(raw, selectedRegimen, selectedStrips);
+      setCurrentId("");
+    } else {
+      showToast("ID exactly 9 digit ki honi chahiye bhai!", "error");
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAdd();
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5 shadow-sm hover:border-slate-200 transition-colors group space-y-3">
+      <label className="block text-xs font-bold text-slate-500 tracking-wider uppercase flex items-center justify-between group-hover:text-indigo-600 transition-colors">
+        <span className="flex items-center gap-1.5">
+          <span>💊</span>
+          {title}
+          {currentId.length === 9 && !isNaN(currentId) && (
+            <span className="text-emerald-500 text-[10px] font-bold">✓ Ready</span>
+          )}
+        </span>
+        <span className="bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">{safeIds.length}</span>
+      </label>
+
+      {/* Smart Notification ID Chips */}
+      {suggestedIds && suggestedIds.length > 0 && (
+        <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
+          <div className="flex justify-between items-center mb-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
+              <span>💡</span> Today's Notified IDs ({suggestedIds.length}):
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+            {suggestedIds.map((sid, sIdx) => {
+              const isAdded = safeIds.includes(sid);
+              return (
+                <button
+                  key={sIdx}
+                  type="button"
+                  disabled={isAdded}
+                  onClick={() => {
+                    onAddFdc(sid, selectedRegimen, selectedStrips);
+                    if (showToast) showToast(`ID #${sid} added to FDC!`, "success");
+                  }}
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
+                    isAdded 
+                      ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
+                      : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
+                  }`}
+                  title={isAdded ? "Already Added" : `Tap to add ID #${sid}`}
+                >
+                  <span>{sid}</span>
+                  <span>{isAdded ? '✓' : '+'}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Regimen & Strips Pre-selector Bar */}
+      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-black uppercase text-slate-500">Dawa Type:</span>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setSelectedRegimen('FDC 3')}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedRegimen === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+            >
+              FDC 3
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedRegimen('FDC 4')}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedRegimen === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+            >
+              FDC 4
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-black uppercase text-slate-500">Quantity:</span>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setSelectedStrips(1)}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedStrips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+            >
+              1 Strip
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedStrips(2)}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedStrips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+            >
+              2 Strips
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Input row */}
+      <div className="flex gap-2">
+        <input 
+          type="text"
+          inputMode="numeric"
+          value={currentId}
+          onChange={(e) => setCurrentId(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Enter or paste 9-digit ID for FDC"
+          className="flex-1 w-full bg-slate-50/70 border border-slate-200 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 placeholder:font-normal font-mono"
+        />
+        <button 
+          onClick={handleAdd} 
+          className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide shrink-0"
+        >
+          ADD
+        </button>
+      </div>
+
+      {/* Added FDC Entries List */}
+      {safeIds.length > 0 && (
+        <ul className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+          {safeIds.map((id, index) => {
+            const detail = (fdcDetails || []).find(d => d && d.id === id) || { fdc_type: 'FDC 4', strips: 1 };
+            return (
+              <li key={index} className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-slate-50/90 border border-slate-200/80 p-3 rounded-xl shadow-2xs hover:bg-indigo-50/30 transition-colors">
+                <span className="font-mono font-bold text-slate-800 tracking-wider text-sm">{id}</span>
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  {/* Regimen Toggle */}
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 3' })}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.fdc_type === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+                    >
+                      FDC 3
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 4' })}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.fdc_type === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+                    >
+                      FDC 4
+                    </button>
+                  </div>
+
+                  {/* Strips Toggle */}
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => onUpdateFdc(id, { strips: 1 })}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.strips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
+                    >
+                      1 Strip
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateFdc(id, { strips: 2 })}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.strips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
+                    >
+                      2 Strips
+                    </button>
+                  </div>
+
+                  {/* Remove button */}
+                  <button
+                    type="button"
+                    onClick={() => onRemoveFdc(index, id)}
+                    className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-6 w-6 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-sm"
+                    title="Remove"
+                  >
+                    &times;
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+
 const sanitizeIncomingFormData = (d, base) => {
   const arrayKeys = [
     'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
@@ -1064,6 +1273,7 @@ function App() {
     face_to_face_ids: [], presumptive_ids: [], 
     documents_ids: [],
     fdc_provided_ids: [],
+    fdc_details: [],
     kit_consumption_ids: [],
     differentiated_tb_ids: [],
     tpt_treatment_start_ids: [],
@@ -1354,7 +1564,7 @@ function App() {
       outcome_assigned_ids: [], home_visit_ids: [], 
       contact_tracing_ids: [], follow_up_ids: [], 
       face_to_face_ids: [], presumptive_ids: [], 
-      documents_ids: [], fdc_provided_ids: [],
+      documents_ids: [], fdc_provided_ids: [], fdc_details: [],
       kit_consumption_ids: [], differentiated_tb_ids: [],
       tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
       adhar_face_authentication_ids: [], consent_with_id_ids: [],
@@ -1451,6 +1661,43 @@ function App() {
     setFormData({ ...formData, [field]: formData[field].filter((_, i) => i !== idx) });
   };
 
+  const handleAddFdc = (id, regimen, strips) => {
+    addId('fdc_provided_ids', id);
+    setFormData(prev => {
+      const existing = (prev.fdc_details || []).filter(d => d.id !== id);
+      return {
+        ...prev,
+        fdc_details: [...existing, { id, fdc_type: regimen, strips }]
+      };
+    });
+  };
+
+  const handleUpdateFdc = (id, patch) => {
+    setFormData(prev => {
+      const existing = (prev.fdc_details || []);
+      const idx = existing.findIndex(d => d.id === id);
+      let updatedList;
+      if (idx !== -1) {
+        updatedList = [...existing];
+        updatedList[idx] = { ...updatedList[idx], ...patch };
+      } else {
+        updatedList = [...existing, { id, fdc_type: 'FDC 4', strips: 1, ...patch }];
+      }
+      return {
+        ...prev,
+        fdc_details: updatedList
+      };
+    });
+  };
+
+  const handleRemoveFdc = (idx, id) => {
+    removeId('fdc_provided_ids', idx);
+    setFormData(prev => ({
+      ...prev,
+      fdc_details: (prev.fdc_details || []).filter(d => d.id !== id)
+    }));
+  };
+
   const handleAutofillPendingId = (fieldKey, patientId, label) => {
     const current = formData[fieldKey] || [];
     if (current.includes(patientId)) {
@@ -1518,7 +1765,15 @@ function App() {
       if (ids.length > 0) {
         hasMetrics = true;
         text += `\n*${cat.label}:* ${ids.length}\n`;
-        text += ids.join('\n') + '\n';
+        if (cat.key === 'fdc_provided_ids' && formData.fdc_details && formData.fdc_details.length > 0) {
+          const fdcLines = ids.map(id => {
+            const det = formData.fdc_details.find(d => d && d.id === id);
+            return det ? `${id} (${det.fdc_type || 'FDC 4'}, ${det.strips || 1} Strip)` : id;
+          });
+          text += fdcLines.join('\n') + '\n';
+        } else {
+          text += ids.join('\n') + '\n';
+        }
       }
     });
 
@@ -1932,19 +2187,36 @@ function App() {
                   ))}
                 </Accordion>
                 <Accordion title="4. Logistics & Outcomes">
-                  {group4.map((cat) => (
-                    <IdBucket 
-                      key={cat.key} 
-                      title={cat.label} 
-                      ids={formData[cat.key]} 
-                      onAdd={(id) => addId(cat.key, id)} 
-                      onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
-                      onRemove={(idx) => removeId(cat.key, idx)} 
-                      showToast={showToast}
-                      suggestedIds={formData.notification_ids || []}
-                      onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
-                    />
-                  ))}
+                  {group4.map((cat) => {
+                    if (cat.key === 'fdc_provided_ids') {
+                      return (
+                        <FdcBucket 
+                          key={cat.key} 
+                          title={cat.label} 
+                          ids={formData.fdc_provided_ids} 
+                          fdcDetails={formData.fdc_details || []}
+                          onAddFdc={handleAddFdc}
+                          onUpdateFdc={handleUpdateFdc}
+                          onRemoveFdc={handleRemoveFdc}
+                          showToast={showToast}
+                          suggestedIds={formData.notification_ids || []}
+                        />
+                      );
+                    }
+                    return (
+                      <IdBucket 
+                        key={cat.key} 
+                        title={cat.label} 
+                        ids={formData[cat.key]} 
+                        onAdd={(id) => addId(cat.key, id)} 
+                        onAddMultiple={(ids) => addMultipleIds(cat.key, ids)} 
+                        onRemove={(idx) => removeId(cat.key, idx)} 
+                        showToast={showToast}
+                        suggestedIds={formData.notification_ids || []}
+                        onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                      />
+                    );
+                  })}
                 </Accordion>
                 <Accordion title="5. Special Tracking">
                   {group5.map((cat) => (
@@ -2183,11 +2455,19 @@ function App() {
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
-                          {ids.map((idVal, iIdx) => (
-                            <span key={iIdx} className="font-mono text-xs font-bold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs">
-                              {idVal}
-                            </span>
-                          ))}
+                          {ids.map((idVal, iIdx) => {
+                            const fdcDet = cat.key === 'fdc_provided_ids' ? (formData.fdc_details || []).find(d => d && d.id === idVal) : null;
+                            return (
+                              <span key={iIdx} className="font-mono text-xs font-bold text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs inline-flex items-center gap-1.5">
+                                <span>{idVal}</span>
+                                {fdcDet && (
+                                  <span className="font-sans text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded">
+                                    {fdcDet.fdc_type || 'FDC 4'} &bull; {fdcDet.strips || 1} Strip
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })}
                         </div>
                       </div>
                     );

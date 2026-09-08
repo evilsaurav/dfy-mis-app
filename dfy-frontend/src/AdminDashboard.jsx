@@ -1275,7 +1275,8 @@ Keep this file safe in your Google Drive or personal diary.
     }
     const userAllowed = currentUser.allowed_districts;
     const filtered = allList.filter(d => userAllowed.includes(d));
-    return ['All', ...(filtered.length > 0 ? filtered : allList)];
+    const permittedOnly = filtered.length > 0 ? filtered : userAllowed.filter(d => d !== 'All');
+    return permittedOnly.length > 0 ? permittedOnly : (allList.length > 0 ? [allList[0]] : ['Jamui']);
   }, [staffDirectory, rawRecords, currentUser]);
 
   const targetModalDistricts = useMemo(() => {
@@ -1307,6 +1308,22 @@ Keep this file safe in your Google Drive or personal diary.
     if (selectedDistrict !== 'All') filtered = filtered.filter(r => r.working_place === selectedDistrict);
     return ['All', ...new Set(filtered.map(r => r.fo_name))];
   }, [rawRecords, selectedDistrict]);
+
+  const isSubAdmin = currentUser?.role === 'SUB_ADMIN';
+
+  const foComparisonData = useMemo(() => {
+    if (!isSubAdmin) return [];
+    const targetDist = selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts?.[0] || '');
+    const distRecs = rawRecords.filter(r => r.working_place === targetDist);
+    const foMap = {};
+    distRecs.forEach(r => {
+      if (!foMap[r.fo_name]) foMap[r.fo_name] = { fo_name: r.fo_name, notifications: 0, tests: 0, total_km: 0 };
+      foMap[r.fo_name].notifications += (r.notifications || 0);
+      foMap[r.fo_name].tests += (r.tests || 0);
+      foMap[r.fo_name].total_km += (r.total_km || 0);
+    });
+    return Object.values(foMap).sort((a, b) => b.notifications - a.notifications);
+  }, [isSubAdmin, selectedDistrict, currentUser, rawRecords]);
 
 const availableDistrictsForFeed = useMemo(() => {
     const allDists = Object.keys(staffDirectory).length > 0 
@@ -1403,14 +1420,8 @@ const availableDistrictsForFeed = useMemo(() => {
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedSuccess(`✓ Success: ${data.detail || 'Data saved successfully!'}`);
+        setFeedSuccess(`✓ Saved successfully for ${feedFoName} (${feedDistrict}) on ${feedDate}! Total ${totalIdsCount} Patient IDs processed.`);
         await fetchData();
-        setTimeout(() => {
-          setFeedCategoryInputs({});
-          setFeedRemarks('');
-          setFeedSuccess('');
-          setShowAdminFeedModal(false);
-        }, 1800);
       } else {
         setFeedError(data.detail || 'Failed to feed data.');
       }
@@ -2055,22 +2066,24 @@ const availableDistrictsForFeed = useMemo(() => {
                   onChange={(e) => setMonth(e.target.value)} 
                   className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs" 
                 />
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDistrict('All');
-                    setSelectedFO('All');
-                  }}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
-                    selectedDistrict === 'All'
-                      ? 'bg-indigo-600 text-white shadow-xs'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs'
-                  }`}
-                  title="View All Districts"
-                >
-                  <span>🌐</span>
-                  <span>All</span>
-                </button>
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDistrict('All');
+                      setSelectedFO('All');
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
+                      selectedDistrict === 'All'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs'
+                    }`}
+                    title="View All Districts"
+                  >
+                    <span>🌐</span>
+                    <span>All</span>
+                  </button>
+                )}
                 <select 
                   value={selectedDistrict} 
                   onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
@@ -2440,7 +2453,7 @@ const availableDistrictsForFeed = useMemo(() => {
               }`}
             >
               <span>📊</span>
-              <span>Overview &amp; State Analytics</span>
+              <span>{isSuperAdmin ? 'Overview & State Analytics' : `Overview & District Analytics (${selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts || []).join(', ')})`}</span>
             </button>
             <button
               type="button"
@@ -2459,18 +2472,20 @@ const availableDistrictsForFeed = useMemo(() => {
                 </span>
               )}
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveMainTab('district_benchmarks')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 active:scale-95 ${
-                activeMainTab === 'district_benchmarks'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/60'
-              }`}
-            >
-              <span>🏢</span>
-              <span>District Benchmarks &amp; Pacing</span>
-            </button>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => setActiveMainTab('district_benchmarks')}
+                className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 active:scale-95 ${
+                  activeMainTab === 'district_benchmarks'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/60'
+                }`}
+              >
+                <span>🏢</span>
+                <span>District Benchmarks &amp; Pacing</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 px-3 py-1.5 bg-indigo-50/60 rounded-xl border border-indigo-100/80 self-start md:self-auto">
@@ -2728,12 +2743,16 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Bar Chart */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2">
-                <h3 className="text-slate-800 font-black mb-4">{selectedDistrict === 'All' ? 'District Performance Comparison' : 'Filtered Data Timeline (Not fully plotted due to aggregation)'}</h3>
+                <h3 className="text-slate-800 font-black mb-4">
+                  {isSubAdmin
+                    ? `Field Officer Performance Breakdown (${selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts || []).join(', ')})`
+                    : (selectedDistrict === 'All' ? 'District Performance Comparison' : `${selectedDistrict} Performance Breakdown`)}
+                </h3>
                 <div className="h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={districtComparisonData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                    <BarChart data={isSubAdmin ? foComparisonData : districtComparisonData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey="working_place" tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} axisLine={false} tickLine={false} />
+                      <XAxis dataKey={isSubAdmin ? "fo_name" : "working_place"} tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} axisLine={false} tickLine={false} />
                       <YAxis tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} axisLine={false} tickLine={false} />
                       <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.1)', fontWeight: 'bold'}} />
                       <Legend wrapperStyle={{fontWeight: 600, fontSize: '11px', color: '#64748b'}} />
@@ -2921,7 +2940,8 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* District Benchmarking Comparator */}
+              {/* District Benchmarking Comparator (Super Admin Only) */}
+              {isSuperAdmin && (
               <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col">
                 <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
                   <div>
@@ -3011,6 +3031,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   );
                 })()}
               </div>
+              )}
 
             </div>
 
@@ -4671,7 +4692,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 { id: "fo_dossier", label: "👤 FO Dossier / TA-DA (.xlsx)", icon: "👤" },
                 { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
                 { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
-              ].map(tab => (
+              ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setReportsStudioTab(tab.id)}
@@ -5132,25 +5153,33 @@ const availableDistrictsForFeed = useMemo(() => {
                                   </div>
                                 </div>
                                 <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
-                                  {ids.map((id, idIdx) => (
-                                    <div key={idIdx} className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border ${foSearchId && String(id).includes(foSearchId) ? 'bg-amber-100 border-amber-300 text-amber-900 ring-2 ring-amber-400' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                                      <span>{id}</span>
-                                      <button
-                                        onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'replace', oldId: id, newId: id, error: '' })}
-                                        className="text-slate-400 hover:text-indigo-600 text-[9px]"
-                                        title="Edit / Correct ID"
-                                      >
-                                        ✏️
-                                      </button>
-                                      <button
-                                        onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'delete', oldId: id, newId: '', error: '' })}
-                                        className="text-slate-400 hover:text-red-500 text-[9px]"
-                                        title="Delete ID"
-                                      >
-                                        🗑️
-                                      </button>
-                                    </div>
-                                  ))}
+                                  {ids.map((id, idIdx) => {
+                                    const fdcItem = cat.key === 'fdc_provided_ids' && Array.isArray(rec.fdc_details) ? rec.fdc_details.find(d => d && d.id === id) : null;
+                                    return (
+                                      <div key={idIdx} className={`inline-flex items-center gap-1 font-mono text-[11px] font-bold px-1.5 py-0.5 rounded border ${foSearchId && String(id).includes(foSearchId) ? 'bg-amber-100 border-amber-300 text-amber-900 ring-2 ring-amber-400' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                                        <span>{id}</span>
+                                        {fdcItem && (
+                                          <span className="font-sans text-[8px] font-black text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-200">
+                                            {fdcItem.fdc_type || 'FDC 4'} &bull; {fdcItem.strips || 1}S
+                                          </span>
+                                        )}
+                                        <button
+                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'replace', oldId: id, newId: id, error: '' })}
+                                          className="text-slate-400 hover:text-indigo-600 text-[9px]"
+                                          title="Edit / Correct ID"
+                                        >
+                                          ✏️
+                                        </button>
+                                        <button
+                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'delete', oldId: id, newId: '', error: '' })}
+                                          className="text-slate-400 hover:text-red-500 text-[9px]"
+                                          title="Delete ID"
+                                        >
+                                          🗑️
+                                        </button>
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             );
@@ -5331,122 +5360,99 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* Indicator Category Tabs & Multi-ID Paste Section */}
-              <div className="space-y-3 pt-2">
+              {/* All-In-One Indicator Category Input Section */}
+              <div className="space-y-4 pt-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <span>📋</span> Patient Indicator Categories &amp; IDs
-                  </label>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                      <span>📋</span> Patient Indicator IDs (Multi-Category Concurrent Input)
+                    </label>
+                    <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                      Paste or type 9-digit Patient IDs directly into any category. You can fill multiple categories at once before saving.
+                    </p>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setFeedShowAllCategories(prev => !prev)}
-                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                    className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-all cursor-pointer shrink-0"
                   >
-                    {feedShowAllCategories ? '− Show Primary Indicators Only' : '+ Show All Indicators (20)'}
+                    {feedShowAllCategories ? '− Show Primary Indicators (8)' : '+ Show All Indicators (20)'}
                   </button>
                 </div>
 
-                {/* Category Pills */}
-                <div className="flex flex-wrap gap-1.5 pb-1">
+                {/* Concurrent Category Input Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto pr-1 custom-scrollbar">
                   {(feedShowAllCategories ? feedCategoriesConfig : feedCategoriesConfig.filter(c => c.isPrimary)).map(cat => {
                     const currentVal = feedCategoryInputs[cat.key] || '';
-                    const parsedTokens = currentVal.split(/[\s,;\n\r\t]+/).filter(Boolean);
-                    const validCount = parsedTokens.filter(t => /^\d{9}$/.test(t)).length;
-                    const isSelected = feedActiveCategory === cat.key;
+                    const tokens = currentVal.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
+                    const validTokens = Array.from(new Set(tokens.filter(t => /^\d{9}$/.test(t))));
+                    const invalidTokens = tokens.filter(t => !/^\d{9}$/.test(t));
 
                     return (
-                      <button
-                        key={cat.key}
-                        type="button"
-                        onClick={() => setFeedActiveCategory(cat.key)}
-                        className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer border ${
-                          isSelected 
-                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs' 
-                            : validCount > 0 
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-black' 
-                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                      <div 
+                        key={cat.key} 
+                        className={`p-3 rounded-2xl border transition-all ${
+                          validTokens.length > 0 
+                            ? 'bg-emerald-50/40 border-emerald-200' 
+                            : 'bg-slate-50/70 border-slate-200 hover:border-slate-300'
                         }`}
                       >
-                        <span>{cat.icon}</span>
-                        <span>{cat.label}</span>
-                        {validCount > 0 && (
-                          <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${isSelected ? 'bg-white text-indigo-700' : 'bg-emerald-600 text-white'}`}>
-                            {validCount}
+                        {/* Header for Category */}
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                            <span>{cat.icon}</span>
+                            <span>{cat.label}</span>
                           </span>
-                        )}
-                      </button>
+                          <div className="flex items-center gap-1">
+                            {validTokens.length > 0 && (
+                              <span className="text-[10px] font-black bg-emerald-600 text-white px-2 py-0.5 rounded-full shadow-2xs">
+                                ✓ {validTokens.length} IDs
+                              </span>
+                            )}
+                            {invalidTokens.length > 0 && (
+                              <span className="text-[10px] font-black bg-rose-600 text-white px-2 py-0.5 rounded-full">
+                                ⚠️ {invalidTokens.length} Invalid
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Textarea for pasting */}
+                        <textarea
+                          rows={3}
+                          value={currentVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFeedCategoryInputs(prev => ({
+                              ...prev,
+                              [cat.key]: val
+                            }));
+                          }}
+                          placeholder={`Paste 9-digit IDs for ${cat.label}... (comma/newline separated)`}
+                          className="w-full bg-white border border-slate-200 rounded-xl p-2.5 font-mono text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-300 placeholder:font-sans custom-scrollbar"
+                        />
+
+                        {/* Category Footer: Clear button & status */}
+                        <div className="flex items-center justify-between mt-1 text-[10px] text-slate-400">
+                          <span>{validTokens.length > 0 ? `${validTokens.length} valid 9-digit ID(s)` : 'No IDs added'}</span>
+                          {currentVal && (
+                            <button
+                              type="button"
+                              onClick={() => setFeedCategoryInputs(prev => ({ ...prev, [cat.key]: '' }))}
+                              className="text-slate-400 hover:text-red-500 font-bold underline cursor-pointer"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
-
-                {/* Active Category Textarea Box */}
-                {(() => {
-                  const activeCatObj = feedCategoriesConfig.find(c => c.key === feedActiveCategory) || feedCategoriesConfig[0];
-                  const currentVal = feedCategoryInputs[activeCatObj.key] || '';
-                  const tokens = currentVal.split(/[\s,;\n\r\t]+/).filter(Boolean);
-                  const validTokens = Array.from(new Set(tokens.filter(t => /^\d{9}$/.test(t))));
-                  const invalidTokens = tokens.filter(t => !/^\d{9}$/.test(t));
-
-                  return (
-                    <div className="bg-slate-50/80 p-3.5 rounded-2xl border border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
-                          <span>{activeCatObj.icon}</span>
-                          <span>{activeCatObj.label} IDs:</span>
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          {validTokens.length > 0 && (
-                            <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md">
-                              ✓ {validTokens.length} Valid 9-Digit IDs
-                            </span>
-                          )}
-                          {invalidTokens.length > 0 && (
-                            <span className="text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-0.5 rounded-md">
-                              ⚠️ {invalidTokens.length} Invalid Token(s)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <textarea
-                        rows={4}
-                        value={currentVal}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setFeedCategoryInputs(prev => ({
-                            ...prev,
-                            [activeCatObj.key]: val
-                          }));
-                        }}
-                        placeholder={`Paste or type 9-digit patient IDs for ${activeCatObj.label}...\nExample: 332882518, 332882519 or space/newline separated`}
-                        className="w-full bg-white border border-slate-200 rounded-xl p-3 font-mono text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400 placeholder:font-sans"
-                      />
-
-                      {invalidTokens.length > 0 && (
-                        <div className="p-2 bg-rose-50 rounded-xl border border-rose-100 text-[10px] font-bold text-rose-700">
-                          ⚠️ The following tokens are not 9 digits and will cause validation to fail: <span className="font-mono">{invalidTokens.slice(0, 5).join(', ')}{invalidTokens.length > 5 ? '...' : ''}</span>
-                        </div>
-                      )}
-
-                      <div className="text-[10px] text-slate-400 flex items-center justify-between">
-                        <span>💡 You can paste large clumps of IDs directly from WhatsApp, Excel or paper registers.</span>
-                        {currentVal && (
-                          <button
-                            type="button"
-                            onClick={() => setFeedCategoryInputs(prev => ({ ...prev, [activeCatObj.key]: '' }))}
-                            className="text-slate-400 hover:text-red-500 font-bold underline cursor-pointer"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
 
-              {/* Remarks / Reason */}
-              <div>
+              {/* Remarks / Note */}
+              <div className="pt-2">
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
                   Feeding Remarks / Note (Optional)
                 </label>
@@ -5459,32 +5465,71 @@ const availableDistrictsForFeed = useMemo(() => {
                 />
               </div>
 
-              {/* Error and Success Alerts */}
+              {/* Error Alert */}
               {feedError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-start gap-2">
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-start gap-2 animate-fade-in">
                   <span className="text-base shrink-0">⚠️</span>
                   <span>{feedError}</span>
                 </div>
               )}
 
+              {/* Success Banner & Post-Save Actions */}
               {feedSuccess && (
-                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-2xl text-xs font-bold text-emerald-800 flex items-start gap-2 animate-fade-in">
-                  <span className="text-base shrink-0">✅</span>
-                  <span>{feedSuccess}</span>
+                <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-xs font-bold text-emerald-900 space-y-3 animate-fade-in">
+                  <div className="flex items-start gap-2">
+                    <span className="text-lg shrink-0">✅</span>
+                    <div className="flex-1">
+                      <p className="font-black text-emerald-950 text-sm">{feedSuccess}</p>
+                      <p className="text-emerald-700 text-[11px] font-medium mt-0.5">
+                        The dashboard and field reports have been refreshed. You can feed another date for the same officer below, or close when done.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Fast Action Buttons */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-emerald-200/60">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFeedCategoryInputs({});
+                        setFeedRemarks('');
+                        setFeedSuccess('');
+                        setFeedError('');
+                        // Date stays as current or user can change; district & fo stay selected!
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs px-4 py-2 rounded-xl shadow-xs active:scale-95 transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span>➕</span>
+                      <span>Feed Another Date for {feedFoName}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAdminFeedModal(false);
+                        setFeedCategoryInputs({});
+                        setFeedRemarks('');
+                        setFeedSuccess('');
+                        setFeedError('');
+                      }}
+                      className="bg-white hover:bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold text-xs px-4 py-2 rounded-xl active:scale-95 transition-all cursor-pointer"
+                    >
+                      ✓ Done / Close
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {/* Modal Actions */}
+              {/* Modal Actions Footer */}
               {(() => {
                 let totalReady = 0;
                 feedCategoriesConfig.forEach(cat => {
                   const raw = feedCategoryInputs[cat.key] || '';
-                  const validCount = raw.split(/[\s,;\n\r\t]+/).filter(t => /^\d{9}$/.test(t)).length;
+                  const validCount = raw.split(/[\s,;\n\r\t]+/).filter(t => /^\d{9}$/.test(t.trim())).length;
                   totalReady += validCount;
                 });
 
                 return (
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-3 shrink-0">
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3 shrink-0">
                     <div className="text-xs font-bold text-slate-600">
                       Total Ready: <span className="font-mono font-black text-indigo-600 text-sm">{totalReady}</span> Patient IDs
                     </div>
@@ -5515,7 +5560,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         ) : (
                           <>
                             <span>✓</span>
-                            <span>Save &amp; Update Dashboard</span>
+                            <span>Save All Indicators for {feedDate || 'Date'}</span>
                           </>
                         )}
                       </button>
@@ -6629,7 +6674,32 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* MODE A: MONTHLY FILE RECONCILER */}
             {ledgerViewMode === 'reconcile' && (
               <div className="space-y-5">
-                {/* Upload & Filter Form */}
+                {isSubAdmin ? (
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-3xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">📋</span>
+                        <h4 className="text-base font-black text-emerald-950">District Discrepancy & Verification Review Sheet</h4>
+                      </div>
+                      <p className="text-xs font-semibold text-emerald-800 mt-1 max-w-xl leading-relaxed">
+                        Download your district's actionable Nikshay Discrepancy review workbook (.xlsx). It separates confirmed ID matches needing indicator action from unverified/aging IDs (&gt;3 days) to resolve with Field Officers.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const targetDist = selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts?.[0] || 'Jamui');
+                        window.open(`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/nikshay/download-review-sheet?district=${encodeURIComponent(targetDist)}&token=${getAdminToken()}`, "_blank");
+                      }}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black px-5 py-3 rounded-2xl shadow-md shadow-emerald-700/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer shrink-0"
+                    >
+                      <span>📥</span>
+                      <span>Download {selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts?.[0] || '')} Review Sheet (.xlsx)</span>
+                    </button>
+                  </div>
+                ) : (
+                /* Upload & Filter Form (Super Admin) */
                 <form onSubmit={handleReconcileNikshay} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
@@ -6672,6 +6742,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     </button>
                   </div>
                 </form>
+                )}
 
                 {/* Reconciliation Results Display */}
                 {nikshayResult && (

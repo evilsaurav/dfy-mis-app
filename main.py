@@ -286,6 +286,7 @@ class DailyActivityReport(BaseModel):
     presumptive_ids: List[str] = []
     documents_ids: List[str] = []
     fdc_provided_ids: List[str] = []
+    fdc_details: Optional[List[Dict[str, Any]]] = []
     kit_consumption_ids: List[str] = []
     differentiated_tb_ids: List[str] = []
     tpt_treatment_start_ids: List[str] = []
@@ -322,6 +323,15 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         allowed_dist_set = None
         if req.districts and req.districts.strip() and req.districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in req.districts.split(",") if d.strip()])
+
+        # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
+        if admin.get("role") == "SUB_ADMIN":
+            user_allowed = set(admin.get("allowed_districts", []))
+            if "All" not in user_allowed:
+                if allowed_dist_set:
+                    allowed_dist_set = allowed_dist_set.intersection(user_allowed)
+                else:
+                    allowed_dist_set = user_allowed
 
         # Run blocking Firestore network query in worker thread
         docs = await asyncio.to_thread(lambda: list(
@@ -391,6 +401,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 "presumptive_ids": data.get("presumptive_ids", []),
                 "documents_ids": data.get("documents_ids", []),
                 "fdc_provided_ids": data.get("fdc_provided_ids", []),
+                "fdc_details": data.get("fdc_details", []),
                 "kit_consumption_ids": data.get("kit_consumption_ids", []),
                 "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
                 "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
@@ -524,6 +535,13 @@ async def submit_daily_report(report: DailyActivityReport):
                 elif k == "visited_names" and isinstance(v, list):
                     combined = d.get(k, []) + v
                     payload[k] = list(dict.fromkeys(combined))
+                elif k == "fdc_details" and isinstance(v, list):
+                    old_fdc = d.get("fdc_details", [])
+                    f_map = {item.get("id"): item for item in old_fdc if isinstance(item, dict) and item.get("id")}
+                    for item in v:
+                        if isinstance(item, dict) and item.get("id"):
+                            f_map[item.get("id")] = item
+                    payload[k] = list(f_map.values())
                 elif k == "remark" and v:
                     old_remark = d.get("remark", "")
                     if v not in old_remark:
@@ -774,6 +792,10 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
     try:
         month = data.month or datetime.now().strftime("%Y-%m")
         clean_dist = data.district.strip()
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update targets in district '{clean_dist}'.")
         clean_name = data.fo_name.strip()
         
         # 1. Month-scoped document
@@ -1608,6 +1630,8 @@ async def admin_update_credentials(req: AdminChangeSettingsReq):
 @app.get("/admin/export-state-summary")
 async def export_state_summary(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
+        if admin.get("role") == "SUB_ADMIN":
+            raise HTTPException(status_code=403, detail="Access denied. State Summary report is restricted to Super Admin.")
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
@@ -1807,6 +1831,10 @@ class EditIdRequest(BaseModel):
 @app.post("/api/reports/edit-id")
 async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_admin)):
     try:
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and req.working_place not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit IDs in district '{req.working_place}'.")
         cat_key = req.category if req.category.endswith("_ids") else f"{req.category}_ids"
         
         if req.action not in ["replace", "delete", "add"]:
@@ -1959,6 +1987,7 @@ class AdminFeedDataRequest(BaseModel):
     presumptive_ids: Optional[List[str]] = []
     documents_ids: Optional[List[str]] = []
     fdc_provided_ids: Optional[List[str]] = []
+    fdc_details: Optional[List[Dict[str, Any]]] = []
     kit_consumption_ids: Optional[List[str]] = []
     tpt_treatment_start_ids: Optional[List[str]] = []
     tpt_presumptive_ids: Optional[List[str]] = []
@@ -2195,6 +2224,10 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
 async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_admin)):
     try:
         clean_dist = req.district.strip()
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot manage staff in district '{clean_dist}'.")
         clean_name = req.name.strip()
         clean_pin = str(req.pin).strip()
         
@@ -2242,6 +2275,10 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
 async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_admin)):
     try:
         clean_dist = req.district.strip()
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update PINs in district '{clean_dist}'.")
         clean_name = req.name.strip()
         clean_pin = str(req.new_pin).strip()
         
@@ -2273,6 +2310,10 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
 async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_current_admin)):
     try:
         clean_dist = req.district.strip()
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot delete staff in district '{clean_dist}'.")
         clean_name = req.name.strip()
         
         doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
