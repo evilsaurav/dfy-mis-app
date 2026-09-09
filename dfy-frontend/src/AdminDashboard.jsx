@@ -1027,7 +1027,7 @@ export default function AdminDashboard() {
 
   const exportAuditLogsExcel = () => {
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/admin/export-audit-logs?action_type=${auditFilterAction}&district=${auditFilterDistrict}&token=${getAdminToken()}`, '_blank');
+    window.open(`${API_BASE_URL}/admin/export-audit-logs?action_type=${auditFilterAction}&district=${auditFilterDistrict}&user_id=${auditFilterUser}&token=${getAdminToken()}`, '_blank');
   };
 
   const handleManualPruneAuditLogs = async () => {
@@ -6656,6 +6656,23 @@ const availableDistrictsForFeed = useMemo(() => {
                 ))}
               </select>
 
+              {/* Actor / User Filter */}
+              <select
+                value={auditFilterUser}
+                onChange={(e) => {
+                  setAuditFilterUser(e.target.value);
+                  fetchAuditLogs(undefined, undefined, e.target.value, undefined);
+                }}
+                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+              >
+                <option value="All">All Actors</option>
+                <option value="admin">Super Admin (admin)</option>
+                {adminUsersList && adminUsersList.filter(u => u.user_id !== 'admin').map(u => (
+                  <option key={u.user_id} value={u.user_id}>{u.name || u.username} ({u.user_id})</option>
+                ))}
+                <option value="system">System Automated</option>
+              </select>
+
               {/* Search Bar */}
               <div className="flex items-center gap-1 ml-auto">
                 <input
@@ -6706,7 +6723,9 @@ const availableDistrictsForFeed = useMemo(() => {
                           </td>
                           <td className="py-3 px-3">
                             <span className="font-bold text-slate-800 block">{log.user_name || log.user_id || 'System'}</span>
-                            <span className="text-[9px] font-black uppercase text-indigo-600">{log.role || 'SUPER_ADMIN'}</span>
+                            <span className="text-[9px] font-black uppercase text-indigo-600">
+                              {log.role || 'SUPER_ADMIN'} {log.user_id && log.user_id !== log.user_name ? `(${log.user_id})` : ''}
+                            </span>
                           </td>
                           <td className="py-3 px-3">
                             <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${

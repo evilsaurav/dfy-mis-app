@@ -1019,9 +1019,15 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         
         cache.delete_prefix("targets_")
         cache.delete_prefix("profile_")
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type="TARGET_UPDATED",
             details=f"Updated target for {clean_name} ({clean_dist}) to {data.target} for month {month}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
             district=clean_dist,
             target_officer=clean_name,
             diff={"month": month, "target": int(data.target)}
@@ -2402,12 +2408,17 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             "edited_by": req.edited_by
         }
         await asyncio.to_thread(lambda: db.collection("id_edit_logs").add(log_entry))
+        actor_name = admin.get("name") or admin.get("username") or req.edited_by or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type=f"PATIENT_ID_{req.action.upper()}",
-            details=f"{req.edited_by} {req.action}d ID in {cat_key} for {req.fo_name} on {req.date} (Old: {req.old_id}, New: {req.new_id})",
+            details=f"{actor_name} ({actor_role}) {req.action}d ID in {cat_key} for {req.fo_name} on {req.date} (Old: {req.old_id}, New: {req.new_id})",
             district=req.working_place,
             target_officer=req.fo_name,
-            user_name=req.edited_by,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
             diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
         )
         
@@ -2475,7 +2486,8 @@ async def admin_feed_officer_data(
 ):
     try:
         admin_role = admin.get("role", "SUB_ADMIN")
-        admin_user = admin.get("username", "Admin")
+        admin_user = admin.get("name") or admin.get("username", "Admin")
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
         allowed_dists = admin.get("allowed_districts", [])
 
         clean_wp = canonicalize_district(req.district.strip())
@@ -2685,6 +2697,7 @@ async def admin_feed_officer_data(
             district=clean_wp,
             target_officer=clean_fo,
             user_name=admin_user,
+            user_id=admin_id,
             role=admin_role,
             diff={"date": clean_date, "created_new_report": new_report_created, "summary": summary_str}
         )
@@ -2727,7 +2740,8 @@ async def admin_delete_day_report(
 ):
     try:
         admin_role = admin.get("role", "SUB_ADMIN")
-        admin_user = admin.get("username", "Admin")
+        admin_user = admin.get("name") or admin.get("username", "Admin")
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
         allowed_dists = admin.get("allowed_districts", [])
 
         clean_wp = canonicalize_district(req.district.strip())
@@ -2842,6 +2856,7 @@ async def admin_delete_day_report(
             district=clean_wp,
             target_officer=clean_fo,
             user_name=admin_user,
+            user_id=admin_id,
             role=admin_role,
             diff={"date": clean_date, "deleted_docs": len(matching_docs), "total_ids": total_deleted_ids}
         )
@@ -2959,6 +2974,20 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
         
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="STAFF_ADDED",
+            details=f"Admin {actor_name} added officer '{clean_name}' ({req.designation or 'Field Officer'}) to {clean_dist} with target {req.target or 50}",
+            district=clean_dist,
+            target_officer=clean_name,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={"designation": req.designation or "Field Officer", "target": req.target or 50}
+        )
+        
         return {"success": True, "message": f"Officer '{clean_name}' added successfully to {clean_dist}!"}
     except HTTPException:
         raise
@@ -2995,6 +3024,20 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
         cache.delete("staff_directory_list")
         cache.delete_prefix("admin_staff_full_list")
         
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="PIN_RESET",
+            details=f"Admin {actor_name} reset PIN for officer '{clean_name}' in {clean_dist}",
+            district=clean_dist,
+            target_officer=clean_name,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={"district": clean_dist, "target_officer": clean_name}
+        )
+        
         return {"success": True, "message": f"PIN for '{clean_name}' successfully updated to {clean_pin}!"}
     except HTTPException:
         raise
@@ -3024,6 +3067,20 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         cache.delete("staff_directory_list")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
+        
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="STAFF_DELETED",
+            details=f"Admin {actor_name} removed officer '{clean_name}' from {clean_dist}",
+            district=clean_dist,
+            target_officer=clean_name,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={"district": clean_dist, "deleted_officer": clean_name}
+        )
         
         return {"success": True, "message": f"Officer '{clean_name}' removed from directory."}
     except HTTPException:
@@ -3407,9 +3464,9 @@ class AuditLogQueryReq(BaseModel):
 async def log_admin_activity(
     action_type: str,
     details: str,
-    user_name: str = "Super Admin",
-    user_id: str = "admin",
-    role: str = "SUPER_ADMIN",
+    user_name: str = "System Automated",
+    user_id: str = "system",
+    role: str = "SYSTEM",
     district: Optional[str] = "All",
     target_officer: Optional[str] = "",
     diff: Optional[Dict[str, Any]] = None,
@@ -3647,7 +3704,9 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
             "last_login": ""
         }
         await asyncio.to_thread(lambda: doc_ref.set(new_user))
-        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=admin.get("username", "Super Admin"), role="SUPER_ADMIN")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
         
         safe_user = {k: v for k, v in new_user.items() if k != "password"}
         return {"success": True, "user": safe_user, "message": f"User {req.name} successfully created!"}
@@ -3680,7 +3739,9 @@ async def update_admin_user(req: AdminUserUpdateReq, admin: dict = Depends(requi
             update_data["status"] = req.status
             
         await asyncio.to_thread(lambda: doc_ref.update(update_data))
-        await log_admin_activity("PERMISSIONS_UPDATED", f"Updated settings/permissions for admin user '{clean_user}'", user_name=admin.get("username", "Super Admin"), role="SUPER_ADMIN")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        await log_admin_activity("PERMISSIONS_UPDATED", f"Updated settings/permissions for admin user '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
         return {"success": True, "message": f"User {clean_user} updated successfully!"}
     except HTTPException:
         raise
@@ -3696,7 +3757,9 @@ async def delete_admin_user(user_id: str, admin: dict = Depends(require_super_ad
             
         doc_ref = db.collection("admin_users").document(clean_user)
         await asyncio.to_thread(doc_ref.delete)
-        await log_admin_activity("ADMIN_USER_DELETED", f"Deleted admin user account '{clean_user}'", user_name=admin.get("username", "Super Admin"), role="SUPER_ADMIN")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        await log_admin_activity("ADMIN_USER_DELETED", f"Deleted admin user account '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
         return {"success": True, "message": f"User {clean_user} deleted successfully!"}
     except HTTPException:
         raise
@@ -3763,6 +3826,15 @@ async def on_app_startup_tasks():
 async def manual_prune_audit_logs(days: Optional[int] = 30, admin: dict = Depends(require_super_admin)):
     try:
         deleted = await prune_expired_audit_logs(retention_days=days or 30)
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        await log_admin_activity(
+            action_type="AUDIT_PRUNED",
+            details=f"Super Admin {actor_name} manually pruned {deleted} audit log(s) older than {days or 30} days",
+            user_name=actor_name,
+            user_id=actor_id,
+            role="SUPER_ADMIN"
+        )
         return {
             "success": True, 
             "deleted_count": deleted, 
@@ -3820,7 +3892,7 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/admin/export-audit-logs")
-async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All", admin: dict = Depends(get_current_admin)):
+async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All", user_id: Optional[str] = "All", admin: dict = Depends(get_current_admin)):
     try:
         cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -3837,6 +3909,8 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
             if action_type and action_type != "All" and d.get("action_type") != action_type:
                 continue
             if district and district != "All" and d.get("district") != district:
+                continue
+            if user_id and user_id != "All" and d.get("user_id") != user_id:
                 continue
                 
             rows.append({
@@ -4165,14 +4239,15 @@ async def trigger_manual_backup(admin: dict = Depends(require_super_admin)):
     Snapshots database, compresses to GZip, uploads to GCS, and writes an audit log.
     """
     try:
-        admin_user = admin.get("username", "Super Admin")
+        admin_user = admin.get("name") or admin.get("username", "Super Admin")
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
         result = await asyncio.to_thread(_sync_create_database_snapshot, source="manual_superadmin")
         
         await log_admin_activity(
             action_type="DATABASE_BACKUP_MANUAL",
             details=f"Manual cloud backup generated: {result['filename']} ({result['size_kb']} KB, {result['total_documents']} docs)",
             user_name=admin_user,
-            user_id=admin.get("user_id", "admin"),
+            user_id=admin_id,
             role="SUPER_ADMIN"
         )
         
@@ -4218,7 +4293,7 @@ async def download_backup_file(
         await log_admin_activity(
             action_type="DATABASE_BACKUP_DOWNLOAD",
             details=f"Super Admin downloaded cloud backup file: {clean_name} ({len(compressed_data)/1024:.1f} KB)",
-            user_name=admin.get("username", "Super Admin"),
+            user_name=admin.get("name") or admin.get("username", "Super Admin"),
             user_id=admin.get("user_id", "admin"),
             role="SUPER_ADMIN"
         )
@@ -4309,7 +4384,7 @@ async def restore_database_backup(
         await log_admin_activity(
             action_type="DATABASE_RESTORE_COMPLETED",
             details=f"Full database disaster restore executed from {clean_name}: {sum(restored.values())} documents restored across {len(restored)} collections.",
-            user_name=admin.get("username", "Super Admin"),
+            user_name=admin.get("name") or admin.get("username", "Super Admin"),
             user_id=admin.get("user_id", "admin"),
             role="SUPER_ADMIN"
         )
@@ -4379,12 +4454,16 @@ async def create_broadcast(req: BroadcastCreateReq, admin: dict = Depends(get_cu
         await asyncio.to_thread(lambda: db.collection("broadcast_alerts").document(broadcast_id).set(doc_data))
         cache.delete_prefix("broadcasts_")
 
+        actor_name = admin.get("name") or admin.get("username") or req.created_by_user or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role") or role
         await log_admin_activity(
             action_type="BROADCAST_CREATED",
             details=f"Created [{req.priority}] broadcast: '{clean_title}' for {', '.join(target_dists)} ({req.target_audience})",
             district=target_dists[0] if len(target_dists) == 1 else "Statewide",
-            user_name=req.created_by_user,
-            role=role
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role
         )
 
         return {"success": True, "message": "Broadcast created successfully!", "broadcast": doc_data}
@@ -4499,12 +4578,16 @@ async def delete_broadcast(req: BroadcastDeleteReq, admin: dict = Depends(get_cu
         await asyncio.to_thread(doc_ref.delete)
         cache.delete_prefix("broadcasts_")
 
+        actor_name = admin.get("name") or admin.get("username") or req.requested_by_user or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role") or user_role
         await log_admin_activity(
             action_type="BROADCAST_DELETED",
             details=f"Deleted broadcast '{d.get('title')}': {req.broadcast_id}",
             district="Statewide" if "All" in d.get("target_districts", []) else d.get("target_districts", [""])[0],
-            user_name=req.requested_by_user,
-            role=user_role
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role
         )
 
         return {"success": True, "message": "Broadcast deleted successfully!"}
@@ -5135,12 +5218,16 @@ async def reconcile_nikshay(
             "services": list(dfy_details.get(pid, {}).get("services", []))
         } for pid in only_in_dfy[:150]]
         
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type="NIKSHAY_RECONCILE",
             details=f"Reconciled {sheet_used} for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(ready_for_nikshay_list)} ready for portal update, {len(flagged_review_list)} flagged for staff review",
             district=district,
-            user_name=admin.get("username", "Admin"),
-            role=admin.get("role", "SUB_ADMIN")
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role
         )
         
         return {
