@@ -2069,6 +2069,15 @@ function App() {
       'culture_dst_ids'
     ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
 
+    const hasVisited = Array.isArray(formData.visited_names) && formData.visited_names.length > 0;
+    const hasRemark = Boolean(formData.remark && formData.remark.trim());
+
+    if (totalCount === 0 && !hasVisited && !hasRemark) {
+      showToast("⚠️ Khali report submit nahi ho sakti! Kripya kam se kam ek Patient ID, Doctor Visit, ya Remark darj karein.", "error");
+      setIsSubmitting(false);
+      return;
+    }
+
     // Direct Offline Submission via IndexedDB
     if (!navigator.onLine) {
       try {
@@ -2592,7 +2601,29 @@ function App() {
               <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 p-3 sm:p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50">
                 <div className="max-w-md mx-auto flex items-center gap-2 sm:gap-3">
                   <button 
-                    onClick={() => { if(!formData.working_place || !formData.fo_name || !formData.pin) { showToast("Pehle Zila, Naam aur PIN bharo!", "error"); return; } setShowReviewModal(true); }} 
+                    onClick={() => {
+                      if(!formData.working_place || !formData.fo_name || !formData.pin) {
+                        showToast("Pehle Zila, Naam aur PIN bharo!", "error");
+                        return;
+                      }
+                      const totalCount = [
+                        'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
+                        'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
+                        'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+                        'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
+                        'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+                        'culture_dst_ids'
+                      ].reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
+
+                      const hasVisited = Array.isArray(formData.visited_names) && formData.visited_names.length > 0;
+                      const hasRemark = Boolean(formData.remark && formData.remark.trim());
+
+                      if (totalCount === 0 && !hasVisited && !hasRemark) {
+                        showToast("⚠️ Khali report submit nahi ho sakti! Kripya kam se kam ek Patient ID, Doctor Visit, ya Remark darj karein.", "error");
+                        return;
+                      }
+                      setShowReviewModal(true);
+                    }} 
                     disabled={isSubmitting}
                     className={`w-full bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >

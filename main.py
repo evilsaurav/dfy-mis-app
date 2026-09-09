@@ -685,6 +685,24 @@ async def submit_daily_report(report: DailyActivityReport):
             import re
             report.fo_name = re.sub(r'\s+', ' ', report.fo_name).strip()
             
+        # Validation Guard: Prevent accidental empty report submissions
+        total_ids_count = sum(len(getattr(report, cat, []) or []) for cat in [
+            "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_tested_ids",
+            "sample_collection_ids", "contact_tracing_ids", "differentiated_tb_ids",
+            "outcome_assigned_ids", "home_visit_ids", "follow_up_ids",
+            "face_to_face_ids", "presumptive_ids", "documents_ids", "fdc_provided_ids",
+            "kit_consumption_ids", "tpt_treatment_start_ids", "tpt_presumptive_ids",
+            "adhar_face_authentication_ids", "consent_with_id_ids", "culture_dst_ids"
+        ])
+        has_visited = bool(report.visited_names and len(report.visited_names) > 0)
+        has_remark = bool(report.remark and report.remark.strip())
+
+        if total_ids_count == 0 and not has_visited and not has_remark:
+            raise HTTPException(
+                status_code=400,
+                detail="Khali report submit nahi ho sakti. Kripya kam se kam ek Patient ID, Doctor Visit, ya Remark darj karein."
+            )
+
         doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
         
