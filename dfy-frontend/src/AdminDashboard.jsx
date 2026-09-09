@@ -1714,19 +1714,23 @@ const availableDistrictsForFeed = useMemo(() => {
     days.forEach(d => { map[d] = 0; });
 
     filteredRecords.forEach(r => {
-      if (r.date_of_reporting) {
-        const parts = r.date_of_reporting.split('-');
-        const d = parts[2];
-        if (d && map[d] !== undefined) {
-          map[d] += (r[activeMetric] || 0);
+      const recordDate = String(r.date || r.date_of_reporting || '').trim();
+      if (recordDate) {
+        const dateOnly = recordDate.split('T')[0];
+        const parts = dateOnly.split('-');
+        if (parts.length >= 3) {
+          const d = parts[2].padStart(2, '0');
+          if (map[d] !== undefined) {
+            map[d] += (Number(r[activeMetric]) || 0);
+          }
         }
       }
     });
 
-    let peakDay = { day: '01', value: 0 };
+    let peakDay = { day: '-', value: 0 };
     let totalVal = 0;
     const chartData = days.map(d => {
-      const val = map[d];
+      const val = map[d] || 0;
       totalVal += val;
       if (val > peakDay.value) {
         peakDay = { day: d, value: val };
@@ -3172,7 +3176,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   <div className="flex flex-wrap items-center gap-2 mb-3">
                     <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      Peak: Day {Number(dailyTrendStats.peakDay.day)} ({dailyTrendStats.peakDay.value} {activeMetric === 'total_km' ? 'KM' : 'IDs'})
+                      Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
                     </span>
                     <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-indigo-500"></span>

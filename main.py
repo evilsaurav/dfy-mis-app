@@ -446,6 +446,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 
                 records.append({
                     "date": data.get("date_of_reporting", ""),
+                    "date_of_reporting": data.get("date_of_reporting", ""),
                     "working_place": c_wp,
                     "fo_name": data.get("fo_name", "Unknown"),
                     
