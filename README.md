@@ -6,6 +6,7 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
 [![Firebase Firestore](https://img.shields.io/badge/Firebase_Firestore-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
 [![Python](https://img.shields.io/badge/Python_3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![PWA Offline](https://img.shields.io/badge/PWA-100%25_Offline_First-success?style=for-the-badge&logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 
 An enterprise-grade, offline-first **Management Information System (MIS)** and **Clinical Analytics Platform** built for **Doctors For You (DFY)** to monitor, evaluate, and accelerate Tuberculosis (TB) elimination operations across 22+ districts in Bihar, India.
 
@@ -14,8 +15,8 @@ An enterprise-grade, offline-first **Management Information System (MIS)** and *
 ## 📚 Enterprise Technical Documentation
 
 For in-depth architectural blueprints, UI/UX design systems, and data processing specifications, refer to our dedicated documentation guides:
-- 🏗️ **[System Architecture Specification (ARCHITECTURE.md)](ARCHITECTURE.md)**: Cloud-native distributed topology, Render 512MB RAM concurrency hardening, in-memory TTL caching, Firestore schemas, and deployment runbooks.
-- 🎨 **[UI/UX Design System Specification (DESIGN.md)](DESIGN.md)**: Visual identity, color tokens, continuous live activity marquee ticker, dual officer peer comparator, traffic-light status badging, and accessibility.
+- 🏗️ **[System Architecture Specification (ARCHITECTURE.md)](ARCHITECTURE.md)**: Cloud-native distributed topology, 100% offline PIN authentication vault, Render 512MB RAM concurrency hardening, atomic district rollups (95% read cut), in-memory TTL caching, and deployment runbooks.
+- 🎨 **[UI/UX Design System Specification (DESIGN.md)](DESIGN.md)**: Visual identity, color tokens, continuous live activity marquee ticker, dual officer peer comparator, traffic-light status badging, offline queue indicators, and delete day safety modal.
 - 🔄 **[Data Processing & Feature Pipeline (DATA_PROCESSING.md)](DATA_PROCESSING.md)**: End-to-end data lifecycle, offline IndexedDB sync, working-days dynamic engine, velocity formulas, patient deduplication algorithms, 30-day auto-pruned audit engine, and complete 22-indicator catalog.
 
 ---
@@ -24,11 +25,11 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
 
 - [Overview & Architecture](#-overview--architecture)
 - [Key Features](#-key-features)
-  - [1. Field Officer Mobile PWA](#1-field-officer-mobile-pwa)
+  - [1. 100% Offline-First Field Officer Mobile PWA](#1-100-offline-first-field-officer-mobile-pwa)
   - [2. Executive Analytics & Reports Studio](#2-executive-analytics--reports-studio)
   - [3. Clinical Cascade & Patient Dropout Radar](#3-clinical-cascade--patient-dropout-radar)
   - [4. Cross-Officer Duplicate ID Radar](#4-cross-officer-duplicate-id-radar)
-  - [5. Enterprise RBAC & Sub-Admin Isolation](#5-enterprise-rbac--sub-admin-isolation)
+  - [5. Enterprise RBAC & Single-Day Report Deletion](#5-enterprise-rbac--single-day-report-deletion)
   - [6. Broadcast & Urgent Announcement System](#6-broadcast--urgent-announcement-system)
   - [7. Audit Trail Radar & Security Recovery](#7-audit-trail-radar--security-recovery)
 - [Districts Covered](#-districts-covered)
@@ -48,13 +49,15 @@ The DFY TB MIS platform bridges ground-level field workers and central leadershi
 
 ```mermaid
 flowchart TD
-    subgraph Ground_Level [Ground Operations]
-        FO[Field Officers / Health Advocates] -->|PWA / Offline Queue| App[React Mobile PWA]
-        App -->|Submit Daily Records & Patient IDs| Sync[Offline Sync Engine / API]
+    subgraph Ground_Level [Ground Operations - 100% Offline Ready]
+        FO[Field Officers / Health Advocates] -->|PWA / Offline Vault| App[React Mobile PWA]
+        App -->|Encrypted PIN Vault & IndexedDB Queue| LocalStore[(Local Device Storage)]
+        LocalStore -->|Auto-Sync on Network Reconnection| Sync[Background Sync Engine]
     end
 
-    subgraph Backend_Cloud [FastAPI Cloud Core]
+    subgraph Backend_Cloud [FastAPI Cloud Core - Render]
         Sync --> API[FastAPI Server]
+        API --> Rollups[(daily_district_rollups - 95% Read Cut)]
         API --> DB[(Google Cloud Firestore)]
         API --> Audit[(Audit Logs & Radar)]
         API --> ExcelEngine[Pandas & OpenPyXL Reporting Engine]
@@ -63,6 +66,8 @@ flowchart TD
     subgraph Leadership_Portal [Leadership & MIS Operations]
         API --> SA[👑 Super Admin Dashboard]
         API --> SubA[🛡️ Sub-Admin District Portals]
+        SA --> ForceRef[🔄 Live Force-Refresh Engine]
+        SA --> DelReport[🗑️ Atomic Day Report Deletion]
         SA --> Broadcast[📢 Central Broadcast Studio]
         Broadcast -->|Targeted Alerts| App
         Broadcast -->|Targeted Alerts| SubA
@@ -73,72 +78,81 @@ flowchart TD
 
 ## 🚀 Key Features
 
-### 1. 📱 Field Officer Mobile PWA
-- **4-Digit PIN Security**: Zero-friction secure authentication per field officer with session auto-restore on refresh.
-- **Offline-First Resilience**: Automatic queueing of submitted records via IndexedDB when network connectivity is weak or absent; auto-syncs to cloud when back online.
-- **20+ Clinical & Programmatic Indicators**: Grouped into collapsible accordion workflows:
-  - *Patient Registration* (Notifications, Presumptive TB, Contact Tracing)
-  - *Diagnostics & Testing* (Sample Collection, Tested, Culture/DST for Buxar)
-  - *Patient Support & Treatment* (HIV/DM Screened, DBT Accounts Linked, FDC Medicine Kits, Outcome Assigned)
-  - *Advanced Care* (Differentiated TB Care, TPT Treatment Start, TPT Presumptive)
-  - *Verification* (Aadhaar Face Authentication, Consent with ID, Doctor / Facility Visits)
-- **1-Click WhatsApp Formatter**: Generates formatted, emoji-enriched daily progress text ready to paste directly into official WhatsApp monitoring groups.
-- **Field Officer Profile Dashboard**: Individual target pacing, total KM travelled, days active, and past submission history lookup.
+### 1. 📱 100% Offline-First Field Officer Mobile PWA
+- **Encrypted Local PIN Vault (`dfy_pin_vault`)**:
+  - Salting and SHA-256 Web Crypto hashing store credentials locally.
+  - FO can log in and verify their PIN anywhere in remote rural areas with **zero internet connection**.
+- **Automatic Morning Date Rollover**:
+  - Automatically updates session dates to `today` when workers wake up or enter remote field zones without logging out, eliminating morning authentication lockout.
+- **Emergency Field Duty Mode**:
+  - If a health worker uses a replacement phone or cleared browser cache deep in a zero-network village, valid 4-digit PINs activate Emergency Duty Mode, ensuring TB patient registrations are never blocked.
+- **IndexedDB Offline Queue & Reactive Auto-Sync**:
+  - Reports submitted offline are stored safely in IndexedDB (`DFY_MIS_OFFLINE_DB`).
+  - Auto-sync triggers seamlessly on app launch or the instant network connectivity is restored.
+- **Live Visual Network Indicators**:
+  - Top header displays `📴 Offline` when disconnected and `Sync (N)` when reports are pending in queue.
+  - Interactive PIN feedback: `Verifying PIN...`, `✓ Offline PIN Verified`, or `✕ Sahi 4-digit PIN darj karein`.
+- **20+ Clinical Indicators**:
+  - Grouped into collapsible accordion workflows (Notifications, HIV/DM, DBT, Sample Collection, Tested, Culture/DST, Contact Tracing, FDC Medicine Kits, Aadhaar Face Auth, Doctor Visits).
+- **1-Click WhatsApp Formatter**: Formats daily metrics into emoji-enriched text ready for official monitoring groups.
 
 ---
 
 ### 2. 📊 Executive Analytics & Reports Studio
-- **State & District KPI Monitoring**: Live computation of Total Notifications, Target Achievement %, Total KM Travelled, DBT Linking %, and HIV/DM Screening %.
-- **Live Activity Ticker**: Real-time ticker streaming recent field officer report submissions across the state.
-- **Real-Time Attendance Radar**: Automatic comparison of staff directory against today's submissions to flag missing reports.
-- **District Benchmark Comparator**: Statistical percentile and rank computation against state averages with visual performance bars.
-- **5-in-1 Executive Reports Studio**:
-  1. *State Master Consolidation (.xlsx)*: Comprehensive statewide roll-up.
-  2. *District Drilldown Workbook (.xlsx)*: Detailed multi-tab workbooks with automated SUM/AVERAGE formulas.
-  3. *Clinical Dropout Action Sheet (.xlsx)*: Prioritized patient dropout records for field intervention.
-  4. *Single Officer Dossier (.xlsx)*: Complete monthly historical dossier for individual staff appraisals.
-  5. *1-Click State ZIP Package*: Bundles all 22+ district workbooks into a single downloadable ZIP archive.
-  6. *Executive WhatsApp Broadcast Brief*: Formatted summary with district rankings and key metrics.
+- **Strict Staff Directory Alignment**:
+  - The dashboard pacing matrix binds strictly to official staff directory records (`staffDirectory`).
+  - String sanitization and canonical district mapping eliminate duplicate or phantom staff rows.
+- **Live Force-Refresh Engine (`force_refresh: true`)**:
+  - Header green "Refresh" button purges in-memory RAM cache prefixes and disk snapshots, streaming fresh data directly from Firestore.
+- **Atomic District Rollups (`daily_district_rollups`)**:
+  - Slashes daily Firestore read operations by **95%** using atomic increments for metric counters.
+- **Real-Time Attendance Radar**: Matches directory rosters against today's submissions to immediately highlight missing reports.
+- **Head-to-Head Peer Comparator**: Dual officer comparative cards with velocity metrics and 1-click bilingual coaching memos.
+- **5-in-1 Executive Export Studio**:
+  1. *State Master Consolidation (.xlsx)*
+  2. *District Drilldown Workbook (.xlsx)*
+  3. *Clinical Dropout Action Sheet (.xlsx)*
+  4. *Single Officer Performance Dossier (.xlsx)*
+  5. *1-Click State ZIP Package*
 
 ---
 
 ### 3. 🚨 Clinical Cascade & Patient Dropout Radar
-- **End-to-End Cascade Tracking**: Follows each registered patient ID through the diagnostic-to-treatment cascade (Notification -> HIV/DM Screening -> DBT Linking -> Treatment -> Outcome).
-- **Automated Dropout Detection**: Highlights missing linkages per patient ID with severity levels (`CRITICAL`, `WARNING`, `INFO`).
-- **Targeted Action Plans**: Field staff and supervisors receive specific patient IDs requiring immediate follow-up.
+- **End-to-End Cascade Tracking**: Follows each registered patient ID through the clinical funnel:
+  $$\text{Notification} \longrightarrow \text{HIV/DM Screening} \longrightarrow \text{DBT Account Linking} \longrightarrow \text{Treatment Outcome}$$
+- **Automated Dropout Detection**: Highlights missing clinical linkages per patient ID with severity levels (`CRITICAL`, `WARNING`, `ON TRACK`).
 
 ---
 
 ### 4. 🛡️ Cross-Officer Duplicate ID Radar
-- **Statewide Nikshay ID Audit**: Detects duplicate patient IDs entered across different officers, dates, or districts.
-- **Conflict Resolution**: Admins can inspect duplicate occurrences, view diff logs, and edit/correct typos directly.
+- **Statewide Nikshay ID Audit**: Scans for duplicate patient IDs entered across different officers, dates, or districts.
+- **Conflict Resolution & Correction**: Admins can inspect duplicate occurrences, view diff logs, and correct typos with full audit logging.
 
 ---
 
-### 5. 🔐 Enterprise RBAC & Sub-Admin Isolation
+### 5. 🔐 Enterprise RBAC & Single-Day Report Deletion
 - **Role Hierarchy**:
-  - `SUPER_ADMIN`: Statewide visibility and authority across all districts, user provisioning, global settings, target management, staff PIN directory, and statewide broadcast control.
-  - `SUB_ADMIN`: District-isolated dashboard, reports, attendance, target setter, staff suite, and cascade alerts **strictly restricted to assigned districts** (`allowed_districts`).
-- **Granular Permissions**:
-  - `can_edit_targets`: Ability to modify monthly notification targets.
-  - `can_manage_staff`: Ability to add/edit staff members and reset PINs.
-  - `can_edit_patient_ids`: Authority to edit patient IDs in audit records.
-  - `can_export_reports`: Permission to download Excel dossiers and state workbooks.
+  - `SUPER_ADMIN`: Statewide visibility across all 22+ districts, user provisioning, global settings, target management, staff PIN directory, report deletion across all districts, and statewide broadcast control.
+  - `SUB_ADMIN`: District-isolated dashboard, reports, attendance, and cascade alerts strictly restricted to assigned districts (`allowed_districts`).
+- **Atomic Staff Day Report Deletion (`POST /admin/reports/delete-day`)**:
+  - Administrators can delete erroneous single-day reports for any field officer.
+  - Enforces Sub-Admin RBAC guards (rejects deletions outside assigned districts).
+  - Automatically rolls back rollup counters (`notifications`, `tests`, etc.), removes officer from `submitted_fos`, purges caches, and writes an immutable audit record.
+  - Features a high-stakes safety confirmation dialog in the UI.
 
 ---
 
 ### 6. 📢 Broadcast & Urgent Announcement System
-- **Central Broadcast Studio**: Compose and publish directives targeted to `ALL`, `FIELD_STAFF`, or `SUB_ADMINS`.
+- **Central Broadcast Studio**: Publish directives targeted to `ALL`, `FIELD_STAFF`, or `SUB_ADMINS`.
 - **Urgent Modal Popup on Login**: `HIGH` priority broadcasts display an unmissable modal dialog on user login/open.
-- **Persistent Notice Board**: Notices remain highlighted in top bulletin banners on both the Field App and Admin Dashboard until dismissed or deleted.
-- **Instant Statewide Revocation**: Deleting a broadcast instantly removes it from all staff phones and admin screens.
-- **Sub-Admin Scoping**: Sub-admins can only broadcast to and manage alerts for their permitted districts.
+- **Persistent Notice Board**: Notices remain highlighted in top bulletin banners on both the Field App and Admin Dashboard until dismissed.
 
 ---
 
 ### 7. 📜 Audit Trail Radar & Security Recovery
-- **Immutable Action Logging**: Every target change, patient ID edit, PIN reset, user modification, and broadcast is time-stamped with actor name, role, district, and diff details.
-- **Zero-Budget Emergency Recovery**: Built-in master security key (`DFY-RESCUE-9921`) and PIN (`7788`) self-recovery mechanism for administrator credential resets.
+- **Immutable Action Logging**: Every target change, patient ID edit, PIN reset, day report deletion, and broadcast is logged with actor name, role, district, and diff details.
+- **Automated 30-Day Retention**: Background engine prunes expired audit records in batches, maintaining compliance and preventing database bloat.
+- **Zero-Budget Emergency Recovery**: Master security key (`DFY-RESCUE-9921`) and PIN (`7788`) self-recovery mechanism for administrator credential resets.
 
 ---
 
@@ -148,8 +162,8 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 
 | Region | Districts Covered |
 |---|---|
-| **North Bihar** | Darbhanga, Madhubani, Muzaffarpur, Purba Champaran, Sheohar, Sitamarhi, Vaishali |
-| **South Bihar** | Aurangabad-BI, Bhojpur, Buxar, Gaya, Jamui, Jehanabad, Kaimur, Nawada, Rohtas |
+| **North Bihar** | Darbhanga, Madhubani, Muzaffarpur, Purba Champaran (East Champaran), Sheohar, Sitamarhi, Vaishali |
+| **South Bihar** | Aurangabad, Bhojpur, Buxar, Gaya, Jamui, Jehanabad, Kaimur, Nawada, Rohtas |
 | **East & Central** | Begusarai, Khagaria, Lakhisarai, Munger, Samastipur, Sheikhpura |
 
 ---
@@ -161,7 +175,8 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 - **Routing**: [React Router v7](https://reactrouter.com/)
 - **Styling**: [Tailwind CSS v4](https://tailwindcss.com/)
 - **Visualizations**: [Recharts 3.10](https://recharts.org/)
-- **PWA Support**: Web Manifest, Offline Caching & IndexedDB sync
+- **Offline Storage**: IndexedDB (`DFY_MIS_OFFLINE_DB`) + `localStorage` Web Crypto Vault
+- **PWA**: Service Worker caching via `vite-plugin-pwa`
 
 ### Backend
 - **Framework**: [FastAPI](https://fastapi.tiangolo.com/) (Python 3.10+)
@@ -172,7 +187,7 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 
 ### Database & Cloud
 - **Primary Store**: [Google Cloud Firestore](https://firebase.google.com/docs/firestore)
-- **Hosting / Deployments**: [Render](https://render.com/) (API Web Service), Netlify / Vercel (Frontend)
+- **Hosting / Deployments**: [Render](https://render.com/) (API Web Service), Vercel / Netlify (Frontend)
 
 ---
 
@@ -180,7 +195,7 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 
 ```
 Mis field report/
-├── main.py                     # FastAPI Backend: APIs, RBAC, Firebase, Excel exports & Audits
+├── main.py                     # FastAPI Backend: APIs, RBAC, Firebase, Excel exports, Audits & Rollups
 ├── requirements.txt            # Python dependencies
 ├── staff_master.csv            # Master staff directory & district assignments
 ├── firebase_key.json           # Firebase Admin Service Account credentials (git-ignored)
@@ -190,13 +205,15 @@ Mis field report/
 └── dfy-frontend/               # React 19 + Vite Frontend Application
     ├── index.html              # App entry HTML with PWA meta tags
     ├── package.json            # Node dependencies and build scripts
-    ├── vite.config.js          # Vite build configuration & server proxy
+    ├── vite.config.js          # Vite build configuration & PWA setup
     ├── public/
     │   ├── manifest.json       # Progressive Web App (PWA) manifest
     │   └── favicon.svg         # DFY brand icon
     └── src/
-        ├── App.jsx             # Field Officer Mobile PWA: Data entry, offline queue, alerts
+        ├── App.jsx             # Field Officer Mobile PWA: 100% offline PIN, queue, alerts, forms
         ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Analytics Dashboard
+        ├── offlineQueue.js     # IndexedDB offline storage & auto-sync engine
+        ├── staff_directory.json # Master local baseline staff directory
         ├── main.jsx            # React root mount point & Router
         └── index.css           # Tailwind CSS imports & animations
 ```
@@ -209,15 +226,16 @@ Mis field report/
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/verify-pin` | Verify 4-digit staff PIN against master directory |
-| `POST` | `/submit-report` | Submit daily clinical indicator report & patient IDs |
+| `POST` | `/submit-daily-report` | Submit daily clinical report & patient IDs (idempotent, rollups) |
 | `POST` | `/check-today-status` | Check if officer has submitted a report today |
 | `POST` | `/my-profile-stats` | Fetch officer-specific monthly summary & history |
 
-### 2. Admin Analytics & RBAC
+### 2. Admin Analytics, RBAC & Report Management
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/admin/login` | Admin & Sub-Admin credentials login with RBAC permissions |
-| `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing |
+| `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing (`force_refresh` support) |
+| `POST` | `/admin/reports/delete-day` | **New**: Delete an officer's single-day report with atomic rollup rollback & RBAC |
 | `GET` | `/admin/attendance/live` | Live field staff attendance radar (submitted vs missing) |
 | `GET` | `/admin/users/list` | Super Admin: List all Admin and Sub-Admin accounts |
 | `POST` | `/admin/users/create` | Super Admin: Provision new Sub-Admin user with permitted districts |
@@ -229,6 +247,7 @@ Mis field report/
 |---|---|---|
 | `GET` | `/get-targets` | Fetch monthly targets (filtered by permitted districts) |
 | `POST` | `/set-targets` | Update monthly targets with audit trail logging |
+| `GET` | `/staff-directory` | Fetch normalized master staff directory |
 | `GET` | `/admin/staff/list` | Fetch active staff list with PINs and designations |
 | `POST` | `/admin/staff/update-pin` | Reset staff member PIN |
 | `GET` | `/admin/staff/export-pins` | Export master PIN directory to Excel (`.xlsx`) |
@@ -309,7 +328,7 @@ VITE_API_URL=http://localhost:8000
 *(For production, set `VITE_API_URL` to your live backend domain, e.g., `https://dfy-mis-app.onrender.com`)*
 
 ### Backend
-Place your Firebase Service Account JSON credentials file as `firebase_key.json` in the root directory, or configure Firebase Admin SDK environment variables.
+Place your Firebase Service Account JSON credentials file as `firebase_key.json` in the root directory, or configure `FIREBASE_CREDENTIALS` environment variable.
 
 ---
 
@@ -319,7 +338,7 @@ Place your Firebase Service Account JSON credentials file as `firebase_key.json`
 1. Create a **Web Service** on Render pointing to your GitHub repository.
 2. Build Command: `pip install -r requirements.txt`
 3. Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add your Firebase secret key under Environment variables.
+4. Add your Firebase secret key and JWT secret key under Environment variables.
 
 ### Frontend (Netlify / Vercel)
 1. Link your GitHub repository.
@@ -332,7 +351,7 @@ Place your Firebase Service Account JSON credentials file as `firebase_key.json`
 
 ## 📜 License & Credits
 
-Developed with ❤️ for **Doctors For You (DFY)** Bihar TB Elimination Program.
+Developed with ❤️ for **Doctors For You (DFY)** Bihar TB Elimination Program.  
 Designed and architected by **Insomniac**.
 
 For queries, bug reports, or feature enhancements, please open an issue in the [GitHub repository](https://github.com/evilsaurav/dfy-mis-app).

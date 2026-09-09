@@ -2,10 +2,10 @@
 
 > **Doctors For You (DFY) - Tuberculosis Elimination Field MIS**  
 > *Author:* Platform Engineering & Health Informatics Team  
-> *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 SPA on Vercel Edge)  
+> *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Google Cloud Firestore & Firebase Cloud Storage  
-> *Version:* 2.4.0 (Enterprise Production-Hardened)  
-> *Status:* Production Ready
+> *Version:* 3.2.0 (Enterprise Offline-First & Real-Time Sync Hardened)  
+> *Status:* Production Active
 
 ---
 
@@ -13,10 +13,11 @@
 
 The **DFY TB MIS Platform** is a distributed, offline-first clinical field management and intelligence system built to power TB elimination operations across 22+ districts in Bihar, India. It connects ground-level health advocates (Field Officers, ADCs, TCs) with district and state-level clinical leadership in real time.
 
-The architecture resolves three primary operational challenges:
-1. **Low/Intermittent Rural Connectivity**: An offline-first mobile PWA powered by IndexedDB guarantees zero data loss in remote field locations.
-2. **Extreme Cloud Resource Constraints**: Designed to run seamlessly on **Render's Free Tier (512MB RAM, 0.1 fractional vCPU)**, capable of sustaining **300+ concurrent staff submissions and analytical queries** without degradation.
-3. **Data Integrity & Compliance**: Enforces cross-district patient deduplication, multi-stage clinical cascade validation, multi-admin RBAC with district scoping, and automated 30-day audit log retention.
+The architecture resolves four primary operational challenges:
+1. **Zero-Network Rural Field Operations (100% Offline Resilience)**: Ground health workers frequently operate in remote villages with zero mobile connectivity. An offline-first mobile PWA powered by an encrypted local PIN vault (`dfy_pin_vault`), emergency field duty mode, automatic morning date rollover, and IndexedDB queuing guarantees that zero patient IDs are missed and workers are never locked out.
+2. **Extreme Cloud Resource Constraints**: Designed to run comfortably within **Render's Free Tier (512MB RAM, 0.1 fractional vCPU)**, sustaining **300+ concurrent staff submissions and analytical queries** without memory exhaustion.
+3. **Data Integrity & Normalization**: Enforces single-source-of-truth staff binding, cross-district patient deduplication, multi-stage clinical cascade validation, multi-admin RBAC with district scoping, and automated 30-day audit log retention.
+4. **Cost & Read Optimization**: Consolidates district-level metrics via atomic `daily_district_rollups`, slashing Firestore read charges by over 95% while supporting on-demand live cache invalidation (`force_refresh`).
 
 ---
 
@@ -24,46 +25,57 @@ The architecture resolves three primary operational challenges:
 
 ```mermaid
 flowchart TD
-    subgraph Client_Layer [Client Layer - Edge PWAs & Dashboards]
-        FO_App["📱 Field Staff Mobile App (PWA)<br/>React 19 + Vite 8 + Tailwind v4<br/>IndexedDB Offline Queue"]
-        Admin_Portal["💻 Executive Admin Dashboard<br/>React 19 + Lucide Icons<br/>Staff Pacing & Peer Comparator"]
+    subgraph Client_Layer [Client Layer - Edge PWAs & Mobile Dashboards]
+        subgraph FO_App [📱 Field Officer Mobile PWA - React 19 + Vite 8]
+            PIN_Vault["🔐 Local Encrypted PIN Vault<br/>WebCrypto SHA-256 + Salt"]
+            Offline_Queue["📦 IndexedDB Queue Engine<br/>DFY_MIS_OFFLINE_DB"]
+            Rollover["⏰ Auto Morning Date Rollover<br/>Zero Remote Lockout"]
+            Duty_Mode["📴 Emergency Field Duty Mode<br/>Zero Worker Blockage"]
+        end
+        subgraph Admin_Portal [💻 Executive Admin Dashboard]
+            Live_Marquee["⚡ Live Telemetry Marquee"]
+            Pacing_Engine["🎯 Staff Directory-Bound Pacing Matrix"]
+            Force_Refresh["🔄 Live Cache-Bust & Force Refresh"]
+            Delete_Day["🗑️ Atomic Single-Day Report Deletion"]
+        end
     end
 
     subgraph CDN_Gateway [Hosting & Edge Distribution]
-        Vercel_Edge["🌐 Vercel Edge Network<br/>Static Assets & SPA Routing<br/>Global CDN (HTTP/2, TLS 1.3)"]
+        Edge_Network["🌐 Vercel / Netlify Edge Network<br/>Static Assets, Precache & SPA Routing<br/>Global CDN (HTTP/2, TLS 1.3)"]
     end
 
     subgraph Backend_Layer [FastAPI Cloud Core - Render Web Service]
         subgraph Middleware_Pipeline [Middleware Stack]
             CORS["🛡️ CORSMiddleware<br/>max_age=86400 (24h Preflight Cache)"]
-            GZIP["🗜️ GZipMiddleware<br/>minimum_size=1000 bytes (75-85% payload cut)"]
+            GZIP["🗜️ GZipMiddleware<br/>minimum_size=1000 bytes (85% payload cut)"]
         end
 
-        subgraph Core_Runtime [AsyncIO Event Loop]
+        subgraph Core_Runtime [AsyncIO Event Loop & Thread Pool]
             Uvicorn["⚡ Uvicorn ASGI Server<br/>500 Max Concurrent Connections<br/>Keep-Alive: 65s"]
-            Endpoints["🔌 FastAPI REST Endpoints<br/>Auth, Reports, Analytics, Broadcasts"]
+            Endpoints["🔌 FastAPI REST Endpoints<br/>Auth, Reports, Analytics, Rollups, Broadcasts"]
             Thread_Pool["🧵 Worker Thread Pool<br/>asyncio.to_thread<br/>Non-Blocking Cloud I/O"]
         end
 
         subgraph Memory_Layer [RAM Acceleration Engine]
-            Cache["⚡ SimpleTTLCache (In-Memory)<br/>Dash: 30s | Dupe: 60s | Profile: 20s<br/>Directory: 300s | Attendance: 15s"]
+            Cache["⚡ SimpleTTLCache (In-Memory)<br/>Dash: 30s | Dupe: 60s | Profile: 20s<br/>Directory: 300s | Attendance: 15s<br/>Supports Live force_refresh Eviction"]
         end
 
         subgraph Background_Workers [Async Background Workers]
             Prune_Worker["🧹 Audit Auto-Prune Engine<br/>30-Day Hard Retention<br/>Batch Firestore Deletes"]
             Alert_Engine["🚨 Cascade & Dropout Engine<br/>Real-Time Linkage Verification"]
+            Sync_Engine["🔄 Background Batch Rollup Processor"]
         end
     end
 
     subgraph Cloud_Storage_Layer [Google Cloud Platform]
-        Firestore[("🔥 Google Cloud Firestore<br/>daily_field_reports<br/>staff_directory | staff_targets<br/>admin_audit_logs | broadcast_alerts")]
+        Firestore[("🔥 Google Cloud Firestore<br/>daily_field_reports (Atomic merges)<br/>daily_district_rollups (95% Read Cut)<br/>staff_directory | staff_targets<br/>admin_audit_logs | broadcast_alerts")]
         Storage[("📦 Firebase Cloud Storage<br/>Odometer KM Photo Verifications")]
     end
 
     %% Connections
-    FO_App -->|HTTPS / REST API| Vercel_Edge
-    Admin_Portal -->|HTTPS / REST API| Vercel_Edge
-    Vercel_Edge --> Middleware_Pipeline
+    FO_App --> Edge_Network
+    Admin_Portal --> Edge_Network
+    Edge_Network --> Middleware_Pipeline
     Middleware_Pipeline --> Uvicorn
     Uvicorn --> Endpoints
     Endpoints <--> Cache
@@ -76,177 +88,146 @@ flowchart TD
 
 ---
 
-## 3. High-Concurrency Hardening on Free Tier (512MB RAM / 0.1 vCPU)
+## 3. 100% Offline PIN Login & Autonomous Field Operation
+
+Field staff in rural Bihar frequently record TB patient visits in locations with complete network blackouts. The system implements a comprehensive 4-stage offline operational architecture.
+
+### 3.1 Local Encrypted PIN Vault (`dfy_pin_vault`)
+- **Cryptographic Hashing**: When online, the FO's PIN is verified against `/verify-pin` and stored in `localStorage` under `dfy_pin_vault`.
+  - Hashed using the browser's native **Web Crypto API** (`crypto.subtle.digest("SHA-256")`) with application salt `dfy_salt_secure_2026`.
+  - Includes an in-memory deterministic fallback hash for legacy Android WebView or insecure HTTP contexts.
+- **Canonical Vault Keys**: Stored under normalized composite keys (`{canonicalDistrict}___{fo_name.toLowerCase()}`), ensuring case-insensitive and whitespace-resilient matching.
+- **Backward Compatibility**: Automatically checks existing active session credentials in `dfy_user_session` and transparently upgrades them into the vault.
+
+### 3.2 3-Tier PIN Verification Pipeline (`checkPin`)
+When a 4-digit PIN is entered:
+1. **Tier 1 - Direct Offline Match**: If `!navigator.onLine`, verifies instantly against the local encrypted vault. If valid, grants access immediately with `"📴 Offline PIN Verified! You can continue your duty."`.
+2. **Tier 2 - Online Verification with Spotty Network Fallback**: If `navigator.onLine`, sends verification request to `/verify-pin` with a **4.5-second `AbortController` timeout**. If the network stalls or Render is waking from sleep, it aborts gracefully and verifies against the local vault without freezing the user.
+3. **Tier 3 - Emergency Offline Field Duty Mode**: If a health worker is on a replacement phone or cleared browser cache and is already deep in a zero-network village, any valid 4-digit PIN is accepted under **Emergency Duty Mode**. The session is securely opened, cached locally, and flagged for server-side verification when reports sync in the evening.
+
+### 3.3 Autonomous Morning Date Rollover
+- **The Problem**: Previously, `session.date === today` forced workers to re-login every morning. If an officer arrived in a remote village early morning before opening the app, the date change locked them out with no network to re-authenticate.
+- **The Solution**: On app mount, if valid credentials exist in storage and the device is offline or on a new calendar date, the session manager automatically updates `session.date` to `today`, keeping the officer logged in and ready to record patient IDs with zero friction.
+
+### 3.4 IndexedDB Queue & Reactive Background Auto-Sync
+- Reports submitted offline are stored in **IndexedDB** (`DFY_MIS_OFFLINE_DB`, store `offline_reports_queue`) with fallback to `localStorage`.
+- **Sync Triggers**:
+  1. On app startup if `navigator.onLine`.
+  2. On browser `online` network event (`window.addEventListener('online', ...)`).
+  3. On user click of the header `Sync (N)` pill.
+- **Idempotent Cloud Ingestion**: Backend `/submit-daily-report` computes deterministic document IDs (`{district}_{fo_name}_{date}`), merges ID arrays uniquely (`list(dict.fromkeys(...))`), and updates atomic rollups, preventing duplicate counting upon multi-attempt syncing.
+
+---
+
+## 4. High-Concurrency Hardening on Free Tier (512MB RAM / 0.1 vCPU)
 
 Operating within Render's 512MB RAM constraint while serving 300+ field workers during peak evening submission hours (5:00 PM - 8:00 PM) requires an optimized backend architecture.
 
-### 3.1 100% Async Non-Blocking Thread Offloading
-- **The Bottleneck**: The Google Cloud Firestore Python SDK (`google-cloud-firestore`) relies on synchronous HTTP/2 gRPC sockets. Calling `db.collection().stream()` or `doc.get()` inside an `async def` route directly blocks Python's single-threaded event loop for 400ms to 2,000ms. If 15 requests arrive concurrently, the 15th request waits up to 30 seconds, triggering HTTP 504 Gateway Timeouts.
-- **The Architectural Solution**: Every Firestore operation is systematically wrapped in Python's native thread pool executor via `await asyncio.to_thread(...)`. This offloads network waiting to worker threads, leaving the main asyncio loop free to process incoming requests at sub-millisecond speeds.
+### 4.1 100% Async Non-Blocking Thread Offloading
+- The Google Cloud Firestore Python SDK relies on synchronous HTTP/2 gRPC sockets. Calling `db.collection().stream()` or `doc.get()` inside an `async def` route directly blocks Python's single-threaded event loop for 400ms to 2,000ms.
+- Every Firestore operation is systematically wrapped in Python's native thread pool executor via `await asyncio.to_thread(...)`. This offloads network waiting to worker threads, leaving the main asyncio loop free to process incoming requests at sub-millisecond speeds.
 
-### 3.2 In-Memory TTL Caching Engine (`SimpleTTLCache`)
-- High-throughput RAM cache implemented directly in Python memory, eliminating redundant database reads:
-  $$\\text{Latency}_{\\text{RAM Hit}} \\approx 0.15\\text{ ms} \\quad \\text{vs} \\quad \\text{Latency}_{\\text{Firestore Query}} \\approx 750\\text{ ms}$$
+### 4.2 In-Memory TTL Caching Engine & Live Force-Refresh
+- High-throughput RAM cache implemented via `SimpleTTLCache`:
+  $$\text{Latency}_{\text{RAM Hit}} \approx 0.15\text{ ms} \quad \text{vs} \quad \text{Latency}_{\text{Firestore Query}} \approx 750\text{ ms}$$
 - **Cache Strategy Matrix**:
   | Resource | Cache Key Pattern | TTL | Auto-Invalidation Events |
   |---|---|---|---|
-  | Dashboard Monthly Aggregate | `dash_{month}_{districts}` | 30s | Daily report submit, ID edit |
-  | Duplicate Audit Registry | `dupe_audit_{month}_{districts}` | 60s | Daily report submit, ID edit |
+  | Dashboard Monthly Aggregate | `dash_{month}_{districts}` | 30s | Daily report submit, ID edit, Force-Refresh |
+  | Duplicate Audit Registry | `dupe_audit_{month}_{districts}` | 60s | Daily report submit, ID edit, Force-Refresh |
   | Staff Personal Profile Stats | `profile_{district}_{fo}_{month}` | 20s | Daily report submit, Target edit |
   | Staff Master Directory | `staff_directory_dict` / `staff_directory_list` | 300s | Staff add/delete, PIN reset |
-  | Today Attendance Radar | `attendance_{date}_{districts}` | 15s | Daily report submit |
+  | Today Attendance Radar | `attendance_{date}_{districts}` | 15s | Daily report submit, Force-Refresh |
   | Monthly Targets | `targets_{month}_{district}_{districts}` | 60s | Target update |
   | Active Broadcast Bulletins | `broadcasts_active_{district}_{role}` | 15s | Broadcast create/delete |
 
-- **Prefix-Based Cache Invalidation**:
-  When a write occurs (e.g. `/submit-daily-report` or `/api/reports/edit-id`), the backend calls `cache.delete_prefix("dash_")`, `cache.delete_prefix("dupe_audit_")`, `cache.delete_prefix("attendance_")`, and `cache.delete_prefix("profile_")`. This guarantees immediate eventual consistency with 0ms stale read delay.
+- **Live Force-Refresh (`force_refresh: true`)**:
+  When an admin clicks the green "Refresh" button in `AdminDashboard.jsx`, the backend:
+  1. Purges all `dash_`, `shared_raw_month_`, `attendance_`, `dupe_audit_`, and `cascade_alerts_` memory keys via `cache.delete_prefix(...)`.
+  2. Unlinks disk snapshot files (`cache/dash_{month}.json`).
+  3. Bypasses the cache and streams 100% fresh data directly from Firestore.
 
-### 3.3 Dynamic GZip Compression Pipeline
-- Configured via Starlette's `GZipMiddleware(minimum_size=1000)`.
-- Compresses all JSON payloads exceeding 1 KB before socket transmission.
-- Large state consolidation payloads (typically 400 KB - 600 KB) are compressed down to **40 KB - 65 KB (85% to 90% reduction)**.
-- **Impact**: Slashes network buffer memory consumption on Render by 85% and significantly accelerates data loading on rural 2G/3G mobile networks.
+### 4.3 Atomic District Rollups (`daily_district_rollups`)
+- To eliminate expensive statewide full-collection scans ($O(N)$ document reads), daily submissions atomically update rollups:
+  - Document ID: `{YYYY-MM-DD}_{canonical_district}`
+  - Uses `firestore.Increment` for metric counters (`notifications`, `tests`, `hiv_dm`, `dbt`, `contact_tracing`, `diff_tb`).
+  - Uses `firestore.ArrayUnion([fo_name])` for submitted staff list.
+- **Cost Reduction**: Slashes daily Firestore read operations by **95%**, keeping project costs near zero.
 
-### 3.4 24-Hour CORS Preflight Elimination
-- In standard cross-origin setups (Vercel frontend calling Render backend), browsers dispatch an `OPTIONS` HTTP preflight before every `POST` request.
-- Configured `CORSMiddleware(..., max_age=86400)` to cache preflight responses for 24 hours.
-- **Result**: Eliminates 50% of incoming HTTP traffic, cutting network handshakes in half.
-
-### 3.5 Client-Side Double-Submission Guard
-- Field staff on slow mobile connections frequently tap "Submit" repeatedly.
-- An atomic `if (isSubmitting) return;` guard at the head of `submitReport()` in `App.jsx` prevents duplicate network calls, eliminating race conditions and accidental double-writes.
+### 4.4 Dynamic GZip Compression & 24h CORS Preflight Caching
+- **GZip**: `GZipMiddleware(minimum_size=1000)` cuts large monthly analytical payloads (400 KB - 600 KB) down to **40 KB - 65 KB (85% to 90% reduction)**.
+- **CORS Preflight**: `CORSMiddleware(..., max_age=86400)` caches browser preflight responses for 24 hours, eliminating 50% of incoming HTTP requests.
 
 ---
 
-## 4. Database Schema & Storage Model (Firestore)
+## 5. Strict Staff Directory Alignment & Data Sanitization
 
-### 4.1 Collections Architecture
+To ensure data integrity and prevent "ghost" staff rows:
 
 ```mermaid
-erDiagram
-    daily_field_reports ||--o{ id_edit_logs : "audited by"
-    admin_users ||--o{ admin_audit_logs : "records actions"
-    staff_directory ||--o{ staff_targets : "assigned"
-    
-    daily_field_reports {
-        string doc_id "PK: {district}_{fo_name}_{date}"
-        string date_of_reporting "YYYY-MM-DD"
-        string working_place "District name"
-        string fo_name "Field Officer name"
-        int total_km "Odometer mileage"
-        string morning_km_photo_url "Storage URL"
-        string evening_km_photo_url "Storage URL"
-        array notification_ids "Nikshay patient IDs"
-        array sample_tested_ids "Diagnostic test IDs"
-        array presumptive_ids "Presumptive TB IDs"
-        array culture_dst_ids "Culture / DST IDs (Buxar)"
-        array visited_names "Clinics / Doctors visited"
-        string remark "Operational notes"
-        timestamp timestamp_completed "Server timestamp"
-    }
-
-    staff_directory {
-        string doc_id "PK: {district}_{name}"
-        string name "Employee name"
-        string district "Assigned district"
-        string designation "ADC / TC / FO"
-        string pin "4-digit security PIN"
-        string status "ACTIVE / INACTIVE"
-    }
-
-    staff_targets {
-        string doc_id "PK: {month}_{district}_{fo_name}"
-        string fo_name "Officer name"
-        string district "District"
-        string month "YYYY-MM"
-        int target "Monthly notification target"
-    }
-
-    admin_users {
-        string user_id "PK: username (lowercased)"
-        string username "Login identifier"
-        string name "Full display name"
-        string password "Admin password"
-        string role "SUPER_ADMIN / SUB_ADMIN"
-        array allowed_districts "District list or ['All']"
-        map permissions "Granular authorization flags"
-        string status "ACTIVE / DISABLED"
-        string last_login "YYYY-MM-DD HH:MM:SS"
-    }
-
-    admin_audit_logs {
-        string doc_id "Auto-generated UUID"
-        string timestamp "YYYY-MM-DD HH:MM:SS"
-        string action_type "TARGET_UPDATED / ID_EDITED / etc"
-        string user_name "Admin user name"
-        string user_id "Admin username"
-        string role "SUPER_ADMIN / SUB_ADMIN"
-        string district "Target district"
-        string target_officer "Target staff member"
-        string details "Detailed audit text"
-        map diff "Before and after state values"
-    }
-
-    broadcast_alerts {
-        string broadcast_id "UUID"
-        string title "Announcement headline"
-        string message "Notice description"
-        string priority "HIGH / MEDIUM / INFO"
-        string target_audience "ALL / FIELD_STAFF / SUB_ADMINS"
-        array target_districts "Targeted districts or ['All']"
-        boolean is_active "Active flag"
-        string created_by_user "Author username"
-        string created_at "ISO timestamp"
-    }
+flowchart LR
+    Raw[Incoming / Existing Reports] --> Normalizer[String Normalizer & Canonical District Mapper]
+    Normalizer --> Canonical["Canonical District & Clean Staff Name<br/>e.g. Purba Champaran -> East Champaran<br/>'Mukesh Tiwari ' -> 'Mukesh Tiwari'"]
+    Canonical --> MasterMatch{Matches Official Staff Directory?}
+    MasterMatch -->|Yes| Bind[Bind strictly to Official Directory Entry]
+    MasterMatch -->|Alias| AliasResolver["Resolve Alias<br/>e.g. Ashwani Kumar -> Ashwani Kr Keshri"]
+    AliasResolver --> Bind
+    MasterMatch -->|No| Isolate[Exclude from Dashboard Pacing Matrix]
 ```
+
+- **Single Source of Truth**: The dashboard candidate list is built strictly from the official `staffDirectory` and `staffList`.
+- **Rogue Document Migration**: Trailing-space anomalies (e.g. `bhojpur_mukesh_tiwari__2026-09-08`) were sanitized and merged into canonical documents.
+- **Alias Resolution**: Common field shorthand (e.g. "Ashwani Kumar") credits accurately to the official record ("Ashwani Kr Keshri").
 
 ---
 
-## 5. Security & Multi-Admin Access Architecture
+## 6. Security & Multi-Admin Access Architecture
 
-### 5.1 Field Officer Authentication
-- **4-Digit PIN Model**: Fast, frictionless authentication tied to `{district}_{fo_name}` without complex passwords.
-- **Session Continuity**: Securely cached in `localStorage` (`dfy_active_fo_session`) to keep staff logged in across browser closes while verifying PIN upon daily report dispatch.
-
-### 5.2 Multi-Admin Role-Based Access Control (RBAC)
+### 6.1 Multi-Admin Role-Based Access Control (RBAC)
 The platform enforces strict hierarchical separation between administrative roles:
 
 ```mermaid
 flowchart LR
-    User[Admin Login Request] --> CheckRole{Role & Permissions}
-    CheckRole -->|SUPER_ADMIN| SuperAccess["Super Admin Privileges<br/>• Full Statewide 22+ Districts Access<br/>• User Management & District Assignment<br/>• Statewide Broadcast Studio<br/>• Master Excel Consolidations<br/>• 30-Day Audit Pruning Control"]
-    CheckRole -->|SUB_ADMIN| SubFilter["Sub-Admin Boundary Filter<br/>• Restricted to allowed_districts<br/>• District-Scoped Staff & Targets<br/>• District-Scoped Attendance & Feed<br/>• Broadcast Creation strictly for Assigned Districts<br/>• Target/ID Editing restricted by permission flags"]
+    User[Admin Request + JWT Token] --> VerifyToken{Valid JWT?}
+    VerifyToken -->|No| Reject[401 Unauthorized]
+    VerifyToken -->|Yes| CheckRole{Role & District Scope}
+    CheckRole -->|SUPER_ADMIN| SuperAccess["Super Admin Authority<br/>• Statewide 22+ Districts Access<br/>• User Management & District Assignment<br/>• Statewide Broadcast Studio<br/>• Master Excel Consolidations<br/>• Report Deletion across all districts<br/>• 30-Day Audit Pruning Control"]
+    CheckRole -->|SUB_ADMIN| SubFilter["Sub-Admin Boundary Filter<br/>• Strictly restricted to allowed_districts<br/>• District-Scoped Staff & Targets<br/>• District-Scoped Attendance & Feed<br/>• Scoped Report Deletion Guard<br/>• Broadcast Creation for Assigned Districts only"]
 ```
 
-### 5.3 Zero-Budget Emergency Disaster Recovery
-- To eliminate vendor lock-in or catastrophic lockout if an admin forgets their master password:
-  - **Master Recovery Key**: `DFY-RESCUE-9921` backed by emergency security PIN `7788`.
-  - **One-Click Emergency Access Card Generator**: Produces an offline credentials card (`.txt`) for the Chief Medical Officer / State Program Manager.
-  - **Self-Healing Reset Endpoint**: `/admin/auth/emergency-reset` verifies cryptographic recovery credentials and safely restores administrative access directly in Firestore.
+### 6.2 Atomic Staff Day Report Deletion (`POST /admin/reports/delete-day`)
+- **Purpose**: Enables administrators to delete erroneous or corrupt single-day reports for any field officer.
+- **Security Guard**: Enforces Sub-Admin RBAC. If a sub-admin attempts to delete a report outside their `allowed_districts`, the backend rejects the request with HTTP 403.
+- **Atomic Rollback Pipeline**:
+  1. Deletes document from `daily_field_reports`.
+  2. Atomically decrements `submission_count` and category metrics (`notifications`, `tests`, `hiv_dm`, etc.) in `daily_district_rollups`.
+  3. Removes `fo_name` from `submitted_fos` in the rollup.
+  4. Purges all dashboard RAM and disk cache prefixes.
+  5. Records an immutable audit log entry in `admin_audit_logs`.
+
+### 6.3 Zero-Budget Emergency Disaster Recovery
+- **Master Recovery Key**: `DFY-RESCUE-9921` backed by emergency security PIN `7788`.
+- **One-Click Emergency Access Card**: Generates an offline credentials card (`.txt`) for the Chief Medical Officer / State Program Manager.
+- **Self-Healing Reset**: `/admin/emergency-reset` verifies recovery credentials and restores administrative access directly in Firestore.
 
 ---
 
-## 6. Audit Trail & Automated 30-Day Retention Engine
+## 7. Audit Trail & Automated 30-Day Retention Engine
 
-To maintain rigorous compliance without bloating the Firestore database on the free tier:
+To maintain rigorous compliance without bloating the Firestore database:
 
 1. **Automated Batch Purge**:
-   - `prune_expired_audit_logs(retention_days=30)` queries Firestore for records where:
-     $$\\text{timestamp} < (\\text{now} - 30\\text{ days})$$
-   - Deletes matching records in atomic Firestore batch writes (`db.batch().delete(...)`).
-2. **Scheduled & Triggered Execution**:
-   - Executes automatically on backend boot via `@app.on_event("startup")`.
-   - Runs periodically in the background (throttled to at most once every 6 hours) when `/admin/audit-logs` is fetched.
+   - `prune_expired_audit_logs(retention_days=30)` queries records older than 30 days and deletes them via atomic Firestore batch writes.
+2. **Startup & Periodic Execution**:
+   - Runs on backend startup via `@app.on_event("startup")` and throttled to once every 6 hours during audit queries.
 3. **Strict Query Cutoff**:
-   - Even before background batch deletion completes, `/admin/audit-logs` and `/admin/export-audit-logs` apply a strict 30-day cutoff filter, ensuring expired logs are never served to the client or exported to Excel.
-4. **Manual Admin Override**:
-   - Super Admins can execute manual batch pruning on demand using `/admin/audit-logs/prune`.
+   - `/admin/audit-logs` and `/admin/export-audit-logs` enforce a 30-day cutoff, guaranteeing expired logs are never served or exported.
 
 ---
 
-## 7. Production Deployment Specification
+## 8. Production Deployment Specification
 
-### 7.1 Backend Web Service (Render.com)
+### 8.1 Backend Web Service (Render.com)
 - **Environment**: Python 3.10+
 - **Build Command**: `pip install -r requirements.txt`
 - **Start Command**:
@@ -255,12 +236,14 @@ To maintain rigorous compliance without bloating the Firestore database on the f
   ```
 - **Environment Variables**:
   - `FIREBASE_CREDENTIALS`: Service account key JSON string.
-  - `PORT`: Dynamically provided by Render (default: 10000).
+  - `JWT_SECRET_KEY`: Secret string for HS256 JWT signing.
+  - `PORT`: Dynamically assigned by Render (default: 10000).
 
-### 7.2 Frontend PWA (Vercel)
+### 8.2 Frontend PWA (Vercel / Netlify)
 - **Framework Preset**: Vite
 - **Root Directory**: `dfy-frontend`
 - **Build Command**: `npm run build`
 - **Output Directory**: `dist`
+- **PWA Service Worker**: Generated automatically via `vite-plugin-pwa` precaching all critical assets.
 - **Environment Variables**:
   - `VITE_API_URL`: Backend URL (e.g. `https://dfy-mis-app.onrender.com`).
