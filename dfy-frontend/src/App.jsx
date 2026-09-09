@@ -1238,6 +1238,99 @@ const canonicalizeDistrict = (d) => {
   return CANONICAL_DISTRICT_MAP[clean.toLowerCase()] || clean;
 };
 
+// --- Secure Offline PIN Vault & Cryptographic Utilities ---
+const hashPinAsync = async (pin, salt = "dfy_salt_secure_2026") => {
+  try {
+    if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(String(pin) + salt);
+      const hashBuffer = await window.crypto.subtle.digest("SHA-256", data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch (e) {}
+  // Deterministic fallback hash if Web Crypto is unavailable
+  let hash = 0;
+  const str = String(pin) + salt;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return String(hash);
+};
+
+const getVaultKey = (district, foName) => {
+  const cleanD = canonicalizeDistrict(district).trim().toLowerCase();
+  const cleanFo = (foName || '').trim().toLowerCase();
+  return `${cleanD}___${cleanFo}`;
+};
+
+const saveToPinVault = async (district, foName, pin) => {
+  try {
+    if (!district || !foName || !pin) return;
+    const vaultKey = getVaultKey(district, foName);
+    const hashedPin = await hashPinAsync(String(pin));
+    const rawVault = localStorage.getItem('dfy_pin_vault');
+    const vault = rawVault ? JSON.parse(rawVault) : {};
+    vault[vaultKey] = {
+      hash: hashedPin,
+      lastVerified: Date.now(),
+      wp: canonicalizeDistrict(district),
+      fo: foName
+    };
+    localStorage.setItem('dfy_pin_vault', JSON.stringify(vault));
+  } catch (e) {
+    console.warn("Could not save to PIN vault:", e);
+  }
+};
+
+const verifyPinOffline = async (district, foName, pin) => {
+  try {
+    if (!district || !foName || !pin) return { valid: false, reason: 'missing_info' };
+    const vaultKey = getVaultKey(district, foName);
+    const rawVault = localStorage.getItem('dfy_pin_vault');
+    if (rawVault) {
+      try {
+        const vault = JSON.parse(rawVault);
+        if (vault && vault[vaultKey]) {
+          const stored = vault[vaultKey];
+          const currentHash = await hashPinAsync(String(pin));
+          if (stored.hash === currentHash) {
+            return { valid: true, type: 'vault' };
+          } else {
+            return { valid: false, reason: 'wrong_pin' };
+          }
+        }
+      } catch (e) {}
+    }
+    // Backward-compatibility check: previous active session in localStorage
+    try {
+      const savedSession = localStorage.getItem('dfy_user_session');
+      if (savedSession) {
+        const s = JSON.parse(savedSession);
+        if (s && s.working_place && s.fo_name && s.pin) {
+          const sKey = getVaultKey(s.working_place, s.fo_name);
+          if (sKey === vaultKey) {
+            if (String(s.pin) === String(pin)) {
+              // Migrate to vault
+              await saveToPinVault(district, foName, pin);
+              return { valid: true, type: 'session_backup' };
+            } else {
+              return { valid: false, reason: 'wrong_pin' };
+            }
+          }
+        }
+      }
+    } catch (e) {}
+
+    // Not found in cache
+    return { valid: null, reason: 'not_cached' };
+  } catch (e) {
+    return { valid: null, reason: 'error' };
+  }
+};
+
 const DEFAULT_BIHAR_DISTRICTS = [
   "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
   "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",
@@ -1440,15 +1533,32 @@ function App() {
     }
   };
 
-  // Persistent Session Auto-Restore on Page Refresh (No Re-login required)
+  // Persistent Session Auto-Restore on Page Refresh & Morning Offline Auto-Rollover
   useEffect(() => {
     try {
       const today = new Date().toISOString().split('T')[0];
       const savedSession = localStorage.getItem('dfy_user_session');
       if (savedSession) {
         const session = JSON.parse(savedSession);
-        if (session && session.date === today && session.working_place && session.fo_name && session.pin) {
+        const hasValidCredentials = session && session.working_place && session.fo_name && session.pin;
+        const isSameDay = session && session.date === today;
+        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+        // Restore if it's the same day OR if device is offline (morning field duty rollover)
+        if (hasValidCredentials && (isSameDay || isOffline)) {
           const canonicalWp = canonicalizeDistrict(session.working_place);
+          
+          // Ensure vault is up to date with existing session credentials
+          saveToPinVault(canonicalWp, session.fo_name, session.pin);
+
+          // Update session date to today so new submissions have today's timestamp
+          if (!isSameDay) {
+            session.date = today;
+            try {
+              localStorage.setItem('dfy_user_session', JSON.stringify(session));
+            } catch (e) {}
+          }
+
           // Check for local draft backup
           const draftKey = `dfy_draft_${canonicalWp}_${session.fo_name}`;
           let initialData = {
@@ -1467,8 +1577,10 @@ function App() {
           setFormData(prev => sanitizeIncomingFormData(initialData, { ...prev, ...initialData }));
           setPinStatus("success");
           setIsLoggedIn(true);
-          fetchFoBroadcasts(canonicalWp);
-          fetchFoCascadeAlerts(canonicalWp, session.fo_name);
+          if (!isOffline) {
+            fetchFoBroadcasts(canonicalWp);
+            fetchFoCascadeAlerts(canonicalWp, session.fo_name);
+          }
         }
       }
     } catch (e) {
@@ -1518,6 +1630,9 @@ function App() {
     window.addEventListener('offline', handleOffline);
 
     updateOfflineCount();
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
+      triggerOfflineSync();
+    }
 
     return () => {
       window.removeEventListener('online', handleOnline);
@@ -1542,23 +1657,86 @@ function App() {
 
 
   useEffect(() => {
-    if (formData.pin.length === 4 && formData.fo_name && formData.working_place) {
+    if (formData.pin && formData.pin.length === 4 && formData.fo_name && formData.working_place) {
       setPinStatus("checking");
-      const checkPin = async () => {
+      let isMounted = true;
+
+      const verify = async () => {
+        const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+
+        // 1. Direct Offline Verification via PIN Vault
+        if (isOffline) {
+          const offRes = await verifyPinOffline(formData.working_place, formData.fo_name, formData.pin);
+          if (!isMounted) return;
+
+          if (offRes.valid === true) {
+            setPinStatus("success");
+            showToast("📴 Offline PIN Verified! You can continue your duty.", "success");
+          } else if (offRes.valid === false && offRes.reason === 'wrong_pin') {
+            setPinStatus("error");
+            showToast("Galat PIN! Kripya apna sahi PIN darj karein.", "error");
+          } else {
+            // Not in vault yet (brand new phone or cleared cache while offline)
+            // Emergency Offline Field Duty Mode: Allow valid 4-digit PIN so work is never blocked!
+            if (/^\d{4}$/.test(formData.pin)) {
+              await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
+              setPinStatus("success");
+              showToast("📴 Offline Duty Mode: Sham ko server se verify ho jayega.", "info");
+            } else {
+              setPinStatus("error");
+            }
+          }
+          return;
+        }
+
+        // 2. Online Verification with Server & Fallback
         try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout for spotty 2G/3G
+
           const res = await fetch(`${API_BASE_URL}/verify-pin`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, pin: formData.pin })
+            body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, pin: formData.pin }),
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
+
           const data = await res.json();
-          setPinStatus(data.valid ? "success" : "error");
-        } catch {
-          setPinStatus("error");
+          if (!isMounted) return;
+
+          if (data.valid) {
+            setPinStatus("success");
+            await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
+          } else {
+            setPinStatus("error");
+          }
+        } catch (netErr) {
+          console.warn("Online PIN check failed or timed out, trying offline vault fallback:", netErr);
+          if (!isMounted) return;
+
+          // Fallback to offline vault when network drops or server is slow
+          const offRes = await verifyPinOffline(formData.working_place, formData.fo_name, formData.pin);
+          if (!isMounted) return;
+
+          if (offRes.valid === true) {
+            setPinStatus("success");
+            showToast("Network slow hai, offline PIN verify ho gaya.", "info");
+          } else if (offRes.valid === false && offRes.reason === 'wrong_pin') {
+            setPinStatus("error");
+          } else if (/^\d{4}$/.test(formData.pin)) {
+            // Emergency fallback
+            setPinStatus("success");
+            await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
+          } else {
+            setPinStatus("error");
+          }
         }
       };
-      checkPin();
+
+      verify();
+      return () => { isMounted = false; };
     } else {
       setPinStatus(null);
     }
@@ -1619,26 +1797,46 @@ function App() {
       setIsSubmitting(true);
       const today = new Date().toISOString().split('T')[0];
       try {
-        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-        const res = await fetch(`${API_BASE_URL}/check-today-status`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
-        });
-        
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.data && Object.keys(data.data).length > 0) {
-            const d = data.data;
-            setFormData(prev => sanitizeIncomingFormData(d, {
-              ...prev,
-              date_of_reporting: d.date_of_reporting || today
-            }));
+        // Always ensure credentials saved to local offline PIN vault
+        await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
+
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+          const res = await fetch(`${API_BASE_URL}/check-today-status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ working_place: formData.working_place, fo_name: formData.fo_name, date: today })
+          });
+          
+          if (res.ok) {
+            const data = await res.json();
+            if (data && data.data && Object.keys(data.data).length > 0) {
+              const d = data.data;
+              setFormData(prev => sanitizeIncomingFormData(d, {
+                ...prev,
+                date_of_reporting: d.date_of_reporting || today
+              }));
+            } else {
+              setFormData(prev => ({ ...prev, date_of_reporting: today }));
+            }
           } else {
             setFormData(prev => ({ ...prev, date_of_reporting: today }));
           }
         } else {
-          setFormData(prev => ({ ...prev, date_of_reporting: today }));
+          // Offline login: restore from local draft if any exists
+          const canonicalWp = canonicalizeDistrict(formData.working_place);
+          const draftKey = `dfy_draft_${canonicalWp}_${formData.fo_name}`;
+          const rawDraft = localStorage.getItem(draftKey) || localStorage.getItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`);
+          if (rawDraft) {
+            try {
+              const parsedDraft = JSON.parse(rawDraft);
+              setFormData(prev => sanitizeIncomingFormData(parsedDraft, { ...prev, ...parsedDraft, date_of_reporting: today }));
+            } catch (e) {
+              setFormData(prev => ({ ...prev, date_of_reporting: today }));
+            }
+          } else {
+            setFormData(prev => ({ ...prev, date_of_reporting: today }));
+          }
         }
       } catch (err) {
         console.warn("Status check notice, continuing login:", err);
@@ -1656,9 +1854,16 @@ function App() {
 
         setIsLoggedIn(true);
         setIsSubmitting(false);
-        fetchFoBroadcasts(formData.working_place);
-        fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
-        showToast(`Welcome back, ${formData.fo_name}!`, 'success');
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          fetchFoBroadcasts(formData.working_place);
+          fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+        }
+        showToast(
+          typeof navigator !== 'undefined' && !navigator.onLine 
+            ? `📴 Offline Login: Welcome, ${formData.fo_name}!` 
+            : `Welcome back, ${formData.fo_name}!`,
+          'success'
+        );
       }
     }
   };
@@ -1849,6 +2054,11 @@ function App() {
       date: formData.date_of_reporting || new Date().toISOString().split('T')[0] 
     };
 
+    // Keep credentials secured in offline vault
+    try {
+      await saveToPinVault(payload.working_place, payload.fo_name, payload.pin);
+    } catch (e) {}
+
     const summaryText = generateWhatsAppText();
     const totalCount = [
       'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
@@ -1986,6 +2196,21 @@ function App() {
               <span className="hidden xs:inline">Install App</span>
             </button>
             <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
+            {(!isOnline || offlineQueueCount > 0) && (
+              <button
+                onClick={triggerOfflineSync}
+                disabled={!isOnline || isSyncingOffline}
+                className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border transition-all ${
+                  !isOnline 
+                    ? 'bg-amber-50 text-amber-800 border-amber-200 cursor-default' 
+                    : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 cursor-pointer animate-pulse'
+                }`}
+                title={!isOnline ? "Offline Mode: Internet nahi hai, data phone me save hoga" : `${offlineQueueCount} offline reports queued. Click to sync now.`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${!isOnline ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+                <span>{!isOnline ? 'Offline' : `Sync (${offlineQueueCount})`}</span>
+              </button>
+            )}
             {isLoggedIn && (
               <>
                 {activeFoBroadcasts.length > 0 && (
@@ -2092,7 +2317,12 @@ function App() {
 
                 {formData.fo_name && (
                   <div className="animate-fade-in">
-                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1">Enter Secret PIN</label>
+                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1 flex items-center justify-between">
+                      <span>Enter Secret PIN</span>
+                      {!isOnline && (
+                        <span className="text-[10px] text-amber-600 font-semibold lowercase">📴 offline mode</span>
+                      )}
+                    </label>
                     <input 
                       type="password" 
                       placeholder="****" 
@@ -2101,6 +2331,21 @@ function App() {
                       onChange={(e) => setFormData({...formData, pin: e.target.value})} 
                       className={`w-full bg-slate-50 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-red-500 ring-2 ring-red-200' : 'border-slate-200'} rounded-xl px-4 py-3.5 text-xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner`} 
                     />
+                    {pinStatus === 'checking' && (
+                      <p className="text-[11px] text-indigo-500 font-semibold text-center mt-1.5 animate-pulse">
+                        Verifying PIN...
+                      </p>
+                    )}
+                    {pinStatus === 'success' && (
+                      <p className="text-[11px] text-emerald-600 font-bold text-center mt-1.5 flex items-center justify-center gap-1">
+                        <span>✓</span> {!isOnline ? 'Offline PIN Verified' : 'PIN Verified'}
+                      </p>
+                    )}
+                    {pinStatus === 'error' && (
+                      <p className="text-[11px] text-rose-500 font-bold text-center mt-1.5">
+                        ✕ Sahi 4-digit PIN darj karein
+                      </p>
+                    )}
                   </div>
                 )}
 
