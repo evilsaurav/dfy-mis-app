@@ -368,17 +368,19 @@ class DailyActivityReport(BaseModel):
 class DashboardRequest(BaseModel):
     month_prefix: str
     districts: Optional[str] = None
+    force_refresh: Optional[bool] = False
 
-async def get_raw_monthly_reports(month_prefix: str) -> list:
+async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> list:
     """
     Shared in-memory cache for monthly daily_field_reports.
     Avoids redundant 2,000-read collection streams when /admin/dashboard-data,
     /admin/duplicate-audit, and pacing queries run concurrently.
     """
     cache_key = f"shared_raw_month_{month_prefix}"
-    cached = cache.get(cache_key)
-    if cached is not None and isinstance(cached, list):
-        return cached
+    if not force:
+        cached = cache.get(cache_key)
+        if cached is not None and isinstance(cached, list):
+            return cached
 
     start_date = f"{month_prefix}-01"
     end_date = f"{month_prefix}-31"
@@ -398,9 +400,23 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
     try:
         user_tag = admin.get("user_id") or admin.get("username") or "admin"
         cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+
+        if req.force_refresh:
+            cache.delete_prefix("dash_")
+            cache.delete_prefix("shared_raw_month_")
+            cache.delete_prefix("attendance_")
+            cache.delete_prefix("dupe_audit_")
+            cache.delete_prefix("cascade_alerts_")
+            try:
+                snap_path = f"cache/dash_{req.month_prefix}.json"
+                if os.path.exists(snap_path):
+                    os.remove(snap_path)
+            except Exception:
+                pass
+        else:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
 
         allowed_dist_set = None
         if req.districts and req.districts.strip() and req.districts.strip() != "All":
@@ -419,7 +435,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         # Load from shared monthly reports cache
         records = []
         try:
-            raw_docs = await get_raw_monthly_reports(req.month_prefix)
+            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh))
             for data in raw_docs:
                 wp = data.get("working_place", "Unknown")
                 c_wp = canonicalize_district(wp)
@@ -661,7 +677,10 @@ async def submit_daily_report(report: DailyActivityReport):
         if not report.date_of_reporting:
             report.date_of_reporting = datetime.now().strftime("%Y-%m-%d")
         if report.working_place:
-            report.working_place = canonicalize_district(report.working_place)
+            report.working_place = canonicalize_district(report.working_place.strip())
+        if report.fo_name:
+            import re
+            report.fo_name = re.sub(r'\s+', ' ', report.fo_name).strip()
             
         doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
@@ -2253,11 +2272,39 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
                 raise HTTPException(status_code=400, detail=f"ID '{req.new_id}' is already present in this category.")
             current_list.append(req.new_id)
 
-        await asyncio.to_thread(lambda: doc_ref.update({
+        count_key = cat_key.replace("_ids", "")
+        doc_update = {
             cat_key: current_list,
+            count_key: len(current_list),
             "last_edited_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "last_edited_by": req.edited_by
-        }))
+        }
+        if cat_key == "notification_ids":
+            doc_update["notifications"] = len(current_list)
+
+        await asyncio.to_thread(lambda: doc_ref.update(doc_update))
+
+        # Atomic adjustment to daily_district_rollups if applicable
+        if req.action in ["delete", "add"]:
+            try:
+                metric_map = {
+                    "notification_ids": "notifications",
+                    "sample_tested_ids": "tests",
+                    "hiv_dm_ids": "hiv_dm",
+                    "dbt_ids": "dbt",
+                    "contact_tracing_ids": "contact_tracing",
+                    "differentiated_tb_ids": "diff_tb"
+                }
+                if cat_key in metric_map:
+                    delta = -1 if req.action == "delete" else 1
+                    rollup_id = f"{req.date}_{c_wp}".replace(" ", "_").lower()
+                    rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                    await asyncio.to_thread(lambda: rollup_ref.update({
+                        metric_map[cat_key]: firestore.Increment(delta),
+                        "last_updated": firestore.SERVER_TIMESTAMP
+                    }))
+            except Exception:
+                pass
         
         log_entry = {
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -2287,6 +2334,14 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
         cache.delete_prefix("attendance_")
         cache.delete_prefix("dupe_audit_")
         cache.delete_prefix("cascade_alerts_")
+
+        try:
+            month_pfx = req.date[:7]
+            snap_path = f"cache/dash_{month_pfx}.json"
+            if os.path.exists(snap_path):
+                os.remove(snap_path)
+        except Exception:
+            pass
         
         return {
             "success": True,
@@ -2339,8 +2394,9 @@ async def admin_feed_officer_data(
         admin_user = admin.get("username", "Admin")
         allowed_dists = admin.get("allowed_districts", [])
 
-        clean_wp = canonicalize_district(req.district)
-        clean_fo = req.fo_name.strip()
+        clean_wp = canonicalize_district(req.district.strip())
+        import re
+        clean_fo = re.sub(r'\s+', ' ', req.fo_name).strip()
         if not clean_wp or not clean_fo:
             raise HTTPException(status_code=400, detail="District and Field Officer name are required.")
 
@@ -2573,6 +2629,151 @@ async def admin_feed_officer_data(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to feed officer data: {str(e)}")
+
+# --- Admin Delete Full Day Report Feature ---
+class DeleteDayReportReq(BaseModel):
+    district: str
+    fo_name: str
+    date: str # YYYY-MM-DD
+
+@app.post("/admin/reports/delete-day")
+async def admin_delete_day_report(
+    req: DeleteDayReportReq,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_user = admin.get("username", "Admin")
+        allowed_dists = admin.get("allowed_districts", [])
+
+        clean_wp = canonicalize_district(req.district.strip())
+        import re
+        clean_fo = re.sub(r'\s+', ' ', req.fo_name).strip()
+        clean_date = req.date.strip()
+
+        if not clean_wp or not clean_fo or not clean_date:
+            raise HTTPException(status_code=400, detail="District, Field Officer name, and Date are required.")
+
+        # 1. RBAC Guard: Sub-Admin can only delete data in permitted districts
+        if admin_role == "SUB_ADMIN":
+            allowed_c = [canonicalize_district(a).lower() for a in allowed_dists]
+            if allowed_dists and not ("All" in allowed_dists or clean_wp.lower() in allowed_c or req.district.strip().lower() in allowed_c):
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Permission denied: You cannot delete reports for {req.district} district."
+                )
+
+        # 2. Locate all candidate documents in daily_field_reports
+        candidate_doc_ids = [
+            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
+        ]
+
+        matching_docs = []
+        for cid in candidate_doc_ids:
+            cand_ref = db.collection("daily_field_reports").document(cid)
+            snap = await asyncio.to_thread(cand_ref.get)
+            if snap.exists:
+                matching_docs.append(snap)
+                break
+
+        if not matching_docs:
+            query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                .where("date_of_reporting", "==", clean_date)
+                .stream()))
+            for d in query_docs:
+                d_dict = d.to_dict()
+                d_fo = str(d_dict.get("fo_name", "")).strip().lower()
+                d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
+                if d_fo == clean_fo.lower() and d_wp == clean_wp.lower():
+                    matching_docs.append(d)
+
+        if not matching_docs:
+            raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
+
+        # 3. Calculate metrics to rollback from rollups
+        total_deleted_ids = 0
+        deleted_metrics = {
+            "notifications": 0, "tests": 0, "hiv_dm": 0, "dbt": 0,
+            "contact_tracing": 0, "diff_tb": 0
+        }
+
+        for doc_snap in matching_docs:
+            d_dict = doc_snap.to_dict()
+            total_deleted_ids += sum(len(v) for k, v in d_dict.items() if isinstance(v, list) and k.endswith("_ids"))
+            deleted_metrics["notifications"] += len(d_dict.get("notification_ids", []))
+            deleted_metrics["tests"] += len(d_dict.get("sample_tested_ids", []))
+            deleted_metrics["hiv_dm"] += len(d_dict.get("hiv_dm_ids", []))
+            deleted_metrics["dbt"] += len(d_dict.get("dbt_ids", []))
+            deleted_metrics["contact_tracing"] += len(d_dict.get("contact_tracing_ids", []))
+            deleted_metrics["diff_tb"] += len(d_dict.get("differentiated_tb_ids", []))
+            # Delete document
+            await asyncio.to_thread(doc_snap.reference.delete)
+
+        # 4. Atomic Rollback in daily_district_rollups
+        try:
+            rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
+            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+            r_snap = await asyncio.to_thread(rollup_ref.get)
+            if r_snap.exists:
+                rollup_update = {
+                    "submission_count": firestore.Increment(-len(matching_docs)),
+                    "last_updated": firestore.SERVER_TIMESTAMP
+                }
+                for m_key, m_val in deleted_metrics.items():
+                    if m_val > 0:
+                        rollup_update[m_key] = firestore.Increment(-m_val)
+                r_dict = r_snap.to_dict()
+                old_fos = r_dict.get("submitted_fos", [])
+                new_fos = [f for f in old_fos if f.strip().lower() != clean_fo.lower()]
+                rollup_update["submitted_fos"] = new_fos
+                await asyncio.to_thread(lambda: rollup_ref.update(rollup_update))
+        except Exception as r_err:
+            print(f"[Delete Day Rollup Notice] {r_err}")
+
+        # 5. Invalidate caches
+        for cid in candidate_doc_ids:
+            cache.delete(f"status_{cid}")
+        cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("profile_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
+
+        month_pfx = clean_date[:7]
+        try:
+            snap_path = f"cache/dash_{month_pfx}.json"
+            if os.path.exists(snap_path):
+                os.remove(snap_path)
+        except Exception:
+            pass
+
+        # 6. Immutable Audit Trail
+        await log_admin_activity(
+            action_type="DELETE_DAILY_REPORT",
+            details=f"Admin {admin_user} deleted full day report for {clean_fo} ({clean_wp}) on {clean_date} ({total_deleted_ids} IDs deleted)",
+            district=clean_wp,
+            target_officer=clean_fo,
+            user_name=admin_user,
+            role=admin_role,
+            diff={"date": clean_date, "deleted_docs": len(matching_docs), "total_ids": total_deleted_ids}
+        )
+
+        return {
+            "success": True,
+            "message": f"Successfully deleted report for {clean_fo} on {clean_date} ({total_deleted_ids} IDs removed).",
+            "district": clean_wp,
+            "fo_name": clean_fo,
+            "date": clean_date,
+            "deleted_ids_count": total_deleted_ids
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete day report: {str(e)}")
 
 # --- Admin Staff & PIN Management Suite ---
 class AddStaffReq(BaseModel):

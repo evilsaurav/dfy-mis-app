@@ -1565,12 +1565,12 @@ function App() {
   }, [formData.pin, formData.fo_name, formData.working_place]);
 
   const handleDistrictChange = (e) => {
-    setFormData({ ...formData, working_place: e.target.value, fo_name: "", pin: "" });
+    setFormData({ ...formData, working_place: (e.target.value || "").trim(), fo_name: "", pin: "" });
     setPinStatus(null);
   }
 
   const handleNameChange = (e) => {
-    setFormData({ ...formData, fo_name: e.target.value, pin: "" });
+    setFormData({ ...formData, fo_name: (e.target.value || "").trim(), pin: "" });
     setPinStatus(null);
   }
 
@@ -1842,7 +1842,12 @@ function App() {
     }
     
     setIsSubmitting(true);
-    const payload = { ...formData, date: formData.date_of_reporting || new Date().toISOString().split('T')[0] };
+    const payload = { 
+      ...formData, 
+      working_place: (formData.working_place || '').trim(),
+      fo_name: (formData.fo_name || '').trim(),
+      date: formData.date_of_reporting || new Date().toISOString().split('T')[0] 
+    };
 
     const summaryText = generateWhatsAppText();
     const totalCount = [

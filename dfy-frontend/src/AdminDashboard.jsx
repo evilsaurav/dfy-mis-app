@@ -99,6 +99,7 @@ export default function AdminDashboard() {
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("");
   const [adminEditModal, setAdminEditModal] = useState(null);
+  const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
   const [showStaffSuite, setShowStaffSuite] = useState(false);
   const [staffList, setStaffList] = useState([]);
   const [staffSearchQuery, setStaffSearchQuery] = useState("");
@@ -1171,6 +1172,40 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleExecuteDeleteDay = async () => {
+    if (!deleteDayModal) return;
+    const { district, fo_name, date } = deleteDayModal;
+    setDeleteDayModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/reports/delete-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district, fo_name, date })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        // Optimistic State Update: remove record from rawRecords in memory
+        setRawRecords(prev => prev.filter(r => {
+          const matchFo = (r.fo_name || '').trim().toLowerCase() === fo_name.trim().toLowerCase();
+          const matchDist = canonicalizeDistrict(r.working_place || '') === canonicalizeDistrict(district);
+          const matchDate = (r.date_of_reporting || r.date) === date;
+          return !(matchFo && matchDist && matchDate);
+        }));
+
+        setDeleteDayModal(null);
+        showToast(`✓ Date ${date} report for ${fo_name} successfully deleted.`, "success");
+        fetchDuplicateAudit();
+        fetchAttendance();
+      } else {
+        setDeleteDayModal(prev => ({ ...prev, error: data.detail || "Failed to delete day report.", loading: false }));
+      }
+    } catch (err) {
+      setDeleteDayModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
+
   const handleDownloadKpi = () => {
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
@@ -1263,12 +1298,12 @@ Keep this file safe in your Google Drive or personal diary.
   };
 
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh = false) => {
     setIsLoading(true);
     setError('');
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const payload = { month_prefix: month };
+      const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         payload.districts = currentUser.allowed_districts.join(',');
       }
@@ -1694,31 +1729,34 @@ const availableDistrictsForFeed = useMemo(() => {
     const seenMap = new Set();
     const candidateList = [];
 
-    // 1. Collect candidates from staffList
-    if (staffList && staffList.length > 0) {
-      staffList.forEach(s => candidateList.push({ name: s.name, district: s.district, designation: s.designation || 'Field Officer' }));
-    }
-
-    // 2. From staffDirectory
-    if (staffDirectory) {
+    // Strict Staff Alignment: Single Source of Truth from Official Staff Directory
+    if (staffDirectory && Object.keys(staffDirectory).length > 0) {
       Object.keys(staffDirectory).forEach(dist => {
+        const cDist = canonicalizeDistrict(dist);
         (staffDirectory[dist] || []).forEach(name => {
-          candidateList.push({ name, district: dist, designation: 'Field Officer' });
+          const cleanName = (name || '').trim();
+          if (cleanName) {
+            candidateList.push({ name: cleanName, district: cDist, designation: 'Field Officer' });
+          }
         });
       });
     }
 
-    // 3. From rawRecords
-    rawRecords.forEach(r => {
-      if (r.fo_name && r.working_place) {
-        candidateList.push({ name: r.fo_name, district: r.working_place, designation: 'Field Officer' });
-      }
-    });
+    // Include registered staff from staffList (Admin Staff Management suite)
+    if (staffList && staffList.length > 0) {
+      staffList.forEach(s => {
+        const cleanName = (s.name || '').trim();
+        const cDist = canonicalizeDistrict(s.district || '');
+        if (cleanName && cDist) {
+          candidateList.push({ name: cleanName, district: cDist, designation: s.designation || 'Field Officer' });
+        }
+      });
+    }
 
-    // De-duplicate candidates
+    // De-duplicate candidates by normalized canonical key
     const uniqueCandidates = [];
     candidateList.forEach(c => {
-      const key = `${c.district}___${c.name}`;
+      const key = `${canonicalizeDistrict(c.district)}___${c.name.trim().toLowerCase()}`;
       if (!seenMap.has(key)) {
         seenMap.add(key);
         uniqueCandidates.push(c);
@@ -1730,17 +1768,34 @@ const availableDistrictsForFeed = useMemo(() => {
     const list = [];
 
     uniqueCandidates.forEach(c => {
+      const cDist = canonicalizeDistrict(c.district);
       // Sub-Admin RBAC filter
-      if (isSubAdmin && !currentUser.allowed_districts.includes(c.district)) {
-        return;
+      if (isSubAdmin) {
+        const allowedCanonical = (currentUser.allowed_districts || []).map(canonicalizeDistrict);
+        if (!allowedCanonical.includes(cDist) && !allowedCanonical.includes(c.district)) {
+          return;
+        }
       }
 
-      // Find target
-      const tObj = targetsData.find(t => t.fo_name === c.name && t.district === c.district);
+      const officerLower = c.name.trim().toLowerCase();
+
+      // Find target with normalized matching
+      const tObj = targetsData.find(t => {
+        if (!t.fo_name || !t.district) return false;
+        return canonicalizeDistrict(t.district) === cDist && t.fo_name.trim().toLowerCase() === officerLower;
+      });
       const target = tObj ? (Number(tObj.target) || 0) : 50;
 
-      // Find monthly records
-      const officerRecords = rawRecords.filter(r => r.fo_name === c.name && r.working_place === c.district);
+      // Find monthly records with normalized trimmed matching
+      const officerRecords = rawRecords.filter(r => {
+        if (!r.working_place || !r.fo_name) return false;
+        if (canonicalizeDistrict(r.working_place) !== cDist) return false;
+        const rName = r.fo_name.trim().toLowerCase();
+        if (rName === officerLower) return true;
+        // Legacy alias resolution (Ashwani Kumar -> Ashwani Kr Keshri)
+        if (officerLower === 'ashwani kr keshri' && (rName === 'ashwani kumar' || rName === 'ashwani kr keshri')) return true;
+        return false;
+      });
       const achieved = officerRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
       const activeDaysCount = new Set(officerRecords.map(r => r.date_of_reporting || r.date).filter(Boolean)).size;
 
@@ -2161,7 +2216,7 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => {
-                    fetchData();
+                    fetchData(true);
                     fetchAttendance();
                     fetchDirectory();
                     loadTargets('All');
@@ -2169,6 +2224,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     fetchStaffList();
                     fetchActiveBroadcasts();
                     if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
+                    showToast("✓ Dashboard refreshed from live database!", "success");
                   }}
                   disabled={isLoading}
                   className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
@@ -4720,6 +4776,54 @@ const availableDistrictsForFeed = useMemo(() => {
         </div>
       )}
 
+      {/* 🗑️ Delete Full Day Report Confirmation Modal */}
+      {deleteDayModal && deleteDayModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-100 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center text-xl font-black shrink-0">
+                🗑️
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-800">Delete Day Report?</h3>
+                <p className="text-[11px] text-slate-400 font-bold uppercase">{deleteDayModal.fo_name} &bull; {deleteDayModal.district}</p>
+              </div>
+            </div>
+            
+            <div className="bg-red-50/70 border border-red-200 rounded-2xl p-4 text-xs text-red-900 mb-4 space-y-2">
+              <p className="font-bold">
+                Kya aap sach me <span className="underline font-mono">{deleteDayModal.date}</span> ka poora report data delete karna chahte hain?
+              </p>
+              <p className="text-[11px] text-red-700 leading-relaxed">
+                Is din ke sabhi <strong>{deleteDayModal.dayIdsCount} Patient IDs</strong> aur travel record ({deleteDayModal.km || 0} KM) permanently delete ho jayenge aur attendance absent mark ho jayegi. Yeh action undo nahi ho sakta.
+              </p>
+            </div>
+
+            {deleteDayModal.error && (
+              <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100 mb-3">{deleteDayModal.error}</p>
+            )}
+
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteDayModal(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={deleteDayModal.loading}
+                onClick={handleExecuteDeleteDay}
+                className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-600/20 active:scale-95 transition-all cursor-pointer"
+              >
+                {deleteDayModal.loading ? "Deleting..." : "Yes, Delete Entire Day"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 📊 Unified Reports & Export Studio Modal */}
       {showReportsStudio && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -5164,7 +5268,26 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span>📅</span> {rec.date}
                             <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">{dayIdsCount} IDs</span>
                           </span>
-                          <span className="text-[10px] font-bold text-slate-400">{rec.total_km} KM Travelled</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-bold text-slate-400">{rec.total_km} KM Travelled</span>
+                            <button
+                              type="button"
+                              onClick={() => setDeleteDayModal({
+                                isOpen: true,
+                                district: rec.working_place || inspectingFO.district,
+                                fo_name: inspectingFO.fo_name,
+                                date: rec.date,
+                                dayIdsCount: dayIdsCount,
+                                km: rec.total_km || 0,
+                                loading: false,
+                                error: ""
+                              })}
+                              className="text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200/60 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 active:scale-95 cursor-pointer ml-1"
+                              title={`Delete entire day report for ${rec.date}`}
+                            >
+                              <span>🗑️</span> Delete Day
+                            </button>
+                          </div>
                         </div>
 
                         {rec.visited_names && rec.visited_names.length > 0 && (
