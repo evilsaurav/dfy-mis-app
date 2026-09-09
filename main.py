@@ -67,7 +67,8 @@ import pandas as pd
 import io
 import os
 import json
-import uuid
+import re
+import openpyxl
 import jwt
 import bcrypt
 
@@ -889,22 +890,9 @@ async def download_excel(admin: dict = Depends(get_current_admin)):
 
 
 
-import os
-import openpyxl
-import re
-
 def safe_filename(district: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9]+", "_", district.strip())
     return cleaned.strip("_") or "UNKNOWN"
-
-def ordinal(n: int) -> str:
-    if n == 1:
-        return "1ST"
-    if 10 <= n % 100 <= 20:
-        suffix = "th"
-    else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
-    return f"{n}{suffix}"
 
 
 class TargetUpdate(BaseModel):

@@ -148,7 +148,6 @@ export default function AdminDashboard() {
   const [feedLoading, setFeedLoading] = useState(false);
   const [feedError, setFeedError] = useState("");
   const [feedSuccess, setFeedSuccess] = useState("");
-  const [feedActiveCategory, setFeedActiveCategory] = useState("notification_ids");
   const [feedShowAllCategories, setFeedShowAllCategories] = useState(false);
 
   // --- Multi-Admin RBAC & Audit Trail State ---
@@ -231,7 +230,6 @@ export default function AdminDashboard() {
   const [ledgerLoading, setLedgerLoading] = useState(false);
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerDistrict, setLedgerDistrict] = useState('All');
-  const [ledgerPage, setLedgerPage] = useState(1);
   const [ledgerExporting, setLedgerExporting] = useState(false);
 
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
