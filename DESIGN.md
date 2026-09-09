@@ -132,6 +132,15 @@ The 4-digit PIN input features real-time dynamic micro-feedback directly beneath
   $$\text{Notification} \longrightarrow \text{HIV/DM Screening} \longrightarrow \text{DBT Account Linking} \longrightarrow \text{Treatment Outcome}$$
 - Severity tags: `CRITICAL` (Missing both HIV/DM and DBT), `WARNING` (Missing one vital linkage), `ON TRACK` (Complete clinical linkage).
 
+### 4.7 Automated Daily Cloud Backup & Disaster Recovery Modal
+- **Access Control**: Visible strictly to `SUPER_ADMIN` via top action bar (`💾 Backups`) and Command Deck Governance cluster.
+- **Visual Design**:
+  - **Today's Status Card**: Emerald pulsating dot indicator (`✓ Up-to-Date & Active`), cloud bucket region (`🇮🇳 Mumbai, India`), and 30-day retention badge.
+  - **On-Demand Action Banner**: Indigo callout card with `⚡ Backup Now` button and spinner animation.
+  - **Snapshots History Table**: Clean monospace filenames, creation dates, compressed file sizes in KB, record counts, and provenance tags (`Automated Daily` vs `Manual Admin`).
+  - **Direct 1-Click Download**: `📥 Download` button initiates direct browser stream of `.json.gz` archive.
+  - **Emergency Disaster Recovery Drawer**: Safety-guarded restore interface requiring typed confirmation keyword `RESTORE-CONFIRM`.
+
 ---
 
 ## 5. Mobile Ergonomics & Accessibility

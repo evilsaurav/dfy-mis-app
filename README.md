@@ -273,8 +273,15 @@ Mis field report/
 |---|---|---|
 | `GET` | `/admin/export-state-summary` | Download Statewide Executive Consolidation (`.xlsx`) |
 | `GET` | `/download-district-kpi` | Download District-specific drilldown workbook (`.xlsx`) |
-| `GET` | `/download-all-kpi-workbooks` | Download 1-Click State ZIP Package containing all districts |
 | `GET` | `/admin/export-fo-dossier` | Download Single Officer Performance Dossier (`.xlsx`) |
+
+### 7. Automated Cloud Backups & Disaster Recovery (Option A)
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/admin/backup/status` | Super Admin: Live backup status, storage bucket location, and snapshots list |
+| `POST` | `/admin/backup/trigger-now` | Super Admin: On-demand immediate database snapshot creation |
+| `GET` | `/admin/backup/download/{filename}` | Super Admin: Stream compressed `.json.gz` backup archive directly to local device |
+| `POST` | `/admin/backup/restore` | Super Admin: Emergency disaster recovery restore with `RESTORE-CONFIRM` safety guard |
 
 ---
 

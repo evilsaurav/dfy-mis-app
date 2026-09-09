@@ -225,7 +225,56 @@ To maintain rigorous compliance without bloating the Firestore database:
 
 ---
 
-## 8. Production Deployment Specification
+## 8. Automated Daily Cloud Backup & Disaster Recovery Architecture (Option A)
+
+```mermaid
+flowchart TD
+    subgraph Triggers ["Non-Blocking Auto-Triggers"]
+        Startup["Backend Startup (@app.on_event)"]
+        MorningSync["First Daily Report / Attendance Request"]
+        ManualTrigger["Super Admin 'Backup Now' Button"]
+    end
+
+    subgraph Engine ["Cloud Backup Engine (asyncio.to_thread)"]
+        CheckCache{"Today's Snapshot<br/>Exists in GCS?"}
+        StreamAll["Stream 10 Collections from Firestore<br/>(Reports, Rollups, Staff, Targets, Patients, etc.)"]
+        GZip["Compress JSON Payload<br/>(GZip Level 6: ~1.1MB -> ~96KB)"]
+        PruneOld["30-Day Auto Retention Policy<br/>(Delete GCS blobs older than 30 days)"]
+    end
+
+    subgraph Storage ["Google Cloud Storage (Mumbai, India)"]
+        GCS["Bucket: dfy-mis-backups-2026<br/>daily_backups/backup_YYYY-MM-DD.json.gz"]
+    end
+
+    subgraph Admin ["Super Admin Controls"]
+        Status["GET /admin/backup/status"]
+        Download["1-Click Direct Download (.json.gz)"]
+        Restore["Emergency Restore (RESTORE-CONFIRM)"]
+    end
+
+    Startup --> CheckCache
+    MorningSync --> CheckCache
+    CheckCache -->|No| StreamAll
+    CheckCache -->|Yes| End["0ms - No Op"]
+    ManualTrigger --> StreamAll
+
+    StreamAll --> GZip
+    GZip --> GCS
+    GCS --> PruneOld
+
+    GCS -.-> Status
+    GCS -.-> Download
+    GCS -.-> Restore
+```
+
+### Key Technical Properties:
+1. **100% Free Cloud Tier**: Each daily snapshot is compressed from >1.1 MB down to ~96 KB. 30 days of retention consumes less than 3 MB total, well within Google Cloud's 5 GB free tier.
+2. **Zero Field Latency**: The backup check and snapshot creation run asynchronously in a background worker thread (`asyncio.create_task` + `asyncio.to_thread`), having 0ms latency impact on field submissions.
+3. **Emergency Disaster Recovery**: In the event of catastrophic data loss, Super Admins can restore all 10 collections directly from any cloud snapshot using the protected keyword `RESTORE-CONFIRM`.
+
+---
+
+## 9. Production Deployment Specification
 
 ### 8.1 Backend Web Service (Render.com)
 - **Environment**: Python 3.10+
