@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -73,6 +73,8 @@ export default function AdminDashboard() {
   const [bulkTargetValue, setBulkTargetValue] = useState("");
   const [targetsData, setTargetsData] = useState([]);
   const [activeMetric, setActiveMetric] = useState('notifications');
+  const [performanceViewMode, setPerformanceViewMode] = useState('chart'); // 'chart' | 'cards'
+  const [performanceMetricFilter, setPerformanceMetricFilter] = useState('notif_only'); // 'notif_only' | 'target_vs_notif' | 'pct_achieve'
   const [inspectingFO, setInspectingFO] = useState(null);
   const [foSearchId, setFoSearchId] = useState("");
   const [copiedFoCategory, setCopiedFoCategory] = useState(null);
@@ -1693,27 +1695,24 @@ const availableDistrictsForFeed = useMemo(() => {
 
   const totals = useMemo(() => aggregate(filteredRecords), [filteredRecords]);
 
-  // District Comparison Data (for Bar Chart)
-  const districtComparisonData = useMemo(() => {
-    const map = {};
-    const visibleRecords = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
-      ? rawRecords.filter(r => currentUser.allowed_districts.includes(r.working_place))
-      : rawRecords;
-    visibleRecords.forEach(r => {
-      if (!map[r.working_place]) map[r.working_place] = aggregate([]);
-      for (let key in map[r.working_place]) {
-        if (key === 'overrides') map[r.working_place][key] += r.is_override ? 1 : 0;
-        else map[r.working_place][key] += (r[key] || 0);
-      }
-    });
-    return Object.keys(map).map(k => ({ working_place: k, ...map[k] }));
-  }, [rawRecords, currentUser]);
+  // Option A: Daily Timeline Trend Data (Dynamic calendar days, peak day, daily average)
+  const dailyTrendStats = useMemo(() => {
+    let totalDays = 31;
+    let year = 2026;
+    let monthIdx = 8;
+    try {
+      const [yStr, mStr] = (month || new Date().toISOString().slice(0, 7)).split('-');
+      year = parseInt(yStr, 10);
+      monthIdx = parseInt(mStr, 10) - 1;
+      totalDays = new Date(year, monthIdx + 1, 0).getDate();
+    } catch (e) {
+      totalDays = 31;
+    }
 
-  // Daily Timeline Trend Data
-  const dailyTrendData = useMemo(() => {
-    const days = Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, '0'));
+    const days = Array.from({ length: totalDays }, (_, i) => String(i + 1).padStart(2, '0'));
     const map = {};
     days.forEach(d => { map[d] = 0; });
+
     filteredRecords.forEach(r => {
       if (r.date_of_reporting) {
         const parts = r.date_of_reporting.split('-');
@@ -1723,8 +1722,107 @@ const availableDistrictsForFeed = useMemo(() => {
         }
       }
     });
-    return days.map(d => ({ day: `${Number(d)}`, value: map[d] }));
-  }, [filteredRecords, activeMetric]);
+
+    let peakDay = { day: '01', value: 0 };
+    let totalVal = 0;
+    const chartData = days.map(d => {
+      const val = map[d];
+      totalVal += val;
+      if (val > peakDay.value) {
+        peakDay = { day: d, value: val };
+      }
+      return {
+        day: `${Number(d)}`,
+        value: val
+      };
+    });
+
+    const today = new Date();
+    const isCurrentMonth = (year === today.getFullYear() && monthIdx === today.getMonth());
+    const elapsedDays = isCurrentMonth ? Math.min(today.getDate(), totalDays) : totalDays;
+    const avgDaily = elapsedDays > 0 ? (totalVal / elapsedDays).toFixed(1) : '0';
+
+    return {
+      chartData,
+      totalVal,
+      peakDay,
+      avgDaily,
+      totalDays
+    };
+  }, [filteredRecords, activeMetric, month]);
+
+  // Backward compatibility alias for any component expecting dailyTrendData
+  const dailyTrendData = dailyTrendStats.chartData;
+
+  // Unified Target vs Achievement & Performance Data
+  const performanceData = useMemo(() => {
+    // Mode 1: Statewide / Multi-District View
+    if (selectedDistrict === 'All') {
+      let distList = DEFAULT_BIHAR_DISTRICTS;
+      // Strict Sub-Admin Enforcing: Sub-Admin only sees their allowed districts!
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+        distList = distList.filter(d => userAllowed.includes(d));
+      }
+
+      const list = distList.map(dist => {
+        const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
+        const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
+        const target = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+        const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
+        return {
+          name: dist,
+          district: dist,
+          notifications: notif,
+          target: target,
+          percentage: pct,
+          reports: distRecords.length,
+          type: 'district'
+        };
+      });
+
+      if (performanceMetricFilter === 'pct_achieve') {
+        return list.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
+      }
+      return list.sort((a, b) => b.notifications - a.notifications || b.percentage - a.percentage);
+    }
+
+    // Mode 2: Specific District View -> Field Officers in selectedDistrict
+    const targetDist = canonicalizeDistrict(selectedDistrict);
+    const distRecs = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === targetDist);
+    const dirFos = staffDirectory[targetDist] || [];
+    const allFos = Array.from(new Set([...dirFos, ...distRecs.map(r => r.fo_name)])).filter(Boolean);
+
+    const list = allFos.map(fo => {
+      const foRecs = distRecs.filter(r => r.fo_name === fo);
+      const notif = foRecs.reduce((sum, r) => sum + (r.notifications || 0), 0);
+      const targetObj = targetsData.find(t => t.fo_name === fo && canonicalizeDistrict(t.district) === targetDist);
+      const target = targetObj ? (Number(targetObj.target) || 0) : 0;
+      const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
+      return {
+        name: fo,
+        fo_name: fo,
+        district: targetDist,
+        notifications: notif,
+        target: target,
+        percentage: pct,
+        reports: foRecs.length,
+        type: 'officer'
+      };
+    });
+
+    if (performanceMetricFilter === 'pct_achieve') {
+      return list.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
+    }
+    return list.sort((a, b) => b.notifications - a.notifications || b.percentage - a.percentage);
+  }, [rawRecords, targetsData, staffDirectory, selectedDistrict, currentUser, performanceMetricFilter]);
+
+  const performanceChartHeight = useMemo(() => {
+    const len = performanceData.length;
+    return Math.min(850, Math.max(340, len * 30 + 50));
+  }, [performanceData]);
+
+  const districtComparisonData = performanceData;
 
   // District Performance Leaderboard
   const leaderboardData = useMemo(() => {
@@ -3024,35 +3122,118 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Visualizations */}
+            {/* Visual Analytics Row: Option A (Daily Progression Trend) & Work Balance Radar */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Bar Chart */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2">
-                <h3 className="text-slate-800 font-black mb-4">
-                  {isSubAdmin
-                    ? `Field Officer Performance Breakdown (${selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts || []).join(', ')})`
-                    : (selectedDistrict === 'All' ? 'District Performance Comparison' : `${selectedDistrict} Performance Breakdown`)}
-                </h3>
-                <div className="h-72">
+              {/* Option A: Day-by-Day Daily Progression Trend */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col justify-between">
+                <div>
+                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">📈</span>
+                        <h3 className="text-slate-800 font-black text-base">
+                          Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
+                        </h3>
+                      </div>
+                      <p className="text-slate-400 text-xs font-semibold mt-0.5">
+                        {selectedDistrict !== 'All' 
+                          ? `Day-by-day progression for ${selectedDistrict}` 
+                          : (isSubAdmin 
+                              ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
+                              : 'Day-by-day statewide performance progression across Bihar')}
+                      </p>
+                    </div>
+
+                    {/* Metric Switcher */}
+                    <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-[11px] font-bold">
+                      {[
+                        { key: 'notifications', label: '🔔 Notif' },
+                        { key: 'tests', label: '🔬 Tests' },
+                        { key: 'total_km', label: '🚗 KM' },
+                        { key: 'presumptive', label: '🩺 Presump' }
+                      ].map(m => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setActiveMetric(m.key)}
+                          className={`px-2.5 py-1 rounded-lg transition-all ${
+                            activeMetric === m.key
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Trend Badges */}
+                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                      Peak: Day {Number(dailyTrendStats.peakDay.day)} ({dailyTrendStats.peakDay.value} {activeMetric === 'total_km' ? 'KM' : 'IDs'})
+                    </span>
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                      Daily Avg: {dailyTrendStats.avgDaily} / day
+                    </span>
+                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
+                      Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* AreaChart */}
+                <div className="h-60 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={isSubAdmin ? foComparisonData : districtComparisonData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                      <XAxis dataKey={isSubAdmin ? "fo_name" : "working_place"} tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} axisLine={false} tickLine={false} />
-                      <YAxis tick={{fill: '#64748b', fontSize: 11, fontWeight: 600}} axisLine={false} tickLine={false} />
-                      <Tooltip cursor={{fill: '#f8fafc'}} contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px -2px rgba(0,0,0,0.1)', fontWeight: 'bold'}} />
-                      <Legend wrapperStyle={{fontWeight: 600, fontSize: '11px', color: '#64748b'}} />
-                      <Bar dataKey="notifications" name="Notifications" fill="#10b981" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="tests" name="Samples Tested" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="total_km" name="Total KM" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    </BarChart>
+                    <AreaChart data={dailyTrendStats.chartData} margin={{ top: 5, right: 15, left: -15, bottom: 5 }}>
+                      <defs>
+                        <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
+                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="day" 
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
+                        axisLine={{ stroke: '#e2e8f0' }} 
+                        tickLine={false}
+                        interval={1}
+                      />
+                      <YAxis 
+                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
+                        axisLine={false} 
+                        tickLine={false} 
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
+                        labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
+                        formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#6366f1" 
+                        strokeWidth={2.5} 
+                        fillOpacity={1} 
+                        fill="url(#trendGradient)" 
+                        dot={{ r: 2, fill: '#6366f1' }}
+                        activeDot={{ r: 5, fill: '#4338ca' }}
+                      />
+                    </AreaChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
               {/* Radar Chart */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
-                <h3 className="text-slate-800 font-black mb-0 text-center">Work Balance Radar</h3>
-                <div className="h-72">
+              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-slate-800 font-black mb-1 text-center">Work Balance Radar</h3>
+                  <p className="text-slate-400 text-[11px] font-semibold text-center mb-2">Multi-domain clinical balance</p>
+                </div>
+                <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
                     <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
                       <PolarGrid stroke="#e2e8f0" />
@@ -3066,14 +3247,228 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Live Target vs Achievement Progress Bars */}
+            {/* Unified Section: Target vs Achievement & Performance */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <div className="flex justify-between items-center mb-4">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-5 pb-4 border-b border-slate-100">
                 <div>
-                  <h3 className="text-slate-800 font-black text-base">Target vs Achievement Overview</h3>
-                  <p className="text-slate-400 text-xs font-semibold">Live performance monitoring & milestone completion</p>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🏆</span>
+                    <h3 className="text-slate-800 font-black text-lg">
+                      Target vs Achievement &amp; Performance
+                    </h3>
+                    {selectedDistrict !== 'All' && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDistrict('All')}
+                        className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                        title="Return to Statewide View"
+                      >
+                        ← View All Districts
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-slate-400 text-xs font-semibold mt-0.5">
+                    {selectedDistrict === 'All'
+                      ? (isSubAdmin 
+                          ? `Performance monitoring for ${(currentUser?.allowed_districts || []).join(', ')} • Ranked by achievement` 
+                          : `Statewide monitoring across 22 Bihar Districts • Ranked by achievement • Click any district to inspect field officers`)
+                      : `Field Officer performance breakdown for ${selectedDistrict} • Click any officer to inspect details`}
+                  </p>
                 </div>
-                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider">
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Metric Filter (when in chart view) */}
+                  {performanceViewMode === 'chart' && (
+                    <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => setPerformanceMetricFilter('notif_only')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                          performanceMetricFilter === 'notif_only'
+                            ? 'bg-emerald-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>🔔</span> Notifications Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPerformanceMetricFilter('target_vs_notif')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                          performanceMetricFilter === 'target_vs_notif'
+                            ? 'bg-indigo-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>🎯</span> Target vs Achieved
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPerformanceMetricFilter('pct_achieve')}
+                        className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                          performanceMetricFilter === 'pct_achieve'
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        <span>📈</span> % Achievement
+                      </button>
+                    </div>
+                  )}
+
+                  {/* View Switcher Toggle */}
+                  <div className="flex items-center gap-1 bg-indigo-50/70 p-1 rounded-xl border border-indigo-200/60 text-xs font-black">
+                    <button
+                      type="button"
+                      onClick={() => setPerformanceViewMode('chart')}
+                      className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                        performanceViewMode === 'chart'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-indigo-700 hover:bg-white/80'
+                      }`}
+                    >
+                      <span>📊</span> Bar Chart
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPerformanceViewMode('cards')}
+                      className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                        performanceViewMode === 'cards'
+                          ? 'bg-indigo-600 text-white shadow-sm'
+                          : 'text-indigo-700 hover:bg-white/80'
+                      }`}
+                    >
+                      <span>🗂️</span> Grid Cards
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Render View 1: Bar Chart */}
+              {performanceViewMode === 'chart' && (
+                <div>
+                  <div style={{ height: `${performanceChartHeight}px` }} className="w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        layout="vertical"
+                        data={performanceData}
+                        margin={{ top: 5, right: 45, left: 15, bottom: 5 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                        <XAxis 
+                          type="number" 
+                          tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                          axisLine={{ stroke: '#cbd5e1' }}
+                          tickLine={false} 
+                        />
+                        <YAxis 
+                          type="category" 
+                          dataKey="name" 
+                          width={130} 
+                          tick={{ fill: '#1e293b', fontSize: 12, fontWeight: 700 }} 
+                          axisLine={false} 
+                          tickLine={false} 
+                        />
+                        <Tooltip 
+                          cursor={{ fill: '#f8fafc' }} 
+                          contentStyle={{ 
+                            borderRadius: '12px', 
+                            border: 'none', 
+                            boxShadow: '0 4px 20px -2px rgba(0,0,0,0.1)', 
+                            fontWeight: 'bold' 
+                          }} 
+                        />
+                        <Legend wrapperStyle={{ fontWeight: 700, fontSize: '12px', color: '#64748b', paddingTop: '8px' }} />
+
+                        {performanceMetricFilter === 'notif_only' && (
+                          <Bar 
+                            dataKey="notifications" 
+                            name="TB Notifications" 
+                            fill="#10b981" 
+                            radius={[0, 6, 6, 0]}
+                            onClick={(entry) => {
+                              if (entry?.type === 'district' && entry?.name) {
+                                setSelectedDistrict(entry.name);
+                              } else if (entry?.type === 'officer' && entry?.name) {
+                                setInspectingFO({ fo_name: entry.name, district: selectedDistrict });
+                              }
+                            }}
+                            className="cursor-pointer hover:opacity-90"
+                          >
+                            <LabelList 
+                              dataKey="notifications" 
+                              position="right" 
+                              style={{ fill: '#059669', fontWeight: 800, fontSize: 11 }} 
+                              formatter={(v) => (v > 0 ? `${v}` : '')}
+                            />
+                          </Bar>
+                        )}
+
+                        {performanceMetricFilter === 'target_vs_notif' && (
+                          <>
+                            <Bar 
+                              dataKey="notifications" 
+                              name="Achieved Notifications" 
+                              fill="#10b981" 
+                              radius={[0, 6, 6, 0]}
+                              onClick={(entry) => {
+                                if (entry?.type === 'district' && entry?.name) {
+                                setSelectedDistrict(entry.name);
+                              } else if (entry?.type === 'officer' && entry?.name) {
+                                setInspectingFO({ fo_name: entry.name, district: selectedDistrict });
+                              }
+                            }}
+                            className="cursor-pointer"
+                          >
+                            <LabelList 
+                              dataKey="notifications" 
+                              position="right" 
+                              style={{ fill: '#059669', fontWeight: 800, fontSize: 11 }} 
+                              formatter={(v) => (v > 0 ? `${v}` : '')}
+                            />
+                          </Bar>
+                          <Bar 
+                            dataKey="target" 
+                            name="Monthly Target" 
+                            fill="#cbd5e1" 
+                            radius={[0, 6, 6, 0]} 
+                          />
+                        </>
+                      )}
+
+                      {performanceMetricFilter === 'pct_achieve' && (
+                        <Bar 
+                          dataKey="percentage" 
+                          name="Target Completion (%)" 
+                          fill="#6366f1" 
+                          radius={[0, 6, 6, 0]}
+                          onClick={(entry) => {
+                            if (entry?.type === 'district' && entry?.name) {
+                              setSelectedDistrict(entry.name);
+                            } else if (entry?.type === 'officer' && entry?.name) {
+                              setInspectingFO({ fo_name: entry.name, district: selectedDistrict });
+                            }
+                          }}
+                          className="cursor-pointer"
+                        >
+                          <LabelList 
+                            dataKey="percentage" 
+                            position="right" 
+                            style={{ fill: '#4f46e5', fontWeight: 800, fontSize: 11 }} 
+                            formatter={(v) => `${v}%`}
+                          />
+                        </Bar>
+                      )}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* Render View 2: Grid Cards */}
+            {performanceViewMode === 'cards' && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider justify-end">
                   <span className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-100">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span> &gt;=100% Target Complete
                   </span>
@@ -3084,71 +3479,63 @@ const availableDistrictsForFeed = useMemo(() => {
                     <span className="w-2 h-2 rounded-full bg-red-500"></span> &lt;50% Lagging
                   </span>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {tableData.map((row, idx) => {
-                  const notifCount = row.notifications || 0;
-                  
-                  // Calculate target: if district row, sum all targets for this district; if FO row, find FO target
-                  let targetNum = 0;
-                  if (selectedDistrict === 'All') {
-                    // Sum targets of all FOs in this district
-                    targetNum = targetsData.filter(t => t.district === row.name).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
-                  } else {
-                    const targetObj = targetsData.find(t => t.fo_name === row.name && (t.district === selectedDistrict || t.district === row.working_place));
-                    targetNum = targetObj ? Number(targetObj.target) : 0;
-                  }
-                  
-                  const pct = targetNum > 0 ? Math.min(100, Math.round((notifCount / targetNum) * 100)) : 0;
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {performanceData.map((row, idx) => {
+                    const notifCount = row.notifications || 0;
+                    const targetNum = row.target || 0;
+                    const pct = row.percentage || 0;
 
-                  let statusColor = "text-red-600 bg-red-50 border-red-200";
-                  let barColor = "bg-red-500";
-                  let statusText = "Lagging";
+                    let statusColor = "text-red-600 bg-red-50 border-red-200";
+                    let barColor = "bg-red-500";
+                    let statusText = "Lagging";
 
-                  if (pct >= 100) {
-                    statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
-                    barColor = "bg-emerald-500";
-                    statusText = "Completed";
-                  } else if (pct >= 50) {
-                    statusColor = "text-amber-700 bg-amber-50 border-amber-200";
-                    barColor = "bg-amber-400";
-                    statusText = "In Progress";
-                  }
+                    if (pct >= 100) {
+                      statusColor = "text-emerald-700 bg-emerald-50 border-emerald-200";
+                      barColor = "bg-emerald-500";
+                      statusText = "Completed";
+                    } else if (pct >= 50) {
+                      statusColor = "text-amber-700 bg-amber-50 border-amber-200";
+                      barColor = "bg-amber-400";
+                      statusText = "In Progress";
+                    }
 
-                  return (
-                    <div key={idx} className="bg-slate-50/70 p-4 rounded-xl border border-slate-100 hover:border-slate-200 transition-all">
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <h4 
-                            onClick={() => {
-                              if (selectedDistrict !== 'All') {
-                                setInspectingFO({ fo_name: row.name, district: selectedDistrict });
-                              } else {
-                                // If district card, filter to district; if officer, inspect
-                                setSelectedDistrict(row.name);
-                              }
-                            }}
-                            className="text-sm font-black text-slate-800 truncate max-w-[180px] hover:text-indigo-600 hover:underline cursor-pointer"
-                            title="Click to inspect all submitted IDs or filter district"
-                          >
-                            {row.name}
-                          </h4>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{notifCount} Notif / {targetNum} Target</p>
+                    return (
+                      <div key={idx} className="bg-slate-50/70 p-4 rounded-xl border border-slate-100 hover:border-slate-200 transition-all">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <h4 
+                              onClick={() => {
+                                if (row.type === 'district') {
+                                  setSelectedDistrict(row.name);
+                                } else {
+                                  setInspectingFO({ fo_name: row.name, district: selectedDistrict });
+                                }
+                              }}
+                              className="text-sm font-black text-slate-800 truncate max-w-[180px] hover:text-indigo-600 hover:underline cursor-pointer"
+                              title={row.type === 'district' ? "Click to filter to this district" : "Click to inspect officer"}
+                            >
+                              {row.name}
+                            </h4>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {notifCount} Notif / {targetNum} Target
+                            </p>
+                          </div>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusColor}`}>
+                            {statusText} ({pct}%)
+                          </span>
                         </div>
-                        <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${statusColor}`}>
-                          {statusText} ({pct}%)
-                        </span>
-                      </div>
 
-                      <div className="w-full bg-slate-200/80 rounded-full h-2.5 overflow-hidden">
-                        <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${pct}%` }}></div>
+                        <div className="w-full bg-slate-200/80 rounded-full h-2.5 overflow-hidden">
+                          <div className={`h-full rounded-full transition-all duration-700 ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }}></div>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
+          </div>
 
                         {/* Target Pacing Forecaster & District Benchmarking */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
