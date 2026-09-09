@@ -1591,16 +1591,58 @@ async def my_profile_stats(req: ProfileStatsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def format_to_ist_time(raw_ts) -> str:
+    """Converts Firestore timestamp or ISO string to Indian Standard Time (IST - UTC+5:30) 12-hour format."""
+    if not raw_ts:
+        return ""
+    try:
+        from datetime import datetime, timezone, timedelta
+        ist_offset = timezone(timedelta(hours=5, minutes=30))
+        
+        # If Firestore DatetimeWithNanoseconds or Python datetime
+        if isinstance(raw_ts, datetime):
+            if raw_ts.tzinfo is None:
+                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
+            else:
+                dt_utc = raw_ts
+            dt_ist = dt_utc.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+            
+        str_ts = str(raw_ts).strip()
+        clean_str = str_ts.replace("Z", "+00:00")
+        if "T" in clean_str or "+" in clean_str or "-" in clean_str:
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt_ist = dt.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+        else:
+            dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=timezone.utc)
+            dt_ist = dt.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+    except Exception:
+        return str(raw_ts)[:16]
+
+
 @app.get("/admin/today-attendance")
-async def get_today_attendance(date: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+async def get_today_attendance(
+    date: Optional[str] = None, 
+    districts: Optional[str] = None, 
+    force_refresh: Optional[bool] = False, 
+    admin: dict = Depends(get_current_admin)
+):
     try:
         if not date:
             date = datetime.now().strftime("%Y-%m-%d")
             
         cache_key = f"attendance_{date}_{districts or 'all'}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+        if force_refresh:
+            cache.delete(cache_key)
+        else:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
             
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":
@@ -1647,19 +1689,39 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
                 continue
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', d.get('fo_name', '')).lower()
             key = f"{dist}_{clean_fo}".replace(" ", "").lower()
+            
+            raw_ts = d.get("timestamp_completed") or d.get("timestamp") or d.get("submitted_at")
+            submitted_time = format_to_ist_time(raw_ts)
+            iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
+            
+            total_km = 0
+            if d.get("total_km"):
+                try: total_km = int(d.get("total_km"))
+                except: pass
+            elif d.get("morning_km") is not None and d.get("evening_km") is not None:
+                try: total_km = max(0, int(d.get("evening_km")) - int(d.get("morning_km")))
+                except: pass
+
             reports_map[key] = {
+                "district": dist,
+                "fo_name": d.get('fo_name', '').strip(),
                 "submission_count": d.get("submission_count", 1),
-                "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+                "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
+                "submitted_time": submitted_time or "Submitted",
+                "timestamp_raw": iso_ts,
+                "total_km": total_km
             }
             
         submitted_full = []
         submitted_partial = []
         missing_fos = []
+        matched_report_keys = set()
         
         for s in staff_list:
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
             key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
             if key in reports_map:
+                matched_report_keys.add(key)
                 rep = reports_map[key]
                 info = {**s, **rep}
                 if rep["submission_count"] >= 2:
@@ -1667,9 +1729,38 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
                 else:
                     submitted_partial.append(info)
             else:
-                missing_fos.append(s)
-                
-        # Sort missing FOs by district then name
+                # Also check alias (e.g. Ashwani Kumar vs Ashwani Kr Keshri)
+                alias_key = None
+                if "ashwanikrkeshri" in key:
+                    alias_key = f"{s['district']}_ashwanikumar".replace(" ", "").lower()
+                elif "ashwanikumar" in key:
+                    alias_key = f"{s['district']}_ashwanikrkeshri".replace(" ", "").lower()
+                if alias_key and alias_key in reports_map:
+                    matched_report_keys.add(alias_key)
+                    rep = reports_map[alias_key]
+                    info = {**s, **rep}
+                    if rep["submission_count"] >= 2:
+                        submitted_full.append(info)
+                    else:
+                        submitted_partial.append(info)
+                else:
+                    missing_fos.append(s)
+
+        # In case an officer submitted whose name is not in staff_list, also include them in submitted list
+        for rkey, rinfo in reports_map.items():
+            if rkey not in matched_report_keys:
+                orphan_info = {
+                    "district": rinfo["district"],
+                    "fo_name": rinfo["fo_name"],
+                    "designation": "Field Officer",
+                    **rinfo
+                }
+                submitted_partial.append(orphan_info)
+
+        # Combine all submitted officers
+        submitted_fos = submitted_full + submitted_partial
+        # Sort submitted_fos by timestamp descending (latest submissions first)
+        submitted_fos.sort(key=lambda x: (x.get("timestamp_raw") or "", x["district"], x["fo_name"]), reverse=True)
         missing_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
         submitted_full.sort(key=lambda x: (x["district"], x["fo_name"]))
         submitted_partial.sort(key=lambda x: (x["district"], x["fo_name"]))
@@ -1677,9 +1768,11 @@ async def get_today_attendance(date: Optional[str] = None, districts: Optional[s
         res = {
             "date": date,
             "total_staff": len(staff_list),
+            "submitted_count": len(submitted_fos),
             "submitted_full_count": len(submitted_full),
             "submitted_partial_count": len(submitted_partial),
             "missing_count": len(missing_fos),
+            "submitted_fos": submitted_fos,
             "submitted_full": submitted_full,
             "submitted_partial": submitted_partial,
             "missing_fos": missing_fos

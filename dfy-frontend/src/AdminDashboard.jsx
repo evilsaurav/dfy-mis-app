@@ -118,6 +118,8 @@ export default function AdminDashboard() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [copiedAttendance, setCopiedAttendance] = useState(false);
+  const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted'
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
 
   // --- Admin/Sub-Admin Data Feeding Modal State ---
   const [showAdminFeedModal, setShowAdminFeedModal] = useState(false);
@@ -527,14 +529,19 @@ export default function AdminDashboard() {
     setUnreadBroadcastPopup(null);
   };
 
-  const fetchAttendance = async () => {
+  const fetchAttendance = async (force = false) => {
     setIsAttendanceLoading(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      let q = "";
+      const params = new URLSearchParams();
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-        q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+        params.set('districts', currentUser.allowed_districts.join(','));
       }
+      if (force) {
+        params.set('force_refresh', 'true');
+        params.set('_t', Date.now().toString());
+      }
+      const q = params.toString() ? `?${params.toString()}` : '';
       const res = await authFetch(`${API_BASE_URL}/admin/today-attendance${q}`);
       if (res.ok) {
         const data = await res.json();
@@ -567,6 +574,34 @@ export default function AdminDashboard() {
       msg += `\n`;
     }
     msg += `Kripya sabhi sadasya turant apni field report submit karein!`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg);
+      setCopiedAttendance(true);
+      setTimeout(() => setCopiedAttendance(false), 3000);
+    }
+  };
+
+  const copySubmittedSummary = () => {
+    const list = attendance?.submitted_fos || [...(attendance?.submitted_full || []), ...(attendance?.submitted_partial || [])];
+    if (!list || list.length === 0) return;
+    const byDistrict = {};
+    list.forEach(fo => {
+      if (!byDistrict[fo.district]) byDistrict[fo.district] = [];
+      byDistrict[fo.district].push(fo);
+    });
+
+    let msg = `*DFY MIS - Today's Submitted Field Reports*\n`;
+    msg += `Date: ${attendance.date}\n`;
+    msg += `Submitted: ${list.length} of ${attendance.total_staff} FOs\n\n`;
+
+    for (let dist in byDistrict) {
+      msg += `*${dist}:*\n`;
+      byDistrict[dist].forEach(fo => {
+        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) - ⏰ ${fo.submitted_time || 'Submitted'}\n`;
+      });
+      msg += `\n`;
+    }
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
@@ -2688,15 +2723,25 @@ const availableDistrictsForFeed = useMemo(() => {
 
             <div className="flex items-center gap-3 w-full md:w-auto justify-end">
               <div className="flex items-center gap-2 text-xs font-bold">
-                <span className="bg-emerald-50 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-100 flex items-center gap-2 shadow-sm">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> {attendance.submitted_full_count + attendance.submitted_partial_count} Submitted
-                </span>
-                <span className="bg-red-50 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-100 flex items-center gap-2 shadow-sm">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span> {attendance.missing_count} Missing
-                </span>
+                <button
+                  onClick={() => { setAttendanceActiveTab('submitted'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                  title="Click to view submitted officers with time"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  <span>{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)} Submitted</span>
+                </button>
+                <button
+                  onClick={() => { setAttendanceActiveTab('missing'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                  title="Click to view pending officers"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                  <span>{attendance.missing_count} Missing</span>
+                </button>
               </div>
               <button 
-                onClick={() => setShowAttendanceModal(true)}
+                onClick={() => { setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
                 className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm"
               >
                 View Details
@@ -5380,52 +5425,191 @@ const availableDistrictsForFeed = useMemo(() => {
         );
       })()}
 
-      {/* Missing Attendance Modal */}
-      {showAttendanceModal && attendance && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[85vh] flex flex-col animate-fade-in">
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-800">Pending Field Officers ({attendance.missing_count})</h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Date: {attendance.date}</p>
-              </div>
-              <button onClick={() => setShowAttendanceModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
-            </div>
+      {/* Field Officer Attendance Modal (Pending vs Submitted with Time) */}
+      {showAttendanceModal && attendance && (() => {
+        const submittedList = attendance.submitted_fos || [...(attendance.submitted_full || []), ...(attendance.submitted_partial || [])];
+        const missingList = attendance.missing_fos || [];
 
-            <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-2">
-              {attendance.missing_fos && attendance.missing_fos.length > 0 ? (
-                attendance.missing_fos.map((fo, idx) => (
-                  <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100 hover:border-red-200 transition-colors">
-                    <div>
-                      <p className="text-sm font-bold text-slate-800">{fo.fo_name}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">{fo.district} &bull; {fo.designation}</p>
-                    </div>
-                    <span className="text-[10px] font-black uppercase tracking-wider text-red-600 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full">
-                      Not Submitted
-                    </span>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-10 text-emerald-600 font-bold">
-                  Sabhi Field Officers ne aaj ki report submit kar di hai!
+        const filteredMissing = missingList.filter(fo => {
+          if (!attendanceSearchQuery) return true;
+          const q = attendanceSearchQuery.toLowerCase();
+          return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
+        });
+
+        const filteredSubmitted = submittedList.filter(fo => {
+          if (!attendanceSearchQuery) return true;
+          const q = attendanceSearchQuery.toLowerCase();
+          return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
+        });
+
+        const totalSubmitted = attendance.submitted_count || submittedList.length;
+
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+            <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in my-auto">
+              {/* Header */}
+              <div className="flex justify-between items-start pb-3 border-b border-slate-100 mb-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    <span>Field Officer Daily Attendance</span>
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-bold tracking-wide mt-0.5">
+                    Total Active Staff: <strong className="text-slate-700">{attendance.total_staff}</strong> | Submitted: <strong className="text-emerald-600">{totalSubmitted}</strong> | Pending: <strong className="text-rose-500">{attendance.missing_count}</strong>
+                  </p>
                 </div>
-              )}
-            </div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => fetchAttendance(true)} 
+                    disabled={isAttendanceLoading}
+                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                    title="Live Refresh Attendance"
+                  >
+                    <svg className={`w-4 h-4 ${isAttendanceLoading ? 'animate-spin text-emerald-600' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                  <button onClick={() => setShowAttendanceModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+                </div>
+              </div>
 
-            <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3 mt-auto">
-              <button 
-                onClick={copyMissingReminder}
-                disabled={attendance.missing_count === 0}
-                className={`flex items-center gap-2 font-bold text-xs py-3 px-5 rounded-xl transition-all ${attendance.missing_count > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                {copiedAttendance ? 'WhatsApp Reminder Copied!' : 'Copy WhatsApp Reminder Message'}
-              </button>
-              <button onClick={() => setShowAttendanceModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-3 px-5 rounded-xl transition-colors">Close</button>
+              {/* Navigation Tabs */}
+              <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl mb-3">
+                <button
+                  onClick={() => setAttendanceActiveTab('missing')}
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+                    attendanceActiveTab === 'missing'
+                      ? 'bg-white text-rose-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
+                  <span className="truncate">Pending / Missing ({attendance.missing_count})</span>
+                </button>
+                <button
+                  onClick={() => setAttendanceActiveTab('submitted')}
+                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+                    attendanceActiveTab === 'submitted'
+                      ? 'bg-white text-emerald-600 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                  <span className="truncate">Submitted with Time ({totalSubmitted})</span>
+                </button>
+              </div>
+
+              {/* Quick Search */}
+              <div className="mb-3">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={attendanceSearchQuery}
+                    onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                    placeholder={`Search ${attendanceActiveTab === 'missing' ? 'pending' : 'submitted'} by name or district...`}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pl-9"
+                  />
+                  <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
+                  {attendanceSearchQuery && (
+                    <button 
+                      onClick={() => setAttendanceSearchQuery('')} 
+                      className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 text-sm font-bold"
+                    >
+                      &times;
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* List Container */}
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1">
+                {attendanceActiveTab === 'missing' ? (
+                  filteredMissing.length > 0 ? (
+                    filteredMissing.map((fo, idx) => (
+                      <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors">
+                        <div>
+                          <p className="text-sm font-bold text-slate-800">{fo.fo_name}</p>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{fo.district} &bull; {fo.designation || 'Field Officer'}</p>
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
+                          Not Submitted
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
+                      {attendanceSearchQuery ? 'Koi missing officer match nahi hua.' : '🎉 Sabhi Field Officers ne aaj ki report submit kar di hai!'}
+                    </div>
+                  )
+                ) : (
+                  filteredSubmitted.length > 0 ? (
+                    filteredSubmitted.map((fo, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0">
+                            ✓
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                              <span>{fo.fo_name}</span>
+                              {fo.submission_count > 1 && (
+                                <span className="text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.2 rounded-md">
+                                  {fo.submission_count} edits
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {fo.district} &bull; {fo.designation || 'Field Officer'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          {fo.total_ids !== undefined && (
+                            <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+                              {fo.total_ids} IDs
+                            </span>
+                          )}
+                          <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
+                            <span>⏰</span> {fo.submitted_time || 'Submitted'}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
+                      {attendanceSearchQuery ? 'Koi submitted officer match nahi hua.' : 'Abhi tak kisi officer ne report submit nahi ki hai.'}
+                    </div>
+                  )
+                )}
+              </div>
+
+              {/* Action Footer */}
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3 mt-auto">
+                {attendanceActiveTab === 'missing' ? (
+                  <button 
+                    onClick={copyMissingReminder}
+                    disabled={attendance.missing_count === 0}
+                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${attendance.missing_count > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    <span>{copiedAttendance ? 'Reminder Copied!' : 'Copy WhatsApp Reminder'}</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={copySubmittedSummary}
+                    disabled={totalSubmitted === 0}
+                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${totalSubmitted > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                    <span>{copiedAttendance ? 'Submitted List Copied!' : 'Copy Submitted List (WhatsApp)'}</span>
+                  </button>
+                )}
+                <button onClick={() => setShowAttendanceModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 px-5 rounded-xl transition-colors">Close</button>
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 📝 Admin & Sub-Admin Backdated Data Feeding Modal */}
       {showAdminFeedModal && (
