@@ -5142,47 +5142,6 @@ async def reconcile_nikshay(
         flagged_review_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
         grace_window_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
 
-        # 🕒 Save Persistent Sync Status in Firestore so Render dyno sleep never loses it!
-        now_utc = datetime.now(timezone.utc)
-        now_ist = now_utc + timedelta(hours=5, minutes=30)
-        ist_formatted = now_ist.strftime("%d %b %Y, %I:%M %p")
-        actor_name = admin.get("name") or admin.get("username", "Super Admin")
-        actor_id = admin.get("user_id") or admin.get("username", "admin")
-
-        sync_meta_doc = {
-            "synced_at": now_utc.isoformat(),
-            "synced_at_ist": ist_formatted,
-            "synced_by": actor_name,
-            "synced_by_id": actor_id,
-            "filename": file.filename,
-            "sheet_used": sheet_used,
-            "month": month,
-            "district": district,
-            "total_matched": len(matched),
-            "total_grace_under_72h": len(grace_window_list),
-            "total_flagged_over_72h": len(flagged_review_list),
-            "match_rate_pct": summary.get("match_rate_pct", 0),
-            "flagged_records": flagged_review_list[:500],
-            "grace_records": grace_window_list[:300],
-            "last_updated": firestore.SERVER_TIMESTAMP
-        }
-        try:
-            await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").set(sync_meta_doc, merge=True))
-            cache.delete("nikshay_sync_meta")
-        except Exception as meta_err:
-            logger.warning(f"Error persisting nikshay_sync_meta: {meta_err}")
-
-        # Cache the review sheet data for rapid Excel export (2h TTL, 0 DB storage)
-        cache_data_review = {
-            "records": flagged_review_list,
-            "month": month,
-            "district": district,
-            "generated_at": ist_formatted
-        }
-        admin_user = admin.get("username", "Admin")
-        cache.set(f"review_sheet_{admin_user}", cache_data_review, ttl=7200)
-        cache.set("review_sheet_latest", cache_data_review, ttl=7200)
-
         # 9. Permanent Cumulative Verification Ledger Synchronization
         # Once an indicator is verified, it is permanently locked in Firestore and NEVER lost or erased!
         patients_to_sync = {}
@@ -5272,6 +5231,47 @@ async def reconcile_nikshay(
                 "already_locked_preserved": ledger_sync_res.get("unchanged", 0)
             }
         }
+
+        # 🕒 Save Persistent Sync Status in Firestore so Render dyno sleep never loses it!
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc + timedelta(hours=5, minutes=30)
+        ist_formatted = now_ist.strftime("%d %b %Y, %I:%M %p")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+
+        sync_meta_doc = {
+            "synced_at": now_utc.isoformat(),
+            "synced_at_ist": ist_formatted,
+            "synced_by": actor_name,
+            "synced_by_id": actor_id,
+            "filename": file.filename,
+            "sheet_used": sheet_used,
+            "month": month,
+            "district": district,
+            "total_matched": len(matched),
+            "total_grace_under_72h": len(grace_window_list),
+            "total_flagged_over_72h": len(flagged_review_list),
+            "match_rate_pct": summary.get("match_rate_pct", 0),
+            "flagged_records": flagged_review_list[:500],
+            "grace_records": grace_window_list[:300],
+            "last_updated": firestore.SERVER_TIMESTAMP
+        }
+        try:
+            await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").set(sync_meta_doc, merge=True))
+            cache.delete("nikshay_sync_meta_light")
+        except Exception as meta_err:
+            logger.warning(f"Error persisting nikshay_sync_meta: {meta_err}")
+
+        # Cache the review sheet data for rapid Excel export (2h TTL, 0 DB storage)
+        cache_data_review = {
+            "records": flagged_review_list,
+            "month": month,
+            "district": district,
+            "generated_at": ist_formatted
+        }
+        admin_user = admin.get("username", "Admin")
+        cache.set(f"review_sheet_{admin_user}", cache_data_review, ttl=7200)
+        cache.set("review_sheet_latest", cache_data_review, ttl=7200)
         
         preview_missing_in_dfy_details = [{
             "id": pid,
@@ -5291,9 +5291,9 @@ async def reconcile_nikshay(
             "services": list(dfy_details.get(pid, {}).get("services", []))
         } for pid in only_in_dfy[:150]]
         
-        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
-        actor_role = admin.get("role", "SUB_ADMIN")
+        actor_role = admin.get("role", "SUPER_ADMIN")
         await log_admin_activity(
             action_type="NIKSHAY_RECONCILE",
             details=f"Reconciled {sheet_used} for {district} ({month}): {len(matched)} matched ({summary['match_rate_pct']}%), {len(ready_for_nikshay_list)} ready for portal update, {len(flagged_review_list)} flagged for staff review",
