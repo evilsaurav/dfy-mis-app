@@ -4756,7 +4756,7 @@ async def reconcile_nikshay(
     file: UploadFile = File(...),
     month: Optional[str] = Form(None),
     district: Optional[str] = Form("All"),
-    admin: dict = Depends(get_current_admin)
+    admin: dict = Depends(require_super_admin)
 ):
     try:
         content = await file.read()
@@ -4873,6 +4873,15 @@ async def reconcile_nikshay(
             }
 
         nikshay_ids = set(nikshay_patients.keys())
+
+        # 🛡️ Memory Guard: Release raw Excel DataFrame and binary content to keep RAM under 35 MB
+        try:
+            del df
+            del content
+            import gc
+            gc.collect()
+        except Exception:
+            pass
 
         # 6. Fetch reported IDs in DFY MIS from Firestore
         if not month:
@@ -5085,11 +5094,11 @@ async def reconcile_nikshay(
                     "category_type": "matched_indicator_pending",
                     "services_claimed": ", ".join(unmatched_services),
                     "nikshay_status": "Blank / Pending on Nikshay Portal",
-                    "action_required": "Discuss with FO: Check physical test slips / DEO entry status"
+                    "action_required": "⚠️ CHECK SERVICE SLIP: Episode ID portal par mil gayi hai lekin claimed test/DBT blank hai. FO se physical lab/test slip mangwayein."
                 }
                 
                 if days_elapsed <= 3:
-                    record["grace_reason"] = f"Reported {days_elapsed}d ago (≤3d) - Govt Portal Sync Lag"
+                    record["grace_reason"] = f"Reported {days_elapsed}d ago (≤72h) - Govt Portal Sync Lag"
                     grace_window_list.append(record)
                 else:
                     flagged_review_list.append(record)
@@ -5120,11 +5129,11 @@ async def reconcile_nikshay(
                 "category_type": "unverified_id",
                 "services_claimed": services_claimed_str,
                 "nikshay_status": "Episode ID Not Found on Nikshay",
-                "action_required": "Discuss with FO: Check for Episode ID digit typos or enrollment slips"
+                "action_required": "🚨 ACTION REQUIRED: Pehle Nikshay Portal ke Search bar me ID type karke manual check karein. Agar 72 ghante ke baad bhi nahi mil rahi, toh FO se clarify karein ya target claim reject karein."
             }
             
             if days_elapsed <= 3:
-                record["grace_reason"] = f"Enrolled {days_elapsed}d ago (≤3d) - Nikshay Portal Enrollment Lag"
+                record["grace_reason"] = f"Enrolled {days_elapsed}d ago (≤72h) - Nikshay Portal Enrollment Lag"
                 grace_window_list.append(record)
             else:
                 flagged_review_list.append(record)
@@ -5133,12 +5142,42 @@ async def reconcile_nikshay(
         flagged_review_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
         grace_window_list.sort(key=lambda x: (str(x.get("district", "")).lower(), str(x.get("fo_name", "")).lower(), -int(x.get("days_elapsed", 0))))
 
+        # 🕒 Save Persistent Sync Status in Firestore so Render dyno sleep never loses it!
+        now_utc = datetime.now(timezone.utc)
+        now_ist = now_utc + timedelta(hours=5, minutes=30)
+        ist_formatted = now_ist.strftime("%d %b %Y, %I:%M %p")
+        actor_name = admin.get("name") or admin.get("username", "Super Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+
+        sync_meta_doc = {
+            "synced_at": now_utc.isoformat(),
+            "synced_at_ist": ist_formatted,
+            "synced_by": actor_name,
+            "synced_by_id": actor_id,
+            "filename": file.filename,
+            "sheet_used": sheet_used,
+            "month": month,
+            "district": district,
+            "total_matched": len(matched),
+            "total_grace_under_72h": len(grace_window_list),
+            "total_flagged_over_72h": len(flagged_review_list),
+            "match_rate_pct": summary.get("match_rate_pct", 0),
+            "flagged_records": flagged_review_list[:500],
+            "grace_records": grace_window_list[:300],
+            "last_updated": firestore.SERVER_TIMESTAMP
+        }
+        try:
+            await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").set(sync_meta_doc, merge=True))
+            cache.delete("nikshay_sync_meta")
+        except Exception as meta_err:
+            logger.warning(f"Error persisting nikshay_sync_meta: {meta_err}")
+
         # Cache the review sheet data for rapid Excel export (2h TTL, 0 DB storage)
         cache_data_review = {
             "records": flagged_review_list,
             "month": month,
             "district": district,
-            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "generated_at": ist_formatted
         }
         admin_user = admin.get("username", "Admin")
         cache.set(f"review_sheet_{admin_user}", cache_data_review, ttl=7200)
@@ -5281,6 +5320,39 @@ async def reconcile_nikshay(
         raise HTTPException(status_code=500, detail=f"Reconciliation error: {str(e)}")
 
 # =========================================================================
+# --- Nikshay Sync Status & Audit Telemetry API ---
+# =========================================================================
+@app.get("/admin/nikshay/sync-status")
+async def get_nikshay_sync_status(admin: dict = Depends(get_current_admin)):
+    """Returns persistent Nikshay sync metadata indicating when dump was last updated and by whom."""
+    cached = cache.get("nikshay_sync_meta_light")
+    if cached is not None:
+        return cached
+    try:
+        doc = await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").get())
+        if doc.exists:
+            d = doc.to_dict()
+            res = {
+                "success": True,
+                "has_sync": True,
+                "synced_at": d.get("synced_at"),
+                "synced_at_ist": d.get("synced_at_ist"),
+                "synced_by": d.get("synced_by", "Super Admin"),
+                "filename": d.get("filename", ""),
+                "month": d.get("month", ""),
+                "district": d.get("district", "All"),
+                "total_matched": d.get("total_matched", 0),
+                "total_grace_under_72h": d.get("total_grace_under_72h", 0),
+                "total_flagged_over_72h": d.get("total_flagged_over_72h", 0),
+                "match_rate_pct": d.get("match_rate_pct", 0)
+            }
+            cache.set("nikshay_sync_meta_light", res, ttl=300)
+            return res
+    except Exception as e:
+        logger.warning(f"Error reading nikshay_sync_meta: {e}")
+    return {"success": True, "has_sync": False}
+
+# =========================================================================
 # --- Nikshay District-Wise Discrepancy Review Sheet Export ---
 # =========================================================================
 @app.get("/admin/nikshay/download-review-sheet")
@@ -5289,9 +5361,9 @@ async def download_nikshay_review_sheet(
     admin: dict = Depends(get_current_admin)
 ):
     """
-    Exports a formatted Excel sheet with 9 columns grouped by District & Field Officer.
-    Contains cases where reporting > 3 days old has indicators missing in Nikshay or IDs unverified.
-    Includes a blank column 'Staff Resolution Notes' for 1-on-1 review meetings.
+    Exports a formatted Excel sheet with 11 columns grouped by District & Field Officer.
+    Contains cases where reporting > 72 hours old has indicators missing in Nikshay or IDs unverified.
+    Includes explicit action directives instructing Admin to manually verify Episode ID on Nikshay before penalizing.
     """
     try:
         admin_user = admin.get("username", "Admin")
@@ -5300,10 +5372,21 @@ async def download_nikshay_review_sheet(
             cached = cache.get("review_sheet_latest")
             
         if not cached or "records" not in cached:
-            raise HTTPException(
-                status_code=400,
-                detail="No review sheet data available. Please upload and reconcile a Nikshay file first."
-            )
+            # 🛡️ Resilient Persistence Fallback: Read from Firestore admin_config/nikshay_sync_meta
+            sync_doc = await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").get())
+            if sync_doc.exists:
+                doc_data = sync_doc.to_dict()
+                cached = {
+                    "records": doc_data.get("flagged_records", []),
+                    "month": doc_data.get("month", datetime.now().strftime("%Y-%m")),
+                    "district": doc_data.get("district", "All")
+                }
+                cache.set("review_sheet_latest", cached, ttl=3600)
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="No review sheet data available. Please ask Super Admin to upload and reconcile an official Nikshay dump first."
+                )
             
         records = cached.get("records", [])
         sheet_month = cached.get("month", datetime.now().strftime("%Y-%m"))
@@ -5313,29 +5396,46 @@ async def download_nikshay_review_sheet(
             
         rows = []
         for r in records:
+            cat = r.get("category", "")
+            action_prompt = r.get("action_required", "")
+            if not action_prompt:
+                if "Part 2" in cat or "Unverified" in cat:
+                    action_prompt = "🚨 ACTION REQUIRED: Manually check Episode ID in Nikshay search bar. If still not found > 72h, demand physical OPD slip from FO or reject target."
+                else:
+                    action_prompt = "⚠️ CHECK TEST SLIP: ID found on portal, but claimed service is blank. Verify physical TRF/lab slip."
+
+            days_e = r.get("days_elapsed", 0)
+            verdict = "🚨 Missing > 72h (Manual Nikshay Check Required)" if days_e > 3 else "⏳ Pending Portal Sync (< 72h Grace Window)"
+            if "Part 1" in cat or "Matched" in cat:
+                verdict = "⚠️ ID Found, but Service Blank on Nikshay"
+
             rows.append({
                 "District": r.get("district", ""),
                 "Field Officer Name": r.get("fo_name", ""),
-                "Date Reported": r.get("date", ""),
-                "Days Pending": r.get("days_elapsed", 0),
+                "Date Reported in MIS": r.get("date", ""),
+                "Days Elapsed (Audit Lag)": f"{days_e} days",
                 "Episode ID": r.get("id", ""),
-                "Discrepancy Category": r.get("category", ""),
+                "72-Hour Audit Verdict": verdict,
                 "Services Claimed by FO": r.get("services_claimed", ""),
-                "Nikshay Portal Status": r.get("nikshay_status", ""),
-                "Staff Resolution Notes (Admin Discussion)": ""
+                "Nikshay Portal Live Status": r.get("nikshay_status", ""),
+                "Action Directive (Manual Check)": action_prompt,
+                "Admin / Sub-Admin Manual Check Outcome": "",
+                "Final Decision (Approved / Rejected Fake ID)": ""
             })
             
         if not rows:
             rows.append({
                 "District": district if district != "All" else "All Districts",
                 "Field Officer Name": "None",
-                "Date Reported": "-",
-                "Days Pending": 0,
+                "Date Reported in MIS": "-",
+                "Days Elapsed (Audit Lag)": "0 days",
                 "Episode ID": "-",
-                "Discrepancy Category": "No discrepancies > 3 days detected",
+                "72-Hour Audit Verdict": "All Synchronized",
                 "Services Claimed by FO": "-",
-                "Nikshay Portal Status": "All Synchronized",
-                "Staff Resolution Notes (Admin Discussion)": "All verified or within 72h grace window"
+                "Nikshay Portal Live Status": "All Synchronized",
+                "Action Directive (Manual Check)": "No discrepancies > 72 hours detected. All verified or within sync grace window.",
+                "Admin / Sub-Admin Manual Check Outcome": "Clean Record",
+                "Final Decision (Approved / Rejected Fake ID)": "Approved"
             })
             
         df_export = pd.DataFrame(rows)

@@ -261,6 +261,32 @@ export default function AdminDashboard() {
     }
   }, [ledgerDistrict]);
 
+  const [nikshaySyncStatus, setNikshaySyncStatus] = useState(null);
+
+  const fetchNikshaySyncStatus = useCallback(async () => {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem('dfy_admin_token') || '';
+      const res = await fetch(`${API_BASE_URL}/admin/nikshay/sync-status`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.has_sync) {
+          setNikshaySyncStatus(data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch Nikshay sync status:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (showNikshayModal) {
+      fetchNikshaySyncStatus();
+    }
+  }, [showNikshayModal, fetchNikshaySyncStatus]);
+
   const handleExportCumulativeLedger = async () => {
     setLedgerExporting(true);
     try {
@@ -352,8 +378,9 @@ export default function AdminDashboard() {
       } else {
         setNikshayActiveTab('missing_in_dfy');
       }
-      // Auto-refresh ledger cache in background
+      // Auto-refresh ledger cache and sync status banner in background
       fetchCumulativeLedger(1, '', nikshayDistrict);
+      fetchNikshaySyncStatus();
     } catch (err) {
       setNikshayError(err.message || 'Error running reconciliation');
     } finally {
@@ -7579,6 +7606,55 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* MODE A: MONTHLY FILE RECONCILER */}
             {ledgerViewMode === 'reconcile' && (
               <div className="space-y-5">
+                {/* 🕒 Persistent Nikshay Sync Status Banner - Visible to All Roles */}
+                {nikshaySyncStatus && nikshaySyncStatus.has_sync && (
+                  <div className="bg-slate-900 text-white border border-slate-800 rounded-3xl p-5 shadow-md space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+                      <div className="flex items-start sm:items-center gap-3">
+                        <span className="text-2xl p-2 bg-slate-800 rounded-2xl border border-slate-700">🕒</span>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-bold text-slate-400">Nikshay Registry Last Synchronized:</span>
+                            <span className="text-xs font-black text-emerald-400 font-mono bg-emerald-950/60 border border-emerald-800 px-2 py-0.5 rounded-lg">
+                              {nikshaySyncStatus.synced_at_ist || 'Active'}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-400 font-medium mt-1">
+                            Updated by <strong className="text-slate-200">{nikshaySyncStatus.synced_by}</strong> • Target Month: <strong className="text-slate-200 font-mono">{nikshaySyncStatus.month || 'Current'}</strong> {nikshaySyncStatus.filename && (<span className="text-slate-500">• File: <span className="font-mono text-slate-400">{nikshaySyncStatus.filename}</span></span>)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] uppercase tracking-wider font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 rounded-full self-start sm:self-auto flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span>Statewide Verification Active</span>
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Verified on Nikshay</div>
+                        <div className="text-lg font-black text-emerald-400 mt-0.5 font-mono">{nikshaySyncStatus.total_matched || 0}</div>
+                        <div className="text-[10px] text-emerald-400/80 font-medium mt-0.5">Permanent Ledger Locked</div>
+                      </div>
+                      <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Sync Grace (&le;72h)</div>
+                        <div className="text-lg font-black text-amber-400 mt-0.5 font-mono">{nikshaySyncStatus.total_grace_under_72h || 0}</div>
+                        <div className="text-[10px] text-amber-400/80 font-medium mt-0.5">Portal Sync In Progress</div>
+                      </div>
+                      <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Missing &gt;72h Alert</div>
+                        <div className="text-lg font-black text-rose-400 mt-0.5 font-mono">{nikshaySyncStatus.total_flagged_over_72h || 0}</div>
+                        <div className="text-[10px] text-rose-400/80 font-medium mt-0.5">Manual Check Required</div>
+                      </div>
+                      <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-3">
+                        <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Match Accuracy</div>
+                        <div className="text-lg font-black text-cyan-400 mt-0.5 font-mono">{nikshaySyncStatus.match_rate_pct || 0}%</div>
+                        <div className="text-[10px] text-cyan-400/80 font-medium mt-0.5">Field Alignment Ratio</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {isSubAdmin ? (
                   <div className="bg-emerald-50/70 border border-emerald-200 rounded-3xl p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                     <div>
