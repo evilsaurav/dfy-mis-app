@@ -653,11 +653,25 @@ const MyProfileDashboard = ({
         const selectedDayData = stats.daily_history && stats.daily_history[selectedDate];
         const isDateEditable = (() => {
           if (!selectedDate) return false;
-          const todayStr = new Date().toISOString().split('T')[0];
+          const now = new Date();
+          const getLocalYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          const todayStr = getLocalYMD(now);
           if (selectedDate === todayStr) return true;
-          const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          const yesterdayStr = yesterday.toISOString().split('T')[0];
-          return selectedDate === yesterdayStr;
+
+          const yesterday = new Date();
+          yesterday.setDate(now.getDate() - 1);
+          const yesterdayStr = getLocalYMD(yesterday);
+          if (selectedDate === yesterdayStr) return true;
+
+          // Also check actual completion timestamp if available on day record
+          if (selectedDayData && (selectedDayData.timestamp_completed || selectedDayData.timestamp)) {
+            const rawTs = selectedDayData.timestamp_completed || selectedDayData.timestamp;
+            const subTime = new Date(rawTs).getTime();
+            if (!isNaN(subTime) && (Date.now() - subTime) <= 24 * 60 * 60 * 1000) {
+              return true;
+            }
+          }
+          return false;
         })();
 
         return (

@@ -62,7 +62,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import pandas as pd
 import io
 import os
@@ -2327,35 +2327,50 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             data = matching_docs[0].to_dict()
             doc_id = matching_docs[0].id
 
-        # ?? Strict 24-Hour Editing Window Rule for Field Officers
+        # 🛡️ Strict 24-Hour Editing Window Rule for Field Officers
         if req.edited_by == "FO":
             is_expired = False
-            # Check submitted_at timestamp
-            sub_ts = data.get("timestamp") or data.get("submitted_at")
+            evaluated = False
+
+            # 1. Check timestamp_completed (primary), timestamp, or submitted_at
+            sub_ts = data.get("timestamp_completed") or data.get("timestamp") or data.get("submitted_at")
             if sub_ts:
                 try:
-                    # Parse timestamp format
-                    sub_clean = str(sub_ts).replace("Z", "+00:00")
-                    if "T" in sub_clean:
-                        sub_dt = datetime.fromisoformat(sub_clean).replace(tzinfo=None)
-                    else:
-                        sub_dt = datetime.strptime(sub_clean, "%Y-%m-%d %H:%M:%S")
-                    hours_diff = (datetime.now() - sub_dt).total_seconds() / 3600.0
-                    if hours_diff > 24.0:
-                        is_expired = True
-                except Exception:
-                    pass
-            
-            # Fallback check against date_of_reporting
-            if not is_expired:
+                    now_utc = datetime.now(timezone.utc)
+                    # Case A: Firestore DatetimeWithNanoseconds or python datetime
+                    if isinstance(sub_ts, datetime):
+                        sub_utc = sub_ts if sub_ts.tzinfo is not None else sub_ts.replace(tzinfo=timezone.utc)
+                        hours_diff = (now_utc - sub_utc).total_seconds() / 3600.0
+                        if hours_diff > 24.0:
+                            is_expired = True
+                        evaluated = True
+                    # Case B: String representation of timestamp
+                    elif isinstance(sub_ts, str) and sub_ts.strip():
+                        clean_ts = sub_ts.strip().replace("Z", "+00:00")
+                        if " " in clean_ts and "T" not in clean_ts:
+                            clean_ts = clean_ts.replace(" ", "T")
+                        sub_dt = datetime.fromisoformat(clean_ts)
+                        sub_utc = sub_dt if sub_dt.tzinfo is not None else sub_dt.replace(tzinfo=timezone.utc)
+                        hours_diff = (now_utc - sub_utc).total_seconds() / 3600.0
+                        if hours_diff > 24.0:
+                            is_expired = True
+                        evaluated = True
+                except Exception as e:
+                    logger.warning(f"Error parsing edit window timestamp '{sub_ts}': {e}")
+
+            # 2. Fallback check against date_of_reporting in Indian Standard Time (IST = UTC + 5:30)
+            if not evaluated and not is_expired:
                 try:
+                    now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
+                    today_ist = now_ist.date()
+                    yesterday_ist = today_ist - timedelta(days=1)
                     rep_date = datetime.strptime(req.date, "%Y-%m-%d").date()
-                    today = datetime.now().date()
-                    if (today - rep_date).days > 1: # More than 1 calendar day ago
+                    # Only lock if report is older than yesterday in IST (2 or more calendar days ago)
+                    if rep_date < yesterday_ist:
                         is_expired = True
                 except Exception:
                     pass
-                    
+
             if is_expired:
                 raise HTTPException(
                     status_code=403, 

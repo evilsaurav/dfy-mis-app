@@ -5698,6 +5698,10 @@ const availableDistrictsForFeed = useMemo(() => {
           if (!matchName) return false;
           if (!inspectingFO.district || inspectingFO.district === 'All') return true;
           return r.working_place && r.working_place.trim().toLowerCase() === inspectingFO.district.trim().toLowerCase();
+        }).sort((a, b) => {
+          const dateA = String(a.date || a.date_of_reporting || '');
+          const dateB = String(b.date || b.date_of_reporting || '');
+          return dateB.localeCompare(dateA); // Latest date first (e.g. 2026-09-09 before 2026-09-05)
         });
         const totalNotif = foRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
         const targetObj = targetsData.find(t => t.fo_name === inspectingFO.fo_name && (t.district === inspectingFO.district));
