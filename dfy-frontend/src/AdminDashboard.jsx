@@ -272,14 +272,16 @@ export default function AdminDashboard() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.has_sync) {
-          setNikshaySyncStatus(data);
-        }
+        setNikshaySyncStatus(data);
       }
     } catch (err) {
       console.error('Failed to fetch Nikshay sync status:', err);
     }
   }, []);
+
+  useEffect(() => {
+    fetchNikshaySyncStatus();
+  }, [fetchNikshaySyncStatus]);
 
   useEffect(() => {
     if (showNikshayModal) {
@@ -7561,40 +7563,68 @@ const availableDistrictsForFeed = useMemo(() => {
               </button>
             </div>
 
-            {/* View Mode Switcher */}
-            <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-              <button
-                type="button"
-                onClick={() => setLedgerViewMode('reconcile')}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  ledgerViewMode === 'reconcile'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <span>⚡</span>
-                <span>Monthly Reconciler</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setLedgerViewMode('ledger');
-                  if (!ledgerData) fetchCumulativeLedger(1, ledgerSearch, ledgerDistrict);
-                }}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  ledgerViewMode === 'ledger'
-                    ? 'bg-emerald-600 text-white shadow-sm'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <span>🔒</span>
-                <span>Permanent Cumulative Ledger</span>
-                {ledgerData?.total_in_collection !== undefined && (
-                  <span className="ml-1 bg-emerald-800 text-white text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
-                    {ledgerData.total_in_collection}
+            {/* View Mode Switcher + Live Nikshay Sync Status */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setLedgerViewMode('reconcile')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    ledgerViewMode === 'reconcile'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>⚡</span>
+                  <span>Monthly Reconciler</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLedgerViewMode('ledger');
+                    if (!ledgerData) fetchCumulativeLedger(1, ledgerSearch, ledgerDistrict);
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                    ledgerViewMode === 'ledger'
+                      ? 'bg-emerald-600 text-white shadow-sm'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <span>🔒</span>
+                  <span>Permanent Cumulative Ledger</span>
+                  {ledgerData?.total_in_collection !== undefined && (
+                    <span className="ml-1 bg-emerald-800 text-white text-[10px] px-2 py-0.5 rounded-full font-mono font-bold">
+                      {ledgerData.total_in_collection}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* 🕒 Last Data Sync Status - Prominently Displayed Right Here */}
+              {nikshaySyncStatus && nikshaySyncStatus.has_sync ? (
+                <div className="flex items-center gap-2 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200/90 px-3.5 py-1.5 rounded-2xl shadow-2xs self-start sm:self-auto">
+                  <span className="flex h-2 w-2 relative">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                )}
-              </button>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="text-slate-500 font-semibold">Last Data Synced:</span>
+                    <span className="font-mono font-black text-emerald-800 bg-white border border-emerald-300 px-2 py-0.5 rounded-md shadow-2xs">
+                      {nikshaySyncStatus.synced_at_ist}
+                    </span>
+                    {nikshaySyncStatus.synced_by && (
+                      <span className="text-slate-400 text-[10px] font-medium hidden md:inline">
+                        • by {nikshaySyncStatus.synced_by}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-[11px] text-slate-500 font-medium self-start sm:self-auto">
+                  <span className="text-xs">🕒</span>
+                  <span>Last Data Synced: <strong className="text-slate-600">Pending / No Dump Yet</strong></span>
+                </div>
+              )}
             </div>
 
             {nikshayError && (
