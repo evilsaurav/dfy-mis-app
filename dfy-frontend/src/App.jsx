@@ -3027,10 +3027,32 @@ function App() {
       )}
 
       {/* Branding Footer */}
-        <footer className="w-full text-center py-6 mt-auto opacity-70">
-          <p className="text-xs font-bold text-slate-500 tracking-widest uppercase">
+        <footer className="w-full text-center py-6 mt-auto">
+          <p className="text-xs font-bold text-slate-500 tracking-widest uppercase opacity-70">
             Designed by <span className="text-indigo-600 font-black">Insomniac</span>
           </p>
+          <div className="mt-2.5">
+            <button
+              onClick={async () => {
+                try {
+                  if ('serviceWorker' in navigator) {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    for (let r of regs) await r.unregister();
+                  }
+                  if ('caches' in window) {
+                    const keys = await caches.keys();
+                    for (let k of keys) await caches.delete(k);
+                  }
+                } catch(e) {}
+                window.location.reload(true);
+              }}
+              className="inline-flex items-center gap-1.5 text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 active:scale-95 px-3 py-1 rounded-full border border-indigo-100 transition-all cursor-pointer shadow-2xs"
+              title="Clear offline cache and get latest update"
+            >
+              <span>🔄</span>
+              <span>Sync Latest Update (v1.0.1)</span>
+            </button>
+          </div>
         </footer>
       
     </div>

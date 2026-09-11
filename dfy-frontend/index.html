@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -23,9 +23,19 @@
     <script type="module" src="/src/main.jsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (!refreshing) {
+            refreshing = true;
+            window.location.reload();
+          }
+        });
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js')
-            .then(reg => console.log('PWA ServiceWorker registered:', reg.scope))
+            .then(reg => {
+              console.log('PWA ServiceWorker registered:', reg.scope);
+              reg.update();
+            })
             .catch(err => console.log('PWA ServiceWorker registration failed:', err));
         });
       }
