@@ -610,7 +610,7 @@ const MyProfileDashboard = ({
         <div className="flex items-center justify-between mb-4 px-1">
           <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-indigo-600"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>
-            Monthly Activity Calendar
+            Monthly Activity Calendar ({new Date().toLocaleString('default', { month: 'short' })} {new Date().getFullYear()})
           </h3>
           <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400">
             <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> Report Submitted</span>
@@ -618,34 +618,49 @@ const MyProfileDashboard = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-7 gap-1.5 text-center">
-          {['M','T','W','T','F','S','S'].map((d, i) => (
-            <span key={i} className="text-[10px] font-black text-slate-400 py-1">{d}</span>
-          ))}
-          {Array.from({ length: 31 }, (_, i) => {
-            const dayNum = i + 1;
-            const dateKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-            const dayData = stats.daily_history && stats.daily_history[dateKey];
-            const count = dayData ? dayData.count : 0;
-            const isToday = new Date().getDate() === dayNum;
+        {(() => {
+          const calNow = new Date();
+          const currentYear = calNow.getFullYear();
+          const currentMonth = calNow.getMonth();
+          const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+          const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
+          // Monday-first offset: Mon=0, Tue=1, Wed=2, Thu=3, Fri=4, Sat=5, Sun=6
+          const firstDayOffset = (firstDayOfWeek + 6) % 7;
 
-            let bgColor = "bg-slate-50 text-slate-400 border-slate-100";
-            if (count > 0) {
-              bgColor = "bg-emerald-500 text-white font-black shadow-sm shadow-emerald-500/30 border-emerald-600";
-            }
+          return (
+            <div className="grid grid-cols-7 gap-1.5 text-center">
+              {['M','T','W','T','F','S','S'].map((d, i) => (
+                <span key={i} className="text-[10px] font-black text-slate-400 py-1">{d}</span>
+              ))}
+              {Array.from({ length: firstDayOffset }, (_, i) => (
+                <div key={`cal-empty-${i}`} className="h-9 pointer-events-none" aria-hidden="true" />
+              ))}
+              {Array.from({ length: daysInMonth }, (_, i) => {
+                const dayNum = i + 1;
+                const dateKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+                const dayData = stats.daily_history && stats.daily_history[dateKey];
+                const count = dayData ? dayData.count : 0;
+                const isToday = calNow.getDate() === dayNum && calNow.getMonth() === currentMonth && calNow.getFullYear() === currentYear;
 
-            return (
-              <div 
-                key={dayNum} 
-                onClick={() => setSelectedDate(dateKey)}
-                className={`h-9 rounded-xl flex flex-col items-center justify-center text-xs font-bold border transition-all cursor-pointer hover:scale-105 active:scale-95 ${bgColor} ${selectedDate === dateKey ? 'ring-2 ring-indigo-600 ring-offset-2' : isToday ? 'ring-2 ring-indigo-300 ring-offset-1' : ''}`}
-                title={dayData && dayData.submitted ? `${dateKey}: ${count} report(s), ${dayData.total_ids} IDs (Click to view)` : `${dateKey}: No report`}
-              >
-                <span>{dayNum}</span>
-              </div>
-            );
-          })}
-        </div>
+                let bgColor = "bg-slate-50 text-slate-400 border-slate-100";
+                if (count > 0) {
+                  bgColor = "bg-emerald-500 text-white font-black shadow-sm shadow-emerald-500/30 border-emerald-600";
+                }
+
+                return (
+                  <div 
+                    key={dayNum} 
+                    onClick={() => setSelectedDate(dateKey)}
+                    className={`h-9 rounded-xl flex flex-col items-center justify-center text-xs font-bold border transition-all cursor-pointer hover:scale-105 active:scale-95 ${bgColor} ${selectedDate === dateKey ? 'ring-2 ring-indigo-600 ring-offset-2' : isToday ? 'ring-2 ring-indigo-300 ring-offset-1' : ''}`}
+                    title={dayData && dayData.submitted ? `${dateKey}: ${count} report(s), ${dayData.total_ids} IDs (Click to view)` : `${dateKey}: No report`}
+                  >
+                    <span>{dayNum}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Date-wise Reported IDs Inspector */}
