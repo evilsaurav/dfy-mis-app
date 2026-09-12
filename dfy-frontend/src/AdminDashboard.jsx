@@ -40,6 +40,40 @@ const canonicalizeDistrict = (d) => {
   return CANONICAL_DISTRICT_MAP[clean.toLowerCase()] || clean;
 };
 
+const formatAuditTimestamp = (ts, tsFormatted) => {
+  if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
+    return tsFormatted;
+  }
+  if (!ts) return '—';
+  if (typeof ts === 'string' && (ts.includes('AM') || ts.includes('PM'))) {
+    return ts;
+  }
+  try {
+    const cleanTs = String(ts).trim();
+    let d;
+    if (cleanTs.includes('T') || cleanTs.endsWith('Z')) {
+      d = new Date(cleanTs);
+    } else {
+      const isoStr = cleanTs.replace(' ', 'T') + 'Z';
+      d = new Date(isoStr);
+    }
+    if (isNaN(d.getTime())) d = new Date(cleanTs);
+    if (isNaN(d.getTime())) return cleanTs;
+    
+    return d.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Kolkata'
+    });
+  } catch (e) {
+    return String(ts);
+  }
+};
+
 const DEFAULT_BIHAR_DISTRICTS = [
   "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
   "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",
@@ -7302,16 +7336,17 @@ const availableDistrictsForFeed = useMemo(() => {
                   setAuditFilterAction(e.target.value);
                   fetchAuditLogs(e.target.value, undefined, undefined, undefined);
                 }}
-                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs cursor-pointer"
               >
                 <option value="All">All Actions</option>
+                <option value="LOGIN_FAILED">🚨 Failed Logins / Intruder Attempts</option>
+                <option value="LOGIN_SUCCESS">🔓 Successful Logins</option>
                 <option value="TARGET_UPDATED">🎯 Target Updates</option>
                 <option value="ID_EDITED">✏️ ID Edits / Deletions</option>
                 <option value="ADMIN_USER_CREATED">➕ User Created</option>
                 <option value="PERMISSIONS_UPDATED">🛡️ Permissions Changed</option>
                 <option value="ADMIN_USER_DELETED">🗑️ User Deleted</option>
                 <option value="PIN_RESET">🔑 PIN Resets</option>
-                <option value="LOGIN_SUCCESS">🔓 Logins</option>
                 <option value="REPORT_DOWNLOADED">📥 Report Downloads</option>
               </select>
 
@@ -7322,7 +7357,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   setAuditFilterDistrict(e.target.value);
                   fetchAuditLogs(undefined, e.target.value, undefined, undefined);
                 }}
-                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs cursor-pointer"
               >
                 <option value="All">All Districts</option>
                 {Object.keys(staffDirectory).sort().map(d => (
@@ -7337,7 +7372,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   setAuditFilterUser(e.target.value);
                   fetchAuditLogs(undefined, undefined, e.target.value, undefined);
                 }}
-                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                className="bg-white border border-amber-200 text-slate-700 font-bold text-xs rounded-xl px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs cursor-pointer"
               >
                 <option value="All">All Actors</option>
                 <option value="admin">Super Admin (admin)</option>
@@ -7347,11 +7382,30 @@ const availableDistrictsForFeed = useMemo(() => {
                 <option value="system">System Automated</option>
               </select>
 
+              {/* Quick Security Radar Filter Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  const nextAction = auditFilterAction === 'LOGIN_FAILED' ? 'All' : 'LOGIN_FAILED';
+                  setAuditFilterAction(nextAction);
+                  fetchAuditLogs(nextAction, undefined, undefined, undefined);
+                }}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-2xs active:scale-95 cursor-pointer ${
+                  auditFilterAction === 'LOGIN_FAILED'
+                    ? 'bg-rose-600 text-white ring-2 ring-rose-400'
+                    : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200'
+                }`}
+                title="1-Click Security Radar: Filter failed login attempts"
+              >
+                <span>🚨</span>
+                <span>Security Radar</span>
+              </button>
+
               {/* Search Bar */}
               <div className="flex items-center gap-1 ml-auto">
                 <input
                   type="text"
-                  placeholder="Search user, ID, details..."
+                  placeholder="Search user, ID, IP, details..."
                   value={auditSearchQuery}
                   onChange={(e) => setAuditSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
@@ -7359,12 +7413,12 @@ const availableDistrictsForFeed = useMemo(() => {
                       fetchAuditLogs(undefined, undefined, undefined, auditSearchQuery);
                     }
                   }}
-                  className="bg-white border border-amber-200 text-slate-800 text-xs rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 w-48 sm:w-64"
+                  className="bg-white border border-amber-200 text-slate-800 text-xs rounded-xl px-3 py-1.5 outline-none focus:ring-2 focus:ring-amber-500 w-44 sm:w-56"
                 />
                 <button
                   type="button"
                   onClick={() => fetchAuditLogs(undefined, undefined, undefined, auditSearchQuery)}
-                  className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-colors"
+                  className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                 >
                   Search
                 </button>
@@ -7382,47 +7436,74 @@ const availableDistrictsForFeed = useMemo(() => {
                   <table className="w-full text-left text-xs">
                     <thead>
                       <tr className="border-b border-slate-200 text-slate-400 font-black uppercase text-[10px] tracking-wider">
-                        <th className="py-2.5 px-3">Timestamp</th>
+                        <th className="py-2.5 px-3">Timestamp (IST)</th>
                         <th className="py-2.5 px-3">Actor / Admin</th>
                         <th className="py-2.5 px-3">Action Type</th>
                         <th className="py-2.5 px-3">District &amp; Officer</th>
-                        <th className="py-2.5 px-3">Details / Diff</th>
+                        <th className="py-2.5 px-3">Details / Device / IP</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {auditLogsList.map((log, idx) => (
-                        <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3 px-3 font-mono text-[10px] text-slate-500 whitespace-nowrap">
-                            {log.timestamp}
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className="font-bold text-slate-800 block">{log.user_name || log.user_id || 'System'}</span>
-                            <span className="text-[9px] font-black uppercase text-indigo-600">
-                              {log.role || 'SUPER_ADMIN'} {log.user_id && log.user_id !== log.user_name ? `(${log.user_id})` : ''}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                              log.action_type === 'TARGET_UPDATED' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
-                              log.action_type === 'ID_EDITED' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
-                              log.action_type === 'PIN_RESET' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                              log.action_type?.includes('USER') ? 'bg-blue-100 text-blue-800 border border-blue-200' :
-                              'bg-slate-100 text-slate-700 border border-slate-200'
-                            }`}>
-                              {log.action_type?.replace(/_/g, ' ')}
-                            </span>
-                          </td>
-                          <td className="py-3 px-3">
-                            <span className="font-semibold text-slate-700 block">{log.district || 'Statewide'}</span>
-                            {log.target_officer && (
-                              <span className="text-[10px] text-slate-400 font-medium">{log.target_officer}</span>
-                            )}
-                          </td>
-                          <td className="py-3 px-3">
-                            <p className="font-medium text-slate-700 max-w-md">{log.details}</p>
-                          </td>
-                        </tr>
-                      ))}
+                      {auditLogsList.map((log, idx) => {
+                        const isFailedLogin = log.action_type === 'LOGIN_FAILED' || log.action_type === 'LOGIN_BLOCKED';
+                        const clientDevice = (log.diff && log.diff.device) || '';
+                        const clientIp = log.ip_address || (log.diff && log.diff.ip) || '';
+                        const formattedTime = formatAuditTimestamp(log.timestamp, log.timestamp_formatted);
+
+                        return (
+                          <tr key={idx} className={`transition-colors ${isFailedLogin ? 'bg-rose-50/80 hover:bg-rose-100/70 border-l-4 border-l-rose-500' : 'hover:bg-slate-50/70'}`}>
+                            <td className="py-3 px-3 font-mono text-[11px] text-slate-700 whitespace-nowrap font-bold">
+                              {formattedTime}
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`font-bold block ${isFailedLogin ? 'text-rose-800' : 'text-slate-800'}`}>
+                                {log.user_name || log.user_id || 'System'}
+                              </span>
+                              <span className={`text-[9px] font-black uppercase ${isFailedLogin ? 'text-rose-500' : 'text-indigo-600'}`}>
+                                {log.role || 'SUPER_ADMIN'} {log.user_id && log.user_id !== log.user_name ? `(${log.user_id})` : ''}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                                isFailedLogin ? 'bg-rose-600 text-white shadow-xs' :
+                                log.action_type === 'LOGIN_SUCCESS' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' :
+                                log.action_type === 'TARGET_UPDATED' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                                log.action_type === 'ID_EDITED' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                                log.action_type === 'PIN_RESET' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                                log.action_type?.includes('USER') ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                                'bg-slate-100 text-slate-700 border border-slate-200'
+                              }`}>
+                                {log.action_type?.replace(/_/g, ' ')}
+                              </span>
+                            </td>
+                            <td className="py-3 px-3">
+                              <span className="font-semibold text-slate-700 block">{log.district || 'Statewide'}</span>
+                              {log.target_officer && (
+                                <span className="text-[10px] text-slate-400 font-medium">{log.target_officer}</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3">
+                              <p className={`font-medium max-w-md ${isFailedLogin ? 'text-rose-950 font-semibold' : 'text-slate-700'}`}>
+                                {log.details}
+                              </p>
+                              {(clientIp || clientDevice) && (
+                                <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                  {clientIp && (
+                                    <span className="inline-flex items-center gap-1 font-mono text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                      🌐 IP: {clientIp}
+                                    </span>
+                                  )}
+                                  {clientDevice && (
+                                    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-100">
+                                      {clientDevice}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

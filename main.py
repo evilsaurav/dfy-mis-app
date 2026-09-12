@@ -56,7 +56,7 @@ import zipfile
 import gzip
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
@@ -1974,8 +1974,11 @@ def get_or_init_admin_auth() -> dict:
     return default_auth
 
 @app.post("/admin/auth/login")
-async def admin_login(req: AdminLoginReq):
+async def admin_login(req: AdminLoginReq, request: Request):
     try:
+        client_ip, client_device = extract_client_info(request)
+        client_diff = {"ip": client_ip, "device": client_device}
+
         # Fast bypass for master credentials (zero Firestore reads)
         if req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
             login_rate_limiter.reset("master_admin")
@@ -1987,9 +1990,11 @@ async def admin_login(req: AdminLoginReq):
                 "allowed_districts": ["All"]
             }
             token = create_access_token(master_user)
+            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
             return {"success": True, "message": "Login successful", "token": token, "user": master_user}
 
         if login_rate_limiter.is_rate_limited("master_admin"):
+            await log_admin_activity("LOGIN_BLOCKED", f"Master admin lockout triggered from {client_device} (Locked for 10m)", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Locked for 10 minutes.")
             
         try:
@@ -2008,9 +2013,11 @@ async def admin_login(req: AdminLoginReq):
                 "allowed_districts": ["All"]
             }
             token = create_access_token(master_user)
+            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
             return {"success": True, "message": "Login successful", "token": token, "user": master_user}
             
         login_rate_limiter.record_failure("master_admin")
+        await log_admin_activity("LOGIN_FAILED", f"Incorrect master password attempt from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
         raise HTTPException(status_code=401, detail="Invalid password")
     except HTTPException:
         raise
@@ -3524,6 +3531,51 @@ class AuditLogQueryReq(BaseModel):
     search: Optional[str] = ""
     limit: Optional[int] = 200
 
+def get_ist_now() -> datetime:
+    return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+
+def extract_client_info(request: Optional[Request] = None) -> Tuple[str, str]:
+    """
+    Extracts the client's real public IP address and a human-friendly device/browser summary.
+    Handles reverse proxies like Render, Vercel, Cloudflare, etc.
+    """
+    if not request:
+        return "Unknown IP", "Unknown Device"
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.headers.get("x-real-ip", "") or (request.client.host if request.client else "Unknown IP")
+        
+    ua = request.headers.get("user-agent", "Unknown Device")
+    ua_lower = ua.lower()
+    
+    device = "Unknown Device"
+    if "android" in ua_lower:
+        device = "📱 Android Mobile"
+        if "chrome" in ua_lower:
+            device += " (Chrome)"
+    elif "iphone" in ua_lower:
+        device = "📱 iPhone (Safari)"
+    elif "ipad" in ua_lower:
+        device = "📱 iPad"
+    elif "windows" in ua_lower:
+        device = "💻 Windows PC"
+        if "chrome" in ua_lower:
+            device += " (Chrome)"
+        elif "edg" in ua_lower:
+            device += " (Edge)"
+        elif "firefox" in ua_lower:
+            device += " (Firefox)"
+    elif "macintosh" in ua_lower or "mac os" in ua_lower:
+        device = "💻 Mac OS"
+    elif "linux" in ua_lower:
+        device = "🖥️ Linux"
+    elif any(bot in ua_lower for bot in ["curl", "python", "postman", "wget", "aiohttp", "requests"]):
+        device = "🤖 API Client / Script"
+        
+    return ip, device
+
 async def log_admin_activity(
     action_type: str,
     details: str,
@@ -3536,8 +3588,11 @@ async def log_admin_activity(
     ip_address: Optional[str] = ""
 ):
     try:
+        ist_now = get_ist_now()
         entry = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": ist_now.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp_ist": ist_now.strftime("%d %b %Y, %I:%M:%S %p"),
+            "is_ist": True,
             "action_type": action_type,
             "details": details,
             "user_name": user_name,
@@ -3582,9 +3637,11 @@ async def init_default_super_admin():
         print(f"Super admin init notice: {e}")
 
 @app.post("/admin/auth/user-login")
-async def admin_user_login(req: AdminUserLoginReq):
+async def admin_user_login(req: AdminUserLoginReq, request: Request):
     try:
         clean_user = req.username.strip().lower()
+        client_ip, client_device = extract_client_info(request)
+        client_diff = {"ip": client_ip, "device": client_device}
         
         # Emergency master admin fast-track (zero Firestore reads)
         if clean_user in ["admin", "superadmin", "dfyadmin"] and req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
@@ -3607,13 +3664,14 @@ async def admin_user_login(req: AdminUserLoginReq):
             }
             token = create_access_token(user_data)
             try:
-                await log_admin_activity("LOGIN_SUCCESS", "Super Admin master login", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN")
+                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
             except Exception:
                 pass
             return {"success": True, "user": user_data, "token": token}
 
         # Check rate limiter against brute force attacks
         if login_rate_limiter.is_rate_limited(clean_user):
+            await log_admin_activity("LOGIN_BLOCKED", f"Brute-force lockout triggered for '{clean_user}' from {client_device} (Account locked for 10m)", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Account locked for 10 minutes.")
             
         try:
@@ -3647,6 +3705,7 @@ async def admin_user_login(req: AdminUserLoginReq):
                     "status": "ACTIVE"
                 }
                 token = create_access_token(user_data)
+                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login (offline fallback) from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
                 return {"success": True, "user": user_data, "token": token}
             raise HTTPException(status_code=503, detail="Database currently at capacity (daily quota limit). Please try again or use master admin credentials.")
         
@@ -3678,27 +3737,28 @@ async def admin_user_login(req: AdminUserLoginReq):
                         "status": "ACTIVE"
                     }
                     token = create_access_token(user_data)
-                    await log_admin_activity("LOGIN_SUCCESS", "Super Admin master login", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN")
+                    await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
                     return {"success": True, "user": user_data, "token": token}
                 
                 login_rate_limiter.record_failure(clean_user)
-                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for username '{req.username}'", user_name=req.username, user_id=clean_user, role="UNKNOWN")
+                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff)
                 raise HTTPException(status_code=401, detail="Invalid username or password.")
                 
         user_data = user_doc.to_dict()
         if user_data.get("status") != "ACTIVE":
+            await log_admin_activity("LOGIN_FAILED", f"Disabled user '{clean_user}' attempted login from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
             raise HTTPException(status_code=403, detail="Your admin account has been disabled. Contact Super Admin.")
             
         stored_pw = user_data.get("password", "")
         if not verify_password(req.password, stored_pw):
             login_rate_limiter.record_failure(clean_user)
-            await log_admin_activity("LOGIN_FAILED", f"Incorrect password for user '{clean_user}'", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"))
+            await log_admin_activity("LOGIN_FAILED", f"Incorrect password for user '{clean_user}' from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
             raise HTTPException(status_code=401, detail="Invalid username or password.")
             
         login_rate_limiter.reset(clean_user)
         
         # Auto-upgrade stored password to bcrypt hash if plain text
-        update_fields = {"last_login": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        update_fields = {"last_login": get_ist_now().strftime("%Y-%m-%d %I:%M:%S %p")}
         if not str(stored_pw).startswith(("$2b$", "$2a$")):
             update_fields["password"] = hash_password(req.password)
             
@@ -3708,7 +3768,7 @@ async def admin_user_login(req: AdminUserLoginReq):
         # Don't return password in payload
         safe_user = {k: v for k, v in user_data.items() if k != "password"}
         token = create_access_token(safe_user)
-        await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"))
+        await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully from {client_device}", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
         
         return {"success": True, "user": safe_user, "token": token}
     except HTTPException:
@@ -3924,6 +3984,20 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
             .limit(query.limit or 200)
             .stream()))
             
+        def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
+            if not ts_str:
+                return ""
+            try:
+                if "AM" in ts_str or "PM" in ts_str:
+                    return ts_str
+                clean_ts = str(ts_str).strip().replace("T", " ")[:19]
+                dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+                if not is_ist:
+                    dt = dt + timedelta(hours=5, minutes=30)
+                return dt.strftime("%d %b %Y, %I:%M:%S %p")
+            except Exception:
+                return str(ts_str)
+
         logs = []
         for doc in docs:
             d = doc.to_dict()
@@ -3942,10 +4016,11 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
                 continue
             if query.search:
                 s_lower = query.search.lower()
-                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')}".lower()
+                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')} {d.get('ip_address', '')}".lower()
                 if s_lower not in text_to_search:
                     continue
                     
+            d["timestamp_formatted"] = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
             logs.append(d)
             
         return {"success": True, "total": len(logs), "retention_policy": f"Last {AUDIT_RETENTION_DAYS} Days", "logs": logs}
@@ -3963,6 +4038,20 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
             .order_by("timestamp", direction=firestore.Query.DESCENDING)
             .limit(1000)
             .stream()))
+
+        def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
+            if not ts_str:
+                return ""
+            try:
+                if "AM" in ts_str or "PM" in ts_str:
+                    return ts_str
+                clean_ts = str(ts_str).strip().replace("T", " ")[:19]
+                dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+                if not is_ist:
+                    dt = dt + timedelta(hours=5, minutes=30)
+                return dt.strftime("%d %b %Y, %I:%M:%S %p")
+            except Exception:
+                return str(ts_str)
             
         rows = []
         for idx, doc in enumerate(docs):
@@ -3976,16 +4065,19 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
             if user_id and user_id != "All" and d.get("user_id") != user_id:
                 continue
                 
+            formatted_time = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
+            client_dev = (d.get("diff") or {}).get("device", "")
             rows.append({
                 "S.No": idx + 1,
-                "Timestamp": d.get("timestamp", ""),
+                "Timestamp (IST)": formatted_time,
                 "Admin User": d.get("user_name", ""),
                 "Role": d.get("role", ""),
                 "Action Type": d.get("action_type", ""),
                 "District": d.get("district", ""),
                 "Target Officer": d.get("target_officer", ""),
                 "Activity Details": d.get("details", ""),
-                "IP Address": d.get("ip_address", "")
+                "IP Address": d.get("ip_address", ""),
+                "Device": client_dev
             })
             
         df = pd.DataFrame(rows)
