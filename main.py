@@ -372,6 +372,27 @@ class DashboardRequest(BaseModel):
     month_prefix: str
     districts: Optional[str] = None
     force_refresh: Optional[bool] = False
+    since: Optional[str] = None
+    cached_count: Optional[int] = None
+
+# Report mutation tracking for Delta Sync
+LAST_REPORTS_MODIFIED_TS: float = time.time()
+DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
+
+def record_report_mutation(action: str = "submit", doc_id: str = ""):
+    global LAST_REPORTS_MODIFIED_TS
+    LAST_REPORTS_MODIFIED_TS = time.time()
+    if action == "delete" and doc_id:
+        DELETED_REPORTS_TOMBSTONES.append({
+            "doc_id": str(doc_id).strip(),
+            "deleted_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+        if len(DELETED_REPORTS_TOMBSTONES) > 500:
+            DELETED_REPORTS_TOMBSTONES.pop(0)
+
+def get_last_mutation_str() -> str:
+    dt = datetime.fromtimestamp(LAST_REPORTS_MODIFIED_TS, timezone(timedelta(hours=5, minutes=30)))
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> list:
     """
@@ -395,7 +416,7 @@ async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> lis
         .stream()
     ))
     raw_list = [d.to_dict() for d in docs]
-    cache.set(cache_key, raw_list, ttl=180) # 3-minute shared cache
+    cache.set(cache_key, raw_list, ttl=3600) # 1-hour shared cache (invalidated on mutation)
     return raw_list
 
 @app.post("/admin/dashboard-data")
@@ -403,8 +424,25 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
     try:
         user_tag = admin.get("user_id") or admin.get("username") or "admin"
         cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
+        last_mut_str = get_last_mutation_str()
+
+        # Delta Sync Guard: If client has fresh cache and no mutations occurred, return NO_CHANGE (0 reads)
+        if req.since and req.cached_count and not req.force_refresh:
+            try:
+                if str(req.since).strip() >= last_mut_str:
+                    recent_deletions = [t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES if t.get("deleted_at", "") > str(req.since).strip()]
+                    return {
+                        "status": "success",
+                        "mode": "NO_CHANGE",
+                        "records": [],
+                        "synced_at": last_mut_str,
+                        "deleted_ids": recent_deletions
+                    }
+            except Exception as e:
+                print(f"Delta sync check notice: {e}")
 
         if req.force_refresh:
+            record_report_mutation("force_refresh")
             cache.delete_prefix("dash_")
             cache.delete_prefix("shared_raw_month_")
             cache.delete_prefix("attendance_")
@@ -419,6 +457,9 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         else:
             cached = cache.get(cache_key)
             if cached is not None:
+                if isinstance(cached, dict) and "records" in cached:
+                    cached["synced_at"] = last_mut_str
+                    cached["mode"] = "FULL"
                 return cached
 
         allowed_dist_set = None
@@ -532,8 +573,14 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 except Exception:
                     pass
 
-        res = {"records": records}
-        cache.set(cache_key, res, ttl=300) # 5 min cache
+        res = {
+            "status": "success",
+            "mode": "FULL",
+            "records": records,
+            "synced_at": last_mut_str,
+            "deleted_ids": []
+        }
+        cache.set(cache_key, res, ttl=3600) # 1-hour cache
         return res
     except HTTPException:
         raise
@@ -805,6 +852,7 @@ async def submit_daily_report(report: DailyActivityReport):
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
+        record_report_mutation("submit", doc_id)
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
@@ -2494,6 +2542,7 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
         )
         
+        record_report_mutation("edit", doc_id)
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
@@ -2775,6 +2824,7 @@ async def admin_feed_officer_data(
         )
 
         # 7. Invalidate caches for immediate live reflection
+        record_report_mutation("feed", doc_id)
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
@@ -2902,8 +2952,9 @@ async def admin_delete_day_report(
         except Exception as r_err:
             print(f"[Delete Day Rollup Notice] {r_err}")
 
-        # 5. Invalidate caches
+        # 5. Invalidate caches and record tombstones
         for cid in candidate_doc_ids:
+            record_report_mutation("delete", cid)
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
         cache.delete_prefix("profile_")
@@ -5825,7 +5876,7 @@ async def get_patient_journey(patient_id: str):
         }
         
         for doc in docs:
-            d = doc.to_dict()
+            d = doc.to_dict() if hasattr(doc, "to_dict") else doc
             dt = d.get("date_of_reporting", "")
             fo = d.get("fo_name", "")
             dist = d.get("working_place", "")
@@ -5890,7 +5941,7 @@ async def get_patient_journey(patient_id: str):
             "is_complete": any(m["category"] == "outcome_assigned_ids" for m in milestones)
         }
         
-        cache.set(cache_key, res, ttl=60)
+        cache.set(cache_key, res, ttl=1800)
         return res
     except HTTPException:
         raise

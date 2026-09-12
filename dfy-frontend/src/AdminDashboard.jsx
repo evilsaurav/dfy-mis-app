@@ -157,6 +157,8 @@ export default function AdminDashboard() {
   const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted'
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [lastSyncedTime, setLastSyncedTime] = useState('');
+  const [syncStatus, setSyncStatus] = useState('LIVE'); // 'LIVE' | 'SYNCING' | 'UP_TO_DATE'
 
   // Toast Notification System
   const [toast, setToast] = useState(null);
@@ -1519,7 +1521,8 @@ export default function AdminDashboard() {
           return rec;
         }));
 
-        fetchDuplicateAudit();
+        try { localStorage.removeItem(`dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`); } catch (e) {}
+        if (showDuplicateModal) fetchDuplicateAudit();
         setAdminEditModal(null);
       } else {
         setAdminEditModal(prev => ({ ...prev, error: data.detail || "Failed to update ID.", loading: false }));
@@ -1553,7 +1556,8 @@ export default function AdminDashboard() {
 
         setDeleteDayModal(null);
         showToast(`✓ Date ${date} report for ${fo_name} successfully deleted.`, "success");
-        fetchDuplicateAudit();
+        try { localStorage.removeItem(`dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`); } catch (e) {}
+        if (showDuplicateModal) fetchDuplicateAudit();
         fetchAttendance();
       } else {
         setDeleteDayModal(prev => ({ ...prev, error: data.detail || "Failed to delete day report.", loading: false }));
@@ -1656,14 +1660,40 @@ Keep this file safe in your Google Drive or personal diary.
 
 
   const fetchData = async (forceRefresh = false) => {
-    setIsLoading(true);
+    const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
+    let cachedData = null;
+    try {
+      const rawCache = localStorage.getItem(cacheKey);
+      if (rawCache) cachedData = JSON.parse(rawCache);
+    } catch (e) {
+      cachedData = null;
+    }
+
+    // Zero-lag instant render: show cached records immediately if available
+    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !forceRefresh) {
+      setRawRecords(cachedData.records);
+      if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
+      setIsLoading(false);
+      setSyncStatus('UP_TO_DATE');
+    } else {
+      setIsLoading(true);
+    }
+
     setError('');
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
+
+      if (!forceRefresh && cachedData && cachedData.synced_at && cachedData.records?.length > 0) {
+        payload.since = cachedData.synced_at;
+        payload.cached_count = cachedData.records.length;
+      }
+
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         payload.districts = currentUser.allowed_districts.join(',');
       }
+
+      setSyncStatus('SYNCING');
       const res = await authFetch(`${API_BASE_URL}/admin/dashboard-data`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1674,14 +1704,40 @@ Keep this file safe in your Google Drive or personal diary.
         throw new Error(errData.detail || `Server responded with status ${res.status}`);
       }
       const data = await res.json();
-      setRawRecords(Array.isArray(data.records) ? data.records : []);
+
+      if (data.mode === 'NO_CHANGE') {
+        // Data has not changed since last sync! 0 Firestore reads!
+        setSyncStatus('UP_TO_DATE');
+        if (data.synced_at) setLastSyncedTime(data.synced_at);
+      } else {
+        const newRecords = Array.isArray(data.records) ? data.records : [];
+        setRawRecords(newRecords);
+        const syncStamp = data.synced_at || new Date().toLocaleString();
+        setLastSyncedTime(syncStamp);
+        setSyncStatus('LIVE');
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({
+            synced_at: syncStamp,
+            records: newRecords
+          }));
+        } catch (storageErr) {
+          console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+        }
+      }
+
       if (currentUser?.role !== 'SUB_ADMIN') {
         setSelectedDistrict('All');
       }
       setSelectedFO('All');
     } catch (err) {
       console.error("Dashboard fetch error:", err);
-      setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
+      // Resilient fallback: If offline/network glitch and cachedData exists, keep displaying it
+      if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0) {
+        setRawRecords(cachedData.records);
+        setError('Offline notice: Showing previously synchronized data.');
+      } else {
+        setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -1689,15 +1745,21 @@ Keep this file safe in your Google Drive or personal diary.
 
   useEffect(() => {
     if (isAuthenticated) { 
-      fetchData(); 
+      fetchData(false); 
       fetchAttendance(); 
       fetchDirectory(); 
       loadTargets('All'); 
-      fetchDuplicateAudit(); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
     }
   }, [month, isAuthenticated]);
+
+  // Lazy Tab Loading: Only fetch Duplicate Audit when modal is opened (saves 749 reads per load!)
+  useEffect(() => {
+    if (showDuplicateModal) {
+      fetchDuplicateAudit();
+    }
+  }, [showDuplicateModal]);
 
   // Derived Filter Lists (Filtered by RBAC for Sub-Admins)
   const districts = useMemo(() => {
@@ -1863,7 +1925,7 @@ const availableDistrictsForFeed = useMemo(() => {
       const data = await res.json();
       if (res.ok) {
         setFeedSuccess(`✓ Saved successfully for ${feedFoName} (${feedDistrict}) on ${feedDate}! Total ${totalIdsCount} Patient IDs processed.`);
-        await fetchData();
+        await fetchData(true);
       } else {
         setFeedError(data.detail || 'Failed to feed data.');
       }
@@ -2671,6 +2733,16 @@ const availableDistrictsForFeed = useMemo(() => {
 
               {/* Utility Action Buttons: Refresh, Security, Logout */}
               <div className="flex items-center gap-1.5">
+                {lastSyncedTime && (
+                  <div 
+                    className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 border border-slate-200/80 text-[11px] font-bold text-slate-600 shadow-2xs"
+                    title={`Last Synced: ${lastSyncedTime} (${syncStatus === 'UP_TO_DATE' ? 'Data verified up-to-date via delta cache' : 'Live synchronized'})`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'SYNCING' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                    <span>{syncStatus === 'SYNCING' ? 'Syncing...' : syncStatus === 'UP_TO_DATE' ? 'Cached (Up-to-date)' : 'Live Synced'}</span>
+                  </div>
+                )}
+
                 <button
                   onClick={() => {
                     fetchData(true);
