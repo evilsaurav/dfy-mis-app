@@ -122,6 +122,7 @@ export default function AdminDashboard() {
   const [copiedAttendance, setCopiedAttendance] = useState(false);
   const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted'
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Toast Notification System
   const [toast, setToast] = useState(null);
@@ -718,13 +719,16 @@ export default function AdminDashboard() {
     setUnreadBroadcastPopup(null);
   };
 
-  const fetchAttendance = async (force = false) => {
+  const fetchAttendance = async (force = false, targetDate = attendanceDate) => {
     setIsAttendanceLoading(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const params = new URLSearchParams();
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
         params.set('districts', currentUser.allowed_districts.join(','));
+      }
+      if (targetDate) {
+        params.set('date', targetDate);
       }
       if (force) {
         params.set('force_refresh', 'true');
@@ -846,8 +850,8 @@ export default function AdminDashboard() {
       byDistrict[fo.district].push(fo.fo_name);
     });
 
-    let msg = `*DFY MIS Reminder - Today's Pending Daily Reports*\n`;
-    msg += `Date: ${attendance.date}\n`;
+    let msg = `*DFY MIS Reminder - Pending Daily Reports*\n`;
+    msg += `Date: ${attendance.date || attendanceDate}\n`;
     msg += `Missing: ${attendance.missing_count} of ${attendance.total_staff} FOs\n\n`;
 
     for (let dist in byDistrict) {
@@ -875,8 +879,8 @@ export default function AdminDashboard() {
       byDistrict[fo.district].push(fo);
     });
 
-    let msg = `*DFY MIS - Today's Submitted Field Reports*\n`;
-    msg += `Date: ${attendance.date}\n`;
+    let msg = `*DFY MIS - Submitted Field Reports*\n`;
+    msg += `Date: ${attendance.date || attendanceDate}\n`;
     msg += `Submitted: ${list.length} of ${attendance.total_staff} FOs\n\n`;
 
     for (let dist in byDistrict) {
@@ -6174,7 +6178,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 <div>
                   <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                     <span>Field Officer Daily Attendance</span>
-                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
+                    <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date || attendanceDate}</span>
                   </h3>
                   <p className="text-xs text-slate-400 font-bold tracking-wide mt-0.5">
                     Total Active Staff: <strong className="text-slate-700">{attendance.total_staff}</strong> | Submitted: <strong className="text-emerald-600">{totalSubmitted}</strong> | Pending: <strong className="text-rose-500">{attendance.missing_count}</strong>
@@ -6182,7 +6186,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
-                    onClick={() => fetchAttendance(true)} 
+                    onClick={() => fetchAttendance(true, attendanceDate)} 
                     disabled={isAttendanceLoading}
                     className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
                     title="Live Refresh Attendance"
@@ -6190,6 +6194,86 @@ const availableDistrictsForFeed = useMemo(() => {
                     <svg className={`w-4 h-4 ${isAttendanceLoading ? 'animate-spin text-emerald-600' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   </button>
                   <button onClick={() => setShowAttendanceModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+                </div>
+              </div>
+
+              {/* 📅 Date Navigation Bar (Option A) */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                    <span>📅</span> Date:
+                  </span>
+                  <input
+                    type="date"
+                    value={attendanceDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={(e) => {
+                      const newDate = e.target.value;
+                      if (newDate) {
+                        setAttendanceDate(newDate);
+                        fetchAttendance(false, newDate);
+                      }
+                    }}
+                    className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 font-mono shadow-2xs cursor-pointer"
+                  />
+                  {isAttendanceLoading && (
+                    <span className="text-[10px] font-bold text-indigo-600 animate-pulse flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span>
+                      Loading...
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = new Date(attendanceDate);
+                      d.setDate(d.getDate() - 1);
+                      const prevDate = d.toISOString().slice(0, 10);
+                      setAttendanceDate(prevDate);
+                      fetchAttendance(false, prevDate);
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold transition-all shadow-2xs cursor-pointer flex items-center gap-1 active:scale-95"
+                    title="Previous Day"
+                  >
+                    <span>◀</span> Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={attendanceDate === new Date().toISOString().slice(0, 10)}
+                    onClick={() => {
+                      const todayStr = new Date().toISOString().slice(0, 10);
+                      setAttendanceDate(todayStr);
+                      fetchAttendance(false, todayStr);
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-black transition-all shadow-2xs cursor-pointer active:scale-95 ${
+                      attendanceDate === new Date().toISOString().slice(0, 10)
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
+                    }`}
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    disabled={attendanceDate >= new Date().toISOString().slice(0, 10)}
+                    onClick={() => {
+                      const d = new Date(attendanceDate);
+                      d.setDate(d.getDate() + 1);
+                      const nextDate = d.toISOString().slice(0, 10);
+                      setAttendanceDate(nextDate);
+                      fetchAttendance(false, nextDate);
+                    }}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1 active:scale-95 ${
+                      attendanceDate >= new Date().toISOString().slice(0, 10)
+                        ? 'bg-slate-100 text-slate-300 border border-slate-100 cursor-not-allowed'
+                        : 'bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 cursor-pointer'
+                    }`}
+                    title="Next Day"
+                  >
+                    Next <span>▶</span>
+                  </button>
                 </div>
               </div>
 
@@ -6336,7 +6420,7 @@ const availableDistrictsForFeed = useMemo(() => {
       {/* 📝 Admin & Sub-Admin Backdated Data Feeding Modal */}
       {showAdminFeedModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
-          <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto">
+          <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-5xl shadow-2xl border border-slate-100 max-h-[92vh] flex flex-col animate-fade-in my-auto">
             {/* Header */}
             <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4 shrink-0">
               <div className="flex items-center gap-2.5">
@@ -6461,8 +6545,8 @@ const availableDistrictsForFeed = useMemo(() => {
                   </button>
                 </div>
 
-                {/* Concurrent Category Input Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto pr-1 custom-scrollbar">
+                {/* Concurrent Category Input Grid (Responsive 3-Column Smooth Flow) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {(feedShowAllCategories ? feedCategoriesConfig : feedCategoriesConfig.filter(c => c.isPrimary)).map(cat => {
                     const currentVal = feedCategoryInputs[cat.key] || '';
                     const tokens = currentVal.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);

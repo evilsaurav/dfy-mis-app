@@ -1550,7 +1550,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
                     "categories": day_categories,
                     "visited_names": data.get("visited_names", []),
                     "total_km": data.get("total_km", 0),
-                    "remark": data.get("remark", "")
+                    "remark": data.get("remark", ""),
+                    "fdc_details": data.get("fdc_details", [])
                 }
                         
         total_achieved = sum(stats.values())
@@ -1697,6 +1698,8 @@ async def get_today_attendance(
                 
         # 2. Fetch daily field reports for this date
         report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", date).stream()))
+        if not report_docs:
+            report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", date).stream()))
         reports_map = {}
         for doc in report_docs:
             d = doc.to_dict()

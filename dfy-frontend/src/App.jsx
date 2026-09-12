@@ -491,6 +491,81 @@ const MyProfileDashboard = ({
     }
   };
 
+  const copyDateWhatsAppSummary = (dateStr, dayData) => {
+    if (!dayData || !dayData.submitted) {
+      showToast("No report submitted on this date", "info");
+      return;
+    }
+    let text = `*Daily Field Report - ${dateStr}*\n`;
+    text += `*Name:* ${formData.fo_name} (${formData.working_place})\n`;
+    text += `*Designation:* Field Officer\n`;
+    text += `*Status:* Report Submitted ✓\n\n`;
+
+    if (dayData.visited_names && dayData.visited_names.length > 0) {
+      text += `*Doctors/Stores Visited:*\n`;
+      text += dayData.visited_names.join('\n') + '\n\n';
+    }
+
+    text += `*Work Metrics:*\n`;
+
+    const categoriesConfig = [
+      { key: 'notification', label: 'Notification' },
+      { key: 'hiv_dm', label: 'HIV & DM' },
+      { key: 'dbt', label: 'DBT' },
+      { key: 'sample_collection', label: 'Sample Collection' },
+      { key: 'sample_tested', label: 'Sample Tested' },
+      { key: 'outcome_assigned', label: 'Outcome Assigned' },
+      { key: 'home_visit', label: 'Home Visit' },
+      { key: 'contact_tracing', label: 'Contact Tracing' },
+      { key: 'follow_up', label: 'Follow Up' },
+      { key: 'face_to_face', label: 'Face to Face' },
+      { key: 'presumptive', label: 'Presumptive' },
+      { key: 'documents', label: 'Documents' },
+      { key: 'fdc_provided', label: 'FDC Provided' },
+      { key: 'kit_consumption', label: 'Kit Consumption' },
+      { key: 'differentiated_tb', label: 'Differentiated TB' },
+      { key: 'tpt_treatment_start', label: 'TPT Treatment Start' },
+      { key: 'tpt_presumptive', label: 'TPT Presumptive' },
+      { key: 'adhar_face_authentication', label: 'Adhar Face Auth' },
+      { key: 'consent_with_id', label: 'Consent with ID' },
+      { key: 'culture_dst', label: 'Culture / DST' }
+    ];
+
+    let hasMetrics = false;
+    categoriesConfig.forEach(cat => {
+      const ids = (dayData.categories && (dayData.categories[cat.key] || dayData.categories[cat.key + '_ids'])) || [];
+      if (ids.length > 0) {
+        hasMetrics = true;
+        text += `\n*${cat.label}:* ${ids.length}\n`;
+        if (cat.key.includes('fdc') && dayData.fdc_details && dayData.fdc_details.length > 0) {
+          const fdcLines = ids.map(id => {
+            const det = dayData.fdc_details.find(d => d && d.id === id);
+            return det ? `${id} (${det.fdc_type || 'FDC 4'}, ${det.strips || 1} Strip)` : id;
+          });
+          text += fdcLines.join('\n') + '\n';
+        } else {
+          text += ids.join('\n') + '\n';
+        }
+      }
+    });
+
+    if (!hasMetrics) {
+      text += '\nNone\n';
+    }
+
+    if (dayData.remark && dayData.remark.trim() !== '') {
+      text += `\n*Remarks:*\n` + dayData.remark.trim() + '\n';
+    }
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text.trim())
+        .then(() => showToast(`📋 WhatsApp summary copied for ${dateStr}!`, 'success'))
+        .catch(() => showToast('Failed to copy to clipboard', 'error'));
+    } else {
+      showToast('Clipboard access unavailable', 'error');
+    }
+  };
+
   const targetVal = stats ? (Number(stats.target) || 0) : 0;
   const breakdown = stats ? (stats.breakdown || {}) : {};
   const notifAchieved = Number(breakdown.notification) || 0;
@@ -701,13 +776,22 @@ const MyProfileDashboard = ({
                 </p>
               </div>
               {selectedDayData && selectedDayData.submitted && (
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => copyDateWhatsAppSummary(selectedDate, selectedDayData)}
+                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
+                    title="Copy full reporting summary for WhatsApp"
+                  >
+                    <span>📱</span>
+                    <span>Copy WhatsApp</span>
+                  </button>
                   {isDateEditable ? (
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200" title="Aap 24 ghante ke andar IDs edit/correct kar sakte hain">
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-xl border border-emerald-200" title="Aap 24 ghante ke andar IDs edit/correct kar sakte hain">
                       ⏱️ 24h Edit Open
                     </span>
                   ) : (
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 px-2.5 py-0.5 rounded-full border border-slate-200" title="24h beet chuke hain. Badlav ke liye Admin se contact karein.">
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-500 px-2.5 py-1.5 rounded-xl border border-slate-200" title="24h beet chuke hain. Badlav ke liye Admin se contact karein.">
                       🔒 Edit Locked
                     </span>
                   )}
