@@ -7440,7 +7440,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         <th className="py-2.5 px-3">Actor / Admin</th>
                         <th className="py-2.5 px-3">Action Type</th>
                         <th className="py-2.5 px-3">District &amp; Officer</th>
-                        <th className="py-2.5 px-3">Details / Device / IP</th>
+                        <th className="py-2.5 px-3">Details / Location / IP / Device</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -7448,6 +7448,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         const isFailedLogin = log.action_type === 'LOGIN_FAILED' || log.action_type === 'LOGIN_BLOCKED';
                         const clientDevice = (log.diff && log.diff.device) || '';
                         const clientIp = log.ip_address || (log.diff && log.diff.ip) || '';
+                        const clientLocation = log.location || (log.diff && log.diff.location) || '';
                         const formattedTime = formatAuditTimestamp(log.timestamp, log.timestamp_formatted);
 
                         return (
@@ -7486,11 +7487,16 @@ const availableDistrictsForFeed = useMemo(() => {
                               <p className={`font-medium max-w-md ${isFailedLogin ? 'text-rose-950 font-semibold' : 'text-slate-700'}`}>
                                 {log.details}
                               </p>
-                              {(clientIp || clientDevice) && (
+                              {(clientIp || clientLocation || clientDevice) && (
                                 <div className="flex flex-wrap items-center gap-1.5 mt-1">
                                   {clientIp && (
                                     <span className="inline-flex items-center gap-1 font-mono text-[9px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
                                       🌐 IP: {clientIp}
+                                    </span>
+                                  )}
+                                  {clientLocation && (
+                                    <span className="inline-flex items-center gap-1 text-[9px] font-bold bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded border border-emerald-200">
+                                      📍 {clientLocation}
                                     </span>
                                   )}
                                   {clientDevice && (

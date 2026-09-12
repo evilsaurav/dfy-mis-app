@@ -67,6 +67,7 @@ import pandas as pd
 import io
 import os
 import json
+import urllib.request
 import re
 import openpyxl
 import jwt
@@ -1977,7 +1978,8 @@ def get_or_init_admin_auth() -> dict:
 async def admin_login(req: AdminLoginReq, request: Request):
     try:
         client_ip, client_device = extract_client_info(request)
-        client_diff = {"ip": client_ip, "device": client_device}
+        client_location = await get_ip_location(client_ip)
+        client_diff = {"ip": client_ip, "device": client_device, "location": client_location}
 
         # Fast bypass for master credentials (zero Firestore reads)
         if req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
@@ -1990,11 +1992,11 @@ async def admin_login(req: AdminLoginReq, request: Request):
                 "allowed_districts": ["All"]
             }
             token = create_access_token(master_user)
-            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
             return {"success": True, "message": "Login successful", "token": token, "user": master_user}
 
         if login_rate_limiter.is_rate_limited("master_admin"):
-            await log_admin_activity("LOGIN_BLOCKED", f"Master admin lockout triggered from {client_device} (Locked for 10m)", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_BLOCKED", f"Master admin lockout triggered from {client_device} (Locked for 10m)", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Locked for 10 minutes.")
             
         try:
@@ -2013,11 +2015,11 @@ async def admin_login(req: AdminLoginReq, request: Request):
                 "allowed_districts": ["All"]
             }
             token = create_access_token(master_user)
-            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
             return {"success": True, "message": "Login successful", "token": token, "user": master_user}
             
         login_rate_limiter.record_failure("master_admin")
-        await log_admin_activity("LOGIN_FAILED", f"Incorrect master password attempt from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+        await log_admin_activity("LOGIN_FAILED", f"Incorrect master password attempt from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
         raise HTTPException(status_code=401, detail="Invalid password")
     except HTTPException:
         raise
@@ -3576,6 +3578,63 @@ def extract_client_info(request: Optional[Request] = None) -> Tuple[str, str]:
         
     return ip, device
 
+# In-memory IP Geolocation Cache to guarantee zero repeated latency
+ip_geo_cache: Dict[str, str] = {}
+
+async def get_ip_location(ip: str) -> str:
+    """
+    Resolves city, state/region, and ISP from client public IP address.
+    Fully asynchronous and non-blocking with in-memory caching and 1.2s timeout.
+    """
+    if not ip or ip in ["Unknown IP", "127.0.0.1", "localhost", "::1"]:
+        return ""
+
+    clean_ip = str(ip).strip()
+    if clean_ip.startswith(("10.", "192.168.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.")):
+        return "Local / Private Network"
+
+    if clean_ip in ip_geo_cache:
+        return ip_geo_cache[clean_ip]
+
+    def _fetch_geo():
+        try:
+            req = urllib.request.Request(
+                f"http://ip-api.com/json/{clean_ip}?fields=status,country,regionName,city,isp",
+                headers={"User-Agent": "mis-app-audit-radar/1.0"}
+            )
+            with urllib.request.urlopen(req, timeout=1.2) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                if data.get("status") == "success":
+                    city = data.get("city", "").strip()
+                    region = data.get("regionName", "").strip()
+                    isp = data.get("isp", "").strip()
+                    parts = []
+                    if city and region:
+                        parts.append(f"{city}, {region}")
+                    elif city:
+                        parts.append(city)
+                    elif region:
+                        parts.append(region)
+
+                    loc_str = parts[0] if parts else data.get("country", "")
+                    if isp and loc_str:
+                        short_isp = isp.replace("Reliance Jio Infocomm Limited", "Jio").replace("Bharat Sanchar Nigam Ltd", "BSNL").replace("BHARTI", "Airtel").replace("Bharti Airtel Limited", "Airtel").replace("Vodafone Idea Limited", "Vi")
+                        loc_str += f" ({short_isp})"
+                    return loc_str
+        except Exception:
+            return ""
+        return ""
+
+    try:
+        loc = await asyncio.to_thread(_fetch_geo)
+        if len(ip_geo_cache) > 2000:
+            ip_geo_cache.clear()
+        if loc:
+            ip_geo_cache[clean_ip] = loc
+        return loc or ""
+    except Exception:
+        return ""
+
 async def log_admin_activity(
     action_type: str,
     details: str,
@@ -3585,10 +3644,16 @@ async def log_admin_activity(
     district: Optional[str] = "All",
     target_officer: Optional[str] = "",
     diff: Optional[Dict[str, Any]] = None,
-    ip_address: Optional[str] = ""
+    ip_address: Optional[str] = "",
+    location: Optional[str] = ""
 ):
     try:
         ist_now = get_ist_now()
+        resolved_diff = diff.copy() if isinstance(diff, dict) else {}
+        resolved_loc = location or resolved_diff.get("location", "")
+        if resolved_loc and "location" not in resolved_diff:
+            resolved_diff["location"] = resolved_loc
+
         entry = {
             "timestamp": ist_now.strftime("%Y-%m-%d %H:%M:%S"),
             "timestamp_ist": ist_now.strftime("%d %b %Y, %I:%M:%S %p"),
@@ -3600,8 +3665,9 @@ async def log_admin_activity(
             "role": role,
             "district": district or "All",
             "target_officer": target_officer or "",
-            "diff": diff or {},
-            "ip_address": ip_address or ""
+            "diff": resolved_diff,
+            "ip_address": ip_address or "",
+            "location": resolved_loc
         }
         await asyncio.to_thread(lambda: db.collection("admin_audit_logs").add(entry))
     except Exception as e:
@@ -3641,7 +3707,8 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
     try:
         clean_user = req.username.strip().lower()
         client_ip, client_device = extract_client_info(request)
-        client_diff = {"ip": client_ip, "device": client_device}
+        client_location = await get_ip_location(client_ip)
+        client_diff = {"ip": client_ip, "device": client_device, "location": client_location}
         
         # Emergency master admin fast-track (zero Firestore reads)
         if clean_user in ["admin", "superadmin", "dfyadmin"] and req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
@@ -3664,14 +3731,14 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
             }
             token = create_access_token(user_data)
             try:
-                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
             except Exception:
                 pass
             return {"success": True, "user": user_data, "token": token}
 
         # Check rate limiter against brute force attacks
         if login_rate_limiter.is_rate_limited(clean_user):
-            await log_admin_activity("LOGIN_BLOCKED", f"Brute-force lockout triggered for '{clean_user}' from {client_device} (Account locked for 10m)", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_BLOCKED", f"Brute-force lockout triggered for '{clean_user}' from {client_device} (Account locked for 10m)", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Account locked for 10 minutes.")
             
         try:
@@ -3705,7 +3772,7 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
                     "status": "ACTIVE"
                 }
                 token = create_access_token(user_data)
-                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login (offline fallback) from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login (offline fallback) from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
                 return {"success": True, "user": user_data, "token": token}
             raise HTTPException(status_code=503, detail="Database currently at capacity (daily quota limit). Please try again or use master admin credentials.")
         
@@ -3737,22 +3804,22 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
                         "status": "ACTIVE"
                     }
                     token = create_access_token(user_data)
-                    await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff)
+                    await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
                     return {"success": True, "user": user_data, "token": token}
                 
                 login_rate_limiter.record_failure(clean_user)
-                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff)
+                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
                 raise HTTPException(status_code=401, detail="Invalid username or password.")
                 
         user_data = user_doc.to_dict()
         if user_data.get("status") != "ACTIVE":
-            await log_admin_activity("LOGIN_FAILED", f"Disabled user '{clean_user}' attempted login from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_FAILED", f"Disabled user '{clean_user}' attempted login from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=403, detail="Your admin account has been disabled. Contact Super Admin.")
             
         stored_pw = user_data.get("password", "")
         if not verify_password(req.password, stored_pw):
             login_rate_limiter.record_failure(clean_user)
-            await log_admin_activity("LOGIN_FAILED", f"Incorrect password for user '{clean_user}' from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
+            await log_admin_activity("LOGIN_FAILED", f"Incorrect password for user '{clean_user}' from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=401, detail="Invalid username or password.")
             
         login_rate_limiter.reset(clean_user)
@@ -3768,7 +3835,7 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
         # Don't return password in payload
         safe_user = {k: v for k, v in user_data.items() if k != "password"}
         token = create_access_token(safe_user)
-        await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully from {client_device}", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff)
+        await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully from {client_device}", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff, location=client_location)
         
         return {"success": True, "user": safe_user, "token": token}
     except HTTPException:
@@ -4016,11 +4083,12 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
                 continue
             if query.search:
                 s_lower = query.search.lower()
-                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')} {d.get('ip_address', '')}".lower()
+                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')} {d.get('ip_address', '')} {d.get('location', '')} {(d.get('diff') or {}).get('location', '')}".lower()
                 if s_lower not in text_to_search:
                     continue
                     
             d["timestamp_formatted"] = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
+            d["location"] = d.get("location") or (d.get("diff") or {}).get("location", "")
             logs.append(d)
             
         return {"success": True, "total": len(logs), "retention_policy": f"Last {AUDIT_RETENTION_DAYS} Days", "logs": logs}
@@ -4067,6 +4135,7 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
                 
             formatted_time = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
             client_dev = (d.get("diff") or {}).get("device", "")
+            client_loc = d.get("location") or (d.get("diff") or {}).get("location", "")
             rows.append({
                 "S.No": idx + 1,
                 "Timestamp (IST)": formatted_time,
@@ -4077,6 +4146,7 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
                 "Target Officer": d.get("target_officer", ""),
                 "Activity Details": d.get("details", ""),
                 "IP Address": d.get("ip_address", ""),
+                "Location": client_loc,
                 "Device": client_dev
             })
             
