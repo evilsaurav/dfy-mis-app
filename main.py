@@ -1503,6 +1503,32 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 .where("date_of_reporting", "<=", end_date)
                 .stream()
             ))
+
+        # Strict District Isolation Guard:
+        # Prevents cross-district data contamination when multiple officers across Bihar share the same name (e.g. Deepak Kumar in Sitamarhi vs Darbhanga)
+        clean_target_wp = c_wp.lower()
+        clean_target_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+
+        filtered_reports = []
+        for rep in reports:
+            rep_data = rep.to_dict() if hasattr(rep, "to_dict") else rep
+            rep_wp = canonicalize_district(rep_data.get("working_place", "")).lower()
+            doc_id_lower = getattr(rep, "id", "").lower()
+            if rep_wp == clean_target_wp or doc_id_lower.startswith(f"{clean_target_wp}_"):
+                filtered_reports.append(rep)
+        reports = filtered_reports
+
+        # Fallback if direct query was empty due to casing or punctuation differences in Firestore
+        if not reports:
+            raw_monthly = await get_raw_monthly_reports(req_month)
+            fallback_matches = []
+            for r in raw_monthly:
+                r_wp = canonicalize_district(r.get("working_place", "")).lower()
+                r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                if (r_wp == clean_target_wp or r.get("id", "").lower().startswith(f"{clean_target_wp}_")) and r_fo == clean_target_fo:
+                    fallback_matches.append(r)
+            if fallback_matches:
+                reports = fallback_matches
         
         stats = {
             "notification": 0,
@@ -1528,7 +1554,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
         
         daily_history = {}
         for rep in reports:
-            data = rep.to_dict()
+            data = rep.to_dict() if hasattr(rep, "to_dict") else rep
             date_str = data.get("date_of_reporting") or data.get("date", "")
             if date_str and date_str.startswith(req.month):
                 day_total = 0
