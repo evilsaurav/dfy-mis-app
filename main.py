@@ -754,7 +754,14 @@ async def submit_daily_report(report: DailyActivityReport):
 
         doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
         doc_ref = db.collection("daily_field_reports").document(doc_id)
-        
+
+        # Idempotency Guard: Prevent concurrent double-tap submissions from inflating rollup metrics
+        # A 10-second lock ensures two simultaneous requests don't both increment the rollup counters
+        submission_lock_key = f"submitting_{doc_id}"
+        if cache.get(submission_lock_key):
+            return {"message": "Daily report submitted successfully"}
+        cache.set(submission_lock_key, True, ttl=10)
+
         payload = report.dict(exclude_unset=True)
         payload["status"] = "completed"
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
@@ -1059,7 +1066,7 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
 async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_admin)):
     try:
         month = data.month or datetime.now().strftime("%Y-%m")
-        clean_dist = data.district.strip()
+        clean_dist = canonicalize_district(data.district.strip())
         if admin.get("role") == "SUB_ADMIN":
             allowed = admin.get("allowed_districts", [])
             if "All" not in allowed and clean_dist not in allowed:
@@ -2408,6 +2415,9 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             matching_docs = [d for d in docs if canonicalize_district(d.to_dict().get("working_place", "")) == c_wp]
             if not matching_docs:
                 raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+            # Deterministic selection: sort by doc ID so canonical format (district_fo_date) is always picked first
+            if len(matching_docs) > 1:
+                matching_docs.sort(key=lambda d: d.id)
             doc_ref = matching_docs[0].reference
             data = matching_docs[0].to_dict()
             doc_id = matching_docs[0].id
@@ -2700,6 +2710,9 @@ async def admin_feed_officer_data(
                 # NOTE: If no district match found, do NOT fall back to other districts.
                 # This prevents cross-district data pollution.
                 if matching:
+                    # Deterministic selection: sort by doc ID so canonical format is always picked first
+                    if len(matching) > 1:
+                        matching.sort(key=lambda d: d.id)
                     doc_ref = matching[0].reference
                     doc_snap = matching[0]
                     doc_id = matching[0].id
@@ -2891,12 +2904,14 @@ async def admin_delete_day_report(
         ]
 
         matching_docs = []
+        seen_doc_ids = set()
         for cid in candidate_doc_ids:
             cand_ref = db.collection("daily_field_reports").document(cid)
             snap = await asyncio.to_thread(cand_ref.get)
-            if snap.exists:
+            if snap.exists and cid not in seen_doc_ids:
                 matching_docs.append(snap)
-                break
+                seen_doc_ids.add(cid)
+        # Note: No break — collect ALL alias matches to prevent zombie documents
 
         if not matching_docs:
             query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
@@ -2953,8 +2968,12 @@ async def admin_delete_day_report(
             print(f"[Delete Day Rollup Notice] {r_err}")
 
         # 5. Invalidate caches and record tombstones
+        # Invalidate ACTUAL deleted document IDs (from matching_docs — may differ from candidate aliases)
+        for doc_snap in matching_docs:
+            record_report_mutation("delete", doc_snap.id)
+            cache.delete(f"status_{doc_snap.id}")
+        # Also invalidate all candidate alias IDs (covers fallback-found docs)
         for cid in candidate_doc_ids:
-            record_report_mutation("delete", cid)
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
         cache.delete_prefix("profile_")
@@ -3054,7 +3073,7 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
 @app.post("/admin/staff/add")
 async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_admin)):
     try:
-        clean_dist = req.district.strip()
+        clean_dist = canonicalize_district(req.district.strip())
         if admin.get("role") == "SUB_ADMIN":
             allowed = admin.get("allowed_districts", [])
             if "All" not in allowed and clean_dist not in allowed:
