@@ -2404,9 +2404,8 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
                 .where("fo_name", "==", req.fo_name)
                 .where("date_of_reporting", "==", req.date)
                 .stream()))
+            # STRICT: Only match documents in the SAME district. Never edit a different district's record.
             matching_docs = [d for d in docs if canonicalize_district(d.to_dict().get("working_place", "")) == c_wp]
-            if not matching_docs and docs:
-                matching_docs = docs
             if not matching_docs:
                 raise HTTPException(status_code=404, detail="No report found for this date and officer.")
             doc_ref = matching_docs[0].reference
