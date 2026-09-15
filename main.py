@@ -2691,14 +2691,15 @@ async def admin_feed_officer_data(
 
         if not doc_ref:
             # Fallback search by fo_name and date_of_reporting in case of spacing/casing variations
+            # STRICT: Only match documents in the SAME district. Never cross-merge across districts.
             try:
                 query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
                     .where("fo_name", "==", clean_fo)
                     .where("date_of_reporting", "==", clean_date)
                     .stream()))
                 matching = [d for d in query_docs if canonicalize_district(d.to_dict().get("working_place", "")) == clean_wp]
-                if not matching and query_docs:
-                    matching = query_docs
+                # NOTE: If no district match found, do NOT fall back to other districts.
+                # This prevents cross-district data pollution.
                 if matching:
                     doc_ref = matching[0].reference
                     doc_snap = matching[0]
