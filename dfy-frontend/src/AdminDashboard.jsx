@@ -154,8 +154,10 @@ export default function AdminDashboard() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [copiedAttendance, setCopiedAttendance] = useState(false);
-  const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted'
+  const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted' | 'defaulters'
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
+  const [attendanceDistrictFilter, setAttendanceDistrictFilter] = useState('All');
+  const [attendanceTimeFilter, setAttendanceTimeFilter] = useState('all'); // 'all' | 'on_time' | 'late' | 'delayed' | 'early'
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [lastSyncedTime, setLastSyncedTime] = useState('');
   const [syncStatus, setSyncStatus] = useState('LIVE'); // 'LIVE' | 'SYNCING' | 'UP_TO_DATE'
@@ -755,7 +757,122 @@ export default function AdminDashboard() {
     setUnreadBroadcastPopup(null);
   };
 
+  // Zero-Firestore In-Memory Derivation: Instantly computes attendance from loaded rawRecords (0 reads, 0 Render load)
+  const deriveAttendanceFromRecords = (targetDate) => {
+    if (!staffDirectory || Object.keys(staffDirectory).length === 0 || !rawRecords) return null;
+
+    const allowedDistSet = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+      ? new Set(currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase()))
+      : null;
+
+    const staffList = [];
+    Object.entries(staffDirectory).forEach(([rawDist, names]) => {
+      const cDist = canonicalizeDistrict(rawDist);
+      if (allowedDistSet && !allowedDistSet.has(cDist.toLowerCase())) return;
+      (names || []).forEach(name => {
+        if (name && String(name).trim()) {
+          staffList.push({
+            district: cDist,
+            fo_name: String(name).trim(),
+            designation: "Field Officer"
+          });
+        }
+      });
+    });
+
+    const dateReports = rawRecords.filter(r => {
+      const rDate = String(r.date_of_reporting || r.date || '').split('T')[0];
+      return rDate === targetDate;
+    });
+
+    const reportsMap = {};
+    dateReports.forEach(r => {
+      const dist = canonicalizeDistrict(r.working_place || '');
+      if (allowedDistSet && !allowedDistSet.has(dist.toLowerCase())) return;
+      const cleanFo = (r.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const key = `${dist}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
+
+      const rawTs = r.timestamp_completed || r.timestamp || r.submitted_at || '';
+      let submittedTime = "Submitted";
+      if (rawTs) {
+        try {
+          const d = new Date(rawTs);
+          if (!isNaN(d.getTime())) {
+            submittedTime = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+          }
+        } catch (e) {}
+      }
+
+      reportsMap[key] = {
+        district: dist,
+        fo_name: (r.fo_name || '').trim(),
+        submission_count: r.submission_count || 1,
+        total_ids: (r.notifications || 0) + (r.tests || 0) + (r.presumptive || 0) + (r.hiv_dm || 0) + (r.dbt || 0),
+        submitted_time: submittedTime,
+        timestamp_raw: rawTs,
+        total_km: r.total_km || 0
+      };
+    });
+
+    const submittedFull = [];
+    const submittedPartial = [];
+    const missingFos = [];
+    const matchedKeys = new Set();
+
+    staffList.forEach(s => {
+      const cleanFo = s.fo_name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const key = `${s.district}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
+      if (reportsMap[key]) {
+        matchedKeys.add(key);
+        const rep = reportsMap[key];
+        const info = { ...s, ...rep };
+        if (rep.submission_count >= 2) submittedFull.push(info);
+        else submittedPartial.push(info);
+      } else {
+        missingFos.push(s);
+      }
+    });
+
+    Object.entries(reportsMap).forEach(([rkey, rinfo]) => {
+      if (!matchedKeys.has(rkey)) {
+        submittedPartial.push({ ...rinfo, designation: "Field Officer" });
+      }
+    });
+
+    const submittedFos = [...submittedFull, ...submittedPartial].sort((a, b) => (b.timestamp_raw || '').localeCompare(a.timestamp_raw || ''));
+    missingFos.sort((a, b) => a.district.localeCompare(b.district) || a.fo_name.localeCompare(b.fo_name));
+
+    return {
+      date: targetDate,
+      total_staff: staffList.length,
+      submitted_count: submittedFos.length,
+      submitted_full_count: submittedFull.length,
+      submitted_partial_count: submittedPartial.length,
+      missing_count: missingFos.length,
+      submitted_fos: submittedFos,
+      submitted_full: submittedFull,
+      submitted_partial: submittedPartial,
+      missing_fos: missingFos,
+      is_derived: true
+    };
+  };
+
   const fetchAttendance = async (force = false, targetDate = attendanceDate) => {
+    const isWithinLoadedMonth = targetDate && targetDate.slice(0, 7) === month;
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const isPastDateInMonth = isWithinLoadedMonth && targetDate !== todayStr;
+
+    // Instant Zero-Read Derivation for loaded month dates (0 reads, 0 Render load)
+    if (!force && isWithinLoadedMonth && rawRecords && rawRecords.length > 0) {
+      const derived = deriveAttendanceFromRecords(targetDate);
+      if (derived) {
+        setAttendance(derived);
+        if (isPastDateInMonth) {
+          return; // Past date in loaded month is 100% complete in rawRecords! No network request needed!
+        }
+      }
+    }
+
     setIsAttendanceLoading(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -930,6 +1047,239 @@ export default function AdminDashboard() {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
       setCopiedAttendance(true);
+      setTimeout(() => setCopiedAttendance(false), 3000);
+    }
+  };
+
+  // Punctuality & Time Classification Helper (Standard evening window: 5 PM - 8 PM)
+  const getSubmissionTimeClassification = (submittedTimeStr, timestampRaw) => {
+    let hour = null;
+    if (submittedTimeStr && typeof submittedTimeStr === 'string') {
+      const match = submittedTimeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+      if (match) {
+        let h = parseInt(match[1], 10);
+        const meridiem = (match[3] || '').toUpperCase();
+        if (meridiem === 'PM' && h !== 12) h += 12;
+        if (meridiem === 'AM' && h === 12) h = 0;
+        hour = h;
+      }
+    }
+    if (hour === null && timestampRaw) {
+      try {
+        const d = new Date(timestampRaw);
+        if (!isNaN(d.getTime())) {
+          // IST (UTC + 5:30)
+          hour = (d.getUTCHours() + 5 + Math.floor((d.getUTCMinutes() + 30) / 60)) % 24;
+        }
+      } catch (e) {}
+    }
+    if (hour === null) {
+      return { bracket: 'unknown', label: 'Submitted', shortLabel: 'Submitted', badgeClass: 'bg-slate-100 text-slate-600 border-slate-200' };
+    }
+    // 1. Standard On-Time: 5:00 PM – 8:00 PM (17:00 – 19:59)
+    if (hour >= 17 && hour < 20) {
+      return { 
+        bracket: 'on_time', 
+        label: 'On-Time (5 PM - 8 PM)', 
+        shortLabel: 'On-Time', 
+        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold' 
+      };
+    }
+    // 2. Late Evening: 8:00 PM – 10:00 PM (20:00 – 21:59)
+    if (hour >= 20 && hour < 22) {
+      return { 
+        bracket: 'late', 
+        label: 'Late Evening (8 PM - 10 PM)', 
+        shortLabel: 'Late (8-10 PM)', 
+        badgeClass: 'bg-amber-50 text-amber-700 border-amber-200 font-bold' 
+      };
+    }
+    // 3. Delayed / Night: After 10:00 PM (22:00 – 23:59 or 00:00 - 04:00)
+    if (hour >= 22 || hour < 4) {
+      return { 
+        bracket: 'delayed', 
+        label: 'Night Submission (> 10 PM)', 
+        shortLabel: 'Night (> 10 PM)', 
+        badgeClass: 'bg-rose-50 text-rose-700 border-rose-200 font-bold' 
+      };
+    }
+    // 4. Mid-Day / Early: Before 5:00 PM (04:00 – 16:59)
+    return { 
+      bracket: 'early', 
+      label: 'Mid-Day (< 5 PM)', 
+      shortLabel: 'Mid-Day (< 5 PM)', 
+      badgeClass: 'bg-blue-50 text-blue-700 border-blue-200 font-bold' 
+    };
+  };
+
+  // Chronic Non-Submitter / Absence Streaks (2+ consecutive days without report)
+  const chronicDefaulters = useMemo(() => {
+    if (!staffDirectory || Object.keys(staffDirectory).length === 0 || !rawRecords) return [];
+
+    const submissionSet = new Set();
+    (rawRecords || []).forEach(r => {
+      const d = String(r.date_of_reporting || r.date || '').split('T')[0];
+      const cDist = canonicalizeDistrict(r.working_place || '').toLowerCase();
+      const cleanFo = (r.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (d && cDist && cleanFo) {
+        submissionSet.add(`${cDist}_${cleanFo}_${d}`);
+      }
+    });
+
+    const targetDateObj = new Date(attendanceDate);
+    const checkDates = [];
+    for (let i = 0; i <= 5; i++) {
+      const d = new Date(targetDateObj);
+      d.setDate(d.getDate() - i);
+      checkDates.push(d.toISOString().slice(0, 10));
+    }
+
+    const defaulters = [];
+    const allowedDistSet = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
+      ? new Set(currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase()))
+      : null;
+
+    Object.entries(staffDirectory).forEach(([rawDist, names]) => {
+      const cDist = canonicalizeDistrict(rawDist);
+      if (allowedDistSet && !allowedDistSet.has(cDist.toLowerCase())) return;
+
+      (names || []).forEach(name => {
+        const cleanName = String(name || '').trim();
+        if (!cleanName) return;
+        const cleanFo = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        const distKey = cDist.toLowerCase();
+
+        let consecutiveMissed = 0;
+        const missedDates = [];
+        for (const cd of checkDates) {
+          const dayOfWeek = new Date(cd).getDay();
+          if (dayOfWeek === 0) continue; // Skip Sunday field break
+
+          const hasReport = submissionSet.has(`${distKey}_${cleanFo}_${cd}`);
+          if (!hasReport) {
+            consecutiveMissed++;
+            missedDates.push(cd);
+          } else {
+            break; // Stop at first submitted day
+          }
+        }
+
+        if (consecutiveMissed >= 2) {
+          defaulters.push({
+            district: cDist,
+            fo_name: cleanName,
+            designation: "Field Officer",
+            consecutiveDays: consecutiveMissed,
+            missedDates,
+            severity: consecutiveMissed >= 3 ? 'CRITICAL' : 'WARNING'
+          });
+        }
+      });
+    });
+
+    return defaulters.sort((a, b) => b.consecutiveDays - a.consecutiveDays || a.district.localeCompare(b.district));
+  }, [staffDirectory, rawRecords, attendanceDate, currentUser]);
+
+  // District-wise attendance scorecard rollup
+  const districtAttendanceRollup = useMemo(() => {
+    if (!attendance) return [];
+    const submittedList = attendance.submitted_fos || [...(attendance.submitted_full || []), ...(attendance.submitted_partial || [])];
+    const missingList = attendance.missing_fos || [];
+
+    const map = {};
+    Object.entries(staffDirectory || {}).forEach(([dist, names]) => {
+      const cDist = canonicalizeDistrict(dist);
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        if (!currentUser.allowed_districts.includes(cDist)) return;
+      }
+      map[cDist] = { district: cDist, total: (names || []).length, submitted: 0, missing: 0 };
+    });
+
+    submittedList.forEach(fo => {
+      const d = canonicalizeDistrict(fo.district);
+      if (!map[d]) map[d] = { district: d, total: 0, submitted: 0, missing: 0 };
+      map[d].submitted++;
+      if (map[d].total < map[d].submitted) map[d].total = map[d].submitted;
+    });
+
+    missingList.forEach(fo => {
+      const d = canonicalizeDistrict(fo.district);
+      if (!map[d]) map[d] = { district: d, total: 0, submitted: 0, missing: 0 };
+      map[d].missing++;
+      if (map[d].total < (map[d].submitted + map[d].missing)) map[d].total = map[d].submitted + map[d].missing;
+    });
+
+    return Object.values(map).map(item => ({
+      ...item,
+      pct: item.total > 0 ? Math.round((item.submitted / item.total) * 100) : 0
+    })).sort((a, b) => b.pct - a.pct || a.district.localeCompare(b.district));
+  }, [attendance, staffDirectory, currentUser]);
+
+  const copyDefaultersWarning = () => {
+    if (!chronicDefaulters || chronicDefaulters.length === 0) return;
+    let msg = `*🚨 DFY MIS Alert — Chronic Inactive Field Officers*\n`;
+    msg += `As of Date: ${attendanceDate}\n`;
+    msg += `Officers with 2+ consecutive days without daily reports:\n\n`;
+
+    const byDistrict = {};
+    chronicDefaulters.forEach(d => {
+      if (!byDistrict[d.district]) byDistrict[d.district] = [];
+      byDistrict[d.district].push(d);
+    });
+
+    for (const dist in byDistrict) {
+      msg += `*${dist}:*\n`;
+      byDistrict[dist].forEach(fo => {
+        msg += `  - ${fo.fo_name} (${fo.consecutiveDays} days inactive: ${fo.missedDates.slice(0, 3).join(', ')})\n`;
+      });
+      msg += `\n`;
+    }
+    msg += `⚠️ Immediate follow-up required by District Coordinators.`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg);
+      setCopiedAttendance(true);
+      showToast("✓ Defaulters alert copied for WhatsApp!", "success");
+      setTimeout(() => setCopiedAttendance(false), 3000);
+    }
+  };
+
+  const copyDistrictSpecificSummary = (distName) => {
+    if (!attendance) return;
+    const submittedList = (attendance.submitted_fos || [...(attendance.submitted_full || []), ...(attendance.submitted_partial || [])])
+      .filter(fo => canonicalizeDistrict(fo.district) === distName);
+    const missingList = (attendance.missing_fos || [])
+      .filter(fo => canonicalizeDistrict(fo.district) === distName);
+
+    const total = submittedList.length + missingList.length;
+    const pct = total > 0 ? Math.round((submittedList.length / total) * 100) : 0;
+
+    let msg = `*📊 DFY MIS — ${distName} Attendance Update*\n`;
+    msg += `Date: ${attendance.date || attendanceDate}\n`;
+    msg += `Status: ${submittedList.length} of ${total} FOs Submitted (${pct}%)\n\n`;
+
+    if (submittedList.length > 0) {
+      msg += `*✅ Submitted (${submittedList.length}):*\n`;
+      submittedList.forEach(fo => {
+        const timeClass = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) [⏰ ${fo.submitted_time || 'Submitted'} • ${timeClass.shortLabel}]\n`;
+      });
+      msg += `\n`;
+    }
+
+    if (missingList.length > 0) {
+      msg += `*⚠️ Pending / Not Submitted (${missingList.length}):*\n`;
+      missingList.forEach(fo => {
+        msg += `  - ${fo.fo_name}\n`;
+      });
+      msg += `\n`;
+    }
+    msg += `Kripya pending officers se report submit karwayen!`;
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg);
+      setCopiedAttendance(true);
+      showToast(`✓ ${distName} WhatsApp report copied!`, "success");
       setTimeout(() => setCopiedAttendance(false), 3000);
     }
   };
@@ -3254,16 +3604,23 @@ const availableDistrictsForFeed = useMemo(() => {
                   Today's Field Officer Attendance 
                   <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
                 </h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong> | Submitted: <strong className="text-emerald-600">{attendance.submitted_full_count + attendance.submitted_partial_count}</strong> | Pending: <strong className="text-red-500">{attendance.missing_count}</strong>
+                <p className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
+                  <span>| Submitted: <strong className="text-emerald-600">{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)}</strong></span>
+                  <span>| Pending: <strong className="text-red-500">{attendance.missing_count}</strong></span>
+                  {chronicDefaulters.length > 0 && (
+                    <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
+                      <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
-              <div className="flex items-center gap-2 text-xs font-bold">
+            <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
                 <button
-                  onClick={() => { setAttendanceActiveTab('submitted'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  onClick={() => { setAttendanceActiveTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
                   title="Click to view submitted officers with time"
                 >
@@ -3271,19 +3628,29 @@ const availableDistrictsForFeed = useMemo(() => {
                   <span>{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)} Submitted</span>
                 </button>
                 <button
-                  onClick={() => { setAttendanceActiveTab('missing'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  onClick={() => { setAttendanceActiveTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
                   className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
                   title="Click to view pending officers"
                 >
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
                   <span>{attendance.missing_count} Missing</span>
                 </button>
+                {chronicDefaulters.length > 0 && (
+                  <button
+                    onClick={() => { setAttendanceActiveTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl border border-amber-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                    title="View chronic defaulters (2+ consecutive days missed)"
+                  >
+                    <span>⚠️</span>
+                    <span>{chronicDefaulters.length} Defaulters</span>
+                  </button>
+                )}
               </div>
               <button 
-                onClick={() => { setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                onClick={() => { setAttendanceSearchQuery(''); setAttendanceDistrictFilter('All'); setShowAttendanceModal(true); }}
                 className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm"
               >
-                View Details
+                View Radar
               </button>
             </div>
           </div>
@@ -6257,18 +6624,60 @@ const availableDistrictsForFeed = useMemo(() => {
         );
       })()}
 
-      {/* Field Officer Attendance Modal (Pending vs Submitted with Time) */}
+      {/* Field Officer Attendance Modal (Attendance Intelligence Radar) */}
       {showAttendanceModal && attendance && (() => {
         const submittedList = attendance.submitted_fos || [...(attendance.submitted_full || []), ...(attendance.submitted_partial || [])];
         const missingList = attendance.missing_fos || [];
 
-        const filteredMissing = missingList.filter(fo => {
+        // Fast lookup map for chronic defaulters
+        const defaulterMap = {};
+        chronicDefaulters.forEach(d => {
+          const key = `${d.district.toLowerCase()}_${d.fo_name.toLowerCase()}`;
+          defaulterMap[key] = d;
+        });
+
+        // 1. Filter by District Pill
+        const districtMatchedMissing = attendanceDistrictFilter === 'All'
+          ? missingList
+          : missingList.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
+
+        const districtMatchedSubmitted = attendanceDistrictFilter === 'All'
+          ? submittedList
+          : submittedList.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
+
+        const districtMatchedDefaulters = attendanceDistrictFilter === 'All'
+          ? chronicDefaulters
+          : chronicDefaulters.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
+
+        // 2. Precompute time bracket counts for chips
+        const timeCounts = { all: districtMatchedSubmitted.length, on_time: 0, late: 0, delayed: 0, early: 0 };
+        districtMatchedSubmitted.forEach(fo => {
+          const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+          if (timeCounts[cls.bracket] !== undefined) timeCounts[cls.bracket]++;
+        });
+
+        // 3. Filter Submitted by Time Bracket
+        const timeFilteredSubmitted = attendanceTimeFilter === 'all'
+          ? districtMatchedSubmitted
+          : districtMatchedSubmitted.filter(fo => {
+              const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+              return cls.bracket === attendanceTimeFilter;
+            });
+
+        // 4. Quick Search Filter across tabs
+        const filteredMissing = districtMatchedMissing.filter(fo => {
           if (!attendanceSearchQuery) return true;
           const q = attendanceSearchQuery.toLowerCase();
           return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
         });
 
-        const filteredSubmitted = submittedList.filter(fo => {
+        const filteredSubmitted = timeFilteredSubmitted.filter(fo => {
+          if (!attendanceSearchQuery) return true;
+          const q = attendanceSearchQuery.toLowerCase();
+          return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
+        });
+
+        const filteredDefaulters = districtMatchedDefaulters.filter(fo => {
           if (!attendanceSearchQuery) return true;
           const q = attendanceSearchQuery.toLowerCase();
           return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
@@ -6278,33 +6687,40 @@ const availableDistrictsForFeed = useMemo(() => {
 
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-2xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in my-auto">
+            <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-3xl sm:max-w-4xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto font-sans">
               {/* Header */}
               <div className="flex justify-between items-start pb-3 border-b border-slate-100 mb-3">
                 <div>
                   <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                    <span>Field Officer Daily Attendance</span>
+                    <span>Field Officer Attendance Radar</span>
                     <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date || attendanceDate}</span>
                   </h3>
-                  <p className="text-xs text-slate-400 font-bold tracking-wide mt-0.5">
-                    Total Active Staff: <strong className="text-slate-700">{attendance.total_staff}</strong> | Submitted: <strong className="text-emerald-600">{totalSubmitted}</strong> | Pending: <strong className="text-rose-500">{attendance.missing_count}</strong>
+                  <p className="text-xs text-slate-400 font-bold tracking-wide mt-0.5 flex flex-wrap items-center gap-1.5">
+                    <span>Total Active Staff: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
+                    <span>| Submitted: <strong className="text-emerald-600">{totalSubmitted}</strong></span>
+                    <span>| Pending: <strong className="text-rose-500">{attendance.missing_count}</strong></span>
+                    {chronicDefaulters.length > 0 && (
+                      <span className="font-bold text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1">
+                        <span>⚠️</span> {chronicDefaulters.length} Defaulters (2+ Days)
+                      </span>
+                    )}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button 
                     onClick={() => fetchAttendance(true, attendanceDate)} 
                     disabled={isAttendanceLoading}
-                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
-                    title="Live Refresh Attendance"
+                    className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all cursor-pointer"
+                    title="Live Refresh Attendance from Server"
                   >
                     <svg className={`w-4 h-4 ${isAttendanceLoading ? 'animate-spin text-emerald-600' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                   </button>
-                  <button onClick={() => setShowAttendanceModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
+                  <button onClick={() => setShowAttendanceModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer">&times;</button>
                 </div>
               </div>
 
-              {/* 📅 Date Navigation Bar (Option A) */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-3 flex flex-wrap items-center justify-between gap-2">
+              {/* 📅 Date Navigation Bar (Instant In-Memory Derivation) */}
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1">
                     <span>📅</span> Date:
@@ -6325,7 +6741,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   {isAttendanceLoading && (
                     <span className="text-[10px] font-bold text-indigo-600 animate-pulse flex items-center gap-1">
                       <span className="inline-block w-2 h-2 rounded-full bg-indigo-600 animate-ping"></span>
-                      Loading...
+                      Syncing...
                     </span>
                   )}
                 </div>
@@ -6383,47 +6799,195 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* Navigation Tabs */}
-              <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-2xl mb-3">
+              {/* 📊 District Attendance Rollup Scorecard Pills */}
+              <div className="mb-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    District Rollup Radar ({districtAttendanceRollup.length} Districts)
+                  </span>
+                  {attendanceDistrictFilter !== 'All' && (
+                    <button
+                      onClick={() => setAttendanceDistrictFilter('All')}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+                    >
+                      Clear District Filter (Show All)
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 custom-scrollbar text-xs font-bold">
+                  <button
+                    onClick={() => setAttendanceDistrictFilter('All')}
+                    className={`px-3 py-1 rounded-xl border transition-all shrink-0 cursor-pointer ${
+                      attendanceDistrictFilter === 'All'
+                        ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    All Districts ({totalSubmitted}/{attendance.total_staff})
+                  </button>
+                  {districtAttendanceRollup.map(d => {
+                    const isSelected = attendanceDistrictFilter === d.district;
+                    const isFull = d.pct === 100;
+                    const isGood = d.pct >= 70;
+                    return (
+                      <button
+                        key={d.district}
+                        onClick={() => setAttendanceDistrictFilter(d.district)}
+                        className={`px-2.5 py-1 rounded-xl border transition-all shrink-0 flex items-center gap-1.5 cursor-pointer text-[11px] ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm font-black'
+                            : isFull
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-200 font-bold'
+                            : isGood
+                            ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200 font-bold'
+                            : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 font-bold'
+                        }`}
+                        title={`${d.district}: ${d.submitted} of ${d.total} submitted (${d.pct}%)`}
+                      >
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : isFull ? 'bg-emerald-500' : isGood ? 'bg-amber-500' : 'bg-rose-500'}`}></span>
+                        <span>{d.district}</span>
+                        <span className={`text-[10px] px-1 py-0.2 rounded-md ${isSelected ? 'bg-indigo-700 text-white' : 'bg-white/80 text-slate-700'}`}>
+                          {d.submitted}/{d.total}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* District Active Notice & 1-Click WhatsApp export */}
+                {attendanceDistrictFilter !== 'All' && (
+                  <div className="bg-indigo-50/80 border border-indigo-100 rounded-xl px-3 py-1.5 flex items-center justify-between gap-2 text-xs animate-fade-in">
+                    <span className="font-bold text-indigo-900 flex items-center gap-1.5">
+                      <span>📍</span> Filtered by District: <strong>{attendanceDistrictFilter}</strong>
+                    </span>
+                    <button
+                      onClick={() => copyDistrictSpecificSummary(attendanceDistrictFilter)}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-3 py-1 rounded-lg transition-all shadow-2xs cursor-pointer flex items-center gap-1 active:scale-95"
+                      title={`Copy ${attendanceDistrictFilter} Attendance for WhatsApp`}
+                    >
+                      <span>📲</span> Copy {attendanceDistrictFilter} WhatsApp
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Navigation Tabs (3 Tabs: Missing, Submitted, Defaulters) */}
+              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5">
                 <button
                   onClick={() => setAttendanceActiveTab('missing')}
-                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+                  className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     attendanceActiveTab === 'missing'
                       ? 'bg-white text-rose-600 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0"></span>
-                  <span className="truncate">Pending / Missing ({attendance.missing_count})</span>
+                  <span className="truncate">Pending ({filteredMissing.length})</span>
                 </button>
+
                 <button
                   onClick={() => setAttendanceActiveTab('submitted')}
-                  className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+                  className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                     attendanceActiveTab === 'submitted'
                       ? 'bg-white text-emerald-600 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
-                  <span className="truncate">Submitted with Time ({totalSubmitted})</span>
+                  <span className="truncate">Submitted ({filteredSubmitted.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setAttendanceActiveTab('defaulters')}
+                  className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    attendanceActiveTab === 'defaulters'
+                      ? 'bg-white text-amber-700 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                  <span className="truncate flex items-center gap-1">
+                    Defaulters ({filteredDefaulters.length})
+                    {filteredDefaulters.length > 0 && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                    )}
+                  </span>
                 </button>
               </div>
 
+              {/* ⏰ Time Filter Chips (Rendered under Submitted Tab) */}
+              {attendanceActiveTab === 'submitted' && (
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 custom-scrollbar text-[11px] font-bold">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 shrink-0 mr-1">Time:</span>
+                  <button
+                    onClick={() => setAttendanceTimeFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 ${
+                      attendanceTimeFilter === 'all'
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    All Times ({timeCounts.all})
+                  </button>
+                  <button
+                    onClick={() => setAttendanceTimeFilter('on_time')}
+                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
+                      attendanceTimeFilter === 'on_time'
+                        ? 'bg-emerald-600 text-white border-emerald-600 font-black'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    }`}
+                  >
+                    <span>🟢</span> On-Time: 5 PM - 8 PM ({timeCounts.on_time})
+                  </button>
+                  <button
+                    onClick={() => setAttendanceTimeFilter('late')}
+                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
+                      attendanceTimeFilter === 'late'
+                        ? 'bg-amber-600 text-white border-amber-600 font-black'
+                        : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                    }`}
+                  >
+                    <span>🟡</span> Late: 8 PM - 10 PM ({timeCounts.late})
+                  </button>
+                  <button
+                    onClick={() => setAttendanceTimeFilter('delayed')}
+                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
+                      attendanceTimeFilter === 'delayed'
+                        ? 'bg-rose-600 text-white border-rose-600 font-black'
+                        : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                    }`}
+                  >
+                    <span>🔴</span> Night: &gt; 10 PM ({timeCounts.delayed})
+                  </button>
+                  <button
+                    onClick={() => setAttendanceTimeFilter('early')}
+                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
+                      attendanceTimeFilter === 'early'
+                        ? 'bg-blue-600 text-white border-blue-600 font-black'
+                        : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
+                    }`}
+                  >
+                    <span>ℹ️</span> Mid-Day: &lt; 5 PM ({timeCounts.early})
+                  </button>
+                </div>
+              )}
+
               {/* Quick Search */}
-              <div className="mb-3">
+              <div className="mb-2.5">
                 <div className="relative">
                   <input
                     type="text"
                     value={attendanceSearchQuery}
                     onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                    placeholder={`Search ${attendanceActiveTab === 'missing' ? 'pending' : 'submitted'} by name or district...`}
+                    placeholder={`Search ${attendanceActiveTab === 'missing' ? 'pending' : attendanceActiveTab === 'submitted' ? 'submitted' : 'defaulters'} by name or district...`}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pl-9"
                   />
                   <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
                   {attendanceSearchQuery && (
                     <button 
                       onClick={() => setAttendanceSearchQuery('')} 
-                      className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 text-sm font-bold"
+                      className="absolute right-3 top-2 text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
                     >
                       &times;
                     </button>
@@ -6432,90 +6996,168 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* List Container */}
-              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1">
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-[220px]">
                 {attendanceActiveTab === 'missing' ? (
                   filteredMissing.length > 0 ? (
-                    filteredMissing.map((fo, idx) => (
-                      <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors">
-                        <div>
-                          <p className="text-sm font-bold text-slate-800">{fo.fo_name}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{fo.district} &bull; {fo.designation || 'Field Officer'}</p>
-                        </div>
-                        <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
-                          Not Submitted
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
-                      {attendanceSearchQuery ? 'Koi missing officer match nahi hua.' : '🎉 Sabhi Field Officers ne aaj ki report submit kar di hai!'}
-                    </div>
-                  )
-                ) : (
-                  filteredSubmitted.length > 0 ? (
-                    filteredSubmitted.map((fo, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
-                        <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0">
-                            ✓
-                          </div>
+                    filteredMissing.map((fo, idx) => {
+                      const defKey = `${(fo.district || '').toLowerCase()}_${(fo.fo_name || '').toLowerCase()}`;
+                      const defInfo = defaulterMap[defKey];
+                      return (
+                        <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors">
                           <div>
-                            <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                            <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                               <span>{fo.fo_name}</span>
-                              {fo.submission_count > 1 && (
-                                <span className="text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.2 rounded-md">
-                                  {fo.submission_count} edits
+                              {defInfo && (
+                                <span className="text-[10px] font-black text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.2 rounded-md inline-flex items-center gap-0.5">
+                                  <span>⚠️</span> {defInfo.consecutiveDays} Days Inactive
                                 </span>
                               )}
                             </p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                              {fo.district} &bull; {fo.designation || 'Field Officer'}
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{fo.district} &bull; {fo.designation || 'Field Officer'}</p>
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
+                            Not Submitted
+                          </span>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
+                      {attendanceSearchQuery ? 'Koi missing officer match nahi hua.' : '🎉 Sabhi Field Officers ne report submit kar di hai!'}
+                    </div>
+                  )
+                ) : attendanceActiveTab === 'submitted' ? (
+                  filteredSubmitted.length > 0 ? (
+                    filteredSubmitted.map((fo, idx) => {
+                      const timeClassification = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+                      return (
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0">
+                              ✓
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                                <span>{fo.fo_name}</span>
+                                {fo.submission_count > 1 && (
+                                  <span className="text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.2 rounded-md">
+                                    {fo.submission_count} edits
+                                  </span>
+                                )}
+                              </p>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                {fo.district} &bull; {fo.designation || 'Field Officer'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                            {fo.total_ids !== undefined && (
+                              <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
+                                {fo.total_ids} IDs
+                              </span>
+                            )}
+                            <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
+                              <span>⏰</span> {fo.submitted_time || 'Submitted'}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-lg border shadow-2xs ${timeClassification.badgeClass}`}>
+                              {timeClassification.shortLabel}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
+                      {attendanceSearchQuery ? 'Koi submitted officer match nahi hua.' : 'Is filter category mein koi officer nahi mila.'}
+                    </div>
+                  )
+                ) : (
+                  /* Defaulters / Absence Streak Tab */
+                  filteredDefaulters.length > 0 ? (
+                    filteredDefaulters.map((fo, idx) => (
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200 transition-colors gap-2 sm:gap-0">
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-black text-sm shrink-0 mt-0.5">
+                            ⚠️
+                          </div>
+                          <div>
+                            <p className="text-sm font-black text-slate-800 flex items-center gap-2">
+                              <span>{fo.fo_name}</span>
+                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider ${fo.severity === 'CRITICAL' ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}`}>
+                                {fo.consecutiveDays} Days Streak
+                              </span>
+                            </p>
+                            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                              {fo.district} &bull; Field Officer
+                            </p>
+                            <p className="text-[11px] font-semibold text-slate-600 mt-1">
+                              Missed Dates: <span className="font-mono text-rose-700 font-bold">{fo.missedDates.join(', ')}</span>
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-center">
-                          {fo.total_ids !== undefined && (
-                            <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
-                              {fo.total_ids} IDs
-                            </span>
-                          )}
-                          <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
-                            <span>⏰</span> {fo.submitted_time || 'Submitted'}
+                        <div className="self-end sm:self-center">
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-2xs ${fo.severity === 'CRITICAL' ? 'bg-rose-600 text-white border-rose-700' : 'bg-amber-500 text-white border-amber-600'}`}>
+                            {fo.severity === 'CRITICAL' ? 'Critical Action' : 'Pending Follow-up'}
                           </span>
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div className="text-center py-12 text-slate-400 font-semibold text-xs">
-                      {attendanceSearchQuery ? 'Koi submitted officer match nahi hua.' : 'Abhi tak kisi officer ne report submit nahi ki hai.'}
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs space-y-1">
+                      <div className="text-2xl">🎉</div>
+                      <p className="font-black text-slate-700 text-sm">Shandar! Koi Chronic Defaulter Nahi Hai.</p>
+                      <p className="text-slate-400">Sabhi active officers regular reporting kar rahe hain (no 2+ consecutive missed days).</p>
                     </div>
                   )
                 )}
               </div>
 
               {/* Action Footer */}
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-3 mt-auto">
-                {attendanceActiveTab === 'missing' ? (
-                  <button 
-                    onClick={copyMissingReminder}
-                    disabled={attendance.missing_count === 0}
-                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${attendance.missing_count > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <span>{copiedAttendance ? 'Reminder Copied!' : 'Copy WhatsApp Reminder'}</span>
-                  </button>
-                ) : (
-                  <button 
-                    onClick={copySubmittedSummary}
-                    disabled={totalSubmitted === 0}
-                    className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${totalSubmitted > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
-                  >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
-                    <span>{copiedAttendance ? 'Submitted List Copied!' : 'Copy Submitted List (WhatsApp)'}</span>
-                  </button>
-                )}
-                <button onClick={() => setShowAttendanceModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 px-5 rounded-xl transition-colors">Close</button>
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 mt-auto">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {attendanceActiveTab === 'missing' ? (
+                    <button 
+                      onClick={copyMissingReminder}
+                      disabled={attendance.missing_count === 0}
+                      className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${attendance.missing_count > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      <span>{copiedAttendance ? 'Reminder Copied!' : 'Copy WhatsApp Reminder'}</span>
+                    </button>
+                  ) : attendanceActiveTab === 'submitted' ? (
+                    <button 
+                      onClick={copySubmittedSummary}
+                      disabled={totalSubmitted === 0}
+                      className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${totalSubmitted > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-600/20 active:scale-95 cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+                      <span>{copiedAttendance ? 'Submitted List Copied!' : 'Copy Submitted List (WhatsApp)'}</span>
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={copyDefaultersWarning}
+                      disabled={chronicDefaulters.length === 0}
+                      className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${chronicDefaulters.length > 0 ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/20 active:scale-95 cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    >
+                      <span>🚨</span>
+                      <span>{copiedAttendance ? 'Alert Copied!' : 'Copy Defaulters Alert (WhatsApp)'}</span>
+                    </button>
+                  )}
+
+                  {attendanceDistrictFilter !== 'All' && (
+                    <button
+                      onClick={() => copyDistrictSpecificSummary(attendanceDistrictFilter)}
+                      className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-xs py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 active:scale-95"
+                    >
+                      <span>📲</span>
+                      <span>Copy {attendanceDistrictFilter} Report</span>
+                    </button>
+                  )}
+                </div>
+
+                <button onClick={() => setShowAttendanceModal(false)} className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs py-2.5 px-5 rounded-xl transition-colors cursor-pointer">Close</button>
               </div>
 
             </div>
