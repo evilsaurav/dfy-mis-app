@@ -156,6 +156,9 @@ export default function AdminDashboard() {
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("");
+  const [selectedKpiDistricts, setSelectedKpiDistricts] = useState([]);
+  const [isDownloadingKpi, setIsDownloadingKpi] = useState(false);
+  const [kpiQueueProgress, setKpiQueueProgress] = useState(null); // { current, total, district, percent, status }
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
   const [editDayModal, setEditDayModal] = useState(null); // { isOpen, district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs, loading, error }
@@ -2075,7 +2078,35 @@ export default function AdminDashboard() {
     }
   };
 
+  const availableKpiDistricts = useMemo(() => {
+    const all = (districts || []).filter(d => d !== 'All');
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowedSet = new Set(currentUser.allowed_districts.map(canonicalizeDistrict));
+      return all.filter(d => allowedSet.has(canonicalizeDistrict(d)));
+    }
+    return all;
+  }, [districts, currentUser]);
+
+  const handleToggleKpiDistrict = (dist) => {
+    setSelectedKpiDistricts(prev => {
+      if (prev.includes(dist)) {
+        return prev.filter(d => d !== dist);
+      } else {
+        return [...prev, dist];
+      }
+    });
+  };
+
+  const handleSelectAllKpiDistricts = () => {
+    setSelectedKpiDistricts([...availableKpiDistricts]);
+  };
+
+  const handleClearKpiDistricts = () => {
+    setSelectedKpiDistricts([]);
+  };
+
   const handleDownloadKpi = () => {
+    if (isDownloadingKpi) return;
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
     const targetDist = (reportsDistrict && reportsDistrict !== 'All') 
@@ -2085,16 +2116,108 @@ export default function AdminDashboard() {
       alert("Please select a district to download.");
       return;
     }
+    setIsDownloadingKpi(true);
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}&token=${getAdminToken()}`, "_blank");
+    setTimeout(() => setIsDownloadingKpi(false), 3000);
   };
 
-  const handleDownloadAllZip = () => {
+  const handleDownloadScopedZip = () => {
+    if (isDownloadingKpi) return;
+    const targetList = selectedKpiDistricts.length > 0 ? selectedKpiDistricts : availableKpiDistricts;
+    if (!targetList || targetList.length === 0) {
+      showToast("Please select at least one district to download.", "error");
+      return;
+    }
+
+    setIsDownloadingKpi(true);
+    showToast(`📦 Preparing Scoped ZIP bundle for ${targetList.length} district(s)...`, "info");
+
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    const subAdminParam = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
-      ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`
-      : '';
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${subAdminParam}&token=${getAdminToken()}`, "_blank");
+    const distParam = `&districts=${encodeURIComponent(targetList.join(','))}`;
+    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}&token=${getAdminToken()}`, "_blank");
+
+    setTimeout(() => {
+      setIsDownloadingKpi(false);
+    }, 4000);
+  };
+
+  const handleDownloadSequentialQueue = async () => {
+    if (isDownloadingKpi) return;
+    const targetList = selectedKpiDistricts.length > 0 ? selectedKpiDistricts : availableKpiDistricts;
+    if (!targetList || targetList.length === 0) {
+      showToast("Please select at least one district to download.", "error");
+      return;
+    }
+
+    setIsDownloadingKpi(true);
+    const total = targetList.length;
+    setKpiQueueProgress({
+      current: 0,
+      total,
+      district: '',
+      percent: 0,
+      status: `Initializing queue for ${total} district(s)...`
+    });
+
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+
+    for (let i = 0; i < total; i++) {
+      const dist = targetList[i];
+      setKpiQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i) / total) * 100),
+        status: `Generating Excel for ${dist} (${i + 1}/${total})...`
+      });
+
+      try {
+        const res = await authFetch(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(dist)}&month=${month}`);
+        if (res.ok) {
+          const blob = await res.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = `KPI_Report_${dist}_${month}.xlsx`;
+          document.body.appendChild(link);
+          link.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          link.remove();
+        } else {
+          console.error(`Failed to download KPI for ${dist}`);
+        }
+      } catch (err) {
+        console.error(`Error downloading ${dist}:`, err);
+      }
+
+      setKpiQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i + 1) / total) * 100),
+        status: `Completed ${dist} (${i + 1}/${total}) ✓`
+      });
+
+      // Intentional 1000ms pause between district files: Render CPU/RAM cooldown
+      if (i < total - 1) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    showToast(`✓ All ${total} district workbooks downloaded successfully!`, "success");
+    setKpiQueueProgress({
+      current: total,
+      total,
+      district: '',
+      percent: 100,
+      status: `All ${total} district workbooks downloaded successfully!`
+    });
+
+    setTimeout(() => {
+      setKpiQueueProgress(null);
+      setIsDownloadingKpi(false);
+    }, 2500);
   };
 
   const copyWhatsAppBulletin = () => {
@@ -6868,46 +6991,183 @@ const availableDistrictsForFeed = useMemo(() => {
               {/* Tab 1: District KPI Workbooks */}
               {reportsStudioTab === "kpi_workbooks" && (
                 <div className="space-y-4">
-                  <div className="bg-indigo-50/70 p-5 rounded-2xl border border-indigo-100">
-                    <h4 className="text-sm font-black text-indigo-900 mb-1">Official 33-Sheet Pre-Formulated KPI Workbooks</h4>
-                    <p className="text-xs text-indigo-700 font-medium">Monthly populated daily tabs (1ST..31st) with auto-calculating consolidated sheets and target injection.</p>
+                  <div className="bg-indigo-50/70 p-4 sm:p-5 rounded-2xl border border-indigo-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-indigo-900 mb-0.5">Official 33-Sheet Pre-Formulated KPI Workbooks</h4>
+                      <p className="text-xs text-indigo-700 font-medium">Monthly populated daily tabs (1ST..31st) with auto-calculating consolidated sheets and target injection.</p>
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-200/80 text-indigo-900 px-3 py-1 rounded-full shrink-0 self-start sm:self-auto">
+                      Month: {month}
+                    </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex flex-col justify-between">
-                      <div>
-                        <span className="text-xs font-black text-slate-800 block mb-1.5">Single District KPI Excel</span>
-                        <p className="text-[11px] text-slate-400 font-medium mb-2.5">Select district to download its pre-formulated 33-sheet workbook:</p>
-                        <select
-                          value={reportsDistrict}
-                          onChange={(e) => setReportsDistrict(e.target.value)}
-                          className="w-full bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
-                        >
-                          {districts.filter(d => d !== 'All').map(d => (
-                            <option key={d} value={d}>{d} District</option>
-                          ))}
-                        </select>
+                  {/* Multi-District Selection Deck */}
+                  <div className="bg-slate-50/90 p-4 sm:p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-800">
+                          🎯 Choose Districts to Export
+                        </span>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${selectedKpiDistricts.length > 0 ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                          {selectedKpiDistricts.length} of {availableKpiDistricts.length} Selected
+                        </span>
                       </div>
-                      <button
-                        onClick={handleDownloadKpi}
-                        className="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95"
-                      >
-                        <span>📥</span> {reportsDistrict ? `Download ${reportsDistrict} KPI (.xlsx)` : 'Download KPI (.xlsx)'}
-                      </button>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleSelectAllKpiDistricts}
+                          disabled={isDownloadingKpi}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-indigo-100 hover:bg-indigo-200 text-indigo-800 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearKpiDistricts}
+                          disabled={isDownloadingKpi}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Clear
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="bg-emerald-50/60 p-4 rounded-2xl border border-emerald-100 flex flex-col justify-between">
-                      <div>
-                        <span className="text-xs font-black text-emerald-900 block mb-1">
-                          {currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? 'Permitted Districts Master ZIP' : 'All Districts Master ZIP'}
-                        </span>
-                        <p className="text-[11px] text-emerald-700 font-medium">1-Click bundles all permitted Bihar district `.xlsx` workbooks into a single ZIP archive.</p>
+                    {/* District Chips */}
+                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                      {availableKpiDistricts.map(dist => {
+                        const isSelected = selectedKpiDistricts.includes(dist);
+                        return (
+                          <button
+                            key={dist}
+                            type="button"
+                            disabled={isDownloadingKpi}
+                            onClick={() => handleToggleKpiDistrict(dist)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border active:scale-95 cursor-pointer disabled:opacity-50 ${
+                              isSelected
+                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-xs shadow-indigo-600/20'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
+                            }`}
+                          >
+                            <span>{isSelected ? '✓' : '+'}</span>
+                            <span>{dist}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Live Queue Progress Banner */}
+                    {kpiQueueProgress && (
+                      <div className="bg-indigo-950 text-white p-4 rounded-2xl border border-indigo-800 shadow-lg space-y-2 animate-fade-in">
+                        <div className="flex justify-between items-center text-xs font-bold">
+                          <span className="flex items-center gap-2">
+                            <span className="animate-spin text-sm">⏳</span>
+                            <span>{kpiQueueProgress.status}</span>
+                          </span>
+                          <span className="font-mono text-indigo-300">{kpiQueueProgress.percent}%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-indigo-900 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-400 to-teal-400 transition-all duration-300 rounded-full"
+                            style={{ width: `${kpiQueueProgress.percent}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-[10px] text-indigo-300 font-medium">
+                          Render memory protection active: generating one file at a time with 1-second server cooldown between requests.
+                        </p>
                       </div>
-                      <button
-                        onClick={handleDownloadAllZip}
-                        className="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2"
+                    )}
+
+                    {/* Multi-District Download Action Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      {/* Option A: Scoped ZIP */}
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-2xs">
+                        <div>
+                          <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1">
+                            <span>📦</span>
+                            <span>Download Scoped ZIP Archive</span>
+                          </span>
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Bundles only the <strong>{selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : availableKpiDistricts.length} selected district(s)</strong> into a single compressed ZIP file.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isDownloadingKpi || (selectedKpiDistricts.length === 0 && availableKpiDistricts.length === 0)}
+                          onClick={handleDownloadScopedZip}
+                          className="mt-3 w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                        >
+                          {isDownloadingKpi ? (
+                            <>
+                              <span className="animate-spin">⏳</span>
+                              <span>Processing... (Please wait)</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>📦</span>
+                              <span>Download Selected ZIP ({selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : 'All'})</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Option B: One-by-One Queue */}
+                      <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/80 flex flex-col justify-between shadow-2xs">
+                        <div>
+                          <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5 mb-1">
+                            <span>📑</span>
+                            <span>Download One-by-One (Queue)</span>
+                          </span>
+                          <p className="text-[11px] text-emerald-800 font-medium">
+                            Downloads `.xlsx` files individually with a 1-second pause between each file (guarantees zero memory spikes on Render).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isDownloadingKpi || selectedKpiDistricts.length === 0}
+                          onClick={handleDownloadSequentialQueue}
+                          className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                        >
+                          {isDownloadingKpi ? (
+                            <>
+                              <span className="animate-spin">⏳</span>
+                              <span>Queue Running...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>📑</span>
+                              <span>Start Download Queue ({selectedKpiDistricts.length} Files)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Single District Quick Export */}
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex-1">
+                      <span className="text-xs font-black text-slate-800 block mb-0.5">Quick Single District Export</span>
+                      <p className="text-[11px] text-slate-400 font-medium">Select a single district to immediately download its 33-sheet `.xlsx` file:</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <select
+                        value={reportsDistrict}
+                        onChange={(e) => setReportsDistrict(e.target.value)}
+                        className="bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
                       >
-                        <span>📦</span> {currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `Download Permitted Districts (${currentUser.allowed_districts.length} ZIP)` : 'Download All Districts (ZIP)'}
+                        {availableKpiDistricts.map(d => (
+                          <option key={d} value={d}>{d} District</option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={isDownloadingKpi}
+                        onClick={handleDownloadKpi}
+                        className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+                      >
+                        <span>📥</span>
+                        <span>Download</span>
                       </button>
                     </div>
                   </div>

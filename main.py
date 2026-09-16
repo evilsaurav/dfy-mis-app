@@ -1403,23 +1403,38 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         pass
     return res_bytes
 
+# Concurrency Semaphore to protect Render memory/CPU from multi-tap or parallel heavy Excel exports
+KPI_EXCEL_SEMAPHORE = asyncio.Semaphore(1)
+
 @app.get("/download-kpi-workbook")
 async def download_kpi_workbook(district: str, month: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
-        excel_bytes = await asyncio.to_thread(lambda: generate_district_kpi_bytes(district, month))
-        if not excel_bytes:
-            raise HTTPException(status_code=404, detail=f"Template for {district} not found on server.")
-            
-        safe_dist = safe_filename(district)
-        month_tag = month or datetime.now().strftime("%Y-%m")
-        headers = {
-            'Content-Disposition': f'attachment; filename="KPI_Report_{safe_dist}_{month_tag}.xlsx"'
-        }
-        return StreamingResponse(
-            io.BytesIO(excel_bytes), 
-            headers=headers,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        c_wp = canonicalize_district(district)
+        # Sub-Admin RBAC check
+        admin_role = admin.get("role", "SUB_ADMIN")
+        allowed = admin.get("allowed_districts", [])
+        if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
+            allowed_c = [canonicalize_district(a).lower() for a in allowed]
+            if c_wp.lower() not in allowed_c and district.lower() not in allowed_c:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+
+        async with KPI_EXCEL_SEMAPHORE:
+            excel_bytes = await asyncio.to_thread(lambda: generate_district_kpi_bytes(district, month))
+            if not excel_bytes:
+                raise HTTPException(status_code=404, detail=f"Template for {district} not found on server.")
+                
+            safe_dist = safe_filename(district)
+            month_tag = month or datetime.now().strftime("%Y-%m")
+            headers = {
+                'Content-Disposition': f'attachment; filename="KPI_Report_{safe_dist}_{month_tag}.xlsx"'
+            }
+            import gc
+            gc.collect()
+            return StreamingResponse(
+                io.BytesIO(excel_bytes), 
+                headers=headers,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     except HTTPException:
         raise
     except Exception as e:
@@ -1428,35 +1443,49 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
 @app.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_allowed = admin.get("allowed_districts", [])
+        allowed_c = [canonicalize_district(a).lower() for a in admin_allowed]
+
         all_bihar = DEFAULT_BIHAR_DISTRICTS
         if districts and districts.strip() and districts.strip() != "All":
-            allowed_set = set([canonicalize_district(d.strip()) for d in districts.split(",") if d.strip()])
-            bihar_districts = [d for d in all_bihar if d in allowed_set or canonicalize_district(d) in allowed_set]
+            requested_set = set([canonicalize_district(d.strip()) for d in districts.split(",") if d.strip()])
+            bihar_districts = [d for d in all_bihar if d in requested_set or canonicalize_district(d) in requested_set]
         else:
             bihar_districts = all_bihar
 
-        zip_buffer = io.BytesIO()
-        month_tag = month or datetime.now().strftime("%Y-%m")
-        
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-            for dist in bihar_districts:
-                excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
-                if excel_bytes:
-                    zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
-                    del excel_bytes
-                    import gc
-                    gc.collect()
-                    
-        zip_buffer.seek(0)
-        archive_name = "DFY_KPI_Scoped_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
-        headers = {
-            'Content-Disposition': f'attachment; filename="{archive_name}_{month_tag}.zip"'
-        }
-        return StreamingResponse(
-            zip_buffer,
-            headers=headers,
-            media_type="application/zip"
-        )
+        # Enforce Sub-Admin permission filter
+        if admin_role == "SUB_ADMIN" and admin_allowed and "All" not in admin_allowed:
+            bihar_districts = [d for d in bihar_districts if canonicalize_district(d).lower() in allowed_c or d.lower() in allowed_c]
+
+        if not bihar_districts:
+            raise HTTPException(status_code=400, detail="No valid districts selected or permitted.")
+
+        async with KPI_EXCEL_SEMAPHORE:
+            zip_buffer = io.BytesIO()
+            month_tag = month or datetime.now().strftime("%Y-%m")
+            
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                for dist in bihar_districts:
+                    excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
+                    if excel_bytes:
+                        zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
+                        del excel_bytes
+                        import gc
+                        gc.collect()
+                    # Small 50ms pause to yield event loop and keep Render CPU cool
+                    await asyncio.sleep(0.05)
+                        
+            zip_buffer.seek(0)
+            archive_name = "DFY_KPI_Selected_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
+            headers = {
+                'Content-Disposition': f'attachment; filename="{archive_name}_{month_tag}.zip"'
+            }
+            return StreamingResponse(
+                zip_buffer,
+                headers=headers,
+                media_type="application/zip"
+            )
     except HTTPException:
         raise
     except Exception as e:
