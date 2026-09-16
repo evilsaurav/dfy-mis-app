@@ -40,6 +40,27 @@ const canonicalizeDistrict = (d) => {
   return CANONICAL_DISTRICT_MAP[clean.toLowerCase()] || clean;
 };
 
+const canonicalizeFo = (foName, district = '', directory = null) => {
+  if (!foName) return '';
+  const clean = String(foName).replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const cDist = canonicalizeDistrict(district);
+  
+  if (directory && typeof directory === 'object') {
+    if (cDist && Array.isArray(directory[cDist])) {
+      const match = directory[cDist].find(official => official && official.trim().toLowerCase() === clean.toLowerCase());
+      if (match) return match.trim();
+    }
+    for (const dist in directory) {
+      if (Array.isArray(directory[dist])) {
+        const match = directory[dist].find(official => official && official.trim().toLowerCase() === clean.toLowerCase());
+        if (match) return match.trim();
+      }
+    }
+  }
+  return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+};
+
 const formatAuditTimestamp = (ts, tsFormatted) => {
   if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
     return tsFormatted;
@@ -2159,25 +2180,29 @@ Keep this file safe in your Google Drive or personal diary.
 
   const fos = useMemo(() => {
     let filtered = rawRecords;
-    if (selectedDistrict !== 'All') filtered = filtered.filter(r => r.working_place === selectedDistrict);
-    return ['All', ...new Set(filtered.map(r => r.fo_name))];
-  }, [rawRecords, selectedDistrict]);
+    if (selectedDistrict !== 'All') {
+      filtered = filtered.filter(r => canonicalizeDistrict(r.working_place) === selectedDistrict);
+    }
+    const names = Array.from(new Set(filtered.map(r => canonicalizeFo(r.fo_name, r.working_place, staffDirectory)))).filter(Boolean).sort();
+    return ['All', ...names];
+  }, [rawRecords, selectedDistrict, staffDirectory]);
 
   const isSubAdmin = currentUser?.role === 'SUB_ADMIN';
 
   const foComparisonData = useMemo(() => {
     if (!isSubAdmin) return [];
     const targetDist = selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.allowed_districts?.[0] || '');
-    const distRecs = rawRecords.filter(r => r.working_place === targetDist);
+    const distRecs = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === targetDist);
     const foMap = {};
     distRecs.forEach(r => {
-      if (!foMap[r.fo_name]) foMap[r.fo_name] = { fo_name: r.fo_name, notifications: 0, tests: 0, total_km: 0 };
-      foMap[r.fo_name].notifications += (r.notifications || 0);
-      foMap[r.fo_name].tests += (r.tests || 0);
-      foMap[r.fo_name].total_km += (r.total_km || 0);
+      const fo = canonicalizeFo(r.fo_name, r.working_place, staffDirectory);
+      if (!foMap[fo]) foMap[fo] = { fo_name: fo, notifications: 0, tests: 0, total_km: 0 };
+      foMap[fo].notifications += (r.notifications || 0);
+      foMap[fo].tests += (r.tests || 0);
+      foMap[fo].total_km += (r.total_km || 0);
     });
     return Object.values(foMap).sort((a, b) => b.notifications - a.notifications);
-  }, [isSubAdmin, selectedDistrict, currentUser, rawRecords]);
+  }, [isSubAdmin, selectedDistrict, currentUser, rawRecords, staffDirectory]);
 
 const availableDistrictsForFeed = useMemo(() => {
     const allDists = Object.keys(staffDirectory).length > 0 
@@ -2289,14 +2314,16 @@ const availableDistrictsForFeed = useMemo(() => {
   // Filtered Records
   const filteredRecords = useMemo(() => {
     return rawRecords.filter(r => {
+      const cDist = canonicalizeDistrict(r.working_place);
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-        if (!currentUser.allowed_districts.includes(r.working_place)) return false;
+        const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+        if (!allowed.includes(cDist)) return false;
       }
-      if (selectedDistrict !== 'All' && r.working_place !== selectedDistrict) return false;
-      if (selectedFO !== 'All' && r.fo_name !== selectedFO) return false;
+      if (selectedDistrict !== 'All' && cDist !== selectedDistrict) return false;
+      if (selectedFO !== 'All' && canonicalizeFo(r.fo_name, cDist, staffDirectory) !== selectedFO) return false;
       return true;
     });
-  }, [rawRecords, selectedDistrict, selectedFO, currentUser]);
+  }, [rawRecords, selectedDistrict, selectedFO, currentUser, staffDirectory]);
 
   // Aggregations
   const aggregate = (records) => {
@@ -2417,12 +2444,12 @@ const availableDistrictsForFeed = useMemo(() => {
     const targetDist = canonicalizeDistrict(selectedDistrict);
     const distRecs = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === targetDist);
     const dirFos = staffDirectory[targetDist] || [];
-    const allFos = Array.from(new Set([...dirFos, ...distRecs.map(r => r.fo_name)])).filter(Boolean);
+    const allFos = Array.from(new Set([...dirFos, ...distRecs.map(r => canonicalizeFo(r.fo_name, targetDist, staffDirectory))])).filter(Boolean);
 
     const list = allFos.map(fo => {
-      const foRecs = distRecs.filter(r => r.fo_name === fo);
+      const foRecs = distRecs.filter(r => canonicalizeFo(r.fo_name, targetDist, staffDirectory) === fo);
       const notif = foRecs.reduce((sum, r) => sum + (r.notifications || 0), 0);
-      const targetObj = targetsData.find(t => t.fo_name === fo && canonicalizeDistrict(t.district) === targetDist);
+      const targetObj = targetsData.find(t => canonicalizeFo(t.fo_name, targetDist, staffDirectory) === fo && canonicalizeDistrict(t.district) === targetDist);
       const target = targetObj ? (Number(targetObj.target) || 0) : 0;
       const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
       return {
@@ -2490,7 +2517,9 @@ const availableDistrictsForFeed = useMemo(() => {
   const tableData = useMemo(() => {
     const map = {};
     filteredRecords.forEach(r => {
-      const key = selectedDistrict === 'All' ? r.working_place : r.fo_name;
+      const key = selectedDistrict === 'All' 
+        ? canonicalizeDistrict(r.working_place) 
+        : canonicalizeFo(r.fo_name, r.working_place, staffDirectory);
       if (!map[key]) map[key] = { name: key, ...aggregate([]) };
       for (let k in map[key]) {
         if (k !== 'name' && k !== 'overrides') map[key][k] += (r[k] || 0);
@@ -2504,7 +2533,7 @@ const availableDistrictsForFeed = useMemo(() => {
       return 0;
     });
     return data;
-  }, [filteredRecords, selectedDistrict, sortConfig]);
+  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -6366,10 +6395,10 @@ const availableDistrictsForFeed = useMemo(() => {
       {inspectingFO && (() => {
         const foRecords = rawRecords.filter(r => {
           if (!r.fo_name || !inspectingFO || !inspectingFO.fo_name) return false;
-          const matchName = r.fo_name.trim().toLowerCase() === inspectingFO.fo_name.trim().toLowerCase();
+          const matchName = canonicalizeFo(r.fo_name, r.working_place, staffDirectory) === canonicalizeFo(inspectingFO.fo_name, inspectingFO.district, staffDirectory);
           if (!matchName) return false;
           if (!inspectingFO.district || inspectingFO.district === 'All') return true;
-          return r.working_place && r.working_place.trim().toLowerCase() === inspectingFO.district.trim().toLowerCase();
+          return canonicalizeDistrict(r.working_place) === canonicalizeDistrict(inspectingFO.district);
         }).sort((a, b) => {
           const dateA = String(a.date || a.date_of_reporting || '');
           const dateB = String(b.date || b.date_of_reporting || '');

@@ -294,6 +294,27 @@ def load_baseline_staff_directory():
 
     return directory
 
+def canonicalize_fo_name(name: str, district: str = None) -> str:
+    if not name:
+        return ""
+    clean = re.sub(r'\s+', ' ', str(name)).strip()
+    if not clean:
+        return ""
+    
+    c_dist = canonicalize_district(district) if district else ""
+    directory = cache.get("staff_directory_list") or load_baseline_staff_directory()
+    if directory and isinstance(directory, dict):
+        if c_dist and c_dist in directory:
+            for official_name in directory[c_dist]:
+                if clean.lower() == official_name.strip().lower():
+                    return official_name.strip()
+        for d, names in directory.items():
+            for official_name in names:
+                if clean.lower() == official_name.strip().lower():
+                    return official_name.strip()
+                    
+    return clean.title()
+
 app = FastAPI(title="DFY Daily Activity API")
 
 # HTTP GZip compression for all responses > 1KB (shrinks payload 75-85%, saves Render RAM and client mobile bandwidth)
@@ -490,7 +511,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                     "date": data.get("date_of_reporting", ""),
                     "date_of_reporting": data.get("date_of_reporting", ""),
                     "working_place": c_wp,
-                    "fo_name": data.get("fo_name", "Unknown"),
+                    "fo_name": canonicalize_fo_name(data.get("fo_name", "Unknown"), c_wp),
                     
                     # Big 5
                     "total_km": data.get("total_km", 0) or 0,
@@ -731,8 +752,7 @@ async def submit_daily_report(report: DailyActivityReport):
         if report.working_place:
             report.working_place = canonicalize_district(report.working_place.strip())
         if report.fo_name:
-            import re
-            report.fo_name = re.sub(r'\s+', ' ', report.fo_name).strip()
+            report.fo_name = canonicalize_fo_name(report.fo_name, report.working_place)
             
         # Validation Guard: Prevent accidental empty report submissions
         total_ids_count = sum(len(getattr(report, cat, []) or []) for cat in [
@@ -2621,8 +2641,7 @@ async def admin_feed_officer_data(
         allowed_dists = admin.get("allowed_districts", [])
 
         clean_wp = canonicalize_district(req.district.strip())
-        import re
-        clean_fo = re.sub(r'\s+', ' ', req.fo_name).strip()
+        clean_fo = canonicalize_fo_name(req.fo_name, clean_wp)
         if not clean_wp or not clean_fo:
             raise HTTPException(status_code=400, detail="District and Field Officer name are required.")
 
