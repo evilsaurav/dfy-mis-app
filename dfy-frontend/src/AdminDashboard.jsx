@@ -2078,6 +2078,185 @@ export default function AdminDashboard() {
     }
   };
 
+  const downloadEmergencyCard = () => {
+    const card = `=====================================================
+  DOCTORS FOR YOU (DFY) - ADMIN EMERGENCY ACCESS CARD
+=====================================================
+Created / Downloaded: ${new Date().toLocaleString()}
+
+🔐 PORTAL URL: https://dfy-mis-app.vercel.app/admin
+🔑 MASTER RECOVERY KEY: DFY-RESCUE-9921
+🛡️ 4-DIGIT SECURITY PIN: 7788
+📋 STATE MISSION CODE: BIHAR-DFY-TB
+
+INSTRUCTIONS:
+If you ever forget your master admin password:
+1. Open Admin Portal Login screen.
+2. Click "Forgot Password / Emergency Recovery Key".
+3. Enter your Master Recovery Key (DFY-RESCUE-9921) or PIN (7788).
+4. Enter your new password and submit.
+
+Keep this file safe in your Google Drive or personal diary.
+=====================================================`;
+
+    const blob = new Blob([card], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `DFY_Admin_Emergency_Access_Card_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+
+  const fetchData = async (forceRefresh = false) => {
+    const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
+    let cachedData = null;
+    try {
+      const rawCache = localStorage.getItem(cacheKey);
+      if (rawCache) cachedData = JSON.parse(rawCache);
+    } catch (e) {
+      cachedData = null;
+    }
+
+    // Zero-lag instant render: show cached records immediately if available
+    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !forceRefresh) {
+      setRawRecords(cachedData.records);
+      if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
+      setIsLoading(false);
+      setSyncStatus('UP_TO_DATE');
+    } else {
+      setIsLoading(true);
+    }
+
+    setError('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
+
+      if (!forceRefresh && cachedData && cachedData.synced_at && cachedData.records?.length > 0) {
+        payload.since = cachedData.synced_at;
+        payload.cached_count = cachedData.records.length;
+      }
+
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        payload.districts = currentUser.allowed_districts.join(',');
+      }
+
+      setSyncStatus('SYNCING');
+      const res = await authFetch(`${API_BASE_URL}/admin/dashboard-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || `Server responded with status ${res.status}`);
+      }
+      const data = await res.json();
+
+      if (data.mode === 'NO_CHANGE') {
+        // Data has not changed since last sync! 0 Firestore reads!
+        setSyncStatus('UP_TO_DATE');
+        if (data.synced_at) setLastSyncedTime(data.synced_at);
+      } else {
+        const newRecords = Array.isArray(data.records) ? data.records : [];
+        setRawRecords(newRecords);
+        const syncStamp = data.synced_at || new Date().toLocaleString();
+        setLastSyncedTime(syncStamp);
+        setSyncStatus('LIVE');
+        try {
+          localStorage.setItem(cacheKey, JSON.stringify({
+            synced_at: syncStamp,
+            records: newRecords
+          }));
+        } catch (storageErr) {
+          console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+        }
+      }
+
+      if (currentUser?.role !== 'SUB_ADMIN') {
+        setSelectedDistrict('All');
+      }
+      setSelectedFO('All');
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+      // Resilient fallback: If offline/network glitch and cachedData exists, keep displaying it
+      if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0) {
+        setRawRecords(cachedData.records);
+        setError('Offline notice: Showing previously synchronized data.');
+      } else {
+        setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAuthenticated) { 
+      fetchData(false); 
+      fetchAttendance(); 
+      fetchDirectory(); 
+      loadTargets('All'); 
+      fetchStaffList(); 
+      fetchActiveBroadcasts();
+    }
+  }, [month, isAuthenticated]);
+
+  // Lazy Tab Loading: Only fetch Duplicate Audit when modal is opened (saves 749 reads per load!)
+  useEffect(() => {
+    if (showDuplicateModal) {
+      fetchDuplicateAudit();
+    }
+  }, [showDuplicateModal]);
+
+  // Derived Filter Lists (Filtered by RBAC for Sub-Admins)
+  const districts = useMemo(() => {
+    const rawSet = new Set([
+      ...DEFAULT_BIHAR_DISTRICTS,
+      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict),
+      ...rawRecords.map(r => canonicalizeDistrict(r.working_place))
+    ]);
+    const allList = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
+    if (!currentUser || currentUser.role === 'SUPER_ADMIN' || !currentUser.allowed_districts || currentUser.allowed_districts.includes('All')) {
+      return ['All', ...allList];
+    }
+    const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+    const filtered = allList.filter(d => userAllowed.includes(d));
+    const permittedOnly = filtered.length > 0 ? filtered : userAllowed.filter(d => d !== 'All');
+    return permittedOnly.length > 0 ? permittedOnly : (allList.length > 0 ? [allList[0]] : ['Jamui']);
+  }, [staffDirectory, rawRecords, currentUser]);
+
+  const targetModalDistricts = useMemo(() => {
+    const rawSet = new Set([
+      ...DEFAULT_BIHAR_DISTRICTS,
+      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict)
+    ]);
+    const allDists = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+      return allDists.filter(d => userAllowed.includes(d));
+    }
+    return allDists;
+  }, [staffDirectory, currentUser]);
+
+  // Synchronize Report Studio & Comparator dropdowns when districts change
+  useEffect(() => {
+    const validDists = districts.filter(d => d !== 'All');
+    if (validDists.length > 0) {
+      if (!reportsDistrict || !validDists.includes(reportsDistrict)) {
+        setReportsDistrict(validDists[0]);
+      }
+      if (!compareDistA || !validDists.includes(compareDistA)) {
+        setCompareDistA(validDists[0]);
+      }
+      if (!compareDistB || !validDists.includes(compareDistB)) {
+        setCompareDistB(validDists.length > 1 ? validDists[1] : validDists[0]);
+      }
+    }
+  }, [districts]);
+
   const availableKpiDistricts = useMemo(() => {
     const all = (districts || []).filter(d => d !== 'All');
     if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
@@ -2258,185 +2437,6 @@ export default function AdminDashboard() {
       setTimeout(() => setCopiedBulletin(false), 2500);
     }
   };
-
-  const downloadEmergencyCard = () => {
-    const card = `=====================================================
-  DOCTORS FOR YOU (DFY) - ADMIN EMERGENCY ACCESS CARD
-=====================================================
-Created / Downloaded: ${new Date().toLocaleString()}
-
-🔐 PORTAL URL: https://dfy-mis-app.vercel.app/admin
-🔑 MASTER RECOVERY KEY: DFY-RESCUE-9921
-🛡️ 4-DIGIT SECURITY PIN: 7788
-📋 STATE MISSION CODE: BIHAR-DFY-TB
-
-INSTRUCTIONS:
-If you ever forget your master admin password:
-1. Open Admin Portal Login screen.
-2. Click "Forgot Password / Emergency Recovery Key".
-3. Enter your Master Recovery Key (DFY-RESCUE-9921) or PIN (7788).
-4. Enter your new password and submit.
-
-Keep this file safe in your Google Drive or personal diary.
-=====================================================`;
-
-    const blob = new Blob([card], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `DFY_Admin_Emergency_Access_Card_${new Date().toISOString().split('T')[0]}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-
-  const fetchData = async (forceRefresh = false) => {
-    const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
-    let cachedData = null;
-    try {
-      const rawCache = localStorage.getItem(cacheKey);
-      if (rawCache) cachedData = JSON.parse(rawCache);
-    } catch (e) {
-      cachedData = null;
-    }
-
-    // Zero-lag instant render: show cached records immediately if available
-    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !forceRefresh) {
-      setRawRecords(cachedData.records);
-      if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
-      setIsLoading(false);
-      setSyncStatus('UP_TO_DATE');
-    } else {
-      setIsLoading(true);
-    }
-
-    setError('');
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
-
-      if (!forceRefresh && cachedData && cachedData.synced_at && cachedData.records?.length > 0) {
-        payload.since = cachedData.synced_at;
-        payload.cached_count = cachedData.records.length;
-      }
-
-      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-        payload.districts = currentUser.allowed_districts.join(',');
-      }
-
-      setSyncStatus('SYNCING');
-      const res = await authFetch(`${API_BASE_URL}/admin/dashboard-data`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Server responded with status ${res.status}`);
-      }
-      const data = await res.json();
-
-      if (data.mode === 'NO_CHANGE') {
-        // Data has not changed since last sync! 0 Firestore reads!
-        setSyncStatus('UP_TO_DATE');
-        if (data.synced_at) setLastSyncedTime(data.synced_at);
-      } else {
-        const newRecords = Array.isArray(data.records) ? data.records : [];
-        setRawRecords(newRecords);
-        const syncStamp = data.synced_at || new Date().toLocaleString();
-        setLastSyncedTime(syncStamp);
-        setSyncStatus('LIVE');
-        try {
-          localStorage.setItem(cacheKey, JSON.stringify({
-            synced_at: syncStamp,
-            records: newRecords
-          }));
-        } catch (storageErr) {
-          console.warn("Storage quota full, continuing with in-memory state:", storageErr);
-        }
-      }
-
-      if (currentUser?.role !== 'SUB_ADMIN') {
-        setSelectedDistrict('All');
-      }
-      setSelectedFO('All');
-    } catch (err) {
-      console.error("Dashboard fetch error:", err);
-      // Resilient fallback: If offline/network glitch and cachedData exists, keep displaying it
-      if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0) {
-        setRawRecords(cachedData.records);
-        setError('Offline notice: Showing previously synchronized data.');
-      } else {
-        setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (isAuthenticated) { 
-      fetchData(false); 
-      fetchAttendance(); 
-      fetchDirectory(); 
-      loadTargets('All'); 
-      fetchStaffList(); 
-      fetchActiveBroadcasts();
-    }
-  }, [month, isAuthenticated]);
-
-  // Lazy Tab Loading: Only fetch Duplicate Audit when modal is opened (saves 749 reads per load!)
-  useEffect(() => {
-    if (showDuplicateModal) {
-      fetchDuplicateAudit();
-    }
-  }, [showDuplicateModal]);
-
-  // Derived Filter Lists (Filtered by RBAC for Sub-Admins)
-  const districts = useMemo(() => {
-    const rawSet = new Set([
-      ...DEFAULT_BIHAR_DISTRICTS,
-      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict),
-      ...rawRecords.map(r => canonicalizeDistrict(r.working_place))
-    ]);
-    const allList = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
-    if (!currentUser || currentUser.role === 'SUPER_ADMIN' || !currentUser.allowed_districts || currentUser.allowed_districts.includes('All')) {
-      return ['All', ...allList];
-    }
-    const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
-    const filtered = allList.filter(d => userAllowed.includes(d));
-    const permittedOnly = filtered.length > 0 ? filtered : userAllowed.filter(d => d !== 'All');
-    return permittedOnly.length > 0 ? permittedOnly : (allList.length > 0 ? [allList[0]] : ['Jamui']);
-  }, [staffDirectory, rawRecords, currentUser]);
-
-  const targetModalDistricts = useMemo(() => {
-    const rawSet = new Set([
-      ...DEFAULT_BIHAR_DISTRICTS,
-      ...Object.keys(staffDirectory || {}).map(canonicalizeDistrict)
-    ]);
-    const allDists = Array.from(rawSet).filter(d => DEFAULT_BIHAR_DISTRICTS.includes(d)).sort();
-    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-      const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
-      return allDists.filter(d => userAllowed.includes(d));
-    }
-    return allDists;
-  }, [staffDirectory, currentUser]);
-
-  // Synchronize Report Studio & Comparator dropdowns when districts change
-  useEffect(() => {
-    const validDists = districts.filter(d => d !== 'All');
-    if (validDists.length > 0) {
-      if (!reportsDistrict || !validDists.includes(reportsDistrict)) {
-        setReportsDistrict(validDists[0]);
-      }
-      if (!compareDistA || !validDists.includes(compareDistA)) {
-        setCompareDistA(validDists[0]);
-      }
-      if (!compareDistB || !validDists.includes(compareDistB)) {
-        setCompareDistB(validDists.length > 1 ? validDists[1] : validDists[0]);
-      }
-    }
-  }, [districts]);
 
   const fos = useMemo(() => {
     let filtered = rawRecords;
