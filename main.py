@@ -3035,6 +3035,340 @@ async def admin_delete_day_report(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete day report: {str(e)}")
 
+# --- Admin Edit Full Day Report Feature ---
+class EditDayReportReq(BaseModel):
+    district: str
+    fo_name: str
+    date: str  # YYYY-MM-DD
+    morning_km: Optional[int] = None
+    evening_km: Optional[int] = None
+    travel_expenses: Optional[int] = None
+    visited_names: Optional[List[str]] = None
+    remark: Optional[str] = None
+    category_ids: Optional[Dict[str, List[str]]] = None
+
+@app.post("/admin/reports/edit-day")
+async def admin_edit_day_report(
+    req: EditDayReportReq,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_user = admin.get("name") or admin.get("username", "Admin")
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
+        allowed_dists = admin.get("allowed_districts", [])
+
+        clean_wp = canonicalize_district(req.district.strip())
+        import re
+        clean_fo = re.sub(r'\s+', ' ', req.fo_name).strip()
+        clean_date = req.date.strip()
+
+        if not clean_wp or not clean_fo or not clean_date:
+            raise HTTPException(status_code=400, detail="District, Field Officer name, and Date are required.")
+
+        # 1. RBAC Guard: Sub-Admin can only edit data in permitted districts
+        if admin_role == "SUB_ADMIN":
+            allowed_c = [canonicalize_district(a).lower() for a in allowed_dists]
+            if allowed_dists and not ("All" in allowed_dists or clean_wp.lower() in allowed_c or req.district.strip().lower() in allowed_c):
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Permission denied: You cannot edit reports for {req.district} district."
+                )
+
+        # 2. Locate all candidate documents in daily_field_reports
+        candidate_doc_ids = [
+            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
+        ]
+
+        matching_docs = []
+        seen_doc_ids = set()
+        for cid in candidate_doc_ids:
+            cand_ref = db.collection("daily_field_reports").document(cid)
+            snap = await asyncio.to_thread(cand_ref.get)
+            if snap.exists and cid not in seen_doc_ids:
+                matching_docs.append(snap)
+                seen_doc_ids.add(cid)
+
+        if not matching_docs:
+            query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                .where("date_of_reporting", "==", clean_date)
+                .stream()))
+            for d in query_docs:
+                d_dict = d.to_dict()
+                d_fo = str(d_dict.get("fo_name", "")).strip().lower()
+                d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
+                if d_fo == clean_fo.lower() and d_wp == clean_wp.lower():
+                    matching_docs.append(d)
+                    seen_doc_ids.add(d.id)
+
+        if not matching_docs:
+            raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
+
+        target_snap = matching_docs[0]
+        doc_ref = target_snap.reference
+        old_data = target_snap.to_dict()
+
+        # 3. Calculate category deltas and prepare updates
+        VALID_CATEGORIES = [
+            "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
+            "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
+            "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
+            "presumptive_ids", "documents_ids", "fdc_provided_ids",
+            "kit_consumption_ids", "differentiated_tb_ids", "tpt_treatment_start_ids",
+            "tpt_presumptive_ids", "adhar_face_authentication_ids", "consent_with_id_ids",
+            "culture_dst_ids"
+        ]
+
+        metric_map = {
+            "notification_ids": "notifications",
+            "sample_tested_ids": "tests",
+            "hiv_dm_ids": "hiv_dm",
+            "dbt_ids": "dbt",
+            "contact_tracing_ids": "contact_tracing",
+            "differentiated_tb_ids": "diff_tb"
+        }
+
+        doc_update = {
+            "last_edited_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_edited_by": admin_user,
+            "last_edited_role": admin_role
+        }
+
+        if req.morning_km is not None:
+            doc_update["morning_km"] = max(0, int(req.morning_km))
+        if req.evening_km is not None:
+            doc_update["evening_km"] = max(0, int(req.evening_km))
+        if req.travel_expenses is not None:
+            doc_update["travel_expenses"] = max(0, int(req.travel_expenses))
+            doc_update["total_km"] = doc_update["travel_expenses"]
+        elif req.morning_km is not None and req.evening_km is not None:
+            calc_km = max(0, int(req.evening_km) - int(req.morning_km))
+            doc_update["travel_expenses"] = calc_km
+            doc_update["total_km"] = calc_km
+
+        if req.visited_names is not None:
+            clean_names = [str(v).strip() for v in req.visited_names if str(v).strip()]
+            doc_update["visited_names"] = clean_names
+            doc_update["doctor_store_visits_count"] = len(clean_names)
+
+        if req.remark is not None:
+            doc_update["remark"] = req.remark.strip()
+
+        metric_deltas = {}
+        all_added_ids = []
+        all_deleted_ids = []
+
+        if req.category_ids is not None:
+            for cat_key in VALID_CATEGORIES:
+                if cat_key in req.category_ids:
+                    raw_ids = req.category_ids[cat_key]
+                    clean_new_ids = []
+                    for rid in raw_ids:
+                        cid = str(rid).strip()
+                        if cid.isdigit() and len(cid) == 9 and cid not in clean_new_ids:
+                            clean_new_ids.append(cid)
+                    
+                    old_ids = list(old_data.get(cat_key, []))
+                    doc_update[cat_key] = clean_new_ids
+                    count_key = cat_key.replace("_ids", "")
+                    doc_update[count_key] = len(clean_new_ids)
+                    if cat_key == "notification_ids":
+                        doc_update["notifications"] = len(clean_new_ids)
+
+                    added = [x for x in clean_new_ids if x not in old_ids]
+                    deleted = [x for x in old_ids if x not in clean_new_ids]
+
+                    all_added_ids.extend([{"cat": cat_key, "id": x} for x in added])
+                    all_deleted_ids.extend([{"cat": cat_key, "id": x} for x in deleted])
+
+                    # Log each ID addition/deletion to id_edit_logs
+                    now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+                    for aid in added:
+                        log_entry = {
+                            "timestamp": now_str,
+                            "working_place": clean_wp,
+                            "district": clean_wp,
+                            "fo_name": clean_fo,
+                            "date": clean_date,
+                            "category": cat_key,
+                            "action": "add",
+                            "old_id": "",
+                            "new_id": aid,
+                            "edited_by": f"{admin_user} ({admin_role})"
+                        }
+                        await asyncio.to_thread(lambda l=log_entry: db.collection("id_edit_logs").add(l))
+
+                    for did in deleted:
+                        log_entry = {
+                            "timestamp": now_str,
+                            "working_place": clean_wp,
+                            "district": clean_wp,
+                            "fo_name": clean_fo,
+                            "date": clean_date,
+                            "category": cat_key,
+                            "action": "delete",
+                            "old_id": did,
+                            "new_id": "",
+                            "edited_by": f"{admin_user} ({admin_role})"
+                        }
+                        await asyncio.to_thread(lambda l=log_entry: db.collection("id_edit_logs").add(l))
+
+                    if cat_key in metric_map:
+                        diff = len(clean_new_ids) - len(old_ids)
+                        if diff != 0:
+                            metric_deltas[metric_map[cat_key]] = diff
+
+        # 4. Commit document updates
+        await asyncio.to_thread(lambda: doc_ref.update(doc_update))
+
+        # 5. Atomic adjustments in daily_district_rollups
+        if metric_deltas:
+            try:
+                rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
+                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                r_snap = await asyncio.to_thread(rollup_ref.get)
+                if r_snap.exists:
+                    r_update = {"last_updated": firestore.SERVER_TIMESTAMP}
+                    for mk, dv in metric_deltas.items():
+                        r_update[mk] = firestore.Increment(dv)
+                    await asyncio.to_thread(lambda: rollup_ref.update(r_update))
+            except Exception as r_err:
+                print(f"[Edit Day Rollup Notice] {r_err}")
+
+        # 6. Invalidate caches and record tombstones
+        for d in matching_docs:
+            record_report_mutation("edit", d.id)
+            cache.delete(f"status_{d.id}")
+        for cid in candidate_doc_ids:
+            cache.delete(f"status_{cid}")
+        cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("profile_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
+        cache.delete_prefix("recent_id_edits_")
+
+        month_pfx = clean_date[:7]
+        try:
+            snap_path = f"cache/dash_{month_pfx}.json"
+            if os.path.exists(snap_path):
+                os.remove(snap_path)
+        except Exception:
+            pass
+
+        # 7. Immutable Audit Trail
+        await log_admin_activity(
+            action_type="EDIT_DAILY_REPORT",
+            details=f"Admin {admin_user} edited full day report for {clean_fo} ({clean_wp}) on {clean_date}. Added: {len(all_added_ids)} IDs, Deleted: {len(all_deleted_ids)} IDs, Travel: {doc_update.get('travel_expenses', old_data.get('travel_expenses', 0))} KM",
+            district=clean_wp,
+            target_officer=clean_fo,
+            user_name=admin_user,
+            user_id=admin_id,
+            role=admin_role,
+            diff={"date": clean_date, "added_count": len(all_added_ids), "deleted_count": len(all_deleted_ids), "deltas": metric_deltas}
+        )
+
+        return {
+            "success": True,
+            "message": f"Successfully updated report for {clean_fo} on {clean_date}.",
+            "district": clean_wp,
+            "fo_name": clean_fo,
+            "date": clean_date,
+            "added_count": len(all_added_ids),
+            "deleted_count": len(all_deleted_ids),
+            "deltas": metric_deltas
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to edit day report: {str(e)}")
+
+# --- 7-Day ID Modifications & Audit Radar ---
+@app.get("/admin/reports/recent-id-edits")
+async def get_recent_id_edits(
+    days: Optional[int] = 7,
+    limit: Optional[int] = 300,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
+        allowed_dists = admin.get("allowed_districts", [])
+        
+        days_num = max(1, min(days or 7, 30))
+        cache_key = f"recent_id_edits_{admin_id}_{days_num}"
+        cached_result = cache.get(cache_key)
+        if cached_result is not None:
+            return cached_result
+
+        cutoff_dt = datetime.now() - timedelta(days=days_num)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        docs = await asyncio.to_thread(lambda: list(db.collection("id_edit_logs")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit or 300)
+            .stream()))
+
+        edits = []
+        allowed_c = [canonicalize_district(a).lower() for a in allowed_dists]
+
+        def format_log_to_ist(ts_val) -> str:
+            if not ts_val:
+                return ""
+            try:
+                if isinstance(ts_val, datetime):
+                    dt = ts_val if ts_val.tzinfo is not None else ts_val.replace(tzinfo=timezone.utc)
+                    dt_ist = dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+                    return dt_ist.strftime("%d %b %Y, %I:%M:%S %p")
+                clean_ts = str(ts_val).strip().replace("T", " ")[:19]
+                dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
+                return dt.strftime("%d %b %Y, %I:%M:%S %p")
+            except Exception:
+                return str(ts_val)
+
+        for d in docs:
+            data = d.to_dict()
+            ts_str = str(data.get("timestamp", ""))
+            if ts_str and ts_str < cutoff_str:
+                continue
+
+            wp = data.get("working_place") or data.get("district", "")
+            c_wp = canonicalize_district(wp)
+
+            if admin_role == "SUB_ADMIN" and allowed_dists and "All" not in allowed_dists:
+                if c_wp.lower() not in allowed_c and wp.lower() not in allowed_c:
+                    continue
+
+            edits.append({
+                "id": d.id,
+                "timestamp": format_log_to_ist(data.get("timestamp")),
+                "raw_timestamp": ts_str,
+                "fo_name": data.get("fo_name", ""),
+                "district": c_wp or wp,
+                "date": data.get("date", ""),
+                "category": data.get("category", ""),
+                "action": (data.get("action") or "edit").lower(),
+                "old_id": data.get("old_id", ""),
+                "new_id": data.get("new_id", ""),
+                "edited_by": data.get("edited_by", "Admin")
+            })
+
+        result = {
+            "success": True,
+            "days": days_num,
+            "count": len(edits),
+            "edits": edits
+        }
+        cache.set(cache_key, result, ttl=60)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch recent ID edits: {str(e)}")
+
+
 # --- Admin Staff & PIN Management Suite ---
 class AddStaffReq(BaseModel):
     district: str

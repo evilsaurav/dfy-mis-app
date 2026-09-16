@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
+import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -157,6 +158,20 @@ export default function AdminDashboard() {
   const [reportsDistrict, setReportsDistrict] = useState("");
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
+  const [editDayModal, setEditDayModal] = useState(null); // { isOpen, district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs, loading, error }
+  const [showRecentIdEditsModal, setShowRecentIdEditsModal] = useState(false);
+  const [recentIdEdits, setRecentIdEdits] = useState([]);
+  const [recentIdEditsLoading, setRecentIdEditsLoading] = useState(false);
+  const [recentIdEditsFilterAction, setRecentIdEditsFilterAction] = useState('All');
+  const [recentIdEditsSearch, setRecentIdEditsSearch] = useState('');
+  const [showChangelogModal, setShowChangelogModal] = useState(false);
+  const [hasSeenLatestChangelog, setHasSeenLatestChangelog] = useState(() => {
+    try {
+      return localStorage.getItem('dfy_last_seen_changelog') === APP_VERSION;
+    } catch (e) {
+      return false;
+    }
+  });
   const [showStaffSuite, setShowStaffSuite] = useState(false);
   const [staffList, setStaffList] = useState([]);
   const [staffSearchQuery, setStaffSearchQuery] = useState("");
@@ -1938,6 +1953,128 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleOpenEditDay = (rec) => {
+    const foDist = rec.working_place || inspectingFO?.district || (selectedDistrict !== 'All' ? selectedDistrict : '');
+    const foName = inspectingFO?.fo_name || rec.fo_name || '';
+    const dateStr = rec.date || rec.date_of_reporting || '';
+
+    const initialInputs = {};
+    feedCategoriesConfig.forEach(cat => {
+      const ids = rec[cat.key] || [];
+      initialInputs[cat.key] = Array.isArray(ids) ? ids.join('\n') : '';
+    });
+
+    const mKm = rec.morning_km !== undefined && rec.morning_km !== null ? rec.morning_km : 0;
+    const eKm = rec.evening_km !== undefined && rec.evening_km !== null ? rec.evening_km : 0;
+    const tKm = rec.total_km || rec.travel_expenses || (eKm && mKm ? Math.max(0, eKm - mKm) : 0);
+
+    setEditDayModal({
+      isOpen: true,
+      district: foDist,
+      fo_name: foName,
+      date: dateStr,
+      morning_km: mKm,
+      evening_km: eKm,
+      travel_expenses: tKm,
+      visited_names: Array.isArray(rec.visited_names) ? rec.visited_names.join(', ') : (rec.visited_names || ''),
+      remark: rec.remark || '',
+      category_inputs: initialInputs,
+      loading: false,
+      error: ''
+    });
+  };
+
+  const handleExecuteEditDay = async (e) => {
+    if (e) e.preventDefault();
+    if (!editDayModal) return;
+    setEditDayModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    try {
+      const { district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs } = editDayModal;
+      
+      const category_ids = {};
+      Object.keys(category_inputs || {}).forEach(catKey => {
+        const raw = category_inputs[catKey] || '';
+        const parsed = raw
+          .split(/[\n,]+/)
+          .map(s => s.trim())
+          .filter(s => s.length === 9 && /^\d+$/.test(s));
+        category_ids[catKey] = Array.from(new Set(parsed));
+      });
+
+      const cleanVisited = visited_names 
+        ? visited_names.split(',').map(s => s.trim()).filter(Boolean)
+        : [];
+
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/reports/edit-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district,
+          fo_name,
+          date,
+          morning_km: Number(morning_km) || 0,
+          evening_km: Number(evening_km) || 0,
+          travel_expenses: Number(travel_expenses) || 0,
+          visited_names: cleanVisited,
+          remark: remark || '',
+          category_ids
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        // Optimistic State Update in rawRecords
+        setRawRecords(prev => prev.map(r => {
+          const matchFo = (r.fo_name || '').trim().toLowerCase() === fo_name.trim().toLowerCase();
+          const matchDist = canonicalizeDistrict(r.working_place || '') === canonicalizeDistrict(district);
+          const matchDate = (r.date_of_reporting || r.date) === date;
+          if (matchFo && matchDist && matchDate) {
+            return {
+              ...r,
+              morning_km: Number(morning_km) || 0,
+              evening_km: Number(evening_km) || 0,
+              travel_expenses: Number(travel_expenses) || 0,
+              total_km: Number(travel_expenses) || 0,
+              visited_names: cleanVisited,
+              doctor_store_visits_count: cleanVisited.length,
+              remark: remark || '',
+              ...category_ids
+            };
+          }
+          return r;
+        }));
+
+        setEditDayModal(null);
+        showToast(`✓ Date ${date} report for ${fo_name} updated successfully!`, "success");
+        try { localStorage.removeItem(`dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`); } catch (e) {}
+        if (showDuplicateModal) fetchDuplicateAudit();
+        fetchAttendance();
+      } else {
+        setEditDayModal(prev => ({ ...prev, error: data.detail || "Failed to update day report.", loading: false }));
+      }
+    } catch (err) {
+      setEditDayModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
+
+  const fetchRecentIdEdits = async () => {
+    setRecentIdEditsLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/reports/recent-id-edits?days=7`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecentIdEdits(data.edits || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch recent ID edits", err);
+    } finally {
+      setRecentIdEditsLoading(false);
+    }
+  };
+
   const handleDownloadKpi = () => {
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
@@ -3161,6 +3298,39 @@ const availableDistrictsForFeed = useMemo(() => {
                 >
                   <span>📘</span>
                   <span className="hidden sm:inline">Help &amp; SOP</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowRecentIdEditsModal(true);
+                    fetchRecentIdEdits();
+                  }}
+                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="View all Patient ID additions, edits, and deletions across the past 7 days"
+                >
+                  <span>🕒</span>
+                  <span className="hidden sm:inline">7-Day ID History</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowChangelogModal(true);
+                    setHasSeenLatestChangelog(true);
+                    try { localStorage.setItem('dfy_last_seen_changelog', APP_VERSION); } catch (e) {}
+                  }}
+                  className="relative bg-slate-900 hover:bg-slate-800 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  title="View Application Updates & Release Changelog"
+                >
+                  {!hasSeenLatestChangelog && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                  )}
+                  <span>🚀</span>
+                  <span>v{APP_VERSION}</span>
                 </button>
 
                 {isSuperAdmin && (
@@ -6169,6 +6339,493 @@ const availableDistrictsForFeed = useMemo(() => {
         </div>
       )}
 
+      {/* ✏️ Edit Full Day Report Modal */}
+      {editDayModal && editDayModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+          <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-5xl shadow-2xl border border-slate-100 max-h-[92vh] flex flex-col animate-fade-in my-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg font-black shrink-0">
+                  ✏️
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+                    Edit Day Report
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                    {editDayModal.fo_name} &bull; {editDayModal.district} &bull; 📅 {editDayModal.date}
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setEditDayModal(null)} 
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Context Callout */}
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-3 mb-4 text-xs text-amber-900 flex items-start gap-2 shrink-0">
+              <span className="text-sm shrink-0">⚠️</span>
+              <div className="text-[11px] leading-relaxed">
+                Yahan aap is din ke <strong>Travel KM</strong>, <strong>Visited Doctors/Stores</strong>, <strong>Remarks</strong>, aur sabhi <strong>19+ Categories ke Patient IDs</strong> ko edit/correct kar sakte hain. Submitting will update report, recalculate district rollups atomically, and log modifications in the 7-day audit trail.
+              </div>
+            </div>
+
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleExecuteEditDay} className="flex-1 overflow-y-auto pr-1 space-y-4 custom-scrollbar">
+              {/* Row 1: KM, Visits, Remarks */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200/70">
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Morning KM
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editDayModal.morning_km}
+                    onChange={(e) => {
+                      const m = Math.max(0, parseInt(e.target.value) || 0);
+                      setEditDayModal(prev => {
+                        const e_val = prev.evening_km || 0;
+                        const diff = e_val > m ? e_val - m : prev.travel_expenses;
+                        return { ...prev, morning_km: m, travel_expenses: diff };
+                      });
+                    }}
+                    className="w-full bg-white border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Evening KM
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editDayModal.evening_km}
+                    onChange={(e) => {
+                      const ev = Math.max(0, parseInt(e.target.value) || 0);
+                      setEditDayModal(prev => {
+                        const m_val = prev.morning_km || 0;
+                        const diff = ev > m_val ? ev - m_val : prev.travel_expenses;
+                        return { ...prev, evening_km: ev, travel_expenses: diff };
+                      });
+                    }}
+                    className="w-full bg-white border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Total Travel (KM)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={editDayModal.travel_expenses}
+                    onChange={(e) => setEditDayModal(prev => ({ ...prev, travel_expenses: Math.max(0, parseInt(e.target.value) || 0) }))}
+                    className="w-full bg-white border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 text-indigo-700"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Remarks
+                  </label>
+                  <input
+                    type="text"
+                    value={editDayModal.remark}
+                    onChange={(e) => setEditDayModal(prev => ({ ...prev, remark: e.target.value }))}
+                    placeholder="e.g. Field visit completed"
+                    className="w-full bg-white border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 lg:col-span-4">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Visited Doctors / Chemist Stores (Comma Separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={editDayModal.visited_names}
+                    onChange={(e) => setEditDayModal(prev => ({ ...prev, visited_names: e.target.value }))}
+                    placeholder="e.g. Dr. A.K. Sharma, Sanjivani Medico, Life Care Pharmacy"
+                    className="w-full bg-white border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: Category ID Buckets Grid */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
+                    Patient IDs by Category (19 Categories)
+                  </h4>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    One 9-digit patient ID per line or separated by commas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {feedCategoriesConfig.map(cat => {
+                    const rawVal = editDayModal.category_inputs[cat.key] || '';
+                    const parsedCount = rawVal
+                      .split(/[\n,]+/)
+                      .map(s => s.trim())
+                      .filter(s => s.length === 9 && /^\d+$/.test(s)).length;
+
+                    return (
+                      <div 
+                        key={cat.key} 
+                        className={`rounded-2xl border p-3 transition-all ${cat.isPrimary ? 'bg-indigo-50/30 border-indigo-200/70' : 'bg-white border-slate-200/80'}`}
+                      >
+                        <div className="flex justify-between items-center mb-1.5">
+                          <span className="text-[11px] font-black text-slate-700 flex items-center gap-1.5 truncate">
+                            <span>{cat.icon}</span>
+                            <span className="truncate">{cat.label}</span>
+                          </span>
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${parsedCount > 0 ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}`}>
+                            {parsedCount}
+                          </span>
+                        </div>
+                        <textarea
+                          rows={3}
+                          value={rawVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setEditDayModal(prev => ({
+                              ...prev,
+                              category_inputs: {
+                                ...prev.category_inputs,
+                                [cat.key]: val
+                              }
+                            }));
+                          }}
+                          placeholder="Paste 9-digit IDs..."
+                          className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 custom-scrollbar resize-none placeholder:text-slate-300"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {editDayModal.error && (
+                <div className="bg-red-50 border border-red-200 text-red-700 text-xs font-bold p-3 rounded-2xl">
+                  {editDayModal.error}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-100 sticky bottom-0 bg-white">
+                <button
+                  type="button"
+                  onClick={() => setEditDayModal(null)}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editDayModal.loading}
+                  className="px-6 py-2.5 rounded-xl text-xs font-black text-white bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                >
+                  {editDayModal.loading ? (
+                    <>
+                      <span className="animate-spin">⏳</span>
+                      <span>Saving Changes...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>💾</span>
+                      <span>Save Day Changes</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🕒 7-Day Patient ID Modification Radar Modal */}
+      {showRecentIdEditsModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+          <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-5xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center text-lg font-black shrink-0">
+                  🕒
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+                    7-Day Patient ID Modification Radar
+                    <span className="text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                      Past 7 Days
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider">
+                    Full audit history of all ID corrections, additions &amp; deletions
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowRecentIdEditsModal(false)} 
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Filter Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-3 shrink-0">
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-2xl">
+                {['All', 'delete', 'replace', 'add'].map(act => (
+                  <button
+                    key={act}
+                    type="button"
+                    onClick={() => setRecentIdEditsFilterAction(act)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                      recentIdEditsFilterAction === act
+                        ? 'bg-white text-slate-800 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {act === 'All' ? 'All Logs' : act === 'delete' ? '🗑️ Deleted' : act === 'replace' ? '✏️ Replaced' : '➕ Added'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 flex-1 sm:max-w-xs">
+                <input
+                  type="text"
+                  value={recentIdEditsSearch}
+                  onChange={(e) => setRecentIdEditsSearch(e.target.value)}
+                  placeholder="Filter by ID, FO, or district..."
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-400"
+                />
+                <button
+                  type="button"
+                  onClick={fetchRecentIdEdits}
+                  disabled={recentIdEditsLoading}
+                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold transition-all shrink-0 cursor-pointer"
+                  title="Refresh Logs"
+                >
+                  <span className={recentIdEditsLoading ? "animate-spin inline-block" : ""}>🔄</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Table */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar border border-slate-100 rounded-2xl">
+              {recentIdEditsLoading ? (
+                <div className="p-12 text-center text-slate-400 font-bold text-xs flex items-center justify-center gap-2">
+                  <span className="animate-spin text-lg">⏳</span> Loading recent modification logs...
+                </div>
+              ) : (() => {
+                const filtered = recentIdEdits.filter(item => {
+                  const matchAct = recentIdEditsFilterAction === 'All' || item.action === recentIdEditsFilterAction;
+                  if (!matchAct) return false;
+                  if (!recentIdEditsSearch.trim()) return true;
+                  const q = recentIdEditsSearch.trim().toLowerCase();
+                  return (
+                    (item.fo_name || '').toLowerCase().includes(q) ||
+                    (item.district || '').toLowerCase().includes(q) ||
+                    (item.old_id || '').includes(q) ||
+                    (item.new_id || '').includes(q) ||
+                    (item.category || '').toLowerCase().includes(q) ||
+                    (item.date || '').includes(q)
+                  );
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-12 text-center text-slate-400 font-bold text-xs">
+                      No ID modifications found in the past 7 days matching this filter.
+                    </div>
+                  );
+                }
+
+                return (
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50/80 border-b border-slate-100 text-slate-400 uppercase text-[10px] tracking-wider font-black sticky top-0">
+                        <th className="p-3">Time (IST)</th>
+                        <th className="p-3">Officer &amp; District</th>
+                        <th className="p-3">Report Date</th>
+                        <th className="p-3">Category</th>
+                        <th className="p-3">Action</th>
+                        <th className="p-3">ID Detail</th>
+                        <th className="p-3">Modified By</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                      {filtered.map((item, idx) => (
+                        <tr key={item.id || idx} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="p-3 whitespace-nowrap font-mono text-[11px] text-slate-500">
+                            {item.timestamp}
+                          </td>
+                          <td className="p-3">
+                            <span className="font-bold text-slate-800 block">{item.fo_name}</span>
+                            <span className="text-[10px] text-slate-400 uppercase">{item.district}</span>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-700">
+                            {item.date}
+                          </td>
+                          <td className="p-3">
+                            <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md">
+                              {(item.category || '').replace(/_/g, ' ')}
+                            </span>
+                          </td>
+                          <td className="p-3">
+                            <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full ${
+                              item.action === 'delete'
+                                ? 'bg-red-50 text-red-700 border border-red-200'
+                                : item.action === 'replace'
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {item.action === 'delete' ? '🗑️ Deleted' : item.action === 'replace' ? '✏️ Replaced' : '➕ Added'}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono text-xs">
+                            {item.action === 'replace' ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="line-through text-red-500">{item.old_id}</span>
+                                <span>➔</span>
+                                <span className="font-black text-emerald-700">{item.new_id}</span>
+                              </div>
+                            ) : item.action === 'delete' ? (
+                              <span className="line-through text-red-600 font-bold">{item.old_id}</span>
+                            ) : (
+                              <span className="text-emerald-700 font-black">+{item.new_id}</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-[11px] text-slate-500">
+                            {item.edited_by || 'Admin'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🚀 Application Updates & Changelog Modal */}
+      {showChangelogModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">
+          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-3xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto">
+            {/* Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white flex items-center justify-center text-xl font-black shadow-md shadow-indigo-600/20 shrink-0">
+                  🚀
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                    DFY MIS Release Changelog
+                    <span className="text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+                      v{APP_VERSION}
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">
+                    Last deployed: {LAST_UPDATED_DATE} &bull; Live Production Version
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowChangelogModal(false)} 
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Releases Timeline */}
+            <div className="flex-1 overflow-y-auto pr-1 space-y-6 custom-scrollbar">
+              {CHANGELOG_ENTRIES.map((entry, idx) => (
+                <div key={entry.version || idx} className="relative pl-6 pb-2 border-l-2 border-indigo-100 last:border-l-0">
+                  {/* Timeline Dot */}
+                  <div className="absolute -left-[9px] top-0 w-4 h-4 rounded-full bg-indigo-600 border-4 border-white shadow-xs"></div>
+
+                  <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/70 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black font-mono bg-indigo-600 text-white px-2.5 py-0.5 rounded-lg">
+                          {entry.version}
+                        </span>
+                        <span className="text-xs font-bold text-slate-500">
+                          {entry.date}
+                        </span>
+                      </div>
+                      {entry.badge && (
+                        <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                          entry.badgeColor === 'emerald'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : entry.badgeColor === 'rose'
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-indigo-100 text-indigo-800'
+                        }`}>
+                          {entry.badge}
+                        </span>
+                      )}
+                    </div>
+
+                    <h4 className="text-sm font-black text-slate-800 leading-snug">
+                      {entry.title}
+                    </h4>
+
+                    {entry.highlights && entry.highlights.length > 0 && (
+                      <ul className="space-y-1.5 text-xs font-medium text-slate-600 bg-white p-3 rounded-xl border border-slate-100">
+                        {entry.highlights.map((h, hIdx) => (
+                          <li key={hIdx} className="flex items-start gap-1.5">
+                            <span className="text-indigo-600 font-bold shrink-0">&bull;</span>
+                            <span>{h}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {entry.details && entry.details.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {entry.details.map((d, dIdx) => (
+                          <span 
+                            key={dIdx} 
+                            className="text-[10px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200/60 shadow-2xs"
+                          >
+                            <strong className="text-indigo-600 uppercase mr-1">[{d.tag}]</strong>
+                            {d.text}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="pt-3 border-t border-slate-100 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowChangelogModal(false)}
+                className="px-5 py-2 rounded-xl text-xs font-black text-white bg-slate-800 hover:bg-slate-900 shadow-sm transition-all cursor-pointer"
+              >
+                Close Changelog
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 📊 Unified Reports & Export Studio Modal */}
       {showReportsStudio && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -6619,6 +7276,14 @@ const availableDistrictsForFeed = useMemo(() => {
                           </span>
                           <div className="flex items-center gap-2">
                             <span className="text-[10px] font-bold text-slate-400">{rec.total_km} KM Travelled</span>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditDay(rec)}
+                              className="text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/70 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 active:scale-95 cursor-pointer ml-1"
+                              title={`Edit entire day report for ${rec.date}`}
+                            >
+                              <span>✏️</span> Edit Day
+                            </button>
                             <button
                               type="button"
                               onClick={() => setDeleteDayModal({
