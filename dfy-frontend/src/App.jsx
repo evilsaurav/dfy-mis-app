@@ -20,29 +20,31 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-// --- Accordion Container ---
+// --- Modern Accordion Container ---
 const Accordion = ({ title, children, defaultOpen = false }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   return (
-    <div className="mb-4 bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-slate-100 overflow-hidden transition-all hover:shadow-[0_8px_30px_-4px_rgba(6,81,237,0.15)]">
+    <div className="mb-4 bg-white/95 backdrop-blur-md rounded-3xl shadow-xs border border-slate-200/80 overflow-hidden transition-all hover:shadow-md hover:border-slate-300">
       <button 
+        type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full bg-white hover:bg-slate-50/50 px-5 py-4 border-b border-slate-50 flex justify-between items-center outline-none transition-colors"
+        className="w-full bg-white hover:bg-slate-50/70 px-5 py-4 flex justify-between items-center outline-none transition-all cursor-pointer select-none active:bg-slate-100/50"
       >
-        <span className="text-sm font-bold text-slate-800 tracking-wide uppercase">{title}</span>
-        <svg 
-          width="20" 
-          height="20"
-          className={`w-5 h-5 flex-shrink-0 text-slate-400 transform transition-transform duration-300 ${isOpen ? 'rotate-180' : ''}`} 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
-        </svg>
+        <span className="text-xs sm:text-sm font-black text-slate-800 tracking-wide uppercase">{title}</span>
+        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${isOpen ? 'bg-indigo-50 text-indigo-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
+          <svg 
+            width="16" 
+            height="16"
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
       </button>
       {isOpen && (
-        <div className="p-4 sm:p-5 bg-slate-50/30">
+        <div className="p-4 sm:p-5 bg-slate-50/40 border-t border-slate-100/90 animate-fade-in">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {children}
           </div>
@@ -1001,15 +1003,17 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5 shadow-sm hover:border-slate-200 transition-colors group">
-      <label className="block text-xs font-bold text-slate-500 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-600 transition-colors">
+    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all group">
+      <label className="block text-xs font-black text-slate-700 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-600 transition-colors">
         <span className="flex items-center gap-1.5">
-          {title}
+          <span>{title}</span>
           {currentId.length === 9 && !isNaN(currentId) && (
-            <span className="text-emerald-500 text-[10px] font-bold">✓ Ready</span>
+            <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
+              ✓ Ready
+            </span>
           )}
         </span>
-        <span className="bg-indigo-50 text-indigo-600 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-bold">{safeIds.length}</span>
+        <span className="bg-indigo-50 border border-indigo-100/90 text-indigo-700 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-black tabular-num">{safeIds.length}</span>
       </label>
 
       {/* Smart Notification ID Suggestion Chips (Only Today's Notified IDs) */}
@@ -1027,7 +1031,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
                   onAddBulk(missing);
                   if (showToast) showToast(`Added ${missing.length} Notification IDs!`, "success");
                 }}
-                className="text-[9px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors active:scale-95 shadow-sm"
+                className="text-[9px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors active:scale-95 shadow-sm cursor-pointer"
               >
                 + Add All ({suggestedIds.filter(sid => !safeIds.includes(sid)).length})
               </button>
@@ -1045,7 +1049,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
                     onAdd(sid);
                     if (showToast) showToast(`ID #${sid} added!`, "success");
                   }}
-                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
                     isAdded 
                       ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
                       : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
@@ -1069,23 +1073,23 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter or paste 9-digit ID"
-          className="flex-1 w-full bg-slate-50/70 border border-slate-200 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 placeholder:font-normal"
+          className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
         <button 
           onClick={handleAdd} 
-          className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide shrink-0"
+          className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
         >
           ADD
         </button>
       </div>
       {safeIds.length > 0 && (
-        <ul className="mt-4 space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
+        <ul className="mt-3.5 space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
           {safeIds.map((id, index) => (
-            <li key={index} className="flex justify-between items-center bg-slate-50/80 border border-slate-100 px-3.5 py-2 rounded-xl shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)] hover:bg-indigo-50/40 transition-colors">
+            <li key={index} className="flex justify-between items-center bg-slate-50/90 border border-slate-200/80 px-3.5 py-2 rounded-xl shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
               <span className="font-mono font-bold text-slate-700 tracking-wider text-sm">{id}</span>
               <button 
                 onClick={() => onRemove(index)} 
-                className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-7 w-7 rounded-full flex items-center justify-center font-bold transition-all shadow-sm"
+                className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-7 w-7 rounded-lg flex items-center justify-center font-black transition-all shadow-2xs cursor-pointer"
                 title="Remove"
               >
                 &times;
@@ -1132,16 +1136,18 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-5 shadow-sm hover:border-slate-200 transition-colors group space-y-3">
-      <label className="block text-xs font-bold text-slate-500 tracking-wider uppercase flex items-center justify-between group-hover:text-indigo-600 transition-colors">
+    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all group space-y-3">
+      <label className="block text-xs font-black text-slate-700 tracking-wider uppercase flex items-center justify-between group-hover:text-indigo-600 transition-colors">
         <span className="flex items-center gap-1.5">
           <span>💊</span>
-          {title}
+          <span>{title}</span>
           {currentId.length === 9 && !isNaN(currentId) && (
-            <span className="text-emerald-500 text-[10px] font-bold">✓ Ready</span>
+            <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
+              ✓ Ready
+            </span>
           )}
         </span>
-        <span className="bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-bold">{safeIds.length}</span>
+        <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-black tabular-num">{safeIds.length}</span>
       </label>
 
       {/* Smart Notification ID Chips */}
@@ -1164,7 +1170,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                     onAddFdc(sid, selectedRegimen, selectedStrips);
                     if (showToast) showToast(`ID #${sid} added to FDC!`, "success");
                   }}
-                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 ${
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
                     isAdded 
                       ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
                       : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
@@ -1181,21 +1187,21 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
       )}
 
       {/* Regimen & Strips Pre-selector Bar */}
-      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+      <div className="bg-slate-100/70 p-2.5 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-black uppercase text-slate-500">Dawa Type:</span>
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+          <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
             <button
               type="button"
               onClick={() => setSelectedRegimen('FDC 3')}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedRegimen === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
             >
               FDC 3
             </button>
             <button
               type="button"
               onClick={() => setSelectedRegimen('FDC 4')}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedRegimen === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
             >
               FDC 4
             </button>
@@ -1204,18 +1210,18 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
 
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] font-black uppercase text-slate-500">Quantity:</span>
-          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+          <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
             <button
               type="button"
               onClick={() => setSelectedStrips(1)}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedStrips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
             >
               1 Strip
             </button>
             <button
               type="button"
               onClick={() => setSelectedStrips(2)}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all ${selectedStrips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
             >
               2 Strips
             </button>
@@ -1232,11 +1238,11 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter or paste 9-digit ID for FDC"
-          className="flex-1 w-full bg-slate-50/70 border border-slate-200 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 placeholder:font-normal font-mono"
+          className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
         <button 
           onClick={handleAdd} 
-          className="bg-indigo-600 text-white px-4 py-2.5 rounded-xl font-bold shadow-md shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all text-sm tracking-wide shrink-0"
+          className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
         >
           ADD
         </button>
@@ -1248,7 +1254,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
           {safeIds.map((id, index) => {
             const detail = (fdcDetails || []).find(d => d && d.id === id) || { fdc_type: 'FDC 4', strips: 1 };
             return (
-              <li key={index} className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-slate-50/90 border border-slate-200/80 p-3 rounded-xl shadow-2xs hover:bg-indigo-50/30 transition-colors">
+              <li key={index} className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-slate-50/90 border border-slate-200/80 p-3 rounded-xl shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
                 <span className="font-mono font-bold text-slate-800 tracking-wider text-sm">{id}</span>
                 <div className="flex items-center gap-2 self-end sm:self-auto">
                   {/* Regimen Toggle */}
@@ -1256,14 +1262,14 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                     <button
                       type="button"
                       onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 3' })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.fdc_type === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.fdc_type === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
                     >
                       FDC 3
                     </button>
                     <button
                       type="button"
                       onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 4' })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.fdc_type === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.fdc_type === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
                     >
                       FDC 4
                     </button>
@@ -1274,14 +1280,14 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                     <button
                       type="button"
                       onClick={() => onUpdateFdc(id, { strips: 1 })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.strips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.strips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
                     >
                       1 Strip
                     </button>
                     <button
                       type="button"
                       onClick={() => onUpdateFdc(id, { strips: 2 })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all ${detail.strips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
+                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.strips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
                     >
                       2 Strips
                     </button>
@@ -1291,7 +1297,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                   <button
                     type="button"
                     onClick={() => onRemoveFdc(index, id)}
-                    className="text-red-400 hover:text-white hover:bg-red-500 bg-red-50 h-6 w-6 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-sm"
+                    className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-6 w-6 rounded-lg flex items-center justify-center font-black text-xs transition-all shadow-2xs cursor-pointer"
                     title="Remove"
                   >
                     &times;
@@ -2297,32 +2303,32 @@ function App() {
     <div className="min-h-screen bg-slate-50/50 font-sans pb-40 text-slate-800 flex flex-col">
       <Toast message={toast.message} type={toast.type} onClose={closeToast} />
 
-      <header className="bg-white border-b border-slate-100 p-4 sticky top-0 z-40 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)]">
-        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 p-3.5 sm:p-4 sticky top-0 z-40 shadow-xs">
+        <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-600 to-blue-500 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-500/30 text-white font-black text-xl shrink-0">
+            <div className="bg-gradient-to-br from-indigo-600 via-indigo-600 to-indigo-800 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-md shadow-indigo-600/25 text-white font-black text-xl shrink-0">
               <svg width="20" height="20" className="sm:w-[22px] sm:h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             </div>
             <div>
-              <h1 className="text-base sm:text-lg font-black tracking-wide leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
-              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 ">Mobile MIS Dashboard</p>
+              <h1 className="text-base sm:text-lg font-black tracking-tight leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
+              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider mt-0.5">Mobile MIS Portal</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 sm:gap-4 ml-auto">
-            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1 sm:gap-1.5 text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 px-2 py-1 sm:px-2.5 sm:py-1 rounded-full transition-colors border border-transparent hover:border-indigo-100" title="Admin Portal">
-              <svg width="12" height="12" className="sm:w-[14px] sm:h-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
-              <span className="text-[9px] sm:text-[10px] font-bold tracking-wider hidden sm:inline">ADMIN</span>
+          <div className="flex items-center gap-2 sm:gap-3 ml-auto">
+            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1 sm:gap-1.5 text-slate-500 hover:text-indigo-600 bg-slate-100/80 hover:bg-indigo-50 px-2.5 py-1 rounded-full transition-colors border border-transparent hover:border-indigo-100 text-[10px] font-black tracking-wider cursor-pointer" title="Admin Portal">
+              <svg width="12" height="12" className="sm:w-[13px] sm:h-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
+              <span className="hidden sm:inline">ADMIN</span>
             </button>
-            <button onClick={handleInstallApp} className="flex items-center gap-1 bg-indigo-600 text-white hover:bg-indigo-700 px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold shadow-sm transition-all active:scale-95" title="Install App">
+            <button onClick={handleInstallApp} className="flex items-center gap-1 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 px-3 py-1 rounded-full text-[10px] font-black shadow-xs shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer" title="Install App">
               <span>📲</span>
-              <span className="hidden xs:inline">Install App</span>
+              <span className="hidden xs:inline">Install</span>
             </button>
-            <div className="bg-indigo-50 text-indigo-600 px-2 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border border-indigo-100 shadow-sm tracking-wider">v3.1</div>
+            <div className="bg-indigo-50/90 text-indigo-700 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-indigo-100 shadow-2xs tracking-wider">v3.1</div>
             {(!isOnline || offlineQueueCount > 0) && (
               <button
                 onClick={triggerOfflineSync}
                 disabled={!isOnline || isSyncingOffline}
-                className={`flex items-center gap-1.5 px-2 sm:px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold border transition-all ${
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-black border transition-all ${
                   !isOnline 
                     ? 'bg-amber-50 text-amber-800 border-amber-200 cursor-default' 
                     : 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100 cursor-pointer animate-pulse'
@@ -2338,7 +2344,7 @@ function App() {
                 {activeFoBroadcasts.length > 0 && (
                   <button 
                     onClick={() => setShowAllAlertsModal(true)} 
-                    className="relative flex items-center justify-center p-1.5 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 transition-all active:scale-95"
+                    className="relative flex items-center justify-center p-1.5 rounded-full bg-rose-50 border border-rose-200 text-rose-600 hover:bg-rose-100 transition-all active:scale-95 cursor-pointer"
                     title="View Important Announcements"
                   >
                     <span className="text-sm">📢</span>
@@ -2349,10 +2355,10 @@ function App() {
                 )}
                 <button 
                   onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} 
-                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer ${
                     currentView === 'form' && cascadeAlerts.length > 0
                       ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-200 shadow-2xs'
-                      : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'
+                      : 'bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100'
                   }`}
                 >
                   <span>{currentView === 'form' ? 'Profile' : 'Form'}</span>
@@ -2362,7 +2368,7 @@ function App() {
                     </span>
                   )}
                 </button>
-                <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors ml-1">
+                <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors ml-1 cursor-pointer" title="Logout">
                   <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                 </button>
               </>
@@ -2376,18 +2382,18 @@ function App() {
           /* Login Screen */
           <div className="max-w-md mx-auto animate-fade-in-down w-full">
             <div className="text-center mb-8">
-              <div className="mx-auto bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mb-4">
-                <svg className="w-8 h-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <div className="mx-auto bg-gradient-to-br from-indigo-500 to-indigo-600 text-white w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-md shadow-indigo-500/25">
+                <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
                 </svg>
               </div>
-              <h2 className="text-2xl font-black text-slate-800 mb-2">Secure Login</h2>
-              <p className="text-slate-500 text-sm font-medium">Select your profile and enter PIN to access the dashboard.</p>
+              <h2 className="text-2xl font-black text-slate-800 tracking-tight mb-1">Field Officer Login</h2>
+              <p className="text-slate-500 text-xs font-semibold">Select your district, name &amp; enter 4-digit PIN.</p>
             </div>
             
-                        {/* PWA Install Banner */}
+            {/* PWA Install Banner */}
             {showInstallBtn && (
-              <div className="mb-5 bg-gradient-to-r from-indigo-600 to-blue-600 rounded-3xl p-4 sm:p-5 text-white flex items-center justify-between shadow-xl shadow-indigo-500/20 border border-indigo-400/30 animate-fade-in">
+              <div className="mb-5 bg-gradient-to-r from-indigo-600 to-blue-600 rounded-3xl p-4 sm:p-5 text-white flex items-center justify-between shadow-lg shadow-indigo-500/20 border border-indigo-400/30 animate-fade-in">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-xl shrink-0">
                     📲
@@ -2399,18 +2405,18 @@ function App() {
                 </div>
                 <button 
                   onClick={handleInstallApp}
-                  className="bg-white text-indigo-700 hover:bg-indigo-50 font-black text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md active:scale-95 transition-all shrink-0 uppercase tracking-wider"
+                  className="bg-white text-indigo-700 hover:bg-indigo-50 font-black text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md active:scale-95 transition-all shrink-0 uppercase tracking-wider cursor-pointer"
                 >
                   Install
                 </button>
               </div>
             )}
 
-            <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 sm:p-8 border border-slate-100">
-              <div className="space-y-5">
+            <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-[0_20px_50px_rgba(79,70,229,0.06)] p-6 sm:p-8 border border-slate-200/80">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1">District (Zila)</label>
-                  <select value={formData.working_place} onChange={handleDistrictChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm">
+                  <label className="block text-[10px] text-slate-500 font-black uppercase tracking-wider mb-1.5 ml-0.5">District (Zila)</label>
+                  <select value={formData.working_place} onChange={handleDistrictChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs cursor-pointer">
                     <option value="">Select District</option>
                     {districts.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
@@ -2418,9 +2424,9 @@ function App() {
                 
                 {formData.working_place && (
                   <div className="animate-fade-in">
-                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1">Select / Enter Name</label>
+                    <label className="block text-[10px] text-slate-500 font-black uppercase tracking-wider mb-1.5 ml-0.5">Select / Enter Name</label>
                     {directory[formData.working_place] && directory[formData.working_place].length > 0 ? (
-                      <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm">
+                      <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs cursor-pointer">
                         <option value="">Select Name</option>
                         {directory[formData.working_place].map(name => <option key={name} value={name}>{name}</option>)}
                       </select>
@@ -2430,7 +2436,7 @@ function App() {
                         value={formData.fo_name}
                         onChange={handleNameChange}
                         placeholder="Apna Naam Likhein (e.g. Rajesh Kumar)"
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 font-semibold outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-sm"
+                        className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs"
                         required
                       />
                     )}
@@ -2439,10 +2445,10 @@ function App() {
 
                 {formData.fo_name && (
                   <div className="animate-fade-in">
-                    <label className="block text-xs text-slate-500 font-bold uppercase tracking-wider mb-1.5 ml-1 flex items-center justify-between">
+                    <label className="block text-[10px] text-slate-500 font-black uppercase tracking-wider mb-1.5 ml-0.5 flex items-center justify-between">
                       <span>Enter Secret PIN</span>
                       {!isOnline && (
-                        <span className="text-[10px] text-amber-600 font-semibold lowercase">📴 offline mode</span>
+                        <span className="text-[10px] text-amber-600 font-bold">📴 offline mode</span>
                       )}
                     </label>
                     <input 
@@ -2451,10 +2457,10 @@ function App() {
                       maxLength="4" 
                       value={formData.pin} 
                       onChange={(e) => setFormData({...formData, pin: e.target.value})} 
-                      className={`w-full bg-slate-50 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-red-500 ring-2 ring-red-200' : 'border-slate-200'} rounded-xl px-4 py-3.5 text-xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner`} 
+                      className={`w-full bg-slate-50/90 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200/90'} rounded-xl px-4 py-3.5 text-2xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner focus:bg-white`} 
                     />
                     {pinStatus === 'checking' && (
-                      <p className="text-[11px] text-indigo-500 font-semibold text-center mt-1.5 animate-pulse">
+                      <p className="text-[11px] text-indigo-500 font-bold text-center mt-1.5 animate-pulse">
                         Verifying PIN...
                       </p>
                     )}
@@ -2474,7 +2480,7 @@ function App() {
                 <button 
                   onClick={handleLogin}
                   disabled={pinStatus !== 'success' || isSubmitting}
-                  className={`w-full mt-6 py-3.5 rounded-xl font-bold text-sm tracking-widest uppercase shadow-lg transition-all ${pinStatus === 'success' && !isSubmitting ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-indigo-500/30 active:scale-95' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
+                  className={`w-full mt-4 py-3.5 rounded-xl font-black text-xs tracking-wider uppercase shadow-md transition-all cursor-pointer ${pinStatus === 'success' && !isSubmitting ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 hover:shadow-indigo-600/30 active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
                 >
                   {isSubmitting ? (
                     <div className="flex items-center justify-center gap-2">
@@ -2677,28 +2683,45 @@ function App() {
                 </Accordion>
 
               {/* Travel & Doctors Section */}
-              <div className="grid grid-cols-1 gap-4 mt-8">
-                <div className="bg-white rounded-2xl shadow-[0_2px_10px_-3px_rgba(16,185,129,0.1)] border border-emerald-100 overflow-hidden">
-                  <div className="bg-emerald-50/50 px-5 py-4 border-b border-emerald-50 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
-                    <label className="block text-sm font-bold text-emerald-800 tracking-wide uppercase">Doctor / Store Visits</label>
+              <div className="grid grid-cols-1 gap-4 mt-6">
+                <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xs border border-emerald-200/80 overflow-hidden">
+                  <div className="bg-emerald-50/70 px-5 py-4 border-b border-emerald-100/90 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                    <label className="block text-xs font-black text-emerald-900 tracking-wide uppercase">Doctor / Chemist Store Visits</label>
                   </div>
                   <div className="p-4 sm:p-5">
                     <div className="flex gap-2">
-                      <input type="text" value={docName} onChange={(e) => setDocName(e.target.value)} placeholder="Doctor/Store Name" className="flex-1 w-full bg-slate-50/50 border border-slate-200 text-slate-800 text-sm rounded-lg px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500 transition-all placeholder:text-slate-300" />
-                      <button onClick={addDoctor} className="bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-bold shadow-md shadow-emerald-500/20 hover:bg-emerald-600 active:scale-95 transition-all text-sm tracking-wide">ADD</button>
+                      <input 
+                        type="text" 
+                        value={docName} 
+                        onChange={(e) => setDocName(e.target.value)} 
+                        placeholder="Doctor ya Medical Store ka Naam Likhein" 
+                        className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs" 
+                      />
+                      <button 
+                        onClick={addDoctor} 
+                        className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
+                      >
+                        ADD
+                      </button>
                     </div>
                     {formData.visited_names.length > 0 && (
-                      <ul className="mt-4 space-y-2">
+                      <ul className="mt-3.5 space-y-2">
                         {formData.visited_names.map((name, i) => (
-                          <li key={i} className="flex justify-between items-center bg-white border border-slate-100 px-3.5 py-2.5 rounded-lg text-sm text-slate-600 font-semibold shadow-[0_2px_8px_-4px_rgba(0,0,0,0.05)]">
-                            <span className="flex items-center gap-3">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
-                              {name}
+                          <li key={i} className="flex justify-between items-center bg-slate-50/90 border border-slate-200/80 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-bold shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
+                            <span className="flex items-center gap-2.5">
+                              <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                              <span>{name}</span>
                             </span>
-                            <button onClick={() => {
-                              setFormData({ ...formData, visited_names: formData.visited_names.filter((_, idx) => idx !== i) });
-                            }} className="text-slate-300 hover:text-red-500 font-bold text-lg transition-colors">&times;</button>
+                            <button 
+                              onClick={() => {
+                                setFormData({ ...formData, visited_names: formData.visited_names.filter((_, idx) => idx !== i) });
+                              }} 
+                              className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-6 w-6 rounded-lg flex items-center justify-center font-black text-xs transition-all shadow-2xs cursor-pointer"
+                              title="Remove"
+                            >
+                              &times;
+                            </button>
                           </li>
                         ))}
                       </ul>
@@ -2708,10 +2731,10 @@ function App() {
               </div>
 
               {/* Spacer for Sticky Footer */}
-              <div className="h-40 w-full pointer-events-none"></div>
+              <div className="h-36 w-full pointer-events-none"></div>
 
-              {/* Sticky Bottom Action Bar */}
-              <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-100 p-3 sm:p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50">
+              {/* Modern Sticky Bottom Action Bar */}
+              <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200/80 p-3.5 sm:p-4 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-50">
                 <div className="max-w-md mx-auto flex items-center gap-2 sm:gap-3">
                   <button 
                     onClick={() => {
@@ -2738,7 +2761,7 @@ function App() {
                       setShowReviewModal(true);
                     }} 
                     disabled={isSubmitting}
-                    className={`w-full bg-indigo-600 text-white font-bold text-xs sm:text-sm py-3.5 sm:py-4 px-4 sm:px-6 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 hover:shadow-indigo-600/40 active:scale-95 transition-all tracking-wider uppercase flex justify-center items-center gap-2 ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className={`w-full bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-xs sm:text-sm py-4 px-6 rounded-2xl shadow-md shadow-indigo-600/25 active:scale-[0.98] transition-all tracking-wider uppercase flex justify-center items-center gap-2 cursor-pointer ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     {isSubmitting ? (
                       <>

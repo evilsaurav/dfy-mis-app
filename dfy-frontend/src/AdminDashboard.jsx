@@ -2541,14 +2541,26 @@ const availableDistrictsForFeed = useMemo(() => {
     setSortConfig({ key, direction });
   };
 
-  const TH = ({ label, sortKey }) => (
-    <th className="p-3 font-bold border-b border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors" onClick={() => requestSort(sortKey)}>
-      <div className="flex items-center gap-1">
-        {label}
-        {sortConfig.key === sortKey && <span className="text-indigo-500 text-[10px]">{sortConfig.direction === 'desc' ? '▼' : '▲'}</span>}
-      </div>
-    </th>
-  );
+  const TH = ({ label, sortKey }) => {
+    const isSorted = sortConfig.key === sortKey;
+    return (
+      <th 
+        className={`p-3 sm:px-3.5 sm:py-3 font-black text-[10px] uppercase tracking-wider border-b border-slate-200 transition-all select-none cursor-pointer ${
+          isSorted ? 'bg-indigo-50/80 text-indigo-900 font-extrabold' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+        }`} 
+        onClick={() => requestSort(sortKey)}
+      >
+        <div className="flex items-center gap-1.5">
+          <span>{label}</span>
+          {isSorted && (
+            <span className="bg-indigo-600 text-white text-[9px] px-1 py-0.2 rounded font-black shadow-2xs">
+              {sortConfig.direction === 'desc' ? '▼' : '▲'}
+            </span>
+          )}
+        </div>
+      </th>
+    );
+  };
 
   // Dynamic Working Days & Calendar Model (Zero-Backend Overhead)
   const workingDaysInfo = useMemo(() => {
@@ -2905,55 +2917,55 @@ const availableDistrictsForFeed = useMemo(() => {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 font-sans">
-        <div className="bg-white p-6 sm:p-8 rounded-3xl shadow-xl w-full max-w-md border border-slate-100">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
+        <div className="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-3xl shadow-[0_20px_50px_rgba(79,70,229,0.07)] w-full max-w-md border border-slate-200/80 animate-fade-in-down">
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 font-black shadow-inner">
+            <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3.5 font-black shadow-md shadow-indigo-500/25">
               🔐
             </div>
             <h1 className="text-2xl font-black text-slate-800 tracking-tight">Admin Portal</h1>
-            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">State Health MIS Management</p>
+            <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-1">State Health MIS Management</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Username / Admin ID</label>
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5 ml-0.5">Username / Admin ID</label>
               <input 
                 type="text" 
                 value={loginUsername} 
                 onChange={(e) => setLoginUsername(e.target.value)} 
                 placeholder="e.g. admin or mis_buxar" 
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-400" 
+                className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs" 
               />
             </div>
 
             <div>
-              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Password</label>
+              <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5 ml-0.5">Password</label>
               <input 
                 type="password" 
                 value={password} 
                 onChange={(e) => setPassword(e.target.value)} 
                 placeholder="Enter password" 
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500 outline-none transition-all placeholder:text-slate-400" 
+                className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs" 
               />
             </div>
 
-            {error && <p className="text-red-500 text-xs font-bold text-center bg-red-50 p-2.5 rounded-xl border border-red-100">{error}</p>}
+            {error && <p className="text-rose-600 text-xs font-bold text-center bg-rose-50/90 p-2.5 rounded-xl border border-rose-200/80 animate-fade-in">{error}</p>}
 
-            <button type="submit" className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-indigo-600/20 hover:bg-indigo-700 active:scale-95 transition-all text-sm uppercase tracking-wider">
-              Enter Admin Portal
+            <button type="submit" className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-black py-3.5 rounded-xl shadow-md shadow-indigo-600/25 hover:from-indigo-700 hover:to-indigo-800 active:scale-[0.98] transition-all text-xs uppercase tracking-wider cursor-pointer">
+              Enter Admin Portal &rarr;
             </button>
           </form>
 
           <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-3">
             <button 
               onClick={() => { setRecoveryError(''); setRecoverySuccess(''); setShowRecoveryModal(true); }}
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5"
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5 cursor-pointer"
             >
               <span>🔑</span> Forgot Password / Emergency Recovery Key?
             </button>
-            <button onClick={() => window.location.href = '/'} className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors">
-              ← Back to Field Officer App
+            <button onClick={() => window.location.href = '/'} className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">
+              &larr; Back to Field Officer App
             </button>
           </div>
         </div>
@@ -3038,21 +3050,21 @@ const availableDistrictsForFeed = useMemo(() => {
         {/* ========================================================================= */}
         {/* --- TIER 1: BRAND IDENTITY, GLOBAL SCOPE FILTERS & ESSENTIAL UTILITIES --- */}
         {/* ========================================================================= */}
-        <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+        <div className="bg-white/95 backdrop-blur-md p-4 sm:p-5 rounded-3xl shadow-sm border border-slate-200/80 space-y-4">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             
             {/* 1. Left: Brand & Admin Identity */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-sm shadow-indigo-600/30 shrink-0">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-600 to-indigo-800 text-white flex items-center justify-center font-black text-xl shadow-md shadow-indigo-600/25 shrink-0">
                 📊
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
                   <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">Analytics Dashboard</h1>
-                  <div className="flex items-center gap-1.5 bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 rounded-lg shadow-2xs">
+                  <div className="flex items-center gap-1.5 bg-indigo-50/90 border border-indigo-100/90 px-2.5 py-0.5 rounded-full shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span className="text-xs font-black text-indigo-900">{currentUser?.name || 'Super Admin'}</span>
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-200/70 text-indigo-800 px-1.5 py-0.2 rounded-md">
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-200/80 text-indigo-800 px-2 py-0.5 rounded-full">
                       {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
                     </span>
                   </div>
@@ -3064,12 +3076,12 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* 2. Middle & Right: Scope Filters + Global Utilities */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
               {/* Scope Filters Group */}
-              <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200/80 p-1.5 rounded-xl">
+              <div className="flex flex-wrap items-center gap-2 bg-slate-100/70 border border-slate-200/80 p-1.5 rounded-2xl shadow-inner">
                 <input 
                   type="month" 
                   value={month} 
                   onChange={(e) => setMonth(e.target.value)} 
-                  className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs" 
+                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-2xs transition-all cursor-pointer" 
                 />
                 {isSuperAdmin && (
                   <button
@@ -3078,10 +3090,10 @@ const availableDistrictsForFeed = useMemo(() => {
                       setSelectedDistrict('All');
                       setSelectedFO('All');
                     }}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 active:scale-95 cursor-pointer ${
+                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                       selectedDistrict === 'All'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs'
+                        ? 'bg-indigo-600 text-white shadow-xs shadow-indigo-600/25'
+                        : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 shadow-2xs'
                     }`}
                     title="View All Districts"
                   >
@@ -3092,10 +3104,10 @@ const availableDistrictsForFeed = useMemo(() => {
                 <select 
                   value={selectedDistrict} 
                   onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
-                  className={`border px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer ${
+                  className={`border px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer ${
                     selectedDistrict !== 'All'
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-800 ring-1 ring-indigo-300'
-                      : 'bg-white border-slate-200 text-slate-700 shadow-2xs'
+                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900 ring-1 ring-indigo-300 shadow-xs'
+                      : 'bg-white border-slate-200/90 text-slate-700 shadow-2xs'
                   }`}
                 >
                   {districts.map(d => <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>)}
@@ -3104,7 +3116,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   value={selectedFO} 
                   onChange={(e) => setSelectedFO(e.target.value)} 
                   disabled={selectedDistrict === 'All'} 
-                  className="bg-white border border-slate-200 px-2.5 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 shadow-2xs cursor-pointer"
+                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 disabled:opacity-40 shadow-2xs cursor-pointer transition-all"
                 >
                   {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
                 </select>
@@ -3114,10 +3126,10 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-1.5">
                 {lastSyncedTime && (
                   <div 
-                    className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100/90 border border-slate-200/80 text-[11px] font-bold text-slate-600 shadow-2xs"
+                    className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/90 border border-slate-200/80 text-[11px] font-bold text-slate-600 shadow-2xs"
                     title={`Last Synced: ${lastSyncedTime} (${syncStatus === 'UP_TO_DATE' ? 'Data verified up-to-date via delta cache' : 'Live synchronized'})`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'SYNCING' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'SYNCING' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 shadow-xs shadow-emerald-500/50'}`}></span>
                     <span>{syncStatus === 'SYNCING' ? 'Syncing...' : syncStatus === 'UP_TO_DATE' ? 'Cached (Up-to-date)' : 'Live Synced'}</span>
                   </div>
                 )}
@@ -3135,7 +3147,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     showToast("✓ Dashboard refreshed from live database!", "success");
                   }}
                   disabled={isLoading}
-                  className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-emerald-600/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Refresh Dashboard & Sync Latest Reports"
                 >
                   <span className={isLoading ? "animate-spin" : ""}>🔄</span>
@@ -3144,17 +3156,17 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 <button
                   onClick={() => setShowAppGuideModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-indigo-600/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Admin SOP Manual & Feature Guide (Sub-Admin Help Center)"
                 >
                   <span>📘</span>
-                  <span className="hidden sm:inline">Help &amp; SOP Manual</span>
+                  <span className="hidden sm:inline">Help &amp; SOP</span>
                 </button>
 
                 {isSuperAdmin && (
                   <button 
                     onClick={() => { setSecurityStatusMsg(''); setShowSecurityModal(true); }} 
-                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
                     title="Admin Security Settings & Change Password"
                   >
                     <span>⚙️</span>
@@ -3165,7 +3177,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 {isSuperAdmin && (
                   <button 
                     onClick={() => { setShowBackupModal(true); fetchBackupStatus(); }} 
-                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
+                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
                     title="Automated Daily Cloud Backups (Google Cloud Storage Mumbai)"
                   >
                     <span>💾</span>
@@ -3183,7 +3195,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     setIsAuthenticated(false);
                     window.location.href = '/';
                   }} 
-                  className="bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-rose-50 hover:bg-rose-600 text-rose-700 hover:text-white border border-rose-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Logout from Admin Portal"
                 >
                   <span>🚪</span>
@@ -3785,43 +3797,98 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               )}
 
-              {/* The BIG 5 KPIs */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-indigo-500">
-                <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Total KM Travelled</h3>
-                <p className="text-2xl font-black text-slate-800">{totals.total_km}</p>
+            {/* The BIG 5 KPIs */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Total KM</span>
+                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                    🚗
+                  </div>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black text-slate-800 tabular-num tracking-tight">{totals.total_km}</p>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-indigo-600/90">
+                  <span>Field Travel</span>
+                </div>
               </div>
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-emerald-500">
-                <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Total Notifications</h3>
-                <p className="text-2xl font-black text-slate-800">{totals.notifications}</p>
+
+              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                    📋
+                  </div>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black text-emerald-600 tabular-num tracking-tight">{totals.notifications}</p>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-emerald-700">
+                  <span>Primary Target</span>
+                </div>
               </div>
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-blue-500">
-                <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Samples Tested</h3>
-                <p className="text-2xl font-black text-slate-800">{totals.tests}</p>
+
+              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Samples Tested</span>
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                    🔬
+                  </div>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black text-blue-600 tabular-num tracking-tight">{totals.tests}</p>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-blue-700">
+                  <span>Lab Diagnostics</span>
+                </div>
               </div>
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-amber-500">
-                <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Presumptive</h3>
-                <p className="text-2xl font-black text-slate-800">{totals.presumptive}</p>
+
+              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Presumptive</span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                    🩺
+                  </div>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black text-amber-600 tabular-num tracking-tight">{totals.presumptive}</p>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-amber-700">
+                  <span>Symptomatic</span>
+                </div>
               </div>
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 border-l-4 border-l-purple-500">
-                <h3 className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Doctor Visits</h3>
-                <p className="text-2xl font-black text-slate-800">{totals.doctor_visits}</p>
+
+              <div className="col-span-2 lg:col-span-1 glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Doctor Visits</span>
+                  <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                    🏥
+                  </div>
+                </div>
+                <p className="text-2xl sm:text-3xl font-black text-purple-600 tabular-num tracking-tight">{totals.doctor_visits}</p>
+                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-purple-700">
+                  <span>Clinical Engagement</span>
+                </div>
               </div>
             </div>
 
             {/* Secondary Metrics Grid */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
-              <h3 className="text-slate-800 text-sm font-black mb-4">Secondary Indicators</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-10 gap-4">
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-3.5">
+                <h3 className="text-slate-800 text-xs sm:text-sm font-black flex items-center gap-2">
+                  <span>⚡</span>
+                  <span>Secondary Clinical &amp; Operational Indicators</span>
+                </h3>
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-100 px-2 py-0.5 rounded-full">
+                  12 Metrics
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2.5">
                 {[
-                  { k: 'hiv_dm', l: 'HIV & DM' }, { k: 'dbt', l: 'DBT' }, { k: 'sample_collection', l: 'Sample Col' },
-                  { k: 'outcome_assigned', l: 'Outcomes' }, { k: 'home_visits', l: 'Home Visits' }, { k: 'contact_tracing', l: 'Contact Tr' },
-                  { k: 'follow_ups', l: 'Follow Ups' }, { k: 'face_to_face', l: 'F2F' }, { k: 'documents', l: 'Docs' },
-                  { k: 'fdc_provided', l: 'FDC Prov' }, { k: 'kit_consumption', l: 'Kits' }, { k: 'overrides', l: 'Overrides' }
+                  { k: 'hiv_dm', l: 'HIV & DM', icon: '🩸' }, { k: 'dbt', l: 'DBT', icon: '💰' }, { k: 'sample_collection', l: 'Sample Col', icon: '🧪' },
+                  { k: 'outcome_assigned', l: 'Outcomes', icon: '🎯' }, { k: 'home_visits', l: 'Home Visits', icon: '🏠' }, { k: 'contact_tracing', l: 'Contact Tr', icon: '👥' },
+                  { k: 'follow_ups', l: 'Follow Ups', icon: '🔄' }, { k: 'face_to_face', l: 'F2F', icon: '🗣️' }, { k: 'documents', l: 'Docs', icon: '📁' },
+                  { k: 'fdc_provided', l: 'FDC Prov', icon: '💊' }, { k: 'kit_consumption', l: 'Kits', icon: '📦' }, { k: 'overrides', l: 'Overrides', icon: '⚠️' }
                 ].map(metric => (
-                  <div key={metric.k} className="text-center p-3 bg-slate-50 rounded-xl">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 leading-tight">{metric.l}</p>
-                    <p className="text-lg font-black text-slate-700">{totals[metric.k]}</p>
+                  <div key={metric.k} className="p-2.5 bg-slate-50/80 hover:bg-white hover:border-slate-300 border border-slate-200/70 rounded-xl transition-all shadow-2xs hover:shadow-xs group text-center">
+                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 leading-tight flex items-center justify-center gap-1">
+                      <span className="text-[10px]">{metric.icon}</span>
+                      <span className="truncate">{metric.l}</span>
+                    </p>
+                    <p className="text-base sm:text-lg font-black text-slate-800 tabular-num group-hover:text-indigo-600 transition-colors">{totals[metric.k]}</p>
                   </div>
                 ))}
               </div>
@@ -4413,17 +4480,23 @@ const availableDistrictsForFeed = useMemo(() => {
             </div>
 
 {/* Master Data Table */}
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-              <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="text-slate-800 font-black">Detailed Master Table</h3>
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-white px-3 py-1 rounded-full shadow-sm border border-slate-100">
-                  Click headers to sort
+            <div className="bg-white rounded-3xl shadow-sm border border-slate-200/90 overflow-hidden">
+              <div className="p-4 sm:p-5 border-b border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50/60">
+                <div>
+                  <h3 className="text-slate-800 font-black text-sm sm:text-base flex items-center gap-2">
+                    <span>📋</span>
+                    <span>Detailed Master Table</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {tableData.length} records</p>
+                </div>
+                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-white px-3 py-1.5 rounded-full shadow-2xs border border-slate-200/80">
+                  Click column header to sort
                 </span>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead>
-                    <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                    <tr className="bg-slate-100/70 text-slate-600 text-[10px] uppercase tracking-wider border-b border-slate-200/90">
                       <TH label={selectedDistrict === 'All' ? 'District' : 'Officer Name'} sortKey="name" />
                       <TH label="KM" sortKey="total_km" />
                       <TH label="Notif" sortKey="notifications" />
@@ -4451,7 +4524,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   </thead>
                   <tbody>
                     {tableData.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-indigo-50/30 transition-colors border-b border-slate-100 last:border-none text-xs font-semibold text-slate-700">
+                      <tr key={idx} className="hover:bg-indigo-50/40 transition-colors border-b border-slate-100/90 last:border-none text-xs font-semibold text-slate-700">
                         <td 
                           onClick={() => {
                             if (selectedDistrict !== 'All') {
@@ -4460,33 +4533,36 @@ const availableDistrictsForFeed = useMemo(() => {
                               setSelectedDistrict(row.name);
                             }
                           }}
-                          className="p-3 sticky left-0 bg-white shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] text-indigo-700 font-bold hover:underline cursor-pointer"
+                          className="p-3 sticky left-0 bg-white/95 backdrop-blur-xs shadow-[3px_0_10px_-2px_rgba(0,0,0,0.06)] border-r border-slate-200/70 text-indigo-700 font-black hover:text-indigo-900 cursor-pointer z-10"
                           title={selectedDistrict !== 'All' ? "Click to inspect all IDs" : "Click to view this district"}
                         >
-                          {row.name} {selectedDistrict !== 'All' ? '🔍' : '➔'}
+                          <span className="flex items-center gap-1.5">
+                            <span>{row.name}</span>
+                            <span className="text-slate-400 text-[10px]">{selectedDistrict !== 'All' ? '🔍' : '➔'}</span>
+                          </span>
                         </td>
-                        <td className="p-3">{row.total_km}</td>
-                        <td className="p-3 text-emerald-600">{row.notifications}</td>
-                        <td className="p-3 text-blue-600">{row.tests}</td>
-                        <td className="p-3 text-amber-500">{row.presumptive}</td>
-                        <td className="p-3 text-purple-600">{row.doctor_visits}</td>
-                        <td className="p-3">{row.hiv_dm}</td>
-                        <td className="p-3">{row.dbt}</td>
-                        <td className="p-3">{row.sample_collection}</td>
-                        <td className="p-3">{row.outcome_assigned}</td>
-                        <td className="p-3">{row.home_visits}</td>
-                        <td className="p-3">{row.contact_tracing}</td>
-                        <td className="p-3">{row.follow_ups}</td>
-                        <td className="p-3">{row.face_to_face}</td>
-                        <td className="p-3">{row.documents}</td>
-                        <td className="p-3">{row.fdc_provided}</td>
-                        <td className="p-3">{row.kit_consumption}</td>
-                          <td className="p-3 font-bold text-pink-600">{row.differentiated_tb}</td>
-                          <td className="p-3 font-bold text-teal-600">{row.tpt_treatment_start}</td>
-                          <td className="p-3 font-bold text-cyan-600">{row.tpt_presumptive}</td>
-                          <td className="p-3 font-bold text-orange-600">{row.adhar_face_auth}</td>
-                          <td className="p-3 font-bold text-indigo-400">{row.consent_with_id}</td>
-                        <td className="p-3 text-red-500">{row.overrides > 0 ? row.overrides : '-'}</td>
+                        <td className="p-3 tabular-num font-bold">{row.total_km}</td>
+                        <td className="p-3 tabular-num font-bold text-emerald-600">{row.notifications}</td>
+                        <td className="p-3 tabular-num font-bold text-blue-600">{row.tests}</td>
+                        <td className="p-3 tabular-num font-bold text-amber-500">{row.presumptive}</td>
+                        <td className="p-3 tabular-num font-bold text-purple-600">{row.doctor_visits}</td>
+                        <td className="p-3 tabular-num">{row.hiv_dm}</td>
+                        <td className="p-3 tabular-num">{row.dbt}</td>
+                        <td className="p-3 tabular-num">{row.sample_collection}</td>
+                        <td className="p-3 tabular-num">{row.outcome_assigned}</td>
+                        <td className="p-3 tabular-num">{row.home_visits}</td>
+                        <td className="p-3 tabular-num">{row.contact_tracing}</td>
+                        <td className="p-3 tabular-num">{row.follow_ups}</td>
+                        <td className="p-3 tabular-num">{row.face_to_face}</td>
+                        <td className="p-3 tabular-num">{row.documents}</td>
+                        <td className="p-3 tabular-num">{row.fdc_provided}</td>
+                        <td className="p-3 tabular-num">{row.kit_consumption}</td>
+                        <td className="p-3 tabular-num font-bold text-pink-600">{row.differentiated_tb}</td>
+                        <td className="p-3 tabular-num font-bold text-teal-600">{row.tpt_treatment_start}</td>
+                        <td className="p-3 tabular-num font-bold text-cyan-600">{row.tpt_presumptive}</td>
+                        <td className="p-3 tabular-num font-bold text-orange-600">{row.adhar_face_auth}</td>
+                        <td className="p-3 tabular-num font-bold text-indigo-500">{row.consent_with_id}</td>
+                        <td className="p-3 tabular-num text-red-500 font-bold">{row.overrides > 0 ? row.overrides : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
