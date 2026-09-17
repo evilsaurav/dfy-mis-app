@@ -20,6 +20,9 @@ Provide a streamlined, error-proof TB Fixed Dose Combination (FDC) medicine dist
    - Frontend anti-double-tap button locks to prevent staff duplicate requests.
 3. **Medical Safety & Auto-Calculation**:
    - Field Officers never manually guess regimen or strip counts. Dosage is 100% automated based on National TB Elimination Program (NTEP) adult and pediatric weight-band matrices.
+4. **8-Digit Legacy ID Clause (FDC & Outcome)**:
+   - Older/legacy patients registered in Nikshay carry **8-digit IDs**, whereas modern registrations carry **9-digit IDs**.
+   - Both **FDC Provided** (`fdc_provided_ids` & `fdc_details`) and **Outcome Assigned** (`outcome_assigned_ids`) MUST officially accept both 8-digit and 9-digit numeric IDs across FO Mobile Form, Admin Feed Data, Admin Edit Day, and Backend APIs. All other categories remain 9-digit strictly.
 
 ---
 
@@ -81,8 +84,8 @@ Pure JavaScript function: `calculateFdcDosage(patientType, weightKg, phase)` ret
 
 ### 4.1 Component Flow in `FdcBucket`:
 1. **Input Fields**:
-   - **Nikshay ID**: Text/numeric input (auto-trimmed, 9-digit validation). Supports single entry or selection from `Today's Notified IDs` chips.
-   - When a valid 9-digit ID is typed or a chip is clicked:
+   - **Nikshay ID**: Accepts both **8-digit and 9-digit numeric IDs** (`\b\d{8,9}\b`, `raw.length === 8 || raw.length === 9`). Supports single entry or selection from `Today's Notified IDs` chips.
+   - When a valid 8 or 9-digit ID is typed or a chip is clicked:
      - The inline card automatically expands smoothly.
 2. **Inline Smart Dosage Configuration**:
    - **Patient Name**: Text input (e.g., "Ramesh Kumar").
@@ -100,8 +103,17 @@ Pure JavaScript function: `calculateFdcDosage(patientType, weightKg, phase)` ret
    - **"Quick Add (Default)"**: Fallback for fast entry if patient weight is pending, defaulting to standard Adult IP 1 strip.
 5. **Entry List**:
    - Each added patient entry displays a compact badge showing:
-     `#123456789 - Ramesh Kumar | 4 FDC (6 Strips) | IP (45kg)`
+     `#12345678 - Ramesh Kumar | 4 FDC (6 Strips) | IP (45kg)`
    - Includes an edit button (re-opens details in card) and delete button (`&times;`).
+
+### 4.2 Outcome Assigned (`outcome_assigned_ids`) 8-Digit Clause:
+- In `IdBucket`, pass `allow8Digit={cat.key === 'outcome_assigned_ids'}`.
+- When `allow8Digit` is true:
+  - Regex allows both 8 and 9 digits (`\b\d{8,9}\b` for multi-paste).
+  - Single ID validator accepts `(raw.length === 8 || raw.length === 9) && !isNaN(raw)`.
+  - Placeholder dynamically reads: `"Enter or paste 8 or 9-digit ID"`.
+  - Ready badge activates for length 8 or 9.
+  - Toast message on invalid length: `"ID 8 ya 9 digit ki honi chahiye bhai!"`.
 
 ---
 
@@ -111,7 +123,7 @@ Pure JavaScript function: `calculateFdcDosage(patientType, weightKg, phase)` ret
 No new collection is needed during regular daily submission. The `fdc_details` array inside the day's existing `daily_field_reports` document receives:
 ```json
 {
-  "id": "123456789",
+  "id": "12345678",
   "patient_name": "Ramesh Kumar",
   "patient_type": "adult",
   "weight_kg": 45.0,
@@ -129,13 +141,29 @@ No new collection is needed during regular daily submission. The `fdc_details` a
 - When the dashboard is opened or reports are requested, `main.py` uses existing monthly cached snapshots (`get_shared_raw_month_records`).
 - **Cost**: 0 additional Firestore read operations.
 
-### 5.3 Dedicated Excel Generation Endpoint:
+### 5.3 Backend API 8-Digit Validation Updates:
+- `/admin/feed-officer-data`:
+  ```python
+  is_valid_len = (len(s) in [8, 9]) if cat in ["fdc_provided_ids", "outcome_assigned_ids"] else (len(s) == 9)
+  if not (s.isdigit() and is_valid_len):
+      invalid_ids.append(s)
+  ```
+- `/admin/reports/edit-day`:
+  ```python
+  is_valid_len = (len(cid) in [8, 9]) if cat_key in ["fdc_provided_ids", "outcome_assigned_ids"] else (len(cid) == 9)
+  if cid.isdigit() and is_valid_len and cid not in clean_new_ids:
+      clean_new_ids.append(cid)
+  ```
+- `/submit-daily-report`:
+  Already takes `List[str]` for `outcome_assigned_ids` and `fdc_provided_ids`, so 8-digit IDs are natively stored with zero friction.
+
+### 5.4 Dedicated Excel Generation Endpoint:
 - `@app.get("/admin/reports/medicine-consumption")`:
   - Query parameters: `month` (e.g. `2026-09`), `district` (e.g. `Buxar` or `All`), `format` (`xlsx` or `csv`).
   - Guarded by `asyncio.Semaphore(1)` (`KPI_EXCEL_SEMAPHORE`).
   - Sub-Admin RBAC filtering enforced.
   - Builds two sheets in the workbook:
-    1. **Detailed Patient Consumption**: Line-by-line patient entries (`Date`, `District`, `FO Name`, `Nikshay ID`, `Patient Name`, `Category`, `Weight`, `Phase`, `Regimen`, `Daily Dose`, `Strips`).
+    1. **Detailed Patient Consumption**: Line-by-line patient entries (`Date`, `District`, `FO Name`, `Nikshay ID (8 or 9 digits)`, `Patient Name`, `Category`, `Weight`, `Phase`, `Regimen`, `Daily Dose`, `Strips`).
     2. **FO & District Summary**: Aggregated strips and patient counts per FO and per district.
   - Releases workbook memory immediately via `gc.collect()`.
 
@@ -152,13 +180,17 @@ No new collection is needed during regular daily submission. The `fdc_details` a
 - **On-Screen Executive Summary Table**:
   - Table displaying: `District` | `FO Name` | `Total Patients Given FDC` | `Adult IP` | `Adult CP` | `Pediatric IP` | `Pediatric CP` | `Total Strips Distributed`.
 
+### 6.2 Admin Modals (Edit Day & Feed Data) 8-Digit Support:
+- `EditDayModal`: Textarea parsing and live preview count accept both 8 and 9 digits for `fdc_provided_ids` and `outcome_assigned_ids`.
+- `AdminFeedModal`: Validation accepts 8 and 9-digit numbers for `fdc_provided_ids` and `outcome_assigned_ids`.
+
 ---
 
 ## 7. Verification & Safety Battery
 
 Following the project's **`GEMINI.md` Golden Rules**:
 1. **Python Compilation**: `python -m py_compile main.py` (Exit code 0).
-2. **Backend Unit Tests**: Automated script testing `/admin/reports/medicine-consumption` with RBAC, query filters, and empty cases.
+2. **Backend Unit Tests**: Automated script testing `/admin/reports/medicine-consumption` and 8-digit ID ingestion in `/admin/feed-officer-data` and `/admin/reports/edit-day`.
 3. **Frontend Production Build**: `npm run build` in `dfy-frontend/` (Exit code 0).
 4. **ESLint**: `npm run lint` in `dfy-frontend/` (0 errors).
 5. **Runtime TDZ & Scope Safety Check**: Ensure all new hooks and calculations are declared strictly after base states and dependencies.
