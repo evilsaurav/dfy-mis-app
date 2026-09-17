@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
+import { calculateFdcDosage } from './utils/fdcCalculator'
 
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
@@ -969,16 +970,21 @@ const MyProfileDashboard = ({
 };
 
 // --- Id Bucket ---
-const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk }) => {
+const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk, allow8Digit = false }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
+
+  const isCurrentValid = allow8Digit 
+    ? ((currentId.length === 8 || currentId.length === 9) && !isNaN(currentId))
+    : (currentId.length === 9 && !isNaN(currentId));
 
   const handleAdd = () => {
     const raw = currentId.trim();
     if (!raw) return;
 
     // Check if user pasted multiple IDs (separated by comma, space, newline)
-    const matches = raw.match(/\b\d{9}\b/g);
+    const regex = allow8Digit ? /\b\d{8,9}\b/g : /\b\d{9}\b/g;
+    const matches = raw.match(regex);
     if (matches && matches.length > 1) {
       if (onAddMultiple) {
         onAddMultiple(matches);
@@ -987,11 +993,15 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
       }
     }
 
-    if (raw.length === 9 && !isNaN(raw)) {
+    const isValid = allow8Digit 
+      ? ((raw.length === 8 || raw.length === 9) && !isNaN(raw)) 
+      : (raw.length === 9 && !isNaN(raw));
+
+    if (isValid) {
       onAdd(raw);
       setCurrentId("");
     } else {
-      showToast("ID exactly 9 digit ki honi chahiye bhai!", "error");
+      showToast(allow8Digit ? "ID 8 ya 9 digit ki honi chahiye bhai!" : "ID exactly 9 digit ki honi chahiye bhai!", "error");
     }
   };
 
@@ -1007,7 +1017,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
       <label className="block text-xs font-black text-slate-700 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-600 transition-colors">
         <span className="flex items-center gap-1.5">
           <span>{title}</span>
-          {currentId.length === 9 && !isNaN(currentId) && (
+          {isCurrentValid && (
             <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
               ✓ Ready
             </span>
@@ -1072,7 +1082,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
           value={currentId}
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter or paste 9-digit ID"
+          placeholder={allow8Digit ? "Enter or paste 8 or 9-digit ID" : "Enter or paste 9-digit ID"}
           className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
         <button 
@@ -1102,53 +1112,136 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
   );
 };
 
-// --- FDC Bucket (With Regimen FDC 3 / FDC 4 and Strip Count Selection) ---
+// --- FDC Bucket (Option A: Inline Smart Card with Auto-Calculated Dosage) ---
 const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemoveFdc, showToast, suggestedIds = [] }) => {
   const [currentId, setCurrentId] = useState("");
+  const [patientName, setPatientName] = useState("");
+  const [patientType, setPatientType] = useState("adult"); // "adult" | "pediatric"
+  const [weightKg, setWeightKg] = useState("");
+  const [phase, setPhase] = useState("IP"); // "IP" | "CP"
   const [selectedRegimen, setSelectedRegimen] = useState("FDC 4");
   const [selectedStrips, setSelectedStrips] = useState(1);
+  const [entryMode, setEntryMode] = useState("smart"); // "smart" | "quick"
+
   const safeIds = Array.isArray(ids) ? ids : [];
+  const cleanFdcDetails = Array.isArray(fdcDetails) ? fdcDetails : [];
 
-  const handleAdd = () => {
-    const raw = currentId.trim();
-    if (!raw) return;
+  const isCurrentValidId = (currentId.length === 8 || currentId.length === 9) && !isNaN(currentId);
 
-    const matches = raw.match(/\b\d{9}\b/g);
-    if (matches && matches.length > 1) {
-      matches.forEach(m => onAddFdc(m, selectedRegimen, selectedStrips));
-      setCurrentId("");
+  // Live Reactive Dosage Calculation
+  const dosage = useMemo(() => {
+    if (!weightKg || isNaN(parseFloat(weightKg))) return null;
+    return calculateFdcDosage(patientType, weightKg, phase);
+  }, [patientType, weightKg, phase]);
+
+  const handleAddSmart = () => {
+    const rawId = currentId.trim();
+    if (!rawId) {
+      showToast("Kripya Nikshay ID enter karein!", "error");
+      return;
+    }
+    if (!(rawId.length === 8 || rawId.length === 9) || isNaN(rawId)) {
+      showToast("FDC ID 8 ya 9 digit ki honi chahiye bhai!", "error");
       return;
     }
 
-    if (raw.length === 9 && !isNaN(raw)) {
+    if (dosage && !dosage.isValid) {
+      showToast(dosage.error || "Weight range invalid hai!", "error");
+      return;
+    }
+
+    const stripsCount = dosage && dosage.isValid ? dosage.strips : selectedStrips;
+    const regimenName = dosage && dosage.isValid 
+      ? dosage.regimenName 
+      : (selectedRegimen === 'FDC 3' ? '3 FDC (HRE)' : '4 FDC (HRZE)');
+
+    const enrichedDetail = {
+      id: rawId,
+      patient_name: patientName.trim() || `Patient #${rawId}`,
+      patient_type: patientType,
+      weight_kg: dosage && dosage.isValid ? dosage.weightKg : (parseFloat(weightKg) || null),
+      weight_band: dosage && dosage.isValid ? dosage.weightBand : '',
+      phase: phase,
+      regimen_name: regimenName,
+      daily_dose_text: dosage && dosage.isValid ? dosage.dailyDoseText : `${selectedRegimen} daily`,
+      supply_issued: dosage && dosage.isValid ? dosage.supplyIssued : `${stripsCount} strips`,
+      daily_tablets: dosage && dosage.isValid ? dosage.dailyTablets : 0,
+      strips: stripsCount,
+      fdc_type: selectedRegimen
+    };
+
+    onAddFdc(rawId, enrichedDetail);
+    setCurrentId("");
+    setPatientName("");
+    setWeightKg("");
+    showToast(`✓ #${rawId} FDC successfully added!`, "success");
+  };
+
+  const handleQuickAdd = () => {
+    const raw = currentId.trim();
+    if (!raw) return;
+
+    const matches = raw.match(/\b\d{8,9}\b/g);
+    if (matches && matches.length > 1) {
+      matches.forEach(m => onAddFdc(m, selectedRegimen, selectedStrips));
+      setCurrentId("");
+      showToast(`Added ${matches.length} FDC IDs!`, "success");
+      return;
+    }
+
+    if ((raw.length === 8 || raw.length === 9) && !isNaN(raw)) {
       onAddFdc(raw, selectedRegimen, selectedStrips);
       setCurrentId("");
+      showToast(`ID #${raw} added to FDC!`, "success");
     } else {
-      showToast("ID exactly 9 digit ki honi chahiye bhai!", "error");
+      showToast("ID 8 ya 9 digit ki honi chahiye bhai!", "error");
     }
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
-      handleAdd();
+      if (entryMode === 'smart') {
+        handleAddSmart();
+      } else {
+        handleQuickAdd();
+      }
     }
   };
 
   return (
     <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all group space-y-3">
-      <label className="block text-xs font-black text-slate-700 tracking-wider uppercase flex items-center justify-between group-hover:text-indigo-600 transition-colors">
-        <span className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between">
+        <label className="block text-xs font-black text-slate-700 tracking-wider uppercase flex items-center gap-1.5 group-hover:text-indigo-600 transition-colors">
           <span>💊</span>
           <span>{title}</span>
-          {currentId.length === 9 && !isNaN(currentId) && (
+          {isCurrentValidId && (
             <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
               ✓ Ready
             </span>
           )}
-        </span>
-        <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-black tabular-num">{safeIds.length}</span>
-      </label>
+        </label>
+        <div className="flex items-center gap-2">
+          {/* Mode Switch Pills */}
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100/80 p-0.5 text-[10px] font-black">
+            <button
+              type="button"
+              onClick={() => setEntryMode("smart")}
+              className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${entryMode === 'smart' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+            >
+              Smart Card
+            </button>
+            <button
+              type="button"
+              onClick={() => setEntryMode("quick")}
+              className={`px-2 py-0.5 rounded-md transition-all cursor-pointer ${entryMode === 'quick' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
+            >
+              Quick Add
+            </button>
+          </div>
+          <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2.5 py-0.5 rounded-full text-[10px] font-black tabular-num">{safeIds.length}</span>
+        </div>
+      </div>
 
       {/* Smart Notification ID Chips */}
       {suggestedIds && suggestedIds.length > 0 && (
@@ -1167,18 +1260,18 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                   type="button"
                   disabled={isAdded}
                   onClick={() => {
-                    onAddFdc(sid, selectedRegimen, selectedStrips);
-                    if (showToast) showToast(`ID #${sid} added to FDC!`, "success");
+                    setCurrentId(sid);
+                    if (showToast) showToast(`Selected ID #${sid} for FDC!`, "info");
                   }}
                   className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
                     isAdded 
                       ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
                       : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
                   }`}
-                  title={isAdded ? "Already Added" : `Tap to add ID #${sid}`}
+                  title={isAdded ? "Already Added" : `Select ID #${sid}`}
                 >
                   <span>{sid}</span>
-                  <span>{isAdded ? '✓' : '+'}</span>
+                  <span>{isAdded ? '✓' : '→'}</span>
                 </button>
               );
             })}
@@ -1186,50 +1279,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         </div>
       )}
 
-      {/* Regimen & Strips Pre-selector Bar */}
-      <div className="bg-slate-100/70 p-2.5 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-black uppercase text-slate-500">Dawa Type:</span>
-          <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => setSelectedRegimen('FDC 3')}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
-            >
-              FDC 3
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedRegimen('FDC 4')}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
-            >
-              FDC 4
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] font-black uppercase text-slate-500">Quantity:</span>
-          <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
-            <button
-              type="button"
-              onClick={() => setSelectedStrips(1)}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
-            >
-              1 Strip
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedStrips(2)}
-              className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
-            >
-              2 Strips
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Input row */}
+      {/* Nikshay ID Input */}
       <div className="flex gap-2">
         <input 
           type="text"
@@ -1237,68 +1287,233 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
           value={currentId}
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Enter or paste 9-digit ID for FDC"
+          placeholder="Enter 8 or 9-digit Nikshay ID"
           className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
-        <button 
-          onClick={handleAdd} 
-          className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
-        >
-          ADD
-        </button>
+        {entryMode === 'quick' && (
+          <button 
+            type="button"
+            onClick={handleQuickAdd} 
+            className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
+          >
+            ADD
+          </button>
+        )}
       </div>
+
+      {/* Option A: Inline Smart Card Form */}
+      {entryMode === 'smart' && (
+        <div className="bg-slate-50/90 p-3 sm:p-4 rounded-xl border border-indigo-100 space-y-3 animate-fade-in">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">Patient Name (Optional)</label>
+              <input 
+                type="text"
+                value={patientName}
+                onChange={(e) => setPatientName(e.target.value)}
+                placeholder="e.g. Ramesh Kumar"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">Weight in KG (Wazan)</label>
+              <input 
+                type="number"
+                step="0.5"
+                min="4"
+                max="150"
+                value={weightKg}
+                onChange={(e) => setWeightKg(e.target.value)}
+                placeholder="e.g. 45"
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            {/* Adult vs Pediatric */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Category:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setPatientType('adult')}
+                  className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'adult' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+                >
+                  Adult (≥ 18)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPatientType('pediatric')}
+                  className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'pediatric' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+                >
+                  Pediatric (&lt; 18)
+                </button>
+              </div>
+            </div>
+
+            {/* IP vs CP Phase */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-black uppercase text-slate-500">Phase:</span>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setPhase('IP')}
+                  className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'IP' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-600 hover:text-amber-600'}`}
+                  title="Intensive Phase (4 FDC / HRZE)"
+                >
+                  IP (Intensive)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhase('CP')}
+                  className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'CP' ? 'bg-teal-600 text-white shadow-xs' : 'text-slate-600 hover:text-teal-600'}`}
+                  title="Continuation Phase (3 FDC / HRE)"
+                >
+                  CP (Continuation)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Reactive Dosage Calculation Card */}
+          {dosage && (
+            <div className={`p-2.5 rounded-xl border text-xs animate-fade-in ${
+              dosage.isValid 
+                ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950' 
+                : 'bg-rose-50/90 border-rose-200 text-rose-900'
+            }`}>
+              {dosage.isValid ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between font-black">
+                    <span className="flex items-center gap-1">
+                      <span>💊</span>
+                      <span>{dosage.regimenName}</span>
+                    </span>
+                    <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full uppercase">
+                      {dosage.weightBand}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800">
+                    <span>📋 Daily Dose: <strong>{dosage.dailyDoseText}</strong></span>
+                    <span>📦 Supply: <strong>{dosage.supplyIssued}</strong></span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 font-bold text-[11px]">
+                  <span>⚠️</span>
+                  <span>{dosage.error}</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {!weightKg && (
+            <p className="text-[10px] text-slate-500 font-medium italic">
+              💡 Tip: Enter patient weight in kg to auto-calculate exact dosage and strip quantity.
+            </p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleAddSmart}
+            className="w-full bg-gradient-to-r from-emerald-600 to-teal-700 text-white py-2.5 rounded-xl font-black shadow-sm hover:from-emerald-700 hover:to-teal-800 active:scale-98 transition-all text-xs tracking-wider uppercase cursor-pointer"
+          >
+            + Add to FDC Distribution
+          </button>
+        </div>
+      )}
+
+      {/* Quick Add Fallback Bar */}
+      {entryMode === 'quick' && (
+        <div className="bg-slate-100/70 p-2.5 rounded-xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase text-slate-500">Dawa Type:</span>
+            <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setSelectedRegimen('FDC 3')}
+                className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+              >
+                FDC 3
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedRegimen('FDC 4')}
+                className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedRegimen === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+              >
+                FDC 4
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-black uppercase text-slate-500">Quantity:</span>
+            <div className="inline-flex rounded-lg border border-slate-200/90 bg-white p-0.5 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setSelectedStrips(1)}
+                className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+              >
+                1 Strip
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedStrips(2)}
+                className={`px-2.5 py-1 text-xs font-black rounded-md transition-all cursor-pointer ${selectedStrips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-emerald-600'}`}
+              >
+                2 Strips
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Added FDC Entries List */}
       {safeIds.length > 0 && (
-        <ul className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1 custom-scrollbar">
+        <ul className="mt-2 space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
           {safeIds.map((id, index) => {
-            const detail = (fdcDetails || []).find(d => d && d.id === id) || { fdc_type: 'FDC 4', strips: 1 };
+            const detail = cleanFdcDetails.find(d => d && d.id === id) || { fdc_type: 'FDC 4', strips: 1 };
+            const displayName = detail.patient_name || 'Patient';
+            const displayRegimen = detail.regimen_name || detail.fdc_type || 'FDC';
+            const displayStrips = detail.strips || 1;
+
             return (
               <li key={index} className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-slate-50/90 border border-slate-200/80 p-3 rounded-xl shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
-                <span className="font-mono font-bold text-slate-800 tracking-wider text-sm">{id}</span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-slate-800 tracking-wider text-xs sm:text-sm">#{id}</span>
+                    <span className="text-xs font-bold text-slate-700 truncate max-w-[150px] sm:max-w-xs">{displayName}</span>
+                    <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2 py-0.5 rounded-md">
+                      {displayStrips} Strip{displayStrips > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-semibold mt-0.5 flex flex-wrap items-center gap-1.5">
+                    <span className="text-indigo-600 font-bold">{displayRegimen}</span>
+                    <span>•</span>
+                    <span>{detail.phase || 'IP'} Phase</span>
+                    {detail.weight_kg && (
+                      <>
+                        <span>•</span>
+                        <span>{detail.weight_kg} kg ({detail.weight_band || ''})</span>
+                      </>
+                    )}
+                    {detail.daily_dose_text && (
+                      <>
+                        <span>•</span>
+                        <span>{detail.daily_dose_text}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-2 self-end sm:self-auto">
-                  {/* Regimen Toggle */}
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
-                    <button
-                      type="button"
-                      onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 3' })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.fdc_type === 'FDC 3' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
-                    >
-                      FDC 3
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdateFdc(id, { fdc_type: 'FDC 4' })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.fdc_type === 'FDC 4' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-500 hover:text-indigo-600'}`}
-                    >
-                      FDC 4
-                    </button>
-                  </div>
-
-                  {/* Strips Toggle */}
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
-                    <button
-                      type="button"
-                      onClick={() => onUpdateFdc(id, { strips: 1 })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.strips === 1 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
-                    >
-                      1 Strip
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onUpdateFdc(id, { strips: 2 })}
-                      className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all cursor-pointer ${detail.strips === 2 ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-500 hover:text-emerald-600'}`}
-                    >
-                      2 Strips
-                    </button>
-                  </div>
-
                   {/* Remove button */}
                   <button
                     type="button"
                     onClick={() => onRemoveFdc(index, id)}
-                    className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-6 w-6 rounded-lg flex items-center justify-center font-black text-xs transition-all shadow-2xs cursor-pointer"
-                    title="Remove"
+                    className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-7 w-7 rounded-lg flex items-center justify-center font-black text-sm transition-all shadow-2xs cursor-pointer"
+                    title="Remove FDC Record"
                   >
                     &times;
                   </button>
@@ -1320,7 +1535,7 @@ const sanitizeIncomingFormData = (d, base) => {
     'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
     'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
     'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
-    'culture_dst_ids'
+    'culture_dst_ids', 'fdc_details'
   ];
   const clean = { ...base };
   if (d && typeof d === 'object') {
@@ -2023,13 +2238,28 @@ function App() {
     setFormData({ ...formData, [field]: formData[field].filter((_, i) => i !== idx) });
   };
 
-  const handleAddFdc = (id, regimen, strips) => {
+  const handleAddFdc = (id, enrichedOrRegimen, strips) => {
     addId('fdc_provided_ids', id);
     setFormData(prev => {
       const existing = (prev.fdc_details || []).filter(d => d.id !== id);
+      const newDetail = typeof enrichedOrRegimen === 'object' && enrichedOrRegimen !== null
+        ? { ...enrichedOrRegimen, id }
+        : { 
+            id, 
+            patient_name: `Patient #${id}`,
+            patient_type: 'adult',
+            weight_kg: null,
+            weight_band: '',
+            phase: 'IP',
+            fdc_type: enrichedOrRegimen || 'FDC 4', 
+            regimen_name: enrichedOrRegimen || '4 FDC (HRZE)', 
+            daily_dose_text: `${enrichedOrRegimen || 'FDC 4'} daily`,
+            supply_issued: `${strips || 1} strips`,
+            strips: strips || 1 
+          };
       return {
         ...prev,
-        fdc_details: [...existing, { id, fdc_type: regimen, strips }]
+        fdc_details: [...existing, newDetail]
       };
     });
   };
@@ -2593,6 +2823,7 @@ function App() {
                       showToast={showToast}
                       suggestedIds={formData.notification_ids || []}
                       onAddBulk={(newIds) => addMultipleIds(cat.key, newIds)}
+                      allow8Digit={cat.key === 'outcome_assigned_ids'}
                     />
                   ))}
                   {formData.working_place === 'Buxar' && (
