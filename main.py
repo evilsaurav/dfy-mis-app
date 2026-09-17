@@ -1450,6 +1450,7 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
 async def download_medicine_consumption(
     month: Optional[str] = None, 
     district: Optional[str] = None, 
+    districts: Optional[str] = None,
     admin: dict = Depends(get_current_admin)
 ):
     try:
@@ -1460,11 +1461,21 @@ async def download_medicine_consumption(
         
         # Sub-Admin RBAC check
         allowed_c = [canonicalize_district(a).lower() for a in allowed]
+        
+        # Determine requested district set
+        req_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            req_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
+        elif district and district.strip() and district.strip() != "All":
+            req_dist_set = {canonicalize_district(district.strip()).lower()}
+
         if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
-            if district and district != "All":
-                c_dist = canonicalize_district(district).lower()
-                if c_dist not in allowed_c:
-                    raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+            if req_dist_set:
+                unauthorized = req_dist_set - set(allowed_c)
+                if unauthorized:
+                    raise HTTPException(status_code=403, detail=f"Permission denied for district(s): {', '.join(unauthorized)}.")
+            else:
+                req_dist_set = set(allowed_c)
         
         async with KPI_EXCEL_SEMAPHORE:
             raw_reports = await get_raw_monthly_reports(target_month)
@@ -1480,10 +1491,9 @@ async def download_medicine_consumption(
                     if wp_lower not in allowed_c:
                         continue
                         
-                # Check query parameter district filter
-                if district and district != "All":
-                    req_dist_lower = canonicalize_district(district).lower()
-                    if wp_lower != req_dist_lower:
+                # Check requested district filter
+                if req_dist_set is not None:
+                    if wp_lower not in req_dist_set:
                         continue
                         
                 filtered_reports.append(r)
@@ -1582,7 +1592,14 @@ async def download_medicine_consumption(
             buf.seek(0)
             excel_bytes = buf.getvalue()
             
-            safe_dist = safe_filename(district or "All")
+            if req_dist_set and len(req_dist_set) == 1:
+                single_dist = list(req_dist_set)[0].title()
+                safe_dist = safe_filename(single_dist)
+            elif req_dist_set and len(req_dist_set) > 1:
+                safe_dist = f"Selected_{len(req_dist_set)}_Districts"
+            else:
+                safe_dist = safe_filename(district or "All")
+
             headers = {
                 'Content-Disposition': f'attachment; filename="Medicine_Consumption_{safe_dist}_{target_month}.xlsx"'
             }

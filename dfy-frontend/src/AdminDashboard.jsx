@@ -157,9 +157,11 @@ export default function AdminDashboard() {
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("");
   const [selectedKpiDistricts, setSelectedKpiDistricts] = useState([]);
+  const [selectedMedDistricts, setSelectedMedDistricts] = useState([]);
   const [isDownloadingKpi, setIsDownloadingKpi] = useState(false);
   const [isDownloadingMedicineReport, setIsDownloadingMedicineReport] = useState(false);
   const [kpiQueueProgress, setKpiQueueProgress] = useState(null); // { current, total, district, percent, status }
+  const [medQueueProgress, setMedQueueProgress] = useState(null); // { current, total, district, percent, status }
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
   const [editDayModal, setEditDayModal] = useState(null); // { isOpen, district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs, loading, error }
@@ -2318,13 +2320,115 @@ Keep this file safe in your Google Drive or personal diary.
     setTimeout(() => setIsDownloadingKpi(false), 3000);
   };
 
+  const handleToggleMedDistrict = (dist) => {
+    setSelectedMedDistricts(prev => {
+      if (prev.includes(dist)) {
+        return prev.filter(d => d !== dist);
+      } else {
+        return [...prev, dist];
+      }
+    });
+  };
+
+  const handleSelectAllMedDistricts = () => {
+    setSelectedMedDistricts([...availableKpiDistricts]);
+  };
+
+  const handleClearMedDistricts = () => {
+    setSelectedMedDistricts([]);
+  };
+
   const handleDownloadMedicineReport = () => {
     if (isDownloadingMedicineReport) return;
     setIsDownloadingMedicineReport(true);
-    const targetDist = selectedDistrict || 'All';
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/admin/reports/medicine-consumption?month=${month}&district=${encodeURIComponent(targetDist)}&token=${getAdminToken()}`, "_blank");
+    let url = `${API_BASE_URL}/admin/reports/medicine-consumption?month=${month}&token=${getAdminToken()}`;
+    if (selectedMedDistricts.length > 0) {
+      url += `&districts=${encodeURIComponent(selectedMedDistricts.join(','))}`;
+    } else {
+      const targetDist = selectedDistrict || 'All';
+      url += `&district=${encodeURIComponent(targetDist)}`;
+    }
+    window.open(url, "_blank");
     setTimeout(() => setIsDownloadingMedicineReport(false), 3000);
+  };
+
+  const handleDownloadSequentialMedQueue = async () => {
+    if (isDownloadingMedicineReport) return;
+    const targetList = selectedMedDistricts.length > 0 ? selectedMedDistricts : availableKpiDistricts;
+    if (!targetList || targetList.length === 0) {
+      showToast("Please select at least one district to download.", "error");
+      return;
+    }
+
+    setIsDownloadingMedicineReport(true);
+    const total = targetList.length;
+    setMedQueueProgress({
+      current: 0,
+      total,
+      district: '',
+      percent: 0,
+      status: `Initializing medicine queue for ${total} district(s)...`
+    });
+
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+
+    for (let i = 0; i < total; i++) {
+      const dist = targetList[i];
+      setMedQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i) / total) * 100),
+        status: `Generating Medicine Report for ${dist} (${i + 1}/${total})...`
+      });
+
+      try {
+        const res = await authFetch(`${API_BASE_URL}/admin/reports/medicine-consumption?district=${encodeURIComponent(dist)}&month=${month}`);
+        if (res.ok) {
+          const blob = await res.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = `Medicine_Consumption_${dist}_${month}.xlsx`;
+          document.body.appendChild(link);
+          link.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          link.remove();
+        } else {
+          console.error(`Failed to download medicine report for ${dist}`);
+        }
+      } catch (err) {
+        console.error(`Error downloading medicine report for ${dist}:`, err);
+      }
+
+      setMedQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i + 1) / total) * 100),
+        status: `Completed ${dist} (${i + 1}/${total}) ✓`
+      });
+
+      // Intentional 1000ms pause between district files: Render CPU/RAM cooldown
+      if (i < total - 1) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    showToast(`✓ All ${total} district medicine workbooks downloaded successfully!`, "success");
+    setMedQueueProgress({
+      current: total,
+      total,
+      district: '',
+      percent: 100,
+      status: `All ${total} district medicine workbooks downloaded successfully!`
+    });
+
+    setTimeout(() => {
+      setMedQueueProgress(null);
+      setIsDownloadingMedicineReport(false);
+    }, 2500);
   };
 
   const handleDownloadScopedZip = () => {
@@ -7258,7 +7362,11 @@ const availableDistrictsForFeed = useMemo(() => {
                     const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
                     if (!allowed.includes(dist)) return false;
                   }
-                  if (selectedDistrict !== 'All' && dist !== selectedDistrict) return false;
+                  if (selectedMedDistricts.length > 0) {
+                    if (!selectedMedDistricts.map(canonicalizeDistrict).includes(dist)) return false;
+                  } else if (selectedDistrict !== 'All' && dist !== selectedDistrict) {
+                    return false;
+                  }
                   if (selectedFO !== 'All' && (r.fo_name || r.officer_name) !== selectedFO) return false;
                   return true;
                 });
@@ -7318,54 +7426,175 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 return (
                   <div className="space-y-4">
-                    {/* Top Banner & Export Card */}
-                    <div className="bg-gradient-to-r from-teal-50 to-emerald-50 p-5 rounded-2xl border border-teal-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    {/* Top Banner & Overview */}
+                    <div className="bg-gradient-to-r from-teal-900 to-slate-900 p-5 rounded-2xl border border-teal-800/60 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-lg shadow-teal-950/30">
                       <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xl">💊</span>
-                          <h4 className="text-base font-black text-teal-950">TB FDC Medicine Distribution &amp; Consumption Studio</h4>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-xl shrink-0">
+                            💊
+                          </div>
+                          <div>
+                            <h4 className="text-base font-black text-white tracking-tight">TB FDC Medicine Distribution &amp; Consumption Studio</h4>
+                            <p className="text-xs text-teal-200/80 font-medium">
+                              Export 2-sheet executive consumption workbooks (.xlsx) with Detailed Patient Records &amp; Aggregations.
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-xs text-teal-800 font-medium mt-1">
-                          Download 2-sheet executive consumption report (.xlsx) featuring Detailed Patient Logs and FO/District Aggregations.
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 mt-2">
-                          <span className="text-[10px] font-black uppercase tracking-wider bg-white/90 border border-teal-200 text-teal-900 px-2.5 py-1 rounded-lg">
+                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-teal-800/60 border border-teal-600/40 text-teal-200 px-2.5 py-1 rounded-lg">
                             Month: {month}
                           </span>
-                          <span className="text-[10px] font-black uppercase tracking-wider bg-white/90 border border-teal-200 text-teal-900 px-2.5 py-1 rounded-lg">
-                            District: {selectedDistrict}
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-teal-800/60 border border-teal-600/40 text-teal-200 px-2.5 py-1 rounded-lg">
+                            Scope: {selectedMedDistricts.length > 0 ? `${selectedMedDistricts.length} Selected Districts` : (selectedDistrict === 'All' ? 'All Districts' : selectedDistrict)}
                           </span>
-                          <span className="text-[10px] font-bold text-teal-900 bg-teal-200/70 px-2.5 py-1 rounded-lg">
+                          <span className="text-[10px] font-bold text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2.5 py-1 rounded-lg">
                             Total Patients: {totalPatientsCount} &bull; Total Strips: {totalStripsCount}
                           </span>
                         </div>
                       </div>
+                    </div>
 
-                      <button
-                        type="button"
-                        onClick={handleDownloadMedicineReport}
-                        disabled={isDownloadingMedicineReport}
-                        className={`inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black shadow-md transition-all shrink-0 cursor-pointer ${
-                          isDownloadingMedicineReport 
-                            ? 'bg-teal-400 text-white cursor-not-allowed' 
-                            : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20 active:scale-95'
-                        }`}
-                      >
-                        {isDownloadingMedicineReport ? (
-                          <>
-                            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                            <span>Generating Excel...</span>
-                          </>
-                        ) : (
-                          <>
-                            <span>📥</span>
-                            <span>Download 2-Sheet Report (.xlsx)</span>
-                          </>
-                        )}
-                      </button>
+                    {/* Multi-District Selection Deck */}
+                    <div className="bg-slate-50/90 p-4 sm:p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black text-slate-800">
+                            🎯 Choose Districts to Export
+                          </span>
+                          <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${selectedMedDistricts.length > 0 ? 'bg-teal-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                            {selectedMedDistricts.length} of {availableKpiDistricts.length} Selected
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={handleSelectAllMedDistricts}
+                            disabled={isDownloadingMedicineReport}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-teal-100 hover:bg-teal-200 text-teal-800 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Select All
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleClearMedDistricts}
+                            disabled={isDownloadingMedicineReport}
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* District Chips */}
+                      <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                        {availableKpiDistricts.map(dist => {
+                          const isSelected = selectedMedDistricts.includes(dist);
+                          return (
+                            <button
+                              key={dist}
+                              type="button"
+                              disabled={isDownloadingMedicineReport}
+                              onClick={() => handleToggleMedDistrict(dist)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border active:scale-95 cursor-pointer disabled:opacity-50 ${
+                                isSelected
+                                  ? 'bg-teal-600 hover:bg-teal-700 text-white border-teal-600 shadow-xs shadow-teal-600/20'
+                                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
+                              }`}
+                            >
+                              <span>{isSelected ? '✓' : '+'}</span>
+                              <span>{dist}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Live Queue Progress Banner */}
+                      {medQueueProgress && (
+                        <div className="bg-slate-900 text-white p-4 rounded-2xl border border-teal-800 shadow-lg space-y-2 animate-fade-in">
+                          <div className="flex justify-between items-center text-xs font-bold">
+                            <span className="flex items-center gap-2">
+                              <span className="animate-spin text-sm">⏳</span>
+                              <span>{medQueueProgress.status}</span>
+                            </span>
+                            <span className="font-mono text-teal-300">{medQueueProgress.percent}%</span>
+                          </div>
+                          <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-gradient-to-r from-teal-400 to-emerald-400 transition-all duration-300 rounded-full"
+                              style={{ width: `${medQueueProgress.percent}%` }}
+                            ></div>
+                          </div>
+                          <p className="text-[10px] text-teal-300 font-medium">
+                            Render memory protection active: generating one file at a time with 1-second server cooldown between requests.
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Multi-District Download Action Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        {/* Option A: Combined Excel */}
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-2xs">
+                          <div>
+                            <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1">
+                              <span>📊</span>
+                              <span>Download Combined Workbook (.xlsx)</span>
+                            </span>
+                            <p className="text-[11px] text-slate-500 font-medium">
+                              Downloads a single 2-sheet workbook containing the <strong>{selectedMedDistricts.length > 0 ? `${selectedMedDistricts.length} selected` : 'all'} district(s)</strong> with patient detail logs and FO summaries.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isDownloadingMedicineReport || (selectedMedDistricts.length === 0 && availableKpiDistricts.length === 0)}
+                            onClick={handleDownloadMedicineReport}
+                            className="mt-3 w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-teal-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                          >
+                            {isDownloadingMedicineReport ? (
+                              <>
+                                <span className="animate-spin">⏳</span>
+                                <span>Processing... (Please wait)</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📥</span>
+                                <span>Download Selected ({selectedMedDistricts.length > 0 ? selectedMedDistricts.length : 'All'})</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+
+                        {/* Option B: One-by-One Queue */}
+                        <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/80 flex flex-col justify-between shadow-2xs">
+                          <div>
+                            <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5 mb-1">
+                              <span>📑</span>
+                              <span>Download One-by-One (Queue)</span>
+                            </span>
+                            <p className="text-[11px] text-emerald-800 font-medium">
+                              Downloads individual district `.xlsx` files with a 1-second pause between each file (guarantees zero memory spikes on Render).
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isDownloadingMedicineReport || (selectedMedDistricts.length === 0 && availableKpiDistricts.length === 0)}
+                            onClick={handleDownloadSequentialMedQueue}
+                            className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                          >
+                            {isDownloadingMedicineReport ? (
+                              <>
+                                <span className="animate-spin">⏳</span>
+                                <span>Queue Running...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📑</span>
+                                <span>Start Download Queue ({selectedMedDistricts.length > 0 ? selectedMedDistricts.length : availableKpiDistricts.length} Files)</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
                     </div>
 
                     {/* On-screen Breakdown Table */}

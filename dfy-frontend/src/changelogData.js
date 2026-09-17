@@ -32,7 +32,7 @@ export const CHANGELOG_ENTRIES = [
       {
         tag: "Reporting & Export",
         color: "emerald",
-        text: "Medicine Consumption Studio: 2-sheet Excel report (Detailed Patient Consumption + District Summary) protected by asyncio semaphore and explicit garbage collection."
+        text: "Medicine Consumption Studio: 2-sheet Excel report protected by asyncio semaphore, with multi-district selection chip deck and sequential queue downloading (1000ms cooldown) for zero Render memory spikes."
       },
       {
         tag: "Staff Lifecycle & Attendance",
