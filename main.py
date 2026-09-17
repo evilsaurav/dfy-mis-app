@@ -620,6 +620,8 @@ async def get_directory():
             directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
             for doc in docs:
                 data = doc.to_dict()
+                if data.get("is_active") is False or data.get("status") == "inactive":
+                    continue
                 dist = canonicalize_district(data.get("district"))
                 name = data.get("name")
                 if dist in directory and name:
@@ -677,7 +679,11 @@ async def verify_pin(data: PinCheck):
             for doc_id in candidate_ids:
                 staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(doc_id).get)
                 if staff_doc.exists:
-                    real_pin = staff_doc.to_dict().get("pin")
+                    doc_data = staff_doc.to_dict() or {}
+                    if doc_data.get("is_active") is False or doc_data.get("status") == "inactive":
+                        pin_rate_limiter.record_failure(primary_id)
+                        return {"valid": False, "error": "Staff account is inactive."}
+                    real_pin = doc_data.get("pin")
                     cache.set(cache_key, str(real_pin), ttl=3600)
                     if verify_password(str(data.pin), str(real_pin)) or str(data.pin) == str(real_pin):
                         pin_rate_limiter.reset(primary_id)
@@ -1657,6 +1663,8 @@ async def get_staff_directory():
             directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
             for doc in docs:
                 data = doc.to_dict()
+                if data.get("is_active") is False or data.get("status") == "inactive":
+                    continue
                 district = canonicalize_district(data.get("district"))
                 name = data.get("name")
                 if district in directory and name:
@@ -1968,6 +1976,12 @@ async def get_today_attendance(
             staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
             for doc in staff_docs:
                 d = doc.to_dict()
+                if d.get("is_active") is False or d.get("status") == "inactive":
+                    deleted_at = d.get("deleted_at")
+                    if deleted_at and date > deleted_at:
+                        continue
+                    elif not deleted_at:
+                        continue
                 raw_dist = d.get("district")
                 dist = canonicalize_district(raw_dist) if raw_dist else ""
                 clean_fo = d.get("name", "").strip()
@@ -3566,6 +3580,13 @@ class UpdatePinReq(BaseModel):
     name: str
     new_pin: str
 
+class UpdateStaffDetailsReq(BaseModel):
+    district: str
+    name: str
+    new_pin: Optional[str] = None
+    designation: Optional[str] = None
+    target: Optional[int] = None
+
 class DeleteStaffReq(BaseModel):
     district: str
     name: str
@@ -3586,6 +3607,8 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
         staff = []
         for doc in docs:
             d = doc.to_dict()
+            if d.get("is_active") is False or d.get("status") == "inactive":
+                continue
             dist = d.get("district")
             if dist and d.get("name"):
                 if allowed_dist_set and dist not in allowed_dist_set:
@@ -3596,7 +3619,9 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
                     "name": d.get("name"),
                     "pin": str(d.get("pin", "")),
                     "designation": d.get("designation", "Field Officer"),
-                    "created_at": d.get("created_at", "")
+                    "created_at": d.get("created_at", ""),
+                    "status": "active",
+                    "is_active": True
                 })
         staff.sort(key=lambda s: (s["district"], s["name"]))
         res = {"success": True, "staff": staff}
@@ -3629,14 +3654,19 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         
         existing = await asyncio.to_thread(doc_ref.get)
         if existing.exists:
-            raise HTTPException(status_code=400, detail=f"Officer '{clean_name}' already exists in '{clean_dist}'.")
+            ex_data = existing.to_dict() or {}
+            if ex_data.get("is_active") is not False and ex_data.get("status") != "inactive":
+                raise HTTPException(status_code=400, detail=f"Officer '{clean_name}' already exists in '{clean_dist}'.")
             
         payload = {
             "district": clean_dist,
             "name": clean_name,
             "pin": clean_pin,
             "designation": req.designation or "Field Officer",
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "status": "active",
+            "is_active": True,
+            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         await asyncio.to_thread(lambda: doc_ref.set(payload))
         
@@ -3647,8 +3677,25 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
             "target": req.target or 50,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }, merge=True))
+
+        # Update disk snapshot
+        if os.path.exists("staff_directory_snapshot.json"):
+            try:
+                with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
+                    snap = json.load(f)
+                if snap and isinstance(snap, dict):
+                    if clean_dist not in snap:
+                        snap[clean_dist] = []
+                    if clean_name not in snap[clean_dist]:
+                        snap[clean_dist].append(clean_name)
+                        snap[clean_dist].sort()
+                    with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
+                        json.dump(snap, f, indent=2)
+            except Exception as se:
+                print(f"Failed to update staff_directory_snapshot.json: {se}")
         
         cache.delete("staff_directory_list")
+        cache.delete("staff_directory_dict")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
@@ -3676,7 +3723,7 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
 @app.post("/admin/staff/update-pin")
 async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_admin)):
     try:
-        clean_dist = req.district.strip()
+        clean_dist = canonicalize_district(req.district.strip())
         if admin.get("role") == "SUB_ADMIN":
             allowed = admin.get("allowed_districts", [])
             if "All" not in allowed and clean_dist not in allowed:
@@ -3701,6 +3748,7 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
         
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
+        cache.delete("staff_directory_dict")
         cache.delete_prefix("admin_staff_full_list")
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
@@ -3723,10 +3771,83 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/admin/staff/update-details")
+async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends(get_current_admin)):
+    try:
+        clean_dist = canonicalize_district(req.district.strip())
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update staff in district '{clean_dist}'.")
+        clean_name = req.name.strip()
+        
+        doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+        doc_ref = db.collection("staff_directory").document(doc_id)
+        
+        doc = await asyncio.to_thread(doc_ref.get)
+        if not doc.exists:
+            raise HTTPException(status_code=404, detail="Staff record not found.")
+            
+        update_data = {
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        diff_info = {"district": clean_dist, "target_officer": clean_name}
+        
+        if req.new_pin is not None and str(req.new_pin).strip():
+            clean_pin = str(req.new_pin).strip()
+            if not clean_pin.isdigit() or len(clean_pin) != 4:
+                raise HTTPException(status_code=400, detail="New PIN must be exactly 4 digits.")
+            update_data["pin"] = clean_pin
+            diff_info["pin_updated"] = True
+            
+        if req.designation is not None and str(req.designation).strip():
+            clean_desig = str(req.designation).strip()
+            update_data["designation"] = clean_desig
+            diff_info["designation"] = clean_desig
+            
+        await asyncio.to_thread(lambda: doc_ref.update(update_data))
+        
+        if req.target is not None and req.target > 0:
+            target_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+            await asyncio.to_thread(lambda: db.collection("staff_targets").document(target_doc_id).set({
+                "district": clean_dist,
+                "fo_name": clean_name,
+                "target": req.target,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }, merge=True))
+            diff_info["target"] = req.target
+            
+        cache.delete(f"pin_{doc_id}")
+        cache.delete("staff_directory_list")
+        cache.delete("staff_directory_dict")
+        cache.delete_prefix("admin_staff_full_list")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("targets_")
+        
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="STAFF_DETAILS_UPDATED",
+            details=f"Admin {actor_name} updated details for '{clean_name}' in {clean_dist}",
+            district=clean_dist,
+            target_officer=clean_name,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff=diff_info
+        )
+        
+        return {"success": True, "message": f"Staff details for '{clean_name}' successfully updated!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/admin/staff/delete")
 async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_current_admin)):
     try:
-        clean_dist = req.district.strip()
+        clean_dist = canonicalize_district(req.district.strip())
         if admin.get("role") == "SUB_ADMIN":
             allowed = admin.get("allowed_districts", [])
             if "All" not in allowed and clean_dist not in allowed:
@@ -3740,10 +3861,30 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         if not doc.exists:
             raise HTTPException(status_code=404, detail="Staff record not found.")
             
-        await asyncio.to_thread(doc_ref.delete)
+        today_str = get_ist_now().strftime("%Y-%m-%d")
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        await asyncio.to_thread(lambda: doc_ref.update({
+            "status": "inactive",
+            "is_active": False,
+            "deleted_at": today_str,
+            "updated_at": now_str
+        }))
+
+        # Update disk snapshot
+        if os.path.exists("staff_directory_snapshot.json"):
+            try:
+                with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
+                    snap = json.load(f)
+                if snap and isinstance(snap, dict) and clean_dist in snap:
+                    snap[clean_dist] = [n for n in snap[clean_dist] if n.strip().lower() != clean_name.lower()]
+                    with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
+                        json.dump(snap, f, indent=2)
+            except Exception as se:
+                print(f"Failed to update staff_directory_snapshot.json: {se}")
         
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
+        cache.delete("staff_directory_dict")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         
@@ -3752,13 +3893,13 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type="STAFF_DELETED",
-            details=f"Admin {actor_name} removed officer '{clean_name}' from {clean_dist}",
+            details=f"Admin {actor_name} soft-deleted officer '{clean_name}' from {clean_dist} (effective {today_str})",
             district=clean_dist,
             target_officer=clean_name,
             user_name=actor_name,
             user_id=actor_id,
             role=actor_role,
-            diff={"district": clean_dist, "deleted_officer": clean_name}
+            diff={"district": clean_dist, "deleted_officer": clean_name, "deleted_at": today_str}
         )
         
         return {"success": True, "message": f"Officer '{clean_name}' removed from directory."}

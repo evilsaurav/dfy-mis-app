@@ -1774,7 +1774,7 @@ export default function AdminDashboard() {
   const handleExecuteUpdatePin = async (e) => {
     e.preventDefault();
     if (!pinChangeModal) return;
-    const { name, district, newPin } = pinChangeModal;
+    const { name, district, newPin, designation } = pinChangeModal;
     if (!newPin || newPin.trim().length !== 4 || !/^\d+$/.test(newPin.trim())) {
       setPinChangeModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits (numbers only)." }));
       return;
@@ -1782,17 +1782,27 @@ export default function AdminDashboard() {
     setPinChangeModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/staff/update-pin`, {
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/update-details`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ district, name, new_pin: newPin.trim() })
+        body: JSON.stringify({
+          district,
+          name,
+          new_pin: newPin.trim(),
+          designation: designation || "Field Officer"
+        })
       });
       const data = await res.json();
       if (res.ok) {
-        setStaffList(prev => prev.map(s => (s.name === name && s.district === district ? { ...s, pin: newPin.trim() } : s)));
+        setStaffList(prev => prev.map(s => (s.name === name && s.district === district ? {
+          ...s,
+          pin: newPin.trim(),
+          designation: designation || s.designation
+        } : s)));
+        fetchDirectory();
         setPinChangeModal(null);
       } else {
-        setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update PIN.", loading: false }));
+        setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update staff details.", loading: false }));
       }
     } catch (err) {
       setPinChangeModal(prev => ({ ...prev, error: "Network error.", loading: false }));
@@ -1829,6 +1839,7 @@ export default function AdminDashboard() {
       if (res.ok) {
         fetchStaffList();
         fetchDirectory();
+        fetchAttendance(true);
         setAddStaffModal(null);
       } else {
         setAddStaffModal(prev => ({ ...prev, error: data.detail || "Failed to add officer.", loading: false }));
@@ -1854,6 +1865,7 @@ export default function AdminDashboard() {
       if (res.ok) {
         setStaffList(prev => prev.filter(s => !(s.name === name && s.district === district)));
         fetchDirectory();
+        fetchAttendance(true);
         setDeleteStaffModal(null);
       } else {
         setDeleteStaffModal(prev => ({ ...prev, error: data.detail || "Failed to delete.", loading: false }));
@@ -6134,7 +6146,11 @@ const availableDistrictsForFeed = useMemo(() => {
                           <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
                             <td className="p-3 font-bold text-indigo-700">{s.district}</td>
                             <td className="p-3 font-black text-slate-800">{s.name}</td>
-                            <td className="p-3 text-slate-500 text-[11px]">{s.designation}</td>
+                            <td className="p-3">
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                {s.designation || 'Field Officer'}
+                              </span>
+                            </td>
                             <td className="p-3">
                               <div className="inline-flex items-center gap-1.5 font-mono text-xs font-black bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
                                 <span>{isPinVisible ? s.pin : '••••'}</span>
@@ -6150,10 +6166,16 @@ const availableDistrictsForFeed = useMemo(() => {
                             </td>
                             <td className="p-3 text-right space-x-2">
                               <button
-                                onClick={() => setPinChangeModal({ name: s.name, district: s.district, newPin: s.pin, error: '' })}
+                                onClick={() => setPinChangeModal({
+                                  name: s.name,
+                                  district: s.district,
+                                  newPin: s.pin,
+                                  designation: s.designation || 'Field Officer',
+                                  error: ''
+                                })}
                                 className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-colors"
                               >
-                                ✏️ Change PIN
+                                ✏️ Edit Details
                               </button>
                               <button
                                 onClick={() => setDeleteStaffModal({ name: s.name, district: s.district, error: '' })}
@@ -6181,13 +6203,13 @@ const availableDistrictsForFeed = useMemo(() => {
         </div>
       )}
 
-      {/* Change PIN Modal */}
+      {/* Edit Staff Details Modal */}
       {pinChangeModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
           <div className="bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl border border-slate-100 animate-fade-in">
             <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
               <div>
-                <h4 className="text-sm font-black text-slate-800">✏️ Change Staff PIN</h4>
+                <h4 className="text-sm font-black text-slate-800">✏️ Edit Staff Details</h4>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">{pinChangeModal.name} ({pinChangeModal.district})</p>
               </div>
               <button onClick={() => setPinChangeModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
@@ -6195,7 +6217,23 @@ const availableDistrictsForFeed = useMemo(() => {
 
             <form onSubmit={handleExecuteUpdatePin} className="space-y-3">
               <div>
-                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Enter New 4-Digit PIN</label>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Designation</label>
+                <select
+                  value={pinChangeModal.designation || 'Field Officer'}
+                  onChange={(e) => setPinChangeModal(prev => ({ ...prev, designation: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Field Officer">Field Officer</option>
+                  <option value="District Coordinator">District Coordinator</option>
+                  <option value="Senior Treatment Supervisor (STS)">Senior Treatment Supervisor (STS)</option>
+                  <option value="TB Health Visitor (TBHV)">TB Health Visitor (TBHV)</option>
+                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
+                  <option value="State Health Coordinator">State Health Coordinator</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">4-Digit Login PIN</label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -6228,7 +6266,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   disabled={pinChangeModal.loading}
                   className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md shadow-blue-600/20 active:scale-95 transition-all"
                 >
-                  {pinChangeModal.loading ? 'Updating...' : 'Update PIN'}
+                  {pinChangeModal.loading ? 'Saving...' : 'Save Changes'}
                 </button>
               </div>
             </form>
@@ -6272,6 +6310,22 @@ const availableDistrictsForFeed = useMemo(() => {
                   className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500"
                   autoFocus
                 />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Designation</label>
+                <select
+                  value={addStaffModal.designation || 'Field Officer'}
+                  onChange={(e) => setAddStaffModal(prev => ({ ...prev, designation: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="Field Officer">Field Officer</option>
+                  <option value="District Coordinator">District Coordinator</option>
+                  <option value="Senior Treatment Supervisor (STS)">Senior Treatment Supervisor (STS)</option>
+                  <option value="TB Health Visitor (TBHV)">TB Health Visitor (TBHV)</option>
+                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
+                  <option value="State Health Coordinator">State Health Coordinator</option>
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
