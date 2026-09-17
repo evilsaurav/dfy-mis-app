@@ -186,11 +186,71 @@ No new collection is needed during regular daily submission. The `fdc_details` a
 
 ---
 
-## 7. Verification & Safety Battery
+## 7. Staff Lifecycle, Deletion Synchronization & Attendance Radar Protection
+
+### 7.1 The Problem Solved:
+Previously, deleting a staff member in `/admin/staff/delete` performed a raw `doc.delete()`. However:
+1. `staff_directory_snapshot.json` on disk was not updated, causing deleted staff to intermittently revive upon server restart or cache expiry.
+2. In the **Attendance Radar**, when calculating expected rosters for days *after* deletion, deleted staff were still expected or treated as missing/defaulters indefinitely, while their past reports risked being orphaned if historical lookups relied on the live directory.
+
+### 7.2 Solution Architecture:
+1. **Soft-Delete Lifecycle Model in Firestore `staff_directory`**:
+   - Instead of blind hard-deletion, deactivating an officer marks:
+     ```json
+     {
+       "status": "inactive",
+       "is_active": false,
+       "deleted_at": "YYYY-MM-DD",
+       "deleted_by": "admin_username",
+       "updated_at": "YYYY-MM-DD HH:MM:SS"
+     }
+     ```
+2. **Attendance Radar Date-Aware Evaluation**:
+   - In both `/admin/today-attendance` and client-side `deriveAttendanceFromRecords(targetDate)`:
+     - When inspecting attendance for a given `targetDate`:
+       * If `staff.is_active === false` and `staff.deleted_at`:
+         - **If `targetDate > staff.deleted_at`**: The officer is **EXCLUDED** from the expected staff roster. They will NEVER appear as a Defaulter/Missing FO on any future date after their deactivation!
+         - **If `targetDate <= staff.deleted_at`**: The officer was active on that date. Their past attendance is preserved 100%. If they submitted a report, it is counted as submitted.
+3. **Synchronized Disk Snapshot & Cache Purge**:
+   - Whenever a staff member is added, edited, or deactivated:
+     - In-memory caches `staff_directory_list`, `admin_staff_full_list_*`, and `attendance_*` are immediately purged.
+     - `staff_directory_snapshot.json` is re-written on disk with ONLY currently active staff.
+     - Mobile `/staff-directory` only streams records where `is_active !== false` and `status !== "inactive"`.
+
+---
+
+## 8. Staff Designation Management
+
+### 8.1 Schema & Field Requirements:
+- Every staff record stores:
+  - `designation`: `str` (e.g., `Field Officer (FO)`, `District Coordinator (DC)`, `Senior Treatment Supervisor (STS)`, `TB Health Visitor (TBHV)`, `Lab Technician`). Default: `"Field Officer (FO)"`.
+- When creating a new staff member via `/admin/staff/add`:
+  - `designation` is a selectable dropdown with standard NTEP roles + custom text option.
+
+### 8.2 Edit Designation & PIN in Admin Dashboard:
+- Update existing PIN Reset modal to a combined **"Edit Staff Details"** modal:
+  - Edit **Designation** (Dropdown: `Field Officer (FO)`, `District Coordinator (DC)`, `Senior Treatment Supervisor (STS)`, `TB Health Visitor (TBHV)`, etc.).
+  - Edit **PIN** (4-digit numeric).
+  - Edit **Target** (optional monthly notification target).
+- Backend endpoint:
+  - `/admin/staff/update-details`:
+    - Validates Sub-Admin district RBAC.
+    - Updates `designation`, `pin`, `target`, and `updated_at`.
+    - Purges relevant cache keys.
+- Staff Directory & PIN Management table displays:
+  - Columns: `District` | `Officer Name` | `Designation (Badge)` | `PIN` | `Status (Active)` | `Actions` (`✏️ Edit Details`, `🗑️ Deactivate`).
+
+---
+
+## 9. Verification & Safety Battery
 
 Following the project's **`GEMINI.md` Golden Rules**:
 1. **Python Compilation**: `python -m py_compile main.py` (Exit code 0).
-2. **Backend Unit Tests**: Automated script testing `/admin/reports/medicine-consumption` and 8-digit ID ingestion in `/admin/feed-officer-data` and `/admin/reports/edit-day`.
+2. **Backend Unit Tests**: Automated script testing:
+   - `/admin/reports/medicine-consumption` Excel export.
+   - 8-digit ID ingestion in `/admin/feed-officer-data` and `/admin/reports/edit-day`.
+   - Staff deactivation: verifies deleted staff is excluded from future attendance dates but preserved in past dates.
+   - Staff designation update endpoint.
 3. **Frontend Production Build**: `npm run build` in `dfy-frontend/` (Exit code 0).
 4. **ESLint**: `npm run lint` in `dfy-frontend/` (0 errors).
 5. **Runtime TDZ & Scope Safety Check**: Ensure all new hooks and calculations are declared strictly after base states and dependencies.
