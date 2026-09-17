@@ -1440,6 +1440,159 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/admin/reports/medicine-consumption")
+async def download_medicine_consumption(
+    month: Optional[str] = None, 
+    district: Optional[str] = None, 
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        allowed = admin.get("allowed_districts", [])
+        
+        target_month = month or datetime.now().strftime("%Y-%m")
+        
+        # Sub-Admin RBAC check
+        allowed_c = [canonicalize_district(a).lower() for a in allowed]
+        if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
+            if district and district != "All":
+                c_dist = canonicalize_district(district).lower()
+                if c_dist not in allowed_c:
+                    raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+        
+        async with KPI_EXCEL_SEMAPHORE:
+            raw_reports = await get_raw_monthly_reports(target_month)
+            
+            # Filter reports by district
+            filtered_reports = []
+            for r in raw_reports:
+                wp = canonicalize_district(r.get("working_place", "") or r.get("district", ""))
+                wp_lower = wp.lower()
+                
+                # Check Sub-admin restriction
+                if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
+                    if wp_lower not in allowed_c:
+                        continue
+                        
+                # Check query parameter district filter
+                if district and district != "All":
+                    req_dist_lower = canonicalize_district(district).lower()
+                    if wp_lower != req_dist_lower:
+                        continue
+                        
+                filtered_reports.append(r)
+                
+            # Build openpyxl workbook
+            wb = openpyxl.Workbook()
+            
+            # Sheet 1: Detailed Patient Consumption
+            ws1 = wb.active
+            ws1.title = "Detailed Patient Consumption"
+            ws1.append([
+                "Date", "District", "FO Name", "Nikshay ID", "Patient Name",
+                "Category", "Weight (kg)", "Phase", "Regimen", "Daily Dose", "Strips Issued"
+            ])
+            
+            # Sheet 2: FO & District Summary
+            ws2 = wb.create_sheet(title="FO & District Summary")
+            ws2.append([
+                "District", "FO Name", "Total Patients",
+                "Adult IP", "Adult CP", "Pediatric IP", "Pediatric CP", "Total Strips Issued"
+            ])
+            
+            summary_map = {}
+            
+            for r in filtered_reports:
+                wp = canonicalize_district(r.get("working_place", "") or r.get("district", ""))
+                fo = r.get("fo_name", "")
+                date = r.get("date_of_reporting", "") or r.get("date", "")
+                fdc_details = r.get("fdc_details", [])
+                fdc_ids = r.get("fdc_provided_ids", [])
+                
+                # Fallback if fdc_details was not saved but fdc_provided_ids exist
+                if not fdc_details and fdc_ids:
+                    fdc_details = [{
+                        "id": str(pid),
+                        "patient_name": f"Patient #{pid}",
+                        "patient_type": "adult",
+                        "weight_kg": None,
+                        "phase": "IP",
+                        "regimen_name": "4 FDC (HRZE)",
+                        "daily_dose_text": "4 FDC (Standard)",
+                        "strips": 1
+                    } for pid in fdc_ids]
+                    
+                for det in fdc_details:
+                    pid = str(det.get("id", ""))
+                    pname = det.get("patient_name", "")
+                    ptype = str(det.get("patient_type", "adult")).lower()
+                    weight = det.get("weight_kg") or ""
+                    phase = str(det.get("phase", "IP")).upper()
+                    regimen = det.get("regimen_name") or det.get("fdc_type") or "FDC 4"
+                    daily_dose = det.get("daily_dose_text", "")
+                    strips = int(det.get("strips") or 1)
+                    
+                    ws1.append([
+                        date, wp, fo, pid, pname,
+                        ptype.capitalize(), weight, phase, regimen, daily_dose, strips
+                    ])
+                    
+                    sum_key = (wp, fo)
+                    if sum_key not in summary_map:
+                        summary_map[sum_key] = {
+                            "total_patients": 0,
+                            "adult_ip": 0,
+                            "adult_cp": 0,
+                            "pedia_ip": 0,
+                            "pedia_cp": 0,
+                            "total_strips": 0
+                        }
+                    s = summary_map[sum_key]
+                    s["total_patients"] += 1
+                    s["total_strips"] += strips
+                    if ptype == "adult":
+                        if phase == "IP":
+                            s["adult_ip"] += 1
+                        else:
+                            s["adult_cp"] += 1
+                    else:
+                        if phase == "IP":
+                            s["pedia_ip"] += 1
+                        else:
+                            s["pedia_cp"] += 1
+                            
+            for (wp, fo), s in sorted(summary_map.items()):
+                ws2.append([
+                    wp, fo, s["total_patients"],
+                    s["adult_ip"], s["adult_cp"], s["pedia_ip"], s["pedia_cp"], s["total_strips"]
+                ])
+                
+            style_excel_worksheet(ws1, header_fill_color="0D9488")
+            style_excel_worksheet(ws2, header_fill_color="4F46E5")
+            
+            buf = io.BytesIO()
+            wb.save(buf)
+            wb.close()
+            buf.seek(0)
+            excel_bytes = buf.getvalue()
+            
+            safe_dist = safe_filename(district or "All")
+            headers = {
+                'Content-Disposition': f'attachment; filename="Medicine_Consumption_{safe_dist}_{target_month}.xlsx"'
+            }
+            import gc
+            gc.collect()
+            
+            return StreamingResponse(
+                io.BytesIO(excel_bytes),
+                headers=headers,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
@@ -2710,7 +2863,8 @@ async def admin_feed_officer_data(
                 s = str(pid).strip()
                 if not s:
                     continue
-                if not (s.isdigit() and len(s) == 9):
+                is_valid_len = (len(s) in (8, 9)) if cat in ["fdc_provided_ids", "outcome_assigned_ids"] else (len(s) == 9)
+                if not (s.isdigit() and is_valid_len):
                     invalid_ids.append(s)
                 else:
                     clean_list.append(s)
@@ -2722,7 +2876,7 @@ async def admin_feed_officer_data(
             sample_invalids = ", ".join(invalid_ids[:5])
             raise HTTPException(
                 status_code=400, 
-                detail=f"Invalid Patient IDs detected (must be 9 digits numbers): {sample_invalids}"
+                detail=f"Invalid Patient IDs detected (must be 8 or 9 digits for FDC/Outcome, 9 digits for others): {sample_invalids}"
             )
 
         if total_ids_added == 0 and not req.remark.strip():
@@ -3196,7 +3350,8 @@ async def admin_edit_day_report(
                     clean_new_ids = []
                     for rid in raw_ids:
                         cid = str(rid).strip()
-                        if cid.isdigit() and len(cid) == 9 and cid not in clean_new_ids:
+                        is_valid_len = (len(cid) in (8, 9)) if cat_key in ["fdc_provided_ids", "outcome_assigned_ids"] else (len(cid) == 9)
+                        if cid.isdigit() and is_valid_len and cid not in clean_new_ids:
                             clean_new_ids.append(cid)
                     
                     old_ids = list(old_data.get(cat_key, []))
