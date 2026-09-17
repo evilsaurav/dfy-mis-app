@@ -1,16 +1,57 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.4.0";
-export const LAST_UPDATED_DATE = "16 Sep 2026";
+export const APP_VERSION = "2.5.0";
+export const LAST_UPDATED_DATE = "17 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.5.0",
+    date: "17 Sep 2026",
+    title: "TB FDC Medicine Distribution Studio, 8-Digit Legacy ID Clause & Staff Lifecycle Synchronization",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "💊 FDC Medicine Distribution Engine: Smart weight-band calculation for adult & pediatric TB regimens with automatic daily tablet and 28-day blister pack estimation.",
+      "🔢 8-Digit Legacy ID Clause: Full ingestion support for 8-digit and 9-digit patient IDs in FDC (fdc_provided_ids) and Outcome Assigned (outcome_assigned_ids).",
+      "📊 2-Sheet Medicine Consumption Studio: Live dashboard consumption viewer and concurrency-locked Excel report generation with zero RAM spike.",
+      "👥 Staff Lifecycle Soft-Delete & Radar Sync: Officer deactivation preserves all historical data while guaranteeing zero defaulter ghosts on future dates.",
+      "🏷️ Designation Management: Comprehensive staff role management (FO, DC, STS, TBHV, LT) with unified PIN and details editing."
+    ],
+    details: [
+      {
+        tag: "Feature",
+        color: "indigo",
+        text: "Inline Smart FDC Dosage Card: Embedded inside FO mobile reporting with live reactive dosage badge, adult/pediatric toggle, and weight-band calculation stored zero-cost in daily_field_reports."
+      },
+      {
+        tag: "Data Ingestion",
+        color: "amber",
+        text: "8-Digit & 9-Digit ID Support: Added regex and length relaxation for legacy IDs in FDC and Outcome Assigned across mobile form, backend validation, feed modal, and edit day modal."
+      },
+      {
+        tag: "Reporting & Export",
+        color: "emerald",
+        text: "Medicine Consumption Studio: 2-sheet Excel report (Detailed Patient Consumption + District Summary) protected by asyncio semaphore and explicit garbage collection."
+      },
+      {
+        tag: "Staff Lifecycle & Attendance",
+        color: "teal",
+        text: "Date-Aware Attendance Roster: Soft-deleted staff are excluded from expected attendance roster after their deletion date, preventing chronic defaulter ghosting while preserving 100% historical records."
+      },
+      {
+        tag: "Administration",
+        color: "blue",
+        text: "Staff Designation Suite: Added designation dropdowns, table badges, and combined Edit Staff Details modal for atomic role and PIN updates."
+      }
+    ]
+  },
   {
     version: "v2.4.0",
     date: "16 Sep 2026",
     title: "Full Day Report Editor, 7-Day ID Modification Audit Radar & Sleek Glassmorphism UI",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Release",
+    badgeColor: "slate",
     highlights: [
       "✏️ Admin Edit Day: Pre-populated full day report editing modal with KM, visited names, remarks & 19+ category ID buckets.",
       "🕒 7-Day ID History: Comprehensive audit radar tracking all Patient ID additions, edits, replacements, and deletions across the past 7 days.",
