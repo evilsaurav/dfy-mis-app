@@ -158,6 +158,7 @@ export default function AdminDashboard() {
   const [reportsDistrict, setReportsDistrict] = useState("");
   const [selectedKpiDistricts, setSelectedKpiDistricts] = useState([]);
   const [isDownloadingKpi, setIsDownloadingKpi] = useState(false);
+  const [isDownloadingMedicineReport, setIsDownloadingMedicineReport] = useState(false);
   const [kpiQueueProgress, setKpiQueueProgress] = useState(null); // { current, total, district, percent, status }
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
@@ -1998,10 +1999,14 @@ export default function AdminDashboard() {
       const category_ids = {};
       Object.keys(category_inputs || {}).forEach(catKey => {
         const raw = category_inputs[catKey] || '';
+        const is8or9 = (catKey === 'fdc_provided_ids' || catKey === 'outcome_assigned_ids');
         const parsed = raw
           .split(/[\n,]+/)
           .map(s => s.trim())
-          .filter(s => s.length === 9 && /^\d+$/.test(s));
+          .filter(s => {
+            const validLen = is8or9 ? (s.length === 8 || s.length === 9) : (s.length === 9);
+            return validLen && /^\d+$/.test(s);
+          });
         category_ids[catKey] = Array.from(new Set(parsed));
       });
 
@@ -2301,6 +2306,15 @@ Keep this file safe in your Google Drive or personal diary.
     setTimeout(() => setIsDownloadingKpi(false), 3000);
   };
 
+  const handleDownloadMedicineReport = () => {
+    if (isDownloadingMedicineReport) return;
+    setIsDownloadingMedicineReport(true);
+    const targetDist = selectedDistrict || 'All';
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+    window.open(`${API_BASE_URL}/admin/reports/medicine-consumption?month=${month}&district=${encodeURIComponent(targetDist)}&token=${getAdminToken()}`, "_blank");
+    setTimeout(() => setIsDownloadingMedicineReport(false), 3000);
+  };
+
   const handleDownloadScopedZip = () => {
     if (isDownloadingKpi) return;
     const targetList = selectedKpiDistricts.length > 0 ? selectedKpiDistricts : availableKpiDistricts;
@@ -2523,9 +2537,11 @@ const availableDistrictsForFeed = useMemo(() => {
       const rawText = feedCategoryInputs[k] || '';
       if (rawText && rawText.trim()) {
         const tokens = rawText.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
+        const is8or9 = (k === 'fdc_provided_ids' || k === 'outcome_assigned_ids');
+        const tokenRegex = is8or9 ? /^\d{8,9}$/ : /^\d{9}$/;
         const validList = [];
         tokens.forEach(tok => {
-          if (/^\d{9}$/.test(tok)) {
+          if (tokenRegex.test(tok)) {
             validList.push(tok);
           } else {
             invalidTokens.push(tok);
@@ -2540,12 +2556,12 @@ const availableDistrictsForFeed = useMemo(() => {
     });
 
     if (totalIdsCount === 0) {
-      setFeedError('Please enter at least one valid 9-digit Patient ID in any category.');
+      setFeedError('Please enter at least one valid Patient ID in any category.');
       return;
     }
 
     if (invalidTokens.length > 0) {
-      setFeedError(`The following ${invalidTokens.length} item(s) are NOT 9-digit numbers: ${invalidTokens.slice(0, 6).join(', ')}${invalidTokens.length > 6 ? '...' : ''}. All IDs must be strictly 9 digits.`);
+      setFeedError(`The following ${invalidTokens.length} item(s) are NOT valid numeric IDs (must be 8 or 9 digits for FDC/Outcome, 9 digits for others): ${invalidTokens.slice(0, 6).join(', ')}${invalidTokens.length > 6 ? '...' : ''}.`);
       return;
     }
 
@@ -6595,10 +6611,11 @@ const availableDistrictsForFeed = useMemo(() => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {feedCategoriesConfig.map(cat => {
                     const rawVal = editDayModal.category_inputs[cat.key] || '';
+                    const is8or9 = (cat.key === 'fdc_provided_ids' || cat.key === 'outcome_assigned_ids');
                     const parsedCount = rawVal
                       .split(/[\n,]+/)
                       .map(s => s.trim())
-                      .filter(s => s.length === 9 && /^\d+$/.test(s)).length;
+                      .filter(s => (is8or9 ? (s.length === 8 || s.length === 9) : s.length === 9) && /^\d+$/.test(s)).length;
 
                     return (
                       <div 
@@ -6627,7 +6644,7 @@ const availableDistrictsForFeed = useMemo(() => {
                               }
                             }));
                           }}
-                          placeholder="Paste 9-digit IDs..."
+                          placeholder={is8or9 ? "Paste 8 or 9-digit IDs..." : "Paste 9-digit IDs..."}
                           className="w-full bg-white border border-slate-200 rounded-xl p-2 text-xs font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 custom-scrollbar resize-none placeholder:text-slate-300"
                         />
                       </div>
@@ -6969,6 +6986,7 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
               {[
                 { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
+                { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
                 { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
                 { id: "fo_dossier", label: "👤 FO Dossier / TA-DA (.xlsx)", icon: "👤" },
                 { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
@@ -7173,6 +7191,181 @@ const availableDistrictsForFeed = useMemo(() => {
                   </div>
                 </div>
               )}
+
+              {/* Tab: Medicine Consumption Studio */}
+              {reportsStudioTab === "medicine_consumption" && (() => {
+                const summaryMap = {};
+                let totalPatientsCount = 0;
+                let totalStripsCount = 0;
+
+                const filtered = rawRecords.filter(r => {
+                  const dist = canonicalizeDistrict(r.working_place || r.district || '');
+                  if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+                    const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+                    if (!allowed.includes(dist)) return false;
+                  }
+                  if (selectedDistrict !== 'All' && dist !== selectedDistrict) return false;
+                  if (selectedFO !== 'All' && (r.fo_name || r.officer_name) !== selectedFO) return false;
+                  return true;
+                });
+
+                filtered.forEach(r => {
+                  const dist = canonicalizeDistrict(r.working_place || r.district || '');
+                  const fo = r.fo_name || r.officer_name || 'Field Officer';
+                  const key = `${dist}___${fo}`;
+                  
+                  if (!summaryMap[key]) {
+                    summaryMap[key] = {
+                      district: dist,
+                      fo_name: fo,
+                      total_patients: 0,
+                      adult_ip: 0,
+                      adult_cp: 0,
+                      pediatric_ip: 0,
+                      pediatric_cp: 0,
+                      total_strips: 0
+                    };
+                  }
+
+                  const details = Array.isArray(r.fdc_details) ? r.fdc_details : [];
+                  const fdcIds = Array.isArray(r.fdc_provided_ids) ? r.fdc_provided_ids : [];
+
+                  if (details.length > 0) {
+                    details.forEach(d => {
+                      const ptype = String(d.patient_type || 'adult').toLowerCase();
+                      const phase = String(d.phase || 'IP').toUpperCase();
+                      const strips = Number(d.strips) || 1;
+
+                      summaryMap[key].total_patients += 1;
+                      summaryMap[key].total_strips += strips;
+                      totalPatientsCount += 1;
+                      totalStripsCount += strips;
+
+                      if (ptype === 'pediatric') {
+                        if (phase === 'IP') summaryMap[key].pediatric_ip += 1;
+                        else summaryMap[key].pediatric_cp += 1;
+                      } else {
+                        if (phase === 'IP') summaryMap[key].adult_ip += 1;
+                        else summaryMap[key].adult_cp += 1;
+                      }
+                    });
+                  } else if (fdcIds.length > 0) {
+                    fdcIds.forEach(() => {
+                      summaryMap[key].total_patients += 1;
+                      summaryMap[key].total_strips += 1;
+                      summaryMap[key].adult_ip += 1;
+                      totalPatientsCount += 1;
+                      totalStripsCount += 1;
+                    });
+                  }
+                });
+
+                const summaryList = Object.values(summaryMap).filter(s => s.total_patients > 0);
+
+                return (
+                  <div className="space-y-4">
+                    {/* Top Banner & Export Card */}
+                    <div className="bg-gradient-to-r from-teal-50 to-emerald-50 p-5 rounded-2xl border border-teal-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xl">💊</span>
+                          <h4 className="text-base font-black text-teal-950">TB FDC Medicine Distribution &amp; Consumption Studio</h4>
+                        </div>
+                        <p className="text-xs text-teal-800 font-medium mt-1">
+                          Download 2-sheet executive consumption report (.xlsx) featuring Detailed Patient Logs and FO/District Aggregations.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2 mt-2">
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-white/90 border border-teal-200 text-teal-900 px-2.5 py-1 rounded-lg">
+                            Month: {month}
+                          </span>
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-white/90 border border-teal-200 text-teal-900 px-2.5 py-1 rounded-lg">
+                            District: {selectedDistrict}
+                          </span>
+                          <span className="text-[10px] font-bold text-teal-900 bg-teal-200/70 px-2.5 py-1 rounded-lg">
+                            Total Patients: {totalPatientsCount} &bull; Total Strips: {totalStripsCount}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleDownloadMedicineReport}
+                        disabled={isDownloadingMedicineReport}
+                        className={`inline-flex items-center gap-2 px-5 py-3 rounded-xl text-xs font-black shadow-md transition-all shrink-0 cursor-pointer ${
+                          isDownloadingMedicineReport 
+                            ? 'bg-teal-400 text-white cursor-not-allowed' 
+                            : 'bg-teal-600 hover:bg-teal-700 text-white shadow-teal-600/20 active:scale-95'
+                        }`}
+                      >
+                        {isDownloadingMedicineReport ? (
+                          <>
+                            <svg className="animate-spin h-4 w-4 text-white" viewBox="0 0 24 24" fill="none">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Generating Excel...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>📥</span>
+                            <span>Download 2-Sheet Report (.xlsx)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    {/* On-screen Breakdown Table */}
+                    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+                      <div className="px-5 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                        <h5 className="text-xs font-black uppercase tracking-wider text-slate-700">
+                          📊 Field Officer Consumption Breakdown
+                        </h5>
+                        <span className="text-[11px] font-bold text-slate-500">
+                          {summaryList.length} Active Officer{summaryList.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+
+                      {summaryList.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400">
+                          <span className="text-3xl block mb-2">💊</span>
+                          <p className="text-xs font-bold">No FDC medicine distributions logged for {selectedDistrict} in {month}.</p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left border-collapse text-xs">
+                            <thead>
+                              <tr className="bg-slate-100/80 text-slate-600 text-[10px] font-black uppercase tracking-wider border-b border-slate-200">
+                                <th className="py-2.5 px-4">District</th>
+                                <th className="py-2.5 px-4">FO Name</th>
+                                <th className="py-2.5 px-4 text-center">Total Patients</th>
+                                <th className="py-2.5 px-4 text-center bg-indigo-50/50 text-indigo-900">Adult IP</th>
+                                <th className="py-2.5 px-4 text-center bg-indigo-50/50 text-indigo-900">Adult CP</th>
+                                <th className="py-2.5 px-4 text-center bg-teal-50/50 text-teal-900">Pediatric IP</th>
+                                <th className="py-2.5 px-4 text-center bg-teal-50/50 text-teal-900">Pediatric CP</th>
+                                <th className="py-2.5 px-4 text-center bg-emerald-50 text-emerald-900 font-black">Total Strips</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 font-medium">
+                              {summaryList.map((row, idx) => (
+                                <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                                  <td className="py-2.5 px-4 font-bold text-slate-800">{row.district}</td>
+                                  <td className="py-2.5 px-4 font-semibold text-slate-700">{row.fo_name}</td>
+                                  <td className="py-2.5 px-4 text-center font-bold text-slate-800">{row.total_patients}</td>
+                                  <td className="py-2.5 px-4 text-center text-indigo-700 font-semibold">{row.adult_ip}</td>
+                                  <td className="py-2.5 px-4 text-center text-indigo-700 font-semibold">{row.adult_cp}</td>
+                                  <td className="py-2.5 px-4 text-center text-teal-700 font-semibold">{row.pediatric_ip}</td>
+                                  <td className="py-2.5 px-4 text-center text-teal-700 font-semibold">{row.pediatric_cp}</td>
+                                  <td className="py-2.5 px-4 text-center font-black text-emerald-700 bg-emerald-50/50">{row.total_strips}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Tab 2: State Summary Excel */}
               {reportsStudioTab === "state_matrix" && (
@@ -8327,9 +8520,11 @@ const availableDistrictsForFeed = useMemo(() => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {(feedShowAllCategories ? feedCategoriesConfig : feedCategoriesConfig.filter(c => c.isPrimary)).map(cat => {
                     const currentVal = feedCategoryInputs[cat.key] || '';
+                    const is8or9 = (cat.key === 'fdc_provided_ids' || cat.key === 'outcome_assigned_ids');
+                    const tokenRegex = is8or9 ? /^\d{8,9}$/ : /^\d{9}$/;
                     const tokens = currentVal.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
-                    const validTokens = Array.from(new Set(tokens.filter(t => /^\d{9}$/.test(t))));
-                    const invalidTokens = tokens.filter(t => !/^\d{9}$/.test(t));
+                    const validTokens = Array.from(new Set(tokens.filter(t => tokenRegex.test(t))));
+                    const invalidTokens = tokens.filter(t => !tokenRegex.test(t));
 
                     return (
                       <div 
@@ -8467,7 +8662,9 @@ const availableDistrictsForFeed = useMemo(() => {
                 let totalReady = 0;
                 feedCategoriesConfig.forEach(cat => {
                   const raw = feedCategoryInputs[cat.key] || '';
-                  const validCount = raw.split(/[\s,;\n\r\t]+/).filter(t => /^\d{9}$/.test(t.trim())).length;
+                  const is8or9 = (cat.key === 'fdc_provided_ids' || cat.key === 'outcome_assigned_ids');
+                  const tokenRegex = is8or9 ? /^\d{8,9}$/ : /^\d{9}$/;
+                  const validCount = raw.split(/[\s,;\n\r\t]+/).filter(t => tokenRegex.test(t.trim())).length;
                   totalReady += validCount;
                 });
 
