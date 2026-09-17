@@ -1,16 +1,53 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.5.0";
+export const APP_VERSION = "2.6.0";
 export const LAST_UPDATED_DATE = "17 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.6.0",
+    date: "17 Sep 2026",
+    title: "FO Mobile UI Enhancement Suite, Live Session HUD & IST Timezone Synchronization",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📊 Live Session Mini-HUD: Sticky floating session tally displaying real-time ID count, TB notifications, FDC medicine, and doctor visits with bottom action bar summary.",
+      "⚖️ FDC Quick Weight Chips: 1-Tap weight selection chips for adults and pediatrics with live visual Phase badges (IP/CP) and blister foil breakdown.",
+      "💬 1-Tap WhatsApp Share: Direct WhatsApp sharing button on post-submission success modal and profile date inspector for instant DTO reporting.",
+      "📅 7-Day Activity Roster: Interactive 7-day attendance strip with date inspector integration and target progress achievement ring.",
+      "🕒 IST Timezone Alignment: Enforced Indian Standard Time (IST UTC+5:30) on reporting and attendance dates, eliminating UTC midnight rollbacks.",
+      "🔢 Profile 8-Digit ID Edit: Extended FO self-service ID correction modal to support 8-digit legacy IDs for FDC and Outcome Assigned."
+    ],
+    details: [
+      {
+        tag: "FO Interface",
+        color: "indigo",
+        text: "Floating Mini-HUD & Sticky Bar: Field Officers can monitor live session tallies while scrolling the form, backed by an active summary above the review & submit button."
+      },
+      {
+        tag: "FDC Smart Card",
+        color: "teal",
+        text: "Tactile Weight Selection: Added weight chips (30kg–80kg for adult, 6kg–35kg for pediatric) to quickly calculate dosages without opening the mobile keyboard."
+      },
+      {
+        tag: "Communication",
+        color: "emerald",
+        text: "Direct WhatsApp Dispatch: Added 1-tap WhatsApp sharing link in post-submit modal and historical date inspector for effortless coordinator reporting."
+      },
+      {
+        tag: "Core Backend & Timezone",
+        color: "amber",
+        text: "Zero UTC Date Drift: Fixed timezone drift across report submission, daily attendance, and profile streak calculation to guarantee 100% accurate calendar dates."
+      }
+    ]
+  },
+  {
     version: "v2.5.0",
     date: "17 Sep 2026",
     title: "TB FDC Medicine Distribution Studio, 8-Digit Legacy ID Clause & Staff Lifecycle Synchronization",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Release",
+    badgeColor: "slate",
     highlights: [
       "💊 FDC Medicine Distribution Engine: Smart weight-band calculation for adult & pediatric TB regimens with automatic daily tablet and 28-day blister pack estimation.",
       "🔢 8-Digit Legacy ID Clause: Full ingestion support for 8-digit and 9-digit patient IDs in FDC (fdc_provided_ids) and Outcome Assigned (outcome_assigned_ids).",
