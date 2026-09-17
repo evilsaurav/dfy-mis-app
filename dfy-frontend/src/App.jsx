@@ -2,6 +2,12 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
 import { calculateFdcDosage } from './utils/fdcCalculator'
 
+// Local Indian Date Formatter (avoids UTC toISOString midnight offset)
+const getLocalYMD = (d = new Date()) => {
+  const dt = (d instanceof Date && !isNaN(d)) ? d : new Date();
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+};
+
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
@@ -380,7 +386,7 @@ const MyProfileDashboard = ({
   onRefreshCascade
 }) => {
   const [stats, setStats] = useState(null);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => getLocalYMD());
   const [copiedKey, setCopiedKey] = useState(null);
   const cascadeAlerts = propCascadeAlerts || [];
   const cascadeSummary = propCascadeSummary || {};
@@ -435,8 +441,17 @@ const MyProfileDashboard = ({
     if (!editingModal) return;
     const { date, category, action, oldId, newId } = editingModal;
     
-    if (action !== 'delete' && (!newId || newId.trim().length !== 9 || !/^\d+$/.test(newId.trim()))) {
-      setEditingModal(prev => ({ ...prev, error: "Patient ID must be exactly 9 digits (numbers only)." }));
+    const isLegacyAllowed = ['fdc_provided_ids', 'outcome_assigned_ids'].includes(category);
+    const cleanId = (newId || '').trim();
+    const isValidLen = isLegacyAllowed ? (cleanId.length === 8 || cleanId.length === 9) : (cleanId.length === 9);
+
+    if (action !== 'delete' && (!cleanId || !isValidLen || !/^\d+$/.test(cleanId))) {
+      setEditingModal(prev => ({ 
+        ...prev, 
+        error: isLegacyAllowed 
+          ? "Patient ID must be 8 or 9 digits (numbers only)." 
+          : "Patient ID must be exactly 9 digits (numbers only)." 
+      }));
       return;
     }
 
@@ -494,11 +509,8 @@ const MyProfileDashboard = ({
     }
   };
 
-  const copyDateWhatsAppSummary = (dateStr, dayData) => {
-    if (!dayData || !dayData.submitted) {
-      showToast("No report submitted on this date", "info");
-      return;
-    }
+  const generateDateWhatsAppSummary = (dateStr, dayData) => {
+    if (!dayData || !dayData.submitted) return '';
     let text = `*Daily Field Report - ${dateStr}*\n`;
     text += `*Name:* ${formData.fo_name} (${formData.working_place})\n`;
     text += `*Designation:* Field Officer\n`;
@@ -559,9 +571,17 @@ const MyProfileDashboard = ({
     if (dayData.remark && dayData.remark.trim() !== '') {
       text += `\n*Remarks:*\n` + dayData.remark.trim() + '\n';
     }
+    return text.trim();
+  };
 
+  const copyDateWhatsAppSummary = (dateStr, dayData) => {
+    const text = generateDateWhatsAppSummary(dateStr, dayData);
+    if (!text) {
+      showToast("No report submitted on this date", "info");
+      return;
+    }
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(text.trim())
+      navigator.clipboard.writeText(text)
         .then(() => showToast(`📋 WhatsApp summary copied for ${dateStr}!`, 'success'))
         .catch(() => showToast('Failed to copy to clipboard', 'error'));
     } else {
@@ -569,10 +589,34 @@ const MyProfileDashboard = ({
     }
   };
 
+  const shareDateWhatsAppSummary = (dateStr, dayData) => {
+    const text = generateDateWhatsAppSummary(dateStr, dayData);
+    if (!text) {
+      showToast("No report submitted on this date", "info");
+      return;
+    }
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   const targetVal = stats ? (Number(stats.target) || 0) : 0;
   const breakdown = stats ? (stats.breakdown || {}) : {};
   const notifAchieved = Number(breakdown.notification) || 0;
   const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
+
+  const last7Days = useMemo(() => {
+    const list = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = getLocalYMD(d);
+      const dayName = d.toLocaleDateString('en-IN', { weekday: 'short' });
+      const dayNum = d.getDate();
+      const isSubmitted = Boolean(stats?.daily_history?.[dateStr]?.submitted);
+      const isToday = i === 0;
+      list.push({ dateStr, dayName, dayNum, isSubmitted, isToday });
+    }
+    return list;
+  }, [stats]);
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
@@ -622,6 +666,44 @@ const MyProfileDashboard = ({
                   <span>{stats.total_km} KM Travelled</span>
                 </span>
               )}
+            </div>
+
+            {/* 7-Day Activity & Attendance Roster */}
+            <div className="mt-5 p-3.5 bg-slate-50/90 rounded-2xl border border-slate-200/70 text-left">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1">
+                  <span>📅</span> Last 7 Days Activity
+                </span>
+                <span className="text-[9px] font-bold text-slate-400">
+                  Tap day to inspect
+                </span>
+              </div>
+              <div className="grid grid-cols-7 gap-1.5">
+                {last7Days.map(item => {
+                  const isSelected = selectedDate === item.dateStr;
+                  return (
+                    <button
+                      key={item.dateStr}
+                      type="button"
+                      onClick={() => setSelectedDate(item.dateStr)}
+                      className={`flex flex-col items-center py-2 px-1 rounded-xl transition-all cursor-pointer border ${
+                        isSelected 
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm scale-105' 
+                          : item.isSubmitted 
+                            ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border-emerald-200' 
+                            : 'bg-white hover:bg-slate-100 text-slate-500 border-slate-200'
+                      }`}
+                      title={`${item.dateStr}: ${item.isSubmitted ? 'Report Submitted' : 'No Report'}`}
+                    >
+                      <span className="text-[9px] font-bold uppercase">{item.dayName}</span>
+                      <span className="text-xs font-black my-0.5">{item.dayNum}</span>
+                      <span className="text-[10px] leading-none">
+                        {item.isSubmitted ? '✓' : '•'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {stats.badges && stats.badges.length > 0 && (
@@ -782,12 +864,21 @@ const MyProfileDashboard = ({
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => copyDateWhatsAppSummary(selectedDate, selectedDayData)}
+                    onClick={() => shareDateWhatsAppSummary(selectedDate, selectedDayData)}
                     className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1.5 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
+                    title="Share directly to WhatsApp"
+                  >
+                    <span>💬</span>
+                    <span>Share</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => copyDateWhatsAppSummary(selectedDate, selectedDayData)}
+                    className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 px-2.5 py-1.5 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
                     title="Copy full reporting summary for WhatsApp"
                   >
-                    <span>📱</span>
-                    <span>Copy WhatsApp</span>
+                    <span>📋</span>
+                    <span>Copy</span>
                   </button>
                   {isDateEditable ? (
                     <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-xl border border-emerald-200" title="Aap 24 ghante ke andar IDs edit/correct kar sakte hain">
@@ -916,18 +1007,27 @@ const MyProfileDashboard = ({
               ) : (
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                    {editingModal.action === 'replace' ? `Replace ID #${editingModal.oldId} With:` : 'Enter 9-Digit Patient ID:'}
+                    {editingModal.action === 'replace' 
+                      ? `Replace ID #${editingModal.oldId} With:` 
+                      : (['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? 'Enter 8 or 9-Digit Patient ID:' : 'Enter 9-Digit Patient ID:')
+                    }
                   </label>
                   <input
                     type="text"
+                    inputMode="numeric"
                     maxLength={9}
                     value={editingModal.newId}
                     onChange={(e) => setEditingModal(prev => ({ ...prev, newId: e.target.value.replace(/\D/g, '') }))}
-                    placeholder="e.g. 332882518"
+                    placeholder={['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? "e.g. 12345678 or 332882518" : "e.g. 332882518"}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-indigo-500"
                     autoFocus
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">Must be exactly 9 digits.</p>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) 
+                      ? "Must be 8 or 9 digits (legacy ID allowed)." 
+                      : "Must be exactly 9 digits."
+                    }
+                  </p>
                 </div>
               )}
 
@@ -1324,27 +1424,108 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
           </div>
         </div>
 
+        {/* Quick Weight Selection Chips */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+              <span>⚖️</span> Quick Weight Chips:
+            </span>
+            {weightKg && (
+              <button 
+                type="button" 
+                onClick={() => setWeightKg("")}
+                className="text-[9px] font-bold text-rose-500 hover:underline cursor-pointer"
+              >
+                ✕ Clear
+              </button>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(patientType === 'adult' ? [
+              { label: '30 kg', val: '30', band: '25–34 kg' },
+              { label: '42 kg', val: '42', band: '35–49 kg' },
+              { label: '55 kg', val: '55', band: '50–64 kg' },
+              { label: '70 kg', val: '70', band: '65–75 kg' },
+              { label: '80 kg', val: '80', band: '>75 kg' }
+            ] : [
+              { label: '6 kg', val: '6', band: '4–7 kg' },
+              { label: '10 kg', val: '10', band: '8–11 kg' },
+              { label: '14 kg', val: '14', band: '12–15 kg' },
+              { label: '20 kg', val: '20', band: '16–24 kg' },
+              { label: '27 kg', val: '27', band: '25–29 kg' },
+              { label: '35 kg', val: '35', band: '30–39 kg' }
+            ]).map((chip) => {
+              const isSelected = String(weightKg) === chip.val;
+              return (
+                <button
+                  key={chip.val}
+                  type="button"
+                  onClick={() => setWeightKg(chip.val)}
+                  className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
+                    isSelected 
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs scale-105' 
+                      : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/60'
+                  }`}
+                  title={`${chip.label} (${chip.band})`}
+                >
+                  <span>{chip.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Live Reactive Dosage Calculation Card */}
         {dosage && (
-          <div className={`p-2.5 rounded-xl border text-xs animate-fade-in ${
+          <div className={`p-3 rounded-xl border text-xs animate-fade-in ${
             dosage.isValid 
-              ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950' 
+              ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950 shadow-xs' 
               : 'bg-rose-50/90 border-rose-200 text-rose-900'
           }`}>
             {dosage.isValid ? (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between font-black">
-                  <span className="flex items-center gap-1">
-                    <span>💊</span>
-                    <span>{dosage.regimenName}</span>
-                  </span>
-                  <span className="bg-emerald-200 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full uppercase">
-                    {dosage.weightBand}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base">💊</span>
+                    <div>
+                      <span className="font-extrabold text-emerald-950 text-xs block">{dosage.regimenName}</span>
+                      <span className="text-[10px] text-emerald-700 font-semibold">{dosage.phaseText}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-md border uppercase ${
+                      dosage.phase === 'IP' 
+                        ? 'bg-amber-100 text-amber-900 border-amber-300' 
+                        : 'bg-teal-100 text-teal-900 border-teal-300'
+                    }`}>
+                      {dosage.phase} Phase
+                    </span>
+                    <span className="bg-emerald-200 text-emerald-900 border border-emerald-300 text-[9px] font-bold px-2 py-0.5 rounded-md uppercase">
+                      {dosage.weightBand}
+                    </span>
+                  </div>
                 </div>
-                <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-800">
-                  <span>📋 Daily Dose: <strong>{dosage.dailyDoseText}</strong></span>
-                  <span>📦 Supply: <strong>{dosage.supplyIssued}</strong></span>
+
+                {/* Dosage & Blister Details */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-200/80 text-[11px]">
+                  <div className="bg-white/90 p-2 rounded-lg border border-emerald-100">
+                    <span className="text-[9px] font-black uppercase text-emerald-600 block">Daily Intake</span>
+                    <span className="font-black text-emerald-900">{dosage.dailyDoseText}</span>
+                    {dosage.dailyTablets > 0 && (
+                      <div className="flex items-center gap-0.5 mt-1" title={`${dosage.dailyTablets} tablets daily`}>
+                        {Array.from({ length: Math.min(6, dosage.dailyTablets) }).map((_, i) => (
+                          <span key={i} className="text-xs">🔴</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="bg-white/90 p-2 rounded-lg border border-emerald-100">
+                    <span className="text-[9px] font-black uppercase text-emerald-600 block">Supply Allocation</span>
+                    <span className="font-black text-emerald-900">{dosage.supplyIssued}</span>
+                    <span className="text-[10px] text-emerald-700 block font-bold mt-0.5">
+                      📦 {dosage.strips} Foil Strip{dosage.strips > 1 ? 's' : ''}
+                    </span>
+                  </div>
                 </div>
               </div>
             ) : (
@@ -1358,7 +1539,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
 
         {!weightKg && (
           <p className="text-[10px] text-slate-500 font-medium italic">
-            💡 Tip: Enter patient weight in kg to auto-calculate exact dosage and strip quantity.
+            💡 Tip: Enter patient weight or select a quick weight chip to auto-calculate exact dosage and strip quantity.
           </p>
         )}
 
@@ -1387,13 +1568,19 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                     <span className="font-mono font-bold text-slate-800 tracking-wider text-xs sm:text-sm">#{id}</span>
                     <span className="text-xs font-bold text-slate-700 truncate max-w-[150px] sm:max-w-xs">{displayName}</span>
                     <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2 py-0.5 rounded-md">
-                      {displayStrips} Strip{displayStrips > 1 ? 's' : ''}
+                      📦 {displayStrips} Strip{displayStrips > 1 ? 's' : ''}
                     </span>
                   </div>
                   <div className="text-[10px] text-slate-500 font-semibold mt-0.5 flex flex-wrap items-center gap-1.5">
                     <span className="text-indigo-600 font-bold">{displayRegimen}</span>
                     <span>•</span>
-                    <span>{detail.phase || 'IP'} Phase</span>
+                    <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
+                      detail.phase === 'CP' 
+                        ? 'bg-teal-50 text-teal-800 border-teal-200' 
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}>
+                      {detail.phase || 'IP'} Phase
+                    </span>
                     {detail.weight_kg && (
                       <>
                         <span>•</span>
@@ -1679,6 +1866,31 @@ function App() {
   const [cascadeAlerts, setCascadeAlerts] = useState([]);
   const [cascadeSummary, setCascadeSummary] = useState({});
   const [loadingCascadeAlerts, setLoadingCascadeAlerts] = useState(false);
+
+  // Derived Live Metric Tallies for Floating Mini-HUD
+  const liveTotalIds = useMemo(() => {
+    const idKeys = [
+      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
+      'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
+      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+      'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
+      'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+      'culture_dst_ids'
+    ];
+    return idKeys.reduce((sum, k) => sum + (Array.isArray(formData[k]) ? formData[k].length : 0), 0);
+  }, [formData]);
+
+  const liveFdcCount = useMemo(() => {
+    return Array.isArray(formData.fdc_provided_ids) ? formData.fdc_provided_ids.length : 0;
+  }, [formData.fdc_provided_ids]);
+
+  const liveVisitsCount = useMemo(() => {
+    return Array.isArray(formData.visited_names) ? formData.visited_names.length : 0;
+  }, [formData.visited_names]);
+
+  const liveNotifCount = useMemo(() => {
+    return Array.isArray(formData.notification_ids) ? formData.notification_ids.length : 0;
+  }, [formData.notification_ids]);
 
   const fetchFoCascadeAlerts = async (district, fo_name) => {
     if (!district || !fo_name) return;
@@ -2698,6 +2910,47 @@ function App() {
                 onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
               />
 
+              {/* Real-time Floating Mini-HUD for daily entries */}
+              <div className="sticky top-16 z-30 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-3 shadow-sm mb-4 transition-all">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${liveTotalIds > 0 ? 'bg-emerald-400' : 'bg-slate-300'}`}></span>
+                      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${liveTotalIds > 0 ? 'bg-emerald-500' : 'bg-slate-400'}`}></span>
+                    </span>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block leading-tight">Live Session Tally</span>
+                      <span className="text-xs font-black text-slate-800">
+                        {liveTotalIds} {liveTotalIds === 1 ? 'Patient ID' : 'Patient IDs'} Recorded
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-colors ${
+                      liveNotifCount > 0 
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-2xs' 
+                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                    }`} title="TB Notifications">
+                      📋 {liveNotifCount} Notif
+                    </span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-colors ${
+                      liveFdcCount > 0 
+                        ? 'bg-teal-50 text-teal-700 border-teal-200 shadow-2xs' 
+                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                    }`} title="FDC Medicine Distributed">
+                      💊 {liveFdcCount} FDC
+                    </span>
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-colors ${
+                      liveVisitsCount > 0 
+                        ? 'bg-amber-50 text-amber-800 border-amber-200 shadow-2xs' 
+                        : 'bg-slate-50 text-slate-400 border-slate-200'
+                    }`} title="Doctor / Chemist Visits">
+                      🏥 {liveVisitsCount} Visits
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <Accordion title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
                     <IdBucket 
@@ -2867,8 +3120,27 @@ function App() {
               <div className="h-36 w-full pointer-events-none"></div>
 
               {/* Modern Sticky Bottom Action Bar */}
-              <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200/80 p-3.5 sm:p-4 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-50">
-                <div className="max-w-md mx-auto flex items-center gap-2 sm:gap-3">
+              <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 p-3.5 sm:p-4 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-50">
+                <div className="max-w-md mx-auto space-y-2">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 px-1">
+                    <span className="flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${liveTotalIds > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
+                      <span>Total IDs: <strong className="text-slate-800">{liveTotalIds}</strong></span>
+                    </span>
+                    <div className="flex items-center gap-1.5 text-[10px]">
+                      {liveFdcCount > 0 && (
+                        <span className="bg-teal-50 text-teal-800 border border-teal-200 px-1.5 py-0.5 rounded-md font-black">
+                          💊 {liveFdcCount} FDC
+                        </span>
+                      )}
+                      {liveVisitsCount > 0 && (
+                        <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md font-black">
+                          🏥 {liveVisitsCount} Visits
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
                   <button 
                     onClick={() => {
                       if(!formData.working_place || !formData.fo_name || !formData.pin) {
@@ -2943,21 +3215,36 @@ function App() {
 
             {/* Actions */}
             <div className="pt-3 border-t border-slate-100 flex flex-col gap-2.5">
-              <button
-                type="button"
-                onClick={() => {
-                  if (navigator.clipboard) {
-                    navigator.clipboard.writeText(submittedReportSummary.text);
-                    setCopiedPostSubmit(true);
-                    showToast("WhatsApp summary copied to clipboard!", "success");
-                    setTimeout(() => setCopiedPostSubmit(false), 2500);
-                  }
-                }}
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-emerald-600/20 active:scale-95 transition-all text-xs sm:text-sm tracking-wider uppercase flex items-center justify-center gap-2"
-              >
-                <span>📋</span>
-                <span>{copiedPostSubmit ? '✓ Copied to Clipboard!' : 'Copy for WhatsApp'}</span>
-              </button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(submittedReportSummary.text)}`;
+                    window.open(shareUrl, '_blank');
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 active:scale-95 transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 cursor-pointer"
+                  title="Directly open WhatsApp to send summary"
+                >
+                  <span className="text-base">💬</span>
+                  <span>WhatsApp Share</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (navigator.clipboard) {
+                      navigator.clipboard.writeText(submittedReportSummary.text);
+                      setCopiedPostSubmit(true);
+                      showToast("WhatsApp summary copied to clipboard!", "success");
+                      setTimeout(() => setCopiedPostSubmit(false), 2500);
+                    }
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3.5 rounded-2xl active:scale-95 transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 border border-slate-200 cursor-pointer"
+                >
+                  <span>📋</span>
+                  <span>{copiedPostSubmit ? '✓ Copied!' : 'Copy Text'}</span>
+                </button>
+              </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <button

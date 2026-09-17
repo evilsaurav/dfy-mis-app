@@ -135,6 +135,12 @@ class SimpleTTLCache:
 
 cache = SimpleTTLCache(default_ttl=30)
 
+IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
+
+def get_ist_now() -> datetime:
+    """Returns current datetime in Indian Standard Time (IST, UTC+5:30)."""
+    return datetime.now(IST_TIMEZONE)
+
 # --- Security, Cryptography & Access Control ---
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dfy-tb-mis-bihar-secret-key-2026-supersecure")
 JWT_ALGORITHM = "HS256"
@@ -754,7 +760,7 @@ async def submit_daily_report(report: DailyActivityReport):
     try:
         ensure_daily_backup_scheduled()
         if not report.date_of_reporting:
-            report.date_of_reporting = datetime.now().strftime("%Y-%m-%d")
+            report.date_of_reporting = get_ist_now().strftime("%Y-%m-%d")
         if report.working_place:
             report.working_place = canonicalize_district(report.working_place.strip())
         if report.fo_name:
@@ -1868,7 +1874,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
         # Calculate Reporting Streak
         sorted_dates = sorted(daily_history.keys(), reverse=True)
         streak_days = 0
-        today = datetime.now().date()
+        today = get_ist_now().date()
         
         # Check streak starting from today or yesterday
         check_date = today
@@ -1960,7 +1966,7 @@ async def get_today_attendance(
     try:
         ensure_daily_backup_scheduled()
         if not date:
-            date = datetime.now().strftime("%Y-%m-%d")
+            date = get_ist_now().strftime("%Y-%m-%d")
             
         cache_key = f"attendance_{date}_{districts or 'all'}"
         if force_refresh:
@@ -4297,9 +4303,7 @@ class AuditLogQueryReq(BaseModel):
     user_id: Optional[str] = "All"
     search: Optional[str] = ""
     limit: Optional[int] = 200
-
-def get_ist_now() -> datetime:
-    return datetime.now(timezone(timedelta(hours=5, minutes=30)))
+# get_ist_now is defined at the top of the module for global availability
 
 def extract_client_info(request: Optional[Request] = None) -> Tuple[str, str]:
     """
