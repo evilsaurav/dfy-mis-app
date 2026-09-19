@@ -1069,6 +1069,520 @@ const MyProfileDashboard = ({
   );
 };
 
+// --- Patient Journey & Nikshay Verification Status Tracker ---
+const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
+  const [searchId, setSearchId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  const handleSearch = async (idToSearch) => {
+    const cleanId = String(idToSearch || searchId).trim();
+    if (!cleanId) {
+      showToast("Kripya Nikshay ID enter karein!", "error");
+      return;
+    }
+    if (!(cleanId.length === 8 || cleanId.length === 9) || isNaN(cleanId)) {
+      showToast("Nikshay ID 8 ya 9 digit ki honi chahiye!", "error");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setResult(null);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/reports/patient-journey/${encodeURIComponent(cleanId)}`);
+      if (!res.ok) {
+        throw new Error("Patient ID server par nahi mila ya network error hai.");
+      }
+      const data = await res.json();
+      if (!data.success || (!data.journey?.length && !data.metadata?.district && !data.metadata?.nikshay_verified)) {
+        setError(`Patient #${cleanId} ka koi record nahi mila. Kripya ID dobara check karein.`);
+      } else {
+        setResult(data);
+      }
+    } catch (err) {
+      console.error("Patient journey fetch error:", err);
+      setError(err.message || "Record load karne me samasya aayi.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const activeNikshayIndicators = result?.metadata?.nikshay_indicators || [];
+  const isNikshayVerified = Boolean(result?.metadata?.nikshay_verified);
+
+  return (
+    <div className="w-full max-w-lg mx-auto animate-fade-in pb-12">
+      {/* Header Card */}
+      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-950/20 mb-5 border border-indigo-700/50">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20">
+            🔍
+          </div>
+          <div>
+            <h2 className="text-xl font-black tracking-tight">Nikshay Patient Tracker</h2>
+            <p className="text-xs text-indigo-200 font-medium">
+              Rogi ki clinical history aur Nikshay verification status dekhein
+            </p>
+          </div>
+        </div>
+
+        {/* Search Bar */}
+        <form 
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSearch();
+          }} 
+          className="mt-4 flex gap-2"
+        >
+          <input 
+            type="text"
+            inputMode="numeric"
+            maxLength={9}
+            value={searchId}
+            onChange={(e) => setSearchId(e.target.value.replace(/\D/g, ''))}
+            placeholder="Enter 8 or 9-digit Nikshay ID..."
+            className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm font-mono font-bold text-white placeholder:text-indigo-300/70 outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/20 transition-all"
+          />
+          <button
+            type="submit"
+            disabled={loading || !searchId}
+            className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-black px-5 py-3 rounded-2xl shadow-lg shadow-emerald-600/30 text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+          >
+            {loading ? 'Searching...' : 'Search'}
+          </button>
+        </form>
+
+        {/* Quick Suggestion Chips */}
+        {suggestedIds && suggestedIds.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-white/10">
+            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300 block mb-1.5">
+              💡 Today's Session IDs (Tap to inspect):
+            </span>
+            <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
+              {suggestedIds.slice(0, 8).map((sid, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setSearchId(sid);
+                    handleSearch(sid);
+                  }}
+                  className="bg-white/10 hover:bg-white/25 text-white border border-white/20 font-mono text-xs font-bold px-2.5 py-1 rounded-xl transition-all cursor-pointer"
+                >
+                  #{sid}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold p-4 rounded-2xl mb-4 flex items-center gap-2 animate-fade-in">
+          <span>⚠️</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Results View */}
+      {result && (
+        <div className="space-y-4 animate-fade-in">
+          {/* Patient Overview Card */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm">
+            <div className="flex items-start justify-between gap-2 pb-3 border-b border-slate-100">
+              <div>
+                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Patient Episode ID</span>
+                <h3 className="text-xl font-black font-mono text-slate-800">#{result.patient_id}</h3>
+                <p className="text-xs font-semibold text-slate-500 mt-0.5">
+                  District: <strong className="text-slate-700">{result.metadata?.district || formData?.working_place || 'Bihar'}</strong>
+                  {result.metadata?.primary_fo && (
+                    <span> &bull; Officer: <strong className="text-slate-700">{result.metadata.primary_fo}</strong></span>
+                  )}
+                </p>
+              </div>
+              <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-2xs ${
+                result.is_complete 
+                  ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                  : 'bg-amber-100 text-amber-800 border-amber-300'
+              }`}>
+                {result.is_complete ? '✓ Treatment Completed' : '⚡ Active In Care'}
+              </span>
+            </div>
+
+            {/* Nikshay Reconciler Sync Status Banner */}
+            <div className="mt-4">
+              {isNikshayVerified ? (
+                <div className="bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-2xl p-4 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xl">🔒</span>
+                    <div>
+                      <h4 className="text-xs font-black text-emerald-950 uppercase tracking-wide">
+                        Nikshay Official Ledger Verified
+                      </h4>
+                      <p className="text-[11px] text-emerald-800 font-medium">
+                        Admin ne is record ko government Nikshay portal se safaltapoorvak reconcile kar liya hai.
+                      </p>
+                    </div>
+                  </div>
+
+                  {activeNikshayIndicators.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {activeNikshayIndicators.map((ind, i) => (
+                        <span key={i} className="bg-emerald-200/70 border border-emerald-300 text-emerald-900 text-[10px] font-black px-2.5 py-1 rounded-xl">
+                          {ind}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
+                  <div className="flex items-start gap-2.5">
+                    <span className="text-xl">⏳</span>
+                    <div>
+                      <h4 className="text-xs font-black text-amber-950 uppercase tracking-wide">
+                        Pending Nikshay Reconciler Sync
+                      </h4>
+                      <p className="text-[11px] text-amber-800 font-medium mt-0.5 leading-relaxed">
+                        Aapka data hamare MIS me 100% surakshit darj hai. DTO / State Admin batch upload me jab Nikshay se ledger match karenge, yahan green verified status update ho jayega.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Clinical Activity Timeline */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-2">
+              <span>📋</span>
+              <span>Clinical Journey Timeline ({result.journey?.length || 0} Events)</span>
+            </h4>
+
+            {(!result.journey || result.journey.length === 0) ? (
+              <p className="text-xs text-slate-400 italic py-3 text-center">Is patient ID ki koi activity history nahi mili.</p>
+            ) : (
+              <div className="relative pl-6 border-l-2 border-indigo-200 space-y-4 my-2">
+                {result.journey.map((step, idx) => {
+                  const isVerifiedStep = step.category === 'nikshay_verified';
+                  return (
+                    <div key={idx} className="relative group">
+                      {/* Step Dot */}
+                      <span className={`absolute -left-[31px] top-0.5 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs shadow-2xs ${
+                        isVerifiedStep 
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-800' 
+                          : 'bg-white border-indigo-500 text-indigo-700'
+                      }`}>
+                        {step.icon || '•'}
+                      </span>
+
+                      <div className={`p-3 rounded-2xl border transition-all ${
+                        isVerifiedStep 
+                          ? 'bg-emerald-50/70 border-emerald-200' 
+                          : 'bg-slate-50 border-slate-200/70 group-hover:bg-white'
+                      }`}>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`text-xs font-black ${isVerifiedStep ? 'text-emerald-950' : 'text-slate-800'}`}>
+                            {step.action}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-slate-500 bg-white px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs">
+                            {step.date}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-semibold mt-1">
+                          By: <strong className="text-slate-700">{step.fo_name}</strong> {step.district ? `(${step.district})` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- Field Officer Help, Guidelines & Visual System Workflow Guide ---
+const FoHelpGuide = () => {
+  const [activeStage, setActiveStage] = useState(1);
+
+  const stages = [
+    {
+      id: 1,
+      icon: "📝",
+      title: "1. Field Entry",
+      subtitle: "Daily Field Reporting",
+      desc: "Field Officer (FO) gaon, ward, ya clinic me jakar TB patient ki jankari, sample collection, FDC medicine, aur doctor visit darj karte hain.",
+      points: [
+        "Patient ID hamesha 9-digit (ya 8-digit legacy) darj karein.",
+        "Weight KG enter karte hi exact FDC medicine dose auto-calculate ho jati hai.",
+        "Visit kiye gaye doctor ya medical store ka naam add karein."
+      ]
+    },
+    {
+      id: 2,
+      icon: "🔄",
+      title: "2. Zero-Loss Sync",
+      subtitle: "Offline & Cloud Vault",
+      desc: "Agar remote village me internet nahi hai, toh app bina kisi rukawat ke kaam karta hai. Data phone ki internal memory (IndexedDB) me encrypted save hota hai.",
+      points: [
+        "Network na hone par data phone me 100% surakshit rehta hai.",
+        "Internet aate hi top bar ke 'Sync' button se ya automatic Firestore cloud par upload ho jata hai.",
+        "Phone restart hone par bhi draft ya offline report delete nahi hoti."
+      ]
+    },
+    {
+      id: 3,
+      icon: "🔒",
+      title: "3. Nikshay Reconciler",
+      subtitle: "Admin Cross-Verification",
+      desc: "State Coordinator aur District Admin daily reported IDs ko government ke official Nikshay Portal se cross-verify karte hain.",
+      points: [
+        "Daily Notification Verification Tray se 1-click me Excel format me IDs check hoti hain.",
+        "DBT Bank Account, HIV/DM Screening aur UDST test report ko Reconciler Ledger me verify kiya jata hai.",
+        "Nikshay portal par verification hote hi record permanent ledger me lock ho jata hai."
+      ]
+    },
+    {
+      id: 4,
+      icon: "🏁",
+      title: "4. Journey & DBT",
+      subtitle: "Treatment & Poshan Sahayata",
+      desc: "Patient ko pure treatment cycle me regular davaiyan milti hain, aur unka DBT Bank validation complete hone se niyamit Poshan Yojana sahayata milti hai.",
+      points: [
+        "FO apne 'Tracker' tab me jakar kisi bhi patient ka verified status dekh sakte hain.",
+        "Green verified shield dikhne ka matlab hai data Nikshay par sync ho chuka hai.",
+        "Outcome assign hone ke baad treatment safely complete mark ho jata hai."
+      ]
+    }
+  ];
+
+  return (
+    <div className="w-full max-w-lg mx-auto animate-fade-in pb-12 space-y-5">
+      {/* Header Banner */}
+      <div className="bg-gradient-to-r from-teal-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-950/20 border border-teal-700/50">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20">
+            📖
+          </div>
+          <div>
+            <h2 className="text-xl font-black tracking-tight">FO Help & App Guide</h2>
+            <p className="text-xs text-teal-200 font-medium">
+              MIS App karyapranali flowchart, NTEP FDC dawai niyam aur guidelines
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Visual Workflow Graph (Flowchart) */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+            <span>📊</span>
+            <span>App Kaise Kaam Karta Hai (System Flowchart)</span>
+          </h3>
+          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+            Tap stage to learn
+          </span>
+        </div>
+
+        {/* 4 Connected Graph Nodes */}
+        <div className="grid grid-cols-4 gap-1.5 relative pt-1">
+          {stages.map((stage, idx) => {
+            const isSelected = activeStage === stage.id;
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => setActiveStage(stage.id)}
+                className={`flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer relative z-10 ${
+                  isSelected 
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/25 scale-105' 
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                }`}
+              >
+                <span className="text-xl mb-1">{stage.icon}</span>
+                <span className="text-[10px] font-black text-center leading-tight">{stage.title.split('. ')[1]}</span>
+                <span className={`text-[8px] font-bold uppercase mt-1 px-1.5 py-0.2 rounded-full ${
+                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
+                }`}>
+                  Step {idx + 1}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Selected Stage Detail Card */}
+        {(() => {
+          const currentStage = stages.find(s => s.id === activeStage) || stages[0];
+          return (
+            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 animate-fade-in">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{currentStage.icon}</span>
+                <div>
+                  <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wider">
+                    {currentStage.title}: {currentStage.subtitle}
+                  </h4>
+                  <p className="text-[11px] text-indigo-800 font-medium">
+                    {currentStage.desc}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-indigo-100/80 space-y-1.5">
+                {currentStage.points.map((pt, i) => (
+                  <div key={i} className="flex items-start gap-2 text-[11px] text-slate-700">
+                    <span className="text-emerald-600 font-black mt-0.5">✓</span>
+                    <span>{pt}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* NTEP FDC Medicine Dosage Table */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-3">
+        <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+          <span>💊</span>
+          <span>NTEP FDC Dawai Dosage Table (Weight Bands)</span>
+        </h3>
+        <p className="text-[11px] text-slate-500 font-medium">
+          Wazan ke anusar niyamit daily dose aur blister pack supply:
+        </p>
+
+        {/* Adult Regimen Table */}
+        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+          <div className="bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 flex justify-between">
+            <span>Adult Regimen (≥ 18 Yrs)</span>
+            <span>IP: 4 FDC (HRZE) • CP: 3 FDC (HRE)</span>
+          </div>
+          <table className="w-full text-[11px] text-left">
+            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+              <tr>
+                <th className="p-2">Weight Band</th>
+                <th className="p-2">Daily Dose</th>
+                <th className="p-2">IP Supply (28d)</th>
+                <th className="p-2">CP Supply (56d)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
+              <tr>
+                <td className="p-2 font-mono">25–34 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">2 tabs</td>
+                <td className="p-2">4 strips</td>
+                <td className="p-2">8 strips</td>
+              </tr>
+              <tr className="bg-slate-50/50">
+                <td className="p-2 font-mono">35–49 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">3 tabs</td>
+                <td className="p-2">6 strips</td>
+                <td className="p-2">12 strips</td>
+              </tr>
+              <tr>
+                <td className="p-2 font-mono">50–64 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">4 tabs</td>
+                <td className="p-2">8 strips</td>
+                <td className="p-2">16 strips</td>
+              </tr>
+              <tr className="bg-slate-50/50">
+                <td className="p-2 font-mono">65–75 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">5 tabs</td>
+                <td className="p-2">10 strips</td>
+                <td className="p-2">20 strips</td>
+              </tr>
+              <tr>
+                <td className="p-2 font-mono">&gt; 75 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">6 tabs</td>
+                <td className="p-2">12 strips</td>
+                <td className="p-2">24 strips</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Pediatric Regimen Table */}
+        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs mt-3">
+          <div className="bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 flex justify-between">
+            <span>Pediatric Regimen (&lt; 18 Yrs)</span>
+            <span>IP: 3 FDC-P + E • CP: 2 FDC-P + E</span>
+          </div>
+          <table className="w-full text-[11px] text-left">
+            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+              <tr>
+                <th className="p-2">Weight Band</th>
+                <th className="p-2">Daily Tabs</th>
+                <th className="p-2">Strips (28 Days)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
+              <tr>
+                <td className="p-2 font-mono">4–7 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">1 tab HRZ + 1 tab E</td>
+                <td className="p-2">1 strip HRZ + 1 strip E</td>
+              </tr>
+              <tr className="bg-slate-50/50">
+                <td className="p-2 font-mono">8–11 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">2 tabs HRZ + 2 tabs E</td>
+                <td className="p-2">2 strips HRZ + 2 strips E</td>
+              </tr>
+              <tr>
+                <td className="p-2 font-mono">12–15 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">3 tabs HRZ + 3 tabs E</td>
+                <td className="p-2">3 strips HRZ + 3 strips E</td>
+              </tr>
+              <tr className="bg-slate-50/50">
+                <td className="p-2 font-mono">16–24 kg</td>
+                <td className="p-2 text-indigo-700 font-bold">4 tabs HRZ + 4 tabs E</td>
+                <td className="p-2">4 strips HRZ + 4 strips E</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 24-Hour ID Self-Correction Policy */}
+      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-2">
+        <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+          <span>⏱️</span>
+          <span>24-Hour ID Self-Correction Niyam</span>
+        </h3>
+        <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+          Agar report submit karne ke baad kisi Nikshay ID me koi typo ya galti ho gayi ho, toh aapko Admin se sampark karne ki zaroorat nahi hai:
+        </p>
+        <ul className="space-y-1 text-[11px] text-slate-700">
+          <li className="flex items-start gap-1.5">
+            <span className="text-emerald-600 font-black">1.</span>
+            <span>Niche diye gaye <strong>Profile</strong> tab par click karein.</span>
+          </li>
+          <li className="flex items-start gap-1.5">
+            <span className="text-emerald-600 font-black">2.</span>
+            <span>Jis din report bhari thi, us calendar date par tap karein.</span>
+          </li>
+          <li className="flex items-start gap-1.5">
+            <span className="text-emerald-600 font-black">3.</span>
+            <span>ID ke bagal me bane pencil ✏️ icon par click karke nayi ID save karein ya ❌ se delete karein.</span>
+          </li>
+          <li className="flex items-start gap-1.5">
+            <span className="text-amber-600 font-black">⚠️</span>
+            <span>24 ghante beet jane ke baad record lock ho jata hai, jiske baad sirf State Admin hi badlav kar sakte hain.</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  );
+};
+
 // --- Id Bucket ---
 const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk, allow8Digit = false }) => {
   const [currentId, setCurrentId] = useState("");
@@ -2697,21 +3211,7 @@ function App() {
                     </span>
                   </button>
                 )}
-                <button 
-                  onClick={() => setCurrentView(currentView === 'form' ? 'profile' : 'form')} 
-                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer ${
-                    currentView === 'form' && cascadeAlerts.length > 0
-                      ? 'bg-rose-100 text-rose-800 hover:bg-rose-200 border border-rose-200 shadow-2xs'
-                      : 'bg-indigo-50 border border-indigo-100 text-indigo-700 hover:bg-indigo-100'
-                  }`}
-                >
-                  <span>{currentView === 'form' ? 'Profile' : 'Form'}</span>
-                  {currentView === 'form' && cascadeAlerts.length > 0 && (
-                    <span className="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full">
-                      {cascadeAlerts.length}
-                    </span>
-                  )}
-                </button>
+
                 <button onClick={handleLogout} className="text-slate-400 hover:text-slate-800 text-sm font-bold transition-colors ml-1 cursor-pointer" title="Logout">
                   <svg width="18" height="18" className="sm:w-[20px] sm:h-[20px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                 </button>
@@ -2849,6 +3349,14 @@ function App() {
               onAutofill={handleAutofillPendingId}
               onRefreshCascade={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
             />
+          ) : currentView === 'tracker' ? (
+            <PatientJourneyTracker 
+              formData={formData}
+              showToast={showToast}
+              suggestedIds={formData.notification_ids || []}
+            />
+          ) : currentView === 'guide' ? (
+            <FoHelpGuide />
           ) : (
             /* Main Dashboard */
             <div className="animate-fade-in w-full max-w-md mx-auto overflow-x-hidden">
@@ -3119,8 +3627,8 @@ function App() {
               {/* Spacer for Sticky Footer */}
               <div className="h-36 w-full pointer-events-none"></div>
 
-              {/* Modern Sticky Bottom Action Bar */}
-              <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 p-3.5 sm:p-4 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-50">
+              {/* Modern Sticky Bottom Action Bar (Sits right above bottom nav dock) */}
+              <div className="fixed bottom-14 sm:bottom-16 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 p-3 sm:p-3.5 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-40">
                 <div className="max-w-md mx-auto space-y-2">
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 px-1">
                     <span className="flex items-center gap-1.5">
@@ -3166,7 +3674,7 @@ function App() {
                       setShowReviewModal(true);
                     }} 
                     disabled={isSubmitting}
-                    className={`w-full bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-xs sm:text-sm py-4 px-6 rounded-2xl shadow-md shadow-indigo-600/25 active:scale-[0.98] transition-all tracking-wider uppercase flex justify-center items-center gap-2 cursor-pointer ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className={`w-full bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-xs sm:text-sm py-3.5 px-6 rounded-2xl shadow-md shadow-indigo-600/25 active:scale-[0.98] transition-all tracking-wider uppercase flex justify-center items-center gap-2 cursor-pointer ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     {isSubmitting ? (
                       <>
@@ -3180,6 +3688,79 @@ function App() {
             </div>
         )}
       </main>
+
+      {/* ========================================================================= */}
+      {/* --- FO MOBILE BOTTOM NAVIGATION DOCK (FIXED DOCK) --- */}
+      {/* ========================================================================= */}
+      {isLoggedIn && (
+        <nav 
+          aria-label="Bottom Navigation" 
+          className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200/90 z-50 shadow-[0_-4px_25px_rgba(0,0,0,0.08)]"
+        >
+          <div className="max-w-md mx-auto grid grid-cols-4 px-2 py-1.5 gap-1">
+            {/* Tab 1: Form / Report */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('form')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+                currentView === 'form' 
+                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  : 'text-slate-400 hover:text-slate-600 font-bold'
+              }`}
+            >
+              <span className="text-lg">📝</span>
+              <span className="text-[10px] uppercase tracking-wider mt-0.5">Report</span>
+            </button>
+
+            {/* Tab 2: Tracker / Patient Journey */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('tracker')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+                currentView === 'tracker' 
+                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  : 'text-slate-400 hover:text-slate-600 font-bold'
+              }`}
+            >
+              <span className="text-lg">🔍</span>
+              <span className="text-[10px] uppercase tracking-wider mt-0.5">Tracker</span>
+            </button>
+
+            {/* Tab 3: Profile */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('profile')}
+              className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+                currentView === 'profile' 
+                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  : 'text-slate-400 hover:text-slate-600 font-bold'
+              }`}
+            >
+              <span className="text-lg">👤</span>
+              <span className="text-[10px] uppercase tracking-wider mt-0.5">Profile</span>
+              {cascadeAlerts.length > 0 && (
+                <span className="absolute top-1 right-2 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
+                  {cascadeAlerts.length}
+                </span>
+              )}
+            </button>
+
+            {/* Tab 4: Guide */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('guide')}
+              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+                currentView === 'guide' 
+                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  : 'text-slate-400 hover:text-slate-600 font-bold'
+              }`}
+            >
+              <span className="text-lg">📖</span>
+              <span className="text-[10px] uppercase tracking-wider mt-0.5">Guide</span>
+            </button>
+          </div>
+        </nav>
+      )}
 
         {/* Post-Submission Success & WhatsApp Summary Modal */}
       {showPostSubmitSuccess && submittedReportSummary && (

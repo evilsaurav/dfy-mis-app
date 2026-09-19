@@ -223,6 +223,7 @@ export default function AdminDashboard() {
 
   // --- Daily Notification Verification Tray State ---
   const [showNotifTrayModal, setShowNotifTrayModal] = useState(false);
+  const [notifTrayDistricts, setNotifTrayDistricts] = useState([]);
   const [notifTrayDistrict, setNotifTrayDistrict] = useState('All');
   const [notifTraySearch, setNotifTraySearch] = useState('');
   const [notifTrayCopiedNotice, setNotifTrayCopiedNotice] = useState(null);
@@ -435,10 +436,14 @@ export default function AdminDashboard() {
   // --- Daily Notification Verification Tray Computation & Copy Engine ---
   useEffect(() => {
     if (selectedDistrict && selectedDistrict !== 'All') {
+      setNotifTrayDistricts([selectedDistrict]);
       setNotifTrayDistrict(selectedDistrict);
     } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
       const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
-      if (allowed.length > 0) setNotifTrayDistrict(allowed[0]);
+      if (allowed.length > 0) {
+        setNotifTrayDistricts([allowed[0]]);
+        setNotifTrayDistrict(allowed[0]);
+      }
     }
   }, [selectedDistrict, currentUser]);
 
@@ -500,7 +505,12 @@ export default function AdminDashboard() {
         const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
         if (!allowed.includes(dist)) return false;
       }
-      if (notifTrayDistrict !== 'All' && dist !== notifTrayDistrict) return false;
+      if (notifTrayDistricts && notifTrayDistricts.length > 0 && !notifTrayDistricts.includes('All')) {
+        const canonicalSelected = notifTrayDistricts.map(canonicalizeDistrict);
+        if (!canonicalSelected.includes(dist)) return false;
+      } else if (notifTrayDistrict && notifTrayDistrict !== 'All' && dist !== notifTrayDistrict) {
+        return false;
+      }
       return true;
     });
 
@@ -562,7 +572,7 @@ export default function AdminDashboard() {
       latestDateFormatted,
       uniqueFOCount: uniqueFOs.length
     };
-  }, [rawRecords, notifTrayDistrict, currentUser]);
+  }, [rawRecords, notifTrayDistricts, notifTrayDistrict, currentUser]);
 
   const [showJourneyModal, setShowJourneyModal] = useState(false);
   const [journeySearchId, setJourneySearchId] = useState('');
@@ -2336,6 +2346,25 @@ Keep this file safe in your Google Drive or personal diary.
 
   const handleClearMedDistricts = () => {
     setSelectedMedDistricts([]);
+  };
+
+  const handleToggleNotifDistrict = (dist) => {
+    setNotifTrayDistricts(prev => {
+      const clean = prev.filter(d => d !== 'All');
+      if (clean.includes(dist)) {
+        return clean.filter(d => d !== dist);
+      } else {
+        return [...clean, dist];
+      }
+    });
+  };
+
+  const handleSelectAllNotifDistricts = () => {
+    setNotifTrayDistricts([...availableKpiDistricts]);
+  };
+
+  const handleClearNotifDistricts = () => {
+    setNotifTrayDistricts([]);
   };
 
   const handleDownloadMedicineReport = () => {
@@ -10180,9 +10209,13 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-600">Selected District</div>
-                <div className="text-xl font-black text-slate-800 mt-0.5 truncate">
-                  {notifTrayDistrict === 'All' ? 'All Districts' : notifTrayDistrict}
+                <div className="text-[10px] font-black uppercase tracking-wider text-slate-600">Selected District(s)</div>
+                <div className="text-xl font-black text-slate-800 mt-0.5 truncate" title={notifTrayDistricts.length === 0 || notifTrayDistricts.includes('All') ? 'All Districts' : notifTrayDistricts.join(', ')}>
+                  {notifTrayDistricts.length === 0 || notifTrayDistricts.includes('All') 
+                    ? 'All Districts' 
+                    : notifTrayDistricts.length === 1 
+                      ? notifTrayDistricts[0] 
+                      : `${notifTrayDistricts.length} Districts`}
                 </div>
                 <div className="text-[10px] text-slate-500 font-medium mt-0.5">
                   Filter scope active
@@ -10326,40 +10359,97 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Filter Controls & Live Search Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl">
-              <div className="flex items-center gap-2 flex-1">
-                <span className="text-slate-400 text-xs">🔍</span>
-                <input
-                  type="text"
-                  value={notifTraySearch}
-                  onChange={(e) => setNotifTraySearch(e.target.value)}
-                  placeholder="Search by Episode ID or Officer Name..."
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500"
-                />
-                {notifTraySearch && (
+            {/* Multi-District Selection Deck for Notification Tray */}
+            <div className="bg-slate-50 border border-slate-200/80 p-3.5 sm:p-4 rounded-2xl space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-slate-800">
+                    🎯 Filter by District(s)
+                  </span>
+                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                    notifTrayDistricts.length > 0 && !notifTrayDistricts.includes('All') 
+                      ? 'bg-amber-600 text-white' 
+                      : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {notifTrayDistricts.length === 0 || notifTrayDistricts.includes('All')
+                      ? 'All Districts'
+                      : `${notifTrayDistricts.length} of ${availableKpiDistricts.length} Selected`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    onClick={() => setNotifTraySearch('')}
-                    className="text-xs text-slate-400 hover:text-slate-600 px-1 font-bold"
+                    onClick={handleClearNotifDistricts}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-colors cursor-pointer ${
+                      notifTrayDistricts.length === 0 || notifTrayDistricts.includes('All')
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                    }`}
                   >
-                    Clear
+                    All Districts
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={handleSelectAllNotifDistricts}
+                    className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-amber-100 hover:bg-amber-200 text-amber-900 transition-colors cursor-pointer"
+                  >
+                    Select All
+                  </button>
+                  {notifTrayDistricts.length > 0 && !notifTrayDistricts.includes('All') && (
+                    <button
+                      type="button"
+                      onClick={handleClearNotifDistricts}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-rose-100 hover:bg-rose-200 text-rose-800 transition-colors cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-500 whitespace-nowrap">District:</span>
-                <select
-                  value={notifTrayDistrict}
-                  onChange={(e) => setNotifTrayDistrict(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-500"
-                >
-                  {districts.map(d => (
-                    <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>
-                  ))}
-                </select>
+              {/* District Chips */}
+              <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto custom-scrollbar p-0.5">
+                {availableKpiDistricts.map(dist => {
+                  const isSelected = notifTrayDistricts.includes(dist);
+                  return (
+                    <button
+                      key={dist}
+                      type="button"
+                      onClick={() => handleToggleNotifDistrict(dist)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border active:scale-95 cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-600 shadow-xs'
+                          : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
+                      }`}
+                    >
+                      <span>{isSelected ? '✓' : '+'}</span>
+                      <span>{dist}</span>
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+
+            {/* Live Search Bar */}
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/80 p-2.5 rounded-2xl">
+              <span className="text-slate-400 text-xs ml-1">🔍</span>
+              <input
+                type="text"
+                value={notifTraySearch}
+                onChange={(e) => setNotifTraySearch(e.target.value)}
+                placeholder="Search by Episode ID or Officer Name in selected districts..."
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              {notifTraySearch && (
+                <button
+                  type="button"
+                  onClick={() => setNotifTraySearch('')}
+                  className="text-xs text-slate-400 hover:text-slate-600 px-2 font-bold"
+                >
+                  Clear
+                </button>
+              )}
             </div>
 
             {/* Live Data Preview Table */}
@@ -10431,7 +10521,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     {notifTrayData.allItems.length === 0 && (
                       <tr>
                         <td colSpan="7" className="p-8 text-center text-slate-400 italic">
-                          No notification IDs reported for {notifTrayDistrict === 'All' ? 'selected month' : notifTrayDistrict}.
+                          No notification IDs reported for {notifTrayDistricts.length === 0 || notifTrayDistricts.includes('All') ? 'selected month' : notifTrayDistricts.join(', ')}.
                         </td>
                       </tr>
                     )}

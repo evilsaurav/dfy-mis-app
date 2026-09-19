@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.6.0";
-export const LAST_UPDATED_DATE = "17 Sep 2026";
+export const APP_VERSION = "2.7.0";
+export const LAST_UPDATED_DATE = "19 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.7.0",
+    date: "19 Sep 2026",
+    title: "Daily Notification Multi-District Tray Filter, FO Bottom Nav Dock, Patient Journey Tracker & Visual Help Guide",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🎯 Multi-District Notification Tray Filter: Flexible district selection in Modal 0A supporting All Districts, single district, or multi-district custom chip decks with live instant search.",
+      "📱 FO Modern Bottom Nav Dock: Redesigned FO mobile interface with a fixed 4-tab bottom navigation dock (Report, Tracker, Profile, Guide) eliminating top header clutter.",
+      "🔍 Live Patient Journey & Nikshay Reconciler Sync: FO lookup for 8/9-digit Nikshay IDs showing verified Reconciler ledger status (DBT, HIV/DM, UDST, Contact Tracing) and visit timeline.",
+      "📖 Interactive Visual Help & Guide: 4-stage system flowchart graph explaining the end-to-end DFY TB MIS architecture, alongside NTEP Adult & Pediatric FDC dosage charts and 24-hr self-correction rules.",
+      "🛡️ Sub-Admin District Guard & Zero-Overlap UI: Strict RBAC isolation ensuring Sub-Admins only filter allowed districts, and sticky submit bar repositioned above bottom nav dock."
+    ],
+    details: [
+      {
+        tag: "Admin Dashboard",
+        color: "amber",
+        text: "Multi-District Verification Tray: Added chip-based multi-district selection in Modal 0A with Select All and Clear controls, allowing State Admins and Sub-Admins to verify notification IDs across multiple districts in one view."
+      },
+      {
+        tag: "FO Navigation",
+        color: "indigo",
+        text: "Modern Bottom Dock: Streamlined FO mobile experience by replacing top bar switches with a fixed bottom navigation dock providing seamless 1-tap switching between Reporting, Tracking, Profile, and Guide."
+      },
+      {
+        tag: "Nikshay Integration",
+        color: "emerald",
+        text: "Reconciler Verification Status: Field Officers can now immediately verify whether reported patient data is synced and approved on Nikshay, reviewing DBT bank linkages and comorbidity tests in real-time."
+      },
+      {
+        tag: "Guidance & Reference",
+        color: "teal",
+        text: "System Workflow Graph: Interactive 4-step flowchart showing how field data moves from Field Entry to Zero-Loss Sync, Nikshay Reconciler, and Patient Journey, accompanied by NTEP weight-band dosage reference tables."
+      }
+    ]
+  },
   {
     version: "v2.6.0",
     date: "17 Sep 2026",
     title: "FO Mobile UI Enhancement Suite, Live Session HUD & IST Timezone Synchronization",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Release",
+    badgeColor: "slate",
     highlights: [
       "📊 Live Session Mini-HUD: Sticky floating session tally displaying real-time ID count, TB notifications, FDC medicine, and doctor visits with bottom action bar summary.",
       "⚖️ FDC Quick Weight Chips: 1-Tap weight selection chips for adults and pediatrics with live visual Phase badges (IP/CP) and blister foil breakdown.",
