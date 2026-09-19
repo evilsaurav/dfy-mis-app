@@ -25,3 +25,5 @@ Thumbs.db
 # Project Specific
 field_report_export.xlsx
 cache/
+.superpowers/
+scratch/
