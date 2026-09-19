@@ -34,21 +34,24 @@ const Toast = ({ message, type, onClose }) => {
   );
 };
 
-// --- Modern Accordion Container ---
-const Accordion = ({ title, children, defaultOpen = false }) => {
+// --- Modern Section Accordion Container (Default Open for Seamless Single-List Flow) ---
+const Accordion = ({ title, children, defaultOpen = true }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   return (
-    <div className="mb-4 bg-white/95 backdrop-blur-md rounded-3xl shadow-xs border border-slate-200/80 overflow-hidden transition-all hover:shadow-md hover:border-slate-300">
+    <div className="mb-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/90 overflow-hidden transition-all hover:border-teal-400/80">
       <button 
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full bg-white hover:bg-slate-50/70 px-5 py-4 flex justify-between items-center outline-none transition-all cursor-pointer select-none active:bg-slate-100/50"
+        className="w-full bg-slate-50/70 hover:bg-slate-100/70 px-4 py-3 sm:px-5 sm:py-3.5 flex justify-between items-center outline-none transition-all cursor-pointer select-none active:bg-slate-100/50 border-b border-slate-200/70"
       >
-        <span className="text-xs sm:text-sm font-black text-slate-800 tracking-wide uppercase">{title}</span>
-        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${isOpen ? 'bg-indigo-50 text-indigo-600 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
+        <span className="text-xs sm:text-sm font-black text-slate-900 tracking-wide uppercase flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-teal-600"></span>
+          <span>{title}</span>
+        </span>
+        <div className={`w-7 h-7 rounded-xl flex items-center justify-center transition-all ${isOpen ? 'bg-teal-50 text-teal-700 rotate-180' : 'bg-slate-100 text-slate-400'}`}>
           <svg 
-            width="16" 
-            height="16"
+            width="15" 
+            height="15"
             fill="none" 
             viewBox="0 0 24 24" 
             stroke="currentColor"
@@ -58,8 +61,8 @@ const Accordion = ({ title, children, defaultOpen = false }) => {
         </div>
       </button>
       {isOpen && (
-        <div className="p-4 sm:p-5 bg-slate-50/40 border-t border-slate-100/90 animate-fade-in">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-3 sm:p-5 bg-slate-50/30 border-t border-slate-100 animate-fade-in">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 sm:gap-4">
             {children}
           </div>
         </div>
@@ -1731,24 +1734,30 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
   };
 
   return (
-    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all group">
-      <label className="block text-xs font-black text-slate-700 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-indigo-600 transition-colors">
+    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs hover:border-teal-300 transition-all group">
+      <label className="block text-xs font-black text-slate-800 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-teal-700 transition-colors">
         <span className="flex items-center gap-1.5">
           <span>{title}</span>
           {isCurrentValid && (
-            <span className="text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
+            <span className="text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
               ✓ Ready
             </span>
           )}
         </span>
-        <span className="bg-indigo-50 border border-indigo-100/90 text-indigo-700 px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-black tabular-num">{safeIds.length}</span>
+        <span className={`px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-black tabular-num transition-colors ${
+          safeIds.length > 0 
+            ? 'bg-teal-50 border border-teal-200 text-teal-800' 
+            : 'bg-slate-100 border border-slate-200 text-slate-500'
+        }`}>
+          {safeIds.length} {safeIds.length === 1 ? 'ID' : 'IDs'}
+        </span>
       </label>
 
       {/* Smart Notification ID Suggestion Chips (Only Today's Notified IDs) */}
       {suggestedIds && suggestedIds.length > 0 && (
-        <div className="mb-3 bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
+        <div className="mb-3 bg-teal-50/40 p-2.5 rounded-xl border border-teal-100/90 animate-fade-in">
           <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
+            <span className="text-[10px] font-black uppercase tracking-wider text-teal-900 flex items-center gap-1">
               <span>💡</span> Today's Notified IDs ({suggestedIds.length}):
             </span>
             {suggestedIds.some(sid => !safeIds.includes(sid)) && onAddBulk && (
@@ -1759,7 +1768,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
                   onAddBulk(missing);
                   if (showToast) showToast(`Added ${missing.length} Notification IDs!`, "success");
                 }}
-                className="text-[9px] font-bold text-indigo-700 bg-white hover:bg-indigo-100 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors active:scale-95 shadow-sm cursor-pointer"
+                className="text-[9px] font-bold text-teal-800 bg-white hover:bg-teal-100 px-2 py-0.5 rounded-md border border-teal-200 transition-colors active:scale-95 shadow-2xs cursor-pointer"
               >
                 + Add All ({suggestedIds.filter(sid => !safeIds.includes(sid)).length})
               </button>
@@ -1779,8 +1788,8 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
                   }}
                   className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
                     isAdded 
-                      ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
-                      : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
+                      ? 'bg-emerald-100 border-emerald-300 text-emerald-900 opacity-80 cursor-default' 
+                      : 'bg-white hover:bg-teal-700 hover:text-white border-teal-200 text-teal-800 shadow-2xs'
                   }`}
                   title={isAdded ? "Already Added" : `Tap to add ID #${sid}`}
                 >
@@ -1793,6 +1802,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
         </div>
       )}
 
+      {/* 48px Thumb Hitbox Input & Add Button */}
       <div className="flex gap-2">
         <input 
           type="text"
@@ -1801,30 +1811,37 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={allow8Digit ? "Enter or paste 8 or 9-digit ID" : "Enter or paste 9-digit ID"}
-          className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
+          className="flex-1 w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
         <button 
+          type="button"
           onClick={handleAdd} 
-          className="bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-indigo-600/20 hover:from-indigo-700 hover:to-indigo-800 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
+          className="h-12 min-w-[76px] bg-teal-700 hover:bg-teal-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
         >
           ADD
         </button>
       </div>
+
+      {/* Chip-Tags with Instant Removal */}
       {safeIds.length > 0 && (
-        <ul className="mt-3.5 space-y-2 max-h-44 overflow-y-auto pr-1 custom-scrollbar">
+        <div className="mt-3 flex flex-wrap gap-2 max-h-48 overflow-y-auto pr-1 custom-scrollbar">
           {safeIds.map((id, index) => (
-            <li key={index} className="flex justify-between items-center bg-slate-50/90 border border-slate-200/80 px-3.5 py-2 rounded-xl shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
-              <span className="font-mono font-bold text-slate-700 tracking-wider text-sm">{id}</span>
+            <span 
+              key={index} 
+              className="inline-flex items-center gap-2 bg-teal-50 text-teal-900 border border-teal-200/90 px-3 py-1.5 rounded-xl text-xs font-mono font-bold shadow-2xs hover:border-teal-300 transition-all"
+            >
+              <span>{id}</span>
               <button 
+                type="button"
                 onClick={() => onRemove(index)} 
-                className="text-slate-400 hover:text-white hover:bg-rose-500 bg-slate-100 h-7 w-7 rounded-lg flex items-center justify-center font-black transition-all shadow-2xs cursor-pointer"
-                title="Remove"
+                className="text-teal-700 hover:text-white hover:bg-rose-500 bg-teal-100/90 h-5 w-5 rounded-md flex items-center justify-center font-black text-xs transition-all shadow-2xs cursor-pointer active:scale-90"
+                title="Remove ID"
               >
                 &times;
               </button>
-            </li>
+            </span>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -1956,7 +1973,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
 
       {/* Nikshay ID Input */}
       <div>
-        <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">Nikshay ID (8 or 9 Digits)</label>
+        <label className="block text-[10px] font-black uppercase text-slate-700 mb-1">Nikshay ID (8 or 9 Digits)</label>
         <input 
           type="text"
           inputMode="numeric"
@@ -1964,25 +1981,25 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Enter 8 or 9-digit Nikshay ID"
-          className="w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
+          className="w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white block px-3.5 py-2.5 outline-none transition-all placeholder:text-slate-400 font-mono shadow-2xs"
         />
       </div>
 
       {/* Inline Smart Card Form */}
-      <div className="bg-slate-50/90 p-3 sm:p-4 rounded-xl border border-indigo-100 space-y-3 animate-fade-in">
+      <div className="bg-slate-50/90 p-3 sm:p-4 rounded-xl border border-teal-100 space-y-3 animate-fade-in">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
           <div>
-            <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">Patient Name (Optional)</label>
+            <label className="block text-[10px] font-black uppercase text-slate-700 mb-1">Patient Name (Optional)</label>
             <input 
               type="text"
               value={patientName}
               onChange={(e) => setPatientName(e.target.value)}
               placeholder="e.g. Ramesh Kumar"
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+              className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-semibold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 outline-none transition-all"
             />
           </div>
           <div>
-            <label className="block text-[10px] font-black uppercase text-slate-600 mb-1">Weight in KG (Wazan)</label>
+            <label className="block text-[10px] font-black uppercase text-slate-700 mb-1">Weight in KG (Wazan)</label>
             <input 
               type="number"
               step="0.5"
@@ -1991,7 +2008,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
               value={weightKg}
               onChange={(e) => setWeightKg(e.target.value)}
               placeholder="e.g. 45"
-              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none transition-all"
+              className="w-full h-10 bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 outline-none transition-all"
             />
           </div>
         </div>
@@ -1999,19 +2016,19 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           {/* Adult vs Pediatric */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-black uppercase text-slate-500">Category:</span>
+            <span className="text-[10px] font-black uppercase text-slate-600">Category:</span>
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setPatientType('adult')}
-                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'adult' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'adult' ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-700 hover:text-teal-700'}`}
               >
                 Adult (≥ 18)
               </button>
               <button
                 type="button"
                 onClick={() => setPatientType('pediatric')}
-                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'pediatric' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-indigo-600'}`}
+                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${patientType === 'pediatric' ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-700 hover:text-teal-700'}`}
               >
                 Pediatric (&lt; 18)
               </button>
@@ -2020,12 +2037,12 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
 
           {/* IP vs CP Phase */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-black uppercase text-slate-500">Phase:</span>
+            <span className="text-[10px] font-black uppercase text-slate-600">Phase:</span>
             <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-2xs">
               <button
                 type="button"
                 onClick={() => setPhase('IP')}
-                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'IP' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-600 hover:text-amber-600'}`}
+                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'IP' ? 'bg-amber-600 text-white shadow-xs' : 'text-slate-700 hover:text-amber-600'}`}
                 title="Intensive Phase (4 FDC / HRZE)"
               >
                 IP (Intensive)
@@ -2033,7 +2050,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
               <button
                 type="button"
                 onClick={() => setPhase('CP')}
-                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'CP' ? 'bg-teal-600 text-white shadow-xs' : 'text-slate-600 hover:text-teal-600'}`}
+                className={`px-2.5 py-1 text-[11px] font-black rounded-md transition-all cursor-pointer ${phase === 'CP' ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-700 hover:text-teal-700'}`}
                 title="Continuation Phase (3 FDC / HRE)"
               >
                 CP (Continuation)
@@ -2045,7 +2062,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         {/* Quick Weight Selection Chips */}
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1">
+            <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 flex items-center gap-1">
               <span>⚖️</span> Quick Weight Chips:
             </span>
             {weightKg && (
@@ -2081,8 +2098,8 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                   onClick={() => setWeightKg(chip.val)}
                   className={`text-[10px] font-bold px-2 py-1 rounded-lg border transition-all cursor-pointer ${
                     isSelected 
-                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs scale-105' 
-                      : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/60'
+                      ? 'bg-teal-700 text-white border-teal-700 shadow-xs scale-105' 
+                      : 'bg-white text-slate-800 border-slate-300 hover:border-teal-400 hover:bg-teal-50/60'
                   }`}
                   title={`${chip.label} (${chip.band})`}
                 >
@@ -2164,7 +2181,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         <button
           type="button"
           onClick={handleAddSmart}
-          className="w-full bg-gradient-to-r from-emerald-600 to-teal-700 text-white py-2.5 rounded-xl font-black shadow-sm hover:from-emerald-700 hover:to-teal-800 active:scale-98 transition-all text-xs tracking-wider uppercase cursor-pointer"
+          className="w-full h-12 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white rounded-xl font-black shadow-md active:scale-98 transition-all text-xs tracking-wider uppercase cursor-pointer flex items-center justify-center"
         >
           + Add to FDC Distribution
         </button>
@@ -3846,11 +3863,12 @@ function App() {
                         value={docName} 
                         onChange={(e) => setDocName(e.target.value)} 
                         placeholder="Doctor ya Medical Store ka Naam Likhein" 
-                        className="flex-1 w-full bg-slate-50/90 border border-slate-200/90 text-slate-800 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs" 
+                        className="flex-1 w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs" 
                       />
                       <button 
+                        type="button"
                         onClick={addDoctor} 
-                        className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-4 py-2.5 rounded-xl font-black shadow-xs shadow-emerald-600/20 hover:from-emerald-700 hover:to-teal-700 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 cursor-pointer"
+                        className="h-12 min-w-[76px] bg-teal-700 hover:bg-teal-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
                       >
                         ADD
                       </button>
@@ -3858,12 +3876,13 @@ function App() {
                     {formData.visited_names.length > 0 && (
                       <ul className="mt-3.5 space-y-2">
                         {formData.visited_names.map((name, i) => (
-                          <li key={i} className="flex justify-between items-center bg-slate-50/90 border border-slate-200/80 px-4 py-2.5 rounded-xl text-xs text-slate-700 font-bold shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
+                          <li key={i} className="flex justify-between items-center bg-slate-50/90 border border-slate-200/80 px-4 py-2.5 rounded-xl text-xs text-slate-800 font-bold shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
                             <span className="flex items-center gap-2.5">
                               <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
                               <span>{name}</span>
                             </span>
                             <button 
+                              type="button"
                               onClick={() => {
                                 setFormData({ ...formData, visited_names: formData.visited_names.filter((_, idx) => idx !== i) });
                               }} 
@@ -3886,19 +3905,19 @@ function App() {
               {/* Modern Sticky Bottom Action Bar (Sits right above bottom nav dock) */}
               <div className="fixed bottom-14 sm:bottom-16 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 p-3 sm:p-3.5 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-40">
                 <div className="max-w-md mx-auto space-y-2">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-600 px-1">
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-700 px-1">
                     <span className="flex items-center gap-1.5">
                       <span className={`w-2 h-2 rounded-full ${liveTotalIds > 0 ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`}></span>
-                      <span>Total IDs: <strong className="text-slate-800">{liveTotalIds}</strong></span>
+                      <span>Total IDs: <strong className="text-slate-900 tabular-num">{liveTotalIds}</strong></span>
                     </span>
                     <div className="flex items-center gap-1.5 text-[10px]">
                       {liveFdcCount > 0 && (
-                        <span className="bg-teal-50 text-teal-800 border border-teal-200 px-1.5 py-0.5 rounded-md font-black">
+                        <span className="bg-teal-50 text-teal-800 border border-teal-200 px-1.5 py-0.5 rounded-md font-black tabular-num">
                           💊 {liveFdcCount} FDC
                         </span>
                       )}
                       {liveVisitsCount > 0 && (
-                        <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md font-black">
+                        <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md font-black tabular-num">
                           🏥 {liveVisitsCount} Visits
                         </span>
                       )}
@@ -3906,6 +3925,7 @@ function App() {
                   </div>
 
                   <button 
+                    type="button"
                     onClick={() => {
                       if(!formData.working_place || !formData.fo_name || !formData.pin) {
                         showToast("Pehle Zila, Naam aur PIN bharo!", "error");
@@ -3930,7 +3950,7 @@ function App() {
                       setShowReviewModal(true);
                     }} 
                     disabled={isSubmitting}
-                    className={`w-full bg-gradient-to-r from-indigo-600 via-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800 text-white font-black text-xs sm:text-sm py-3.5 px-6 rounded-2xl shadow-md shadow-indigo-600/25 active:scale-[0.98] transition-all tracking-wider uppercase flex justify-center items-center gap-2 cursor-pointer ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    className={`w-full min-h-[52px] bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-black text-xs sm:text-sm py-3 px-6 rounded-2xl shadow-lg shadow-teal-800/25 active:scale-[0.98] transition-all tracking-wider uppercase flex justify-center items-center gap-2 cursor-pointer ${isSubmitting ? 'opacity-70 cursor-not-allowed' : ''}`}
                   >
                     {isSubmitting ? (
                       <>
@@ -3953,14 +3973,14 @@ function App() {
           aria-label="Bottom Navigation" 
           className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200/90 z-50 shadow-[0_-4px_25px_rgba(0,0,0,0.08)]"
         >
-          <div className="max-w-md mx-auto grid grid-cols-5 px-1 sm:px-2 py-1.5 gap-0.5 sm:gap-1">
+          <div className="max-w-md mx-auto grid grid-cols-5 px-1 sm:px-2 py-1 gap-0.5 sm:gap-1">
             {/* Tab 1: Form / Report */}
             <button
               type="button"
               onClick={() => setCurrentView('form')}
-              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 currentView === 'form' 
-                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
@@ -3972,16 +3992,16 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('pending')}
-              className={`relative flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 relative flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 currentView === 'pending' 
-                  ? 'bg-rose-50 text-rose-700 font-black shadow-xs scale-102' 
+                  ? 'bg-rose-50 text-rose-800 border border-rose-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
               <span className="text-base sm:text-lg">⚡</span>
               <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Pending</span>
               {cascadeAlerts.length > 0 && (
-                <span className="absolute top-0.5 right-1 sm:right-2 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                <span className="absolute top-0.5 right-1 sm:right-2 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-xs animate-pulse tabular-num">
                   {cascadeAlerts.length > 99 ? '99+' : cascadeAlerts.length}
                 </span>
               )}
@@ -3991,9 +4011,9 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('tracker')}
-              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 currentView === 'tracker' 
-                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
@@ -4005,9 +4025,9 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('profile')}
-              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 currentView === 'profile' 
-                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
@@ -4019,9 +4039,9 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('guide')}
-              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
                 currentView === 'guide' 
-                  ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
+                  ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
