@@ -1,16 +1,47 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.2";
-export const LAST_UPDATED_DATE = "19 Sep 2026";
+export const APP_VERSION = "2.7.3";
+export const LAST_UPDATED_DATE = "20 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.7.3",
+    date: "20 Sep 2026",
+    title: "Executive Medical UI Design System Upgrade: Sticky Command Bar, 4-Card KPI Strip, Category Bands & FO Ergonomics",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🎨 Medical Teal Design Tokens: Transformed color palette to DFY Medical Teal & Deep Emerald (#0f766e, #0d9488, #059669) for high visual clarity and professional health dashboard ergonomics.",
+      "🧭 Top Sticky Command Bar: Replaced old top controls with a unified, sticky command bar featuring brand insignia, quick pill selectors, and full 1720px wide-screen real estate.",
+      "📊 Executive 4-Card KPI Strip: Streamlined overview metrics into 4 balanced, executive summary cards (TB Notifications with target pacing, UDST Testing with yield bar, Clinical Cascade with cohort breakdown, and Field Travel with active staff pills).",
+      "📑 Master Table Category Header Bands: Introduced 4 distinct color-coded header bands (Target & Volume, Core Clinical Cascade, Visits & Logistics, Special Indicators), sticky pinned district/officer column with shadow elevation, and dimmed zero-dashes (—) for noise-free data analysis.",
+      "📱 Field Officer Mobile Form Ergonomics: Enhanced mobile form with 48px touch targets, outdoor sunlight contrast borders, flex-wrap chip tags with 1-tap delete, and high-contrast sticky submit button."
+    ],
+    details: [
+      {
+        tag: "Design System",
+        color: "teal",
+        text: "Introduced clinical design tokens, badge utilities, and command bar surfaces across both Admin Dashboard and FO Mobile Reporting."
+      },
+      {
+        tag: "Admin Dashboard",
+        color: "indigo",
+        text: "Sticky top navigation, balanced 4-card KPI strip with tabular typography, and categorized master table with pinned column and zebra striping."
+      },
+      {
+        tag: "Mobile Ergonomics",
+        color: "emerald",
+        text: "Preserved continuous single-list mobile flow with default-expanded sections, large thumb-friendly buckets, and 1-tap tag deletion."
+      }
+    ]
+  },
   {
     version: "v2.7.2",
     date: "19 Sep 2026",
     title: "Detailed Master Table Target Column, 1-Click Back Navigation, Clinical Cohort Switch & KPI Performance Sheet Breakdown",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "🎯 Master Table Target Column: Replaced the KM column in Detailed Master Table with Target (District aggregated targets in Statewide view, and individual Field Officer targets in drill-down view) with full sort support.",
       "🔙 1-Click Back to All Districts Navigation: Added an immediate '← Back to All Districts' button in the Detailed Master Table header so managers can return to statewide view with a single tap.",
