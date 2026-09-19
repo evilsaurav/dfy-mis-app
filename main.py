@@ -1377,9 +1377,73 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                                 c_cell.alignment = Alignment(horizontal="center", vertical="center")
                                 staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
 
-    # 5. Populate Tab 1: 'Performance sheet'
+    # 5. Populate Tab 1: 'Performance sheet' with Cohort Breakdown
     if "Performance sheet" in wb.sheetnames:
         ws_perf = wb["Performance sheet"]
+        ref_h_cell = ws_perf.cell(row=4, column=6)
+        ref_data_cell = ws_perf.cell(row=5, column=6)
+
+        # Pre-calculate staff cohort breakdown for key cascade indicators
+        current_month_notif_ids = set()
+        for rep in reports:
+            for nid in (rep.get("notification_ids") or []):
+                nid_clean = str(nid).strip()
+                if nid_clean:
+                    current_month_notif_ids.add(nid_clean)
+
+        staff_cohort_counts = {
+            s_idx: { 'hiv_cur': 0, 'hiv_prev': 0, 'udst_cur': 0, 'udst_prev': 0, 'con_cur': 0, 'con_prev': 0 }
+            for s_idx in range(num_staff)
+        }
+
+        for rep in reports:
+            fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+            if fo_norm in staff_name_to_idx:
+                s_idx = staff_name_to_idx[fo_norm]
+                for pid in (rep.get("hiv_dm_ids") or []):
+                    pid_clean = str(pid).strip()
+                    if pid_clean:
+                        if pid_clean in current_month_notif_ids:
+                            staff_cohort_counts[s_idx]['hiv_cur'] += 1
+                        else:
+                            staff_cohort_counts[s_idx]['hiv_prev'] += 1
+                for pid in (rep.get("sample_tested_ids") or []):
+                    pid_clean = str(pid).strip()
+                    if pid_clean:
+                        if pid_clean in current_month_notif_ids:
+                            staff_cohort_counts[s_idx]['udst_cur'] += 1
+                        else:
+                            staff_cohort_counts[s_idx]['udst_prev'] += 1
+                for pid in (rep.get("contact_tracing_ids") or []):
+                    pid_clean = str(pid).strip()
+                    if pid_clean:
+                        if pid_clean in current_month_notif_ids:
+                            staff_cohort_counts[s_idx]['con_cur'] += 1
+                        else:
+                            staff_cohort_counts[s_idx]['con_prev'] += 1
+
+        cohort_col_defs = [
+            (19, 'HIV\n(Cur Month)', 'hiv_cur'),
+            (20, 'HIV\n(Prev Backlog)', 'hiv_prev'),
+            (21, 'UDST\n(Cur Month)', 'udst_cur'),
+            (22, 'UDST\n(Prev Backlog)', 'udst_prev'),
+            (23, 'Contact Tr\n(Cur Month)', 'con_cur'),
+            (24, 'Contact Tr\n(Prev Backlog)', 'con_prev')
+        ]
+
+        # Populate headers in Row 4
+        for col_idx, header_title, _ in cohort_col_defs:
+            c = ws_perf.cell(row=4, column=col_idx, value=header_title)
+            if ref_h_cell.font:
+                c.font = Font(name=ref_h_cell.font.name or "Calibri", size=ref_h_cell.font.size or 10, bold=True, color=getattr(ref_h_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
+            if ref_h_cell.fill:
+                fill_color = getattr(ref_h_cell.fill.start_color, 'rgb', '00374151') or '00374151'
+                c.fill = PatternFill(fill_type="solid", start_color=fill_color, end_color=fill_color)
+            c.border = EXCEL_THIN_BORDER
+            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            col_letter = get_column_letter(col_idx)
+            ws_perf.column_dimensions[col_letter].width = 14
+
         for r_idx in range(5, 5 + num_staff):
             cell_name = ws_perf.cell(row=r_idx, column=1).value
             if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
@@ -1404,6 +1468,36 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                     for k_idx in range(1, num_kpis):
                         kpi_val = staff_counts[s_idx][k_idx]
                         ws_perf.cell(row=r_idx, column=5 + k_idx).value = kpi_val
+
+                    # Cols 19 to 24: Cohort breakdown
+                    for col_idx, _, field_key in cohort_col_defs:
+                        c_val = staff_cohort_counts[s_idx].get(field_key, 0)
+                        cc = ws_perf.cell(row=r_idx, column=col_idx, value=c_val)
+                        if ref_data_cell.font:
+                            cc.font = Font(name=ref_data_cell.font.name or "Calibri", size=ref_data_cell.font.size or 10, bold=False)
+                        cc.alignment = Alignment(horizontal="center", vertical="center")
+                        cc.border = EXCEL_THIN_BORDER
+
+        # Locate GRAND TOTAL row and set formulas
+        gt_row = None
+        for r in range(5, ws_perf.max_row + 1):
+            val = ws_perf.cell(row=r, column=1).value
+            if val and "GRAND TOTAL" in str(val).upper():
+                gt_row = r
+                break
+
+        if gt_row:
+            ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
+            for col_idx, _, _ in cohort_col_defs:
+                col_ltr = get_column_letter(col_idx)
+                gc = ws_perf.cell(row=gt_row, column=col_idx, value=f"=SUM({col_ltr}5:{col_ltr}{gt_row - 1})")
+                if ref_gt_cell.font:
+                    gc.font = Font(name=ref_gt_cell.font.name or "Calibri", size=ref_gt_cell.font.size or 10, bold=True, color=getattr(ref_gt_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
+                if ref_gt_cell.fill:
+                    gt_fill_color = getattr(ref_gt_cell.fill.start_color, 'rgb', '001E3A8A') or '001E3A8A'
+                    gc.fill = PatternFill(fill_type="solid", start_color=gt_fill_color, end_color=gt_fill_color)
+                gc.border = EXCEL_THIN_BORDER
+                gc.alignment = Alignment(horizontal="center", vertical="center")
 
     output = io.BytesIO()
     wb.save(output)

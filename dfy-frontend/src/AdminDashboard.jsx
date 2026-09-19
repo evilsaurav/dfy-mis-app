@@ -121,7 +121,8 @@ export default function AdminDashboard() {
   // Filters
   const [selectedDistrict, setSelectedDistrict] = useState('All');
   const [selectedFO, setSelectedFO] = useState('All');
-  const [sortConfig, setSortConfig] = useState({ key: 'total_km', direction: 'desc' });
+  const [sortConfig, setSortConfig] = useState({ key: 'notifications', direction: 'desc' });
+  const [masterTableCohortFilter, setMasterTableCohortFilter] = useState('all'); // 'all' | 'current_cohort' | 'backlog'
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [targetModalMonth, setTargetModalMonth] = useState(new Date().toISOString().slice(0, 7));
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
@@ -2934,6 +2935,18 @@ const availableDistrictsForFeed = useMemo(() => {
     ];
   }, [totals]);
 
+  // Set of all patient IDs notified in the current month across active records
+  const currentMonthNotifIdSet = useMemo(() => {
+    const s = new Set();
+    (rawRecords || []).forEach(r => {
+      (r.notification_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) s.add(clean);
+      });
+    });
+    return s;
+  }, [rawRecords]);
+
   // Table Data with Grouping & Sorting
   const tableData = useMemo(() => {
     const map = {};
@@ -2941,20 +2954,94 @@ const availableDistrictsForFeed = useMemo(() => {
       const key = selectedDistrict === 'All' 
         ? canonicalizeDistrict(r.working_place) 
         : canonicalizeFo(r.fo_name, r.working_place, staffDirectory);
-      if (!map[key]) map[key] = { name: key, ...aggregate([]) };
-      for (let k in map[key]) {
-        if (k !== 'name' && k !== 'overrides') map[key][k] += (r[k] || 0);
+      if (!map[key]) {
+        map[key] = { 
+          name: key, 
+          ...aggregate([]),
+          target: 0,
+          hiv_dm_cur: 0,
+          hiv_dm_prev: 0,
+          tests_cur: 0,
+          tests_prev: 0,
+          contact_tracing_cur: 0,
+          contact_tracing_prev: 0,
+        };
       }
-      if(r.is_override) map[key].overrides += 1;
+      for (let k in map[key]) {
+        if (k !== 'name' && k !== 'overrides' && !k.endsWith('_cur') && !k.endsWith('_prev') && k !== 'target') {
+          map[key][k] += (r[k] || 0);
+        }
+      }
+      if (r.is_override) map[key].overrides += 1;
+
+      // Cohort breakdown for this record's IDs
+      (r.hiv_dm_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].hiv_dm_cur += 1;
+          else map[key].hiv_dm_prev += 1;
+        }
+      });
+      (r.sample_tested_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].tests_cur += 1;
+          else map[key].tests_prev += 1;
+        }
+      });
+      (r.contact_tracing_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].contact_tracing_cur += 1;
+          else map[key].contact_tracing_prev += 1;
+        }
+      });
     });
+
+    // Populate target for each row (district or officer)
+    Object.keys(map).forEach(key => {
+      if (selectedDistrict === 'All') {
+        const distTargets = (targetsData || []).filter(t => canonicalizeDistrict(t.district) === key);
+        let tSum = distTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+        if (tSum === 0) {
+          const staffCount = (staffList || []).filter(s => canonicalizeDistrict(s.district) === key).length;
+          tSum = (staffCount > 0 ? staffCount : 1) * 50;
+        }
+        map[key].target = tSum;
+      } else {
+        const cDist = canonicalizeDistrict(selectedDistrict);
+        const tObj = (targetsData || []).find(t => 
+          canonicalizeDistrict(t.district) === cDist && 
+          canonicalizeFo(t.fo_name, cDist, staffDirectory).toLowerCase() === key.toLowerCase()
+        );
+        map[key].target = tObj ? (Number(tObj.target) || 50) : 50;
+      }
+    });
+
     let data = Object.values(map);
     data.sort((a, b) => {
-      if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
-      if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
+      const getVal = (row, sortKey) => {
+        if (masterTableCohortFilter === 'current_cohort') {
+          if (sortKey === 'hiv_dm') return row.hiv_dm_cur;
+          if (sortKey === 'tests') return row.tests_cur;
+          if (sortKey === 'contact_tracing') return row.contact_tracing_cur;
+        } else if (masterTableCohortFilter === 'backlog') {
+          if (sortKey === 'hiv_dm') return row.hiv_dm_prev;
+          if (sortKey === 'tests') return row.tests_prev;
+          if (sortKey === 'contact_tracing') return row.contact_tracing_prev;
+        }
+        return row[sortKey] ?? 0;
+      };
+
+      const valA = getVal(a, sortConfig.key);
+      const valB = getVal(b, sortConfig.key);
+
+      if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
     return data;
-  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory]);
+  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -4663,7 +4750,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       <BarChart
                         layout="vertical"
                         data={performanceData}
-                        margin={{ top: 5, right: 45, left: 15, bottom: 5 }}
+                        margin={{ top: 5, right: 60, left: 15, bottom: 5 }}
                       >
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                         <XAxis 
@@ -4743,7 +4830,14 @@ const availableDistrictsForFeed = useMemo(() => {
                             name="Monthly Target" 
                             fill="#cbd5e1" 
                             radius={[0, 6, 6, 0]} 
-                          />
+                          >
+                            <LabelList 
+                              dataKey="target" 
+                              position="right" 
+                              style={{ fill: '#334155', fontWeight: 800, fontSize: 11 }} 
+                              formatter={(v) => (v > 0 ? `${v}` : '')}
+                            />
+                          </Bar>
                         </>
                       )}
 
@@ -5021,23 +5115,88 @@ const availableDistrictsForFeed = useMemo(() => {
 {/* Master Data Table */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200/90 overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50/60">
-                <div>
-                  <h3 className="text-slate-800 font-black text-sm sm:text-base flex items-center gap-2">
-                    <span>📋</span>
-                    <span>Detailed Master Table</span>
-                  </h3>
-                  <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {tableData.length} records</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div>
+                    <h3 className="text-slate-800 font-black text-sm sm:text-base flex items-center gap-2">
+                      <span>📋</span>
+                      <span>Detailed Master Table</span>
+                      {selectedDistrict !== 'All' && (
+                        <span className="text-xs font-bold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md border border-indigo-200">
+                          {selectedDistrict}
+                        </span>
+                      )}
+                    </h3>
+                    <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {tableData.length} records</p>
+                  </div>
+
+                  {selectedDistrict !== 'All' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedDistrict('All');
+                        setSelectedFO('All');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-xs transition-all active:scale-95 cursor-pointer"
+                      title="Return to All Districts list"
+                    >
+                      <span>←</span> Back to All Districts
+                    </button>
+                  )}
                 </div>
-                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-white px-3 py-1.5 rounded-full shadow-2xs border border-slate-200/80">
-                  Click column header to sort
-                </span>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Cohort Switcher */}
+                  <div className="inline-flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-2xs text-[11px] font-bold">
+                    <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider px-2 hidden md:inline">Cohort:</span>
+                    <button
+                      type="button"
+                      onClick={() => setMasterTableCohortFilter('all')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        masterTableCohortFilter === 'all'
+                          ? 'bg-indigo-600 text-white shadow-2xs font-black'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Show all interventions conducted this month"
+                    >
+                      All (Total)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMasterTableCohortFilter('current_cohort')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        masterTableCohortFilter === 'current_cohort'
+                          ? 'bg-emerald-600 text-white shadow-2xs font-black'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Interventions conducted on patients notified in current month"
+                    >
+                      Current Month Cohort
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMasterTableCohortFilter('backlog')}
+                      className={`px-2.5 py-1 rounded-lg transition-all ${
+                        masterTableCohortFilter === 'backlog'
+                          ? 'bg-amber-600 text-white shadow-2xs font-black'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      title="Interventions conducted on patients notified in previous months (backlog)"
+                    >
+                      Previous Month Backlog
+                    </button>
+                  </div>
+
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-white px-3 py-1.5 rounded-full shadow-2xs border border-slate-200/80 hidden sm:inline-block">
+                    Click column header to sort
+                  </span>
+                </div>
               </div>
               <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead>
                     <tr className="bg-slate-100/70 text-slate-600 text-[10px] uppercase tracking-wider border-b border-slate-200/90">
                       <TH label={selectedDistrict === 'All' ? 'District' : 'Officer Name'} sortKey="name" />
-                      <TH label="KM" sortKey="total_km" />
+                      <TH label="Target" sortKey="target" />
                       <TH label="Notif" sortKey="notifications" />
                       <TH label="Tests" sortKey="tests" />
                       <TH label="Presumptive" sortKey="presumptive" />
@@ -5080,17 +5239,62 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span className="text-slate-400 text-[10px]">{selectedDistrict !== 'All' ? '🔍' : '➔'}</span>
                           </span>
                         </td>
-                        <td className="p-3 tabular-num font-bold">{row.total_km}</td>
+                        <td className="p-3 tabular-num font-bold text-slate-800">{row.target}</td>
                         <td className="p-3 tabular-num font-bold text-emerald-600">{row.notifications}</td>
-                        <td className="p-3 tabular-num font-bold text-blue-600">{row.tests}</td>
+                        <td className="p-3 tabular-num font-bold text-blue-600">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? row.tests_cur
+                            : masterTableCohortFilter === 'backlog'
+                            ? row.tests_prev
+                            : (
+                              <span>
+                                {row.tests}
+                                {row.tests > 0 && (row.tests_cur > 0 || row.tests_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.tests_cur} | P:{row.tests_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                        </td>
                         <td className="p-3 tabular-num font-bold text-amber-500">{row.presumptive}</td>
                         <td className="p-3 tabular-num font-bold text-purple-600">{row.doctor_visits}</td>
-                        <td className="p-3 tabular-num">{row.hiv_dm}</td>
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? row.hiv_dm_cur
+                            : masterTableCohortFilter === 'backlog'
+                            ? row.hiv_dm_prev
+                            : (
+                              <span>
+                                {row.hiv_dm}
+                                {row.hiv_dm > 0 && (row.hiv_dm_cur > 0 || row.hiv_dm_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.hiv_dm_cur} | P:{row.hiv_dm_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                        </td>
                         <td className="p-3 tabular-num">{row.dbt}</td>
                         <td className="p-3 tabular-num">{row.sample_collection}</td>
                         <td className="p-3 tabular-num">{row.outcome_assigned}</td>
                         <td className="p-3 tabular-num">{row.home_visits}</td>
-                        <td className="p-3 tabular-num">{row.contact_tracing}</td>
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? row.contact_tracing_cur
+                            : masterTableCohortFilter === 'backlog'
+                            ? row.contact_tracing_prev
+                            : (
+                              <span>
+                                {row.contact_tracing}
+                                {row.contact_tracing > 0 && (row.contact_tracing_cur > 0 || row.contact_tracing_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.contact_tracing_cur} | P:{row.contact_tracing_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
+                        </td>
                         <td className="p-3 tabular-num">{row.follow_ups}</td>
                         <td className="p-3 tabular-num">{row.face_to_face}</td>
                         <td className="p-3 tabular-num">{row.documents}</td>

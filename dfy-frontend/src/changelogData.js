@@ -1,16 +1,47 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.1";
+export const APP_VERSION = "2.7.2";
 export const LAST_UPDATED_DATE = "19 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.7.2",
+    date: "19 Sep 2026",
+    title: "Detailed Master Table Target Column, 1-Click Back Navigation, Clinical Cohort Switch & KPI Performance Sheet Breakdown",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🎯 Master Table Target Column: Replaced the KM column in Detailed Master Table with Target (District aggregated targets in Statewide view, and individual Field Officer targets in drill-down view) with full sort support.",
+      "🔙 1-Click Back to All Districts Navigation: Added an immediate '← Back to All Districts' button in the Detailed Master Table header so managers can return to statewide view with a single tap.",
+      "🔄 3-Way Cohort Switch (Current Month vs Previous Month Backlog): Added a cohort toggle switch (All Total, Current Month Cohort, Previous Month Backlog) for HIV/DM, UDST (Tests), and Contact Tracing to clearly separate new patient interventions from backlog follow-ups.",
+      "📊 Target vs Achieved Chart Label: Added explicit high-contrast number labels directly on the target bar in Target vs Achievement & Performance studio for instant visual comparison alongside notifications.",
+      "📑 Excel KPI Performance Sheet Breakdown: Added dedicated cohort breakdown columns in Tab 1 'Performance sheet' of the KPI Workbook for HIV & DM, UDST, and Contact Tracing."
+    ],
+    details: [
+      {
+        tag: "Detailed Master Table",
+        color: "indigo",
+        text: "Replaced KM with Target across District and FO views, added 1-click back navigation button, and introduced cohort toggle for HIV/DM, UDST, and Contact Tracing."
+      },
+      {
+        tag: "Target vs Performance",
+        color: "purple",
+        text: "Target numbers are now visibly rendered on the monthly target bar in the performance bar chart with increased right margin."
+      },
+      {
+        tag: "KPI Workbook Export",
+        color: "emerald",
+        text: "Tab 1 'Performance sheet' now features Columns 19-24 containing exact staff-wise breakdown between current month notified cohort and previous month backlog."
+      }
+    ]
+  },
+  {
     version: "v2.7.1",
     date: "19 Sep 2026",
     title: "1-Click District WhatsApp Performance Report, 24-Hour FO Missing ID Suite & Monthly Duplicate ID Warnings",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "📱 1-Click WhatsApp District Comprehensive Performance Report: Added manager-ready WhatsApp export with district totals and individual staff achievement percentages (targetAchievedPct) and status badges.",
       "➕ 24-Hour FO Edit Suite (Remarks-Only Report Fix): Added master '+ Add Missing Patient ID' button and Category selector in Date Inspector so officers can add IDs even if the initial submission contained only remarks.",
