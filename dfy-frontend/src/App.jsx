@@ -70,10 +70,12 @@ const PendingInterventionsActionCenter = ({
   formData,
   onAutofill,
   showToast,
-  onRefresh
+  onRefresh,
+  fullView = false
 }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(fullView);
   const [selectedFilter, setSelectedFilter] = useState('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
 
   if (loading) {
     return (
@@ -124,6 +126,12 @@ const PendingInterventionsActionCenter = ({
   const udstCount = cascadeSummary.udst_pending || 0;
 
   const filteredAlerts = cascadeAlerts.filter(a => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      const matchId = String(a.id || '').toLowerCase().includes(q);
+      const matchDate = String(a.notified_date || '').toLowerCase().includes(q);
+      if (!matchId && !matchDate) return false;
+    }
     if (selectedFilter === 'ALL') return true;
     if (selectedFilter === 'HIV') return !a.has_hiv;
     if (selectedFilter === 'DIFF_TB') return !a.has_diff_tb;
@@ -133,7 +141,7 @@ const PendingInterventionsActionCenter = ({
     return true;
   });
 
-  const displayedAlerts = isExpanded ? filteredAlerts : filteredAlerts.slice(0, 3);
+  const displayedAlerts = (isExpanded || fullView) ? filteredAlerts : filteredAlerts.slice(0, 3);
 
   const copyWhatsAppList = () => {
     const foName = formData?.fo_name || '';
@@ -273,28 +281,62 @@ const PendingInterventionsActionCenter = ({
         )}
       </div>
 
+      {/* Live Search Bar for Full View */}
+      {fullView && cascadeAlerts.length > 2 && (
+        <div className="relative mb-3.5">
+          <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400 text-xs">🔍</span>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by Patient ID or Notification Date..."
+            className="w-full pl-8 pr-8 py-2 bg-white border border-rose-200/80 rounded-xl text-xs font-bold text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500 shadow-2xs"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Patients Action Cards */}
-      <div className="space-y-2 max-h-72 overflow-y-auto pr-1 custom-scrollbar">
+      <div className={`space-y-2 overflow-y-auto pr-1 custom-scrollbar ${fullView ? 'max-h-[32rem]' : 'max-h-72'}`}>
+        {displayedAlerts.length === 0 && (
+          <div className="bg-white/80 border border-slate-200/80 rounded-2xl p-6 text-center text-xs font-bold text-slate-500">
+            {searchQuery ? `No pending patients match "${searchQuery}"` : `No pending patients found for ${selectedFilter} filter.`}
+          </div>
+        )}
         {displayedAlerts.map((alt, idx) => {
           const isUrgent = alt.days_elapsed > 7;
           return (
             <div
               key={idx}
-              className="bg-white p-3 rounded-2xl border border-rose-100/90 shadow-2xs hover:border-indigo-200 transition-colors"
+              className="bg-white rounded-2xl p-3 border border-slate-100 shadow-2xs hover:shadow-xs transition-all flex flex-col gap-2"
             >
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-mono text-xs font-black text-slate-800 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+              {/* Top Meta Line: ID, elapsed days, and copy button */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono font-black text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
                     #{alt.id}
                   </span>
+                  {alt.notified_date && (
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      Notified: {alt.notified_date}
+                    </span>
+                  )}
                   <span
-                    className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                    className={`text-[9px] font-black px-1.5 py-0.5 rounded-md uppercase tracking-wider ${
                       isUrgent
-                        ? 'bg-red-100 text-red-700 border border-red-200'
-                        : 'bg-slate-100 text-slate-500'
+                        ? 'bg-rose-100 text-rose-700 animate-pulse'
+                        : 'bg-amber-100 text-amber-700'
                     }`}
                   >
-                    {isUrgent ? `🔴 Urgent (${alt.days_elapsed}d)` : `${alt.days_elapsed}d ago`}
+                    {alt.days_elapsed}d pending
                   </span>
                 </div>
 
@@ -359,8 +401,8 @@ const PendingInterventionsActionCenter = ({
         })}
       </div>
 
-      {/* Expand / Collapse Footer */}
-      {filteredAlerts.length > 3 && (
+      {/* Expand / Collapse Footer (only shown when not in fullView) */}
+      {!fullView && filteredAlerts.length > 3 && (
         <div className="text-center mt-2.5 pt-2 border-t border-rose-200/50">
           <button
             type="button"
@@ -2926,6 +2968,7 @@ function App() {
     }
     addId(fieldKey, patientId);
     showToast(`✓ #${patientId} added to ${label}!`, "success");
+    setCurrentView('form');
   };
   
   const addDoctor = () => {
@@ -3339,6 +3382,40 @@ function App() {
               </div>
             </div>
           </div>
+          ) : currentView === 'pending' ? (
+            <div className="animate-fade-in w-full max-w-lg mx-auto pb-10">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
+                    <span>⚡</span>
+                    <span>Pending Interventions</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Priority follow-up actions for your notified TB patients
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+                  disabled={loadingCascadeAlerts}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                >
+                  <span className={loadingCascadeAlerts ? "animate-spin" : ""}>🔄</span>
+                  <span>Sync</span>
+                </button>
+              </div>
+
+              <PendingInterventionsActionCenter 
+                cascadeAlerts={cascadeAlerts}
+                cascadeSummary={cascadeSummary}
+                loading={loadingCascadeAlerts}
+                formData={formData}
+                onAutofill={handleAutofillPendingId}
+                showToast={showToast}
+                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+                fullView={true}
+              />
+            </div>
           ) : currentView === 'profile' ? (
             <MyProfileDashboard 
               formData={formData} 
@@ -3697,66 +3774,80 @@ function App() {
           aria-label="Bottom Navigation" 
           className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-200/90 z-50 shadow-[0_-4px_25px_rgba(0,0,0,0.08)]"
         >
-          <div className="max-w-md mx-auto grid grid-cols-4 px-2 py-1.5 gap-1">
+          <div className="max-w-md mx-auto grid grid-cols-5 px-1 sm:px-2 py-1.5 gap-0.5 sm:gap-1">
             {/* Tab 1: Form / Report */}
             <button
               type="button"
               onClick={() => setCurrentView('form')}
-              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
                 currentView === 'form' 
                   ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
-              <span className="text-lg">📝</span>
-              <span className="text-[10px] uppercase tracking-wider mt-0.5">Report</span>
+              <span className="text-base sm:text-lg">📝</span>
+              <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Report</span>
             </button>
 
-            {/* Tab 2: Tracker / Patient Journey */}
+            {/* Tab 2: Pending Interventions */}
+            <button
+              type="button"
+              onClick={() => setCurrentView('pending')}
+              className={`relative flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
+                currentView === 'pending' 
+                  ? 'bg-rose-50 text-rose-700 font-black shadow-xs scale-102' 
+                  : 'text-slate-400 hover:text-slate-600 font-bold'
+              }`}
+            >
+              <span className="text-base sm:text-lg">⚡</span>
+              <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Pending</span>
+              {cascadeAlerts.length > 0 && (
+                <span className="absolute top-0.5 right-1 sm:right-2 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                  {cascadeAlerts.length > 99 ? '99+' : cascadeAlerts.length}
+                </span>
+              )}
+            </button>
+
+            {/* Tab 3: Tracker / Patient Journey */}
             <button
               type="button"
               onClick={() => setCurrentView('tracker')}
-              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
                 currentView === 'tracker' 
                   ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
-              <span className="text-lg">🔍</span>
-              <span className="text-[10px] uppercase tracking-wider mt-0.5">Tracker</span>
+              <span className="text-base sm:text-lg">🔍</span>
+              <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Tracker</span>
             </button>
 
-            {/* Tab 3: Profile */}
+            {/* Tab 4: Profile */}
             <button
               type="button"
               onClick={() => setCurrentView('profile')}
-              className={`relative flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
                 currentView === 'profile' 
                   ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
-              <span className="text-lg">👤</span>
-              <span className="text-[10px] uppercase tracking-wider mt-0.5">Profile</span>
-              {cascadeAlerts.length > 0 && (
-                <span className="absolute top-1 right-2 bg-rose-600 text-white text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center animate-pulse">
-                  {cascadeAlerts.length}
-                </span>
-              )}
+              <span className="text-base sm:text-lg">👤</span>
+              <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Profile</span>
             </button>
 
-            {/* Tab 4: Guide */}
+            {/* Tab 5: Guide */}
             <button
               type="button"
               onClick={() => setCurrentView('guide')}
-              className={`flex flex-col items-center justify-center py-1.5 px-2 rounded-2xl transition-all cursor-pointer ${
+              className={`flex flex-col items-center justify-center py-1 sm:py-1.5 px-1 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
                 currentView === 'guide' 
                   ? 'bg-indigo-50 text-indigo-700 font-black shadow-xs scale-102' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
               }`}
             >
-              <span className="text-lg">📖</span>
-              <span className="text-[10px] uppercase tracking-wider mt-0.5">Guide</span>
+              <span className="text-base sm:text-lg">📖</span>
+              <span className="text-[9px] sm:text-[10px] uppercase tracking-tight mt-0.5 font-bold truncate">Guide</span>
             </button>
           </div>
         </nav>

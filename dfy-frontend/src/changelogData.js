@@ -12,8 +12,9 @@ export const CHANGELOG_ENTRIES = [
     badge: "Latest Release",
     badgeColor: "emerald",
     highlights: [
+      "⚡ Dedicated Pending Interventions Hub: Added 5th bottom tab with real-time badge, patient search, 1-tap WhatsApp list dispatch, and 1-tap autofill into today's report.",
       "🎯 Multi-District Notification Tray Filter: Flexible district selection in Modal 0A supporting All Districts, single district, or multi-district custom chip decks with live instant search.",
-      "📱 FO Modern Bottom Nav Dock: Redesigned FO mobile interface with a fixed 4-tab bottom navigation dock (Report, Tracker, Profile, Guide) eliminating top header clutter.",
+      "📱 FO Modern 5-Tab Bottom Nav Dock: Redesigned FO mobile interface with a tactile bottom navigation dock (Report, Pending, Tracker, Profile, Guide) eliminating top header clutter.",
       "🔍 Live Patient Journey & Nikshay Reconciler Sync: FO lookup for 8/9-digit Nikshay IDs showing verified Reconciler ledger status (DBT, HIV/DM, UDST, Contact Tracing) and visit timeline.",
       "📖 Interactive Visual Help & Guide: 4-stage system flowchart graph explaining the end-to-end DFY TB MIS architecture, alongside NTEP Adult & Pediatric FDC dosage charts and 24-hr self-correction rules.",
       "🛡️ Sub-Admin District Guard & Zero-Overlap UI: Strict RBAC isolation ensuring Sub-Admins only filter allowed districts, and sticky submit bar repositioned above bottom nav dock."
