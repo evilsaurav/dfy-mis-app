@@ -3053,15 +3053,15 @@ const availableDistrictsForFeed = useMemo(() => {
     const isSorted = sortConfig.key === sortKey;
     return (
       <th 
-        className={`p-3 sm:px-3.5 sm:py-3 font-black text-[10px] uppercase tracking-wider border-b border-slate-200 transition-all select-none cursor-pointer ${
-          isSorted ? 'bg-indigo-50/80 text-indigo-900 font-extrabold' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+        className={`p-2.5 sm:px-3 sm:py-2.5 font-black text-[10px] uppercase tracking-wider border-b border-slate-200 transition-all select-none cursor-pointer ${
+          isSorted ? 'bg-teal-50 text-teal-950 font-extrabold' : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
         }`} 
         onClick={() => requestSort(sortKey)}
       >
         <div className="flex items-center gap-1.5">
           <span>{label}</span>
           {isSorted && (
-            <span className="bg-indigo-600 text-white text-[9px] px-1 py-0.2 rounded font-black shadow-2xs">
+            <span className="bg-teal-700 text-white text-[9px] px-1 py-0.2 rounded font-black shadow-2xs">
               {sortConfig.direction === 'desc' ? '▼' : '▲'}
             </span>
           )}
@@ -5299,8 +5299,30 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="overflow-x-auto custom-scrollbar">
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                   <thead>
-                    <tr className="bg-slate-100/70 text-slate-600 text-[10px] uppercase tracking-wider border-b border-slate-200/90">
-                      <TH label={selectedDistrict === 'All' ? 'District' : 'Officer Name'} sortKey="name" />
+                    {/* Tier 1: Category Group Bands */}
+                    <tr>
+                      <th 
+                        rowSpan={2}
+                        className="p-3 sticky left-0 z-20 bg-slate-100/95 backdrop-blur-md border-r border-b border-slate-300 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.08)] text-slate-800 text-[11px] font-black uppercase tracking-wider align-bottom"
+                      >
+                        {selectedDistrict === 'All' ? 'District' : 'Officer Name'}
+                      </th>
+                      <th colSpan={2} className="th-band-primary py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider border-r border-teal-200/80">
+                        Target &amp; Volume
+                      </th>
+                      <th colSpan={5} className="th-band-clinical py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider border-r border-indigo-200/80">
+                        Core Clinical Cascade
+                      </th>
+                      <th colSpan={8} className="th-band-outreach py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider border-r border-amber-200/80">
+                        Visits &amp; Field Logistics
+                      </th>
+                      <th colSpan={7} className="th-band-special py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider">
+                        Special Indicators
+                      </th>
+                    </tr>
+
+                    {/* Tier 2: Column Headers */}
+                    <tr className="bg-slate-50/90 text-slate-700 text-[10px] uppercase tracking-wider border-b border-slate-200">
                       <TH label="Target" sortKey="target" />
                       <TH label="Notif" sortKey="notifications" />
                       <TH label="Tests" sortKey="tests" />
@@ -5327,7 +5349,12 @@ const availableDistrictsForFeed = useMemo(() => {
                   </thead>
                   <tbody>
                     {tableData.map((row, idx) => (
-                      <tr key={idx} className="hover:bg-indigo-50/40 transition-colors border-b border-slate-100/90 last:border-none text-xs font-semibold text-slate-700">
+                      <tr 
+                        key={idx} 
+                        className={`transition-colors border-b border-slate-100/90 last:border-none text-xs font-semibold text-slate-700 group ${
+                          idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
+                        } hover:bg-teal-50/60`}
+                      >
                         <td 
                           onClick={() => {
                             if (selectedDistrict !== 'All') {
@@ -5336,24 +5363,26 @@ const availableDistrictsForFeed = useMemo(() => {
                               setSelectedDistrict(row.name);
                             }
                           }}
-                          className="p-3 sticky left-0 bg-white/95 backdrop-blur-xs shadow-[3px_0_10px_-2px_rgba(0,0,0,0.06)] border-r border-slate-200/70 text-indigo-700 font-black hover:text-indigo-900 cursor-pointer z-10"
+                          className={`p-3 sticky left-0 z-10 backdrop-blur-xs shadow-[4px_0_12px_-2px_rgba(0,0,0,0.07)] border-r border-slate-300/80 text-teal-800 hover:text-teal-950 font-black cursor-pointer group-hover:bg-teal-50/80 transition-colors ${
+                            idx % 2 === 0 ? 'bg-white/95' : 'bg-slate-50/95'
+                          }`}
                           title={selectedDistrict !== 'All' ? "Click to inspect all IDs" : "Click to view this district"}
                         >
                           <span className="flex items-center gap-1.5">
                             <span>{row.name}</span>
-                            <span className="text-slate-400 text-[10px]">{selectedDistrict !== 'All' ? '🔍' : '➔'}</span>
+                            <span className="text-teal-500 text-[10px]">{selectedDistrict !== 'All' ? '🔍' : '➔'}</span>
                           </span>
                         </td>
                         <td className="p-3 tabular-num font-bold text-slate-800">{row.target}</td>
                         <td className="p-3 tabular-num font-bold text-emerald-600">{row.notifications}</td>
                         <td className="p-3 tabular-num font-bold text-blue-600">
                           {masterTableCohortFilter === 'current_cohort'
-                            ? row.tests_cur
+                            ? (row.tests_cur > 0 ? row.tests_cur : <span className="text-slate-300 font-normal">—</span>)
                             : masterTableCohortFilter === 'backlog'
-                            ? row.tests_prev
+                            ? (row.tests_prev > 0 ? row.tests_prev : <span className="text-slate-300 font-normal">—</span>)
                             : (
                               <span>
-                                {row.tests}
+                                {row.tests > 0 ? row.tests : <span className="text-slate-300 font-normal">—</span>}
                                 {row.tests > 0 && (row.tests_cur > 0 || row.tests_prev > 0) && (
                                   <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
                                     C:{row.tests_cur} | P:{row.tests_prev}
@@ -5362,16 +5391,20 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                             )}
                         </td>
-                        <td className="p-3 tabular-num font-bold text-amber-500">{row.presumptive}</td>
-                        <td className="p-3 tabular-num font-bold text-purple-600">{row.doctor_visits}</td>
+                        <td className="p-3 tabular-num font-bold text-amber-600">
+                          {row.presumptive > 0 ? row.presumptive : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-purple-600">
+                          {row.doctor_visits > 0 ? row.doctor_visits : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
                         <td className="p-3 tabular-num font-semibold text-slate-700">
                           {masterTableCohortFilter === 'current_cohort'
-                            ? row.hiv_dm_cur
+                            ? (row.hiv_dm_cur > 0 ? row.hiv_dm_cur : <span className="text-slate-300 font-normal">—</span>)
                             : masterTableCohortFilter === 'backlog'
-                            ? row.hiv_dm_prev
+                            ? (row.hiv_dm_prev > 0 ? row.hiv_dm_prev : <span className="text-slate-300 font-normal">—</span>)
                             : (
                               <span>
-                                {row.hiv_dm}
+                                {row.hiv_dm > 0 ? row.hiv_dm : <span className="text-slate-300 font-normal">—</span>}
                                 {row.hiv_dm > 0 && (row.hiv_dm_cur > 0 || row.hiv_dm_prev > 0) && (
                                   <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
                                     C:{row.hiv_dm_cur} | P:{row.hiv_dm_prev}
@@ -5380,18 +5413,26 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                             )}
                         </td>
-                        <td className="p-3 tabular-num">{row.dbt}</td>
-                        <td className="p-3 tabular-num">{row.sample_collection}</td>
-                        <td className="p-3 tabular-num">{row.outcome_assigned}</td>
-                        <td className="p-3 tabular-num">{row.home_visits}</td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.dbt > 0 ? row.dbt : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.sample_collection > 0 ? row.sample_collection : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.outcome_assigned > 0 ? row.outcome_assigned : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.home_visits > 0 ? row.home_visits : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
                         <td className="p-3 tabular-num font-semibold text-slate-700">
                           {masterTableCohortFilter === 'current_cohort'
-                            ? row.contact_tracing_cur
+                            ? (row.contact_tracing_cur > 0 ? row.contact_tracing_cur : <span className="text-slate-300 font-normal">—</span>)
                             : masterTableCohortFilter === 'backlog'
-                            ? row.contact_tracing_prev
+                            ? (row.contact_tracing_prev > 0 ? row.contact_tracing_prev : <span className="text-slate-300 font-normal">—</span>)
                             : (
                               <span>
-                                {row.contact_tracing}
+                                {row.contact_tracing > 0 ? row.contact_tracing : <span className="text-slate-300 font-normal">—</span>}
                                 {row.contact_tracing > 0 && (row.contact_tracing_cur > 0 || row.contact_tracing_prev > 0) && (
                                   <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
                                     C:{row.contact_tracing_cur} | P:{row.contact_tracing_prev}
@@ -5400,17 +5441,39 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                             )}
                         </td>
-                        <td className="p-3 tabular-num">{row.follow_ups}</td>
-                        <td className="p-3 tabular-num">{row.face_to_face}</td>
-                        <td className="p-3 tabular-num">{row.documents}</td>
-                        <td className="p-3 tabular-num">{row.fdc_provided}</td>
-                        <td className="p-3 tabular-num">{row.kit_consumption}</td>
-                        <td className="p-3 tabular-num font-bold text-pink-600">{row.differentiated_tb}</td>
-                        <td className="p-3 tabular-num font-bold text-teal-600">{row.tpt_treatment_start}</td>
-                        <td className="p-3 tabular-num font-bold text-cyan-600">{row.tpt_presumptive}</td>
-                        <td className="p-3 tabular-num font-bold text-orange-600">{row.adhar_face_auth}</td>
-                        <td className="p-3 tabular-num font-bold text-indigo-500">{row.consent_with_id}</td>
-                        <td className="p-3 tabular-num text-red-500 font-bold">{row.overrides > 0 ? row.overrides : '—'}</td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.follow_ups > 0 ? row.follow_ups : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.face_to_face > 0 ? row.face_to_face : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.documents > 0 ? row.documents : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.fdc_provided > 0 ? row.fdc_provided : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-medium">
+                          {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-pink-600">
+                          {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-teal-600">
+                          {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-cyan-600">
+                          {row.tpt_presumptive > 0 ? row.tpt_presumptive : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-orange-600">
+                          {row.adhar_face_auth > 0 ? row.adhar_face_auth : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num font-bold text-indigo-500">
+                          {row.consent_with_id > 0 ? row.consent_with_id : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
+                        <td className="p-3 tabular-num text-red-500 font-bold">
+                          {row.overrides > 0 ? row.overrides : <span className="text-slate-300 font-normal">—</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
