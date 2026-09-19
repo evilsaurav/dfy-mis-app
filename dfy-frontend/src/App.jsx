@@ -452,11 +452,6 @@ const EDITABLE_CATEGORIES = [
 const MyProfileDashboard = ({ 
   formData, 
   showToast, 
-  cascadeAlerts: propCascadeAlerts, 
-  cascadeSummary: propCascadeSummary, 
-  loadingAlerts: propLoadingAlerts,
-  onAutofill,
-  onRefreshCascade,
   stats: propStats,
   setStats: propSetStats,
   onRefreshStats
@@ -466,10 +461,6 @@ const MyProfileDashboard = ({
   const setStats = propSetStats || setInternalStats;
   const [selectedDate, setSelectedDate] = useState(() => getLocalYMD());
   const [copiedKey, setCopiedKey] = useState(null);
-  const cascadeAlerts = propCascadeAlerts || [];
-  const cascadeSummary = propCascadeSummary || {};
-  const loadingAlerts = propLoadingAlerts || false;
-  const fetchFoCascadeAlerts = onRefreshCascade || (() => {});
   const [editingModal, setEditingModal] = useState(null);
   const [loading, setLoading] = useState(!stats);
 
@@ -507,16 +498,6 @@ const MyProfileDashboard = ({
     };
     fetchStats();
   }, [formData, stats, setStats]);
-
-  const activeAlerts = (propCascadeAlerts && propCascadeAlerts.length > 0) 
-    ? propCascadeAlerts 
-    : cascadeAlerts;
-  const activeSummary = (propCascadeSummary && Object.keys(propCascadeSummary).length > 0) 
-    ? propCascadeSummary 
-    : (cascadeSummary || {});
-  const activeLoading = (propLoadingAlerts !== undefined && propLoadingAlerts !== false) 
-    ? propLoadingAlerts 
-    : loadingAlerts;
 
 
   const handleExecuteIdEdit = async (e) => {
@@ -705,20 +686,6 @@ const MyProfileDashboard = ({
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
-      {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center ALWAYS AT TOP */}
-      <PendingInterventionsActionCenter 
-        cascadeAlerts={activeAlerts}
-        cascadeSummary={activeSummary}
-        loading={activeLoading}
-        formData={formData}
-        onAutofill={onAutofill}
-        showToast={showToast}
-        onRefresh={() => {
-          if (onRefreshCascade) onRefreshCascade();
-          fetchFoCascadeAlerts();
-        }}
-      />
-
       {/* Profile Header & Monthly Target Card */}
       <div className="bg-white rounded-3xl p-6 shadow-xl shadow-indigo-100/50 border border-slate-100 mb-6 text-center">
         <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 font-black">
@@ -3644,11 +3611,6 @@ function App() {
             <MyProfileDashboard 
               formData={formData} 
               showToast={showToast} 
-              cascadeAlerts={cascadeAlerts}
-              cascadeSummary={cascadeSummary}
-              loadingAlerts={loadingCascadeAlerts}
-              onAutofill={handleAutofillPendingId}
-              onRefreshCascade={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
               stats={foMonthlyHistory}
               setStats={setFoMonthlyHistory}
               onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
