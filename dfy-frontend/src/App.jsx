@@ -11,13 +11,20 @@ const getLocalYMD = (d = new Date()) => {
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
-    const timer = setTimeout(onClose, 4000);
+    const duration = type === 'warning' ? 5500 : 4000;
+    const timer = setTimeout(onClose, duration);
     return () => clearTimeout(timer);
-  }, [message, onClose]);
+  }, [message, type, onClose]);
 
   if (!message) return null;
 
-  const bgColor = type === 'error' ? 'bg-red-500' : 'bg-emerald-500';
+  const bgColor = type === 'error' 
+    ? 'bg-red-500' 
+    : type === 'warning' 
+      ? 'bg-amber-600' 
+      : type === 'info' 
+        ? 'bg-blue-600' 
+        : 'bg-emerald-500';
 
   return (
     <div className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-[100] ${bgColor} text-white px-5 py-3 rounded-2xl sm:rounded-full shadow-lg flex items-center justify-between gap-3 transition-all duration-300 ease-in-out w-[90%] max-w-md`}>
@@ -417,6 +424,30 @@ const PendingInterventionsActionCenter = ({
   );
 };
 
+// --- Editable Categories for 24h Edit Modal ---
+const EDITABLE_CATEGORIES = [
+  { key: 'notification', label: 'TB Notification' },
+  { key: 'sample_tested', label: 'Samples Tested (Lab)' },
+  { key: 'sample_collection', label: 'Sample Collection' },
+  { key: 'presumptive', label: 'Presumptive TB' },
+  { key: 'dbt', label: 'DBT (Bank Linking)' },
+  { key: 'hiv_dm', label: 'HIV & DM Screening' },
+  { key: 'fdc_provided', label: 'FDC Provided' },
+  { key: 'contact_tracing', label: 'Contact Tracing' },
+  { key: 'differentiated_tb', label: 'Differentiated TB' },
+  { key: 'outcome_assigned', label: 'Outcome Assigned' },
+  { key: 'home_visit', label: 'Home Visit' },
+  { key: 'follow_up', label: 'Follow Up' },
+  { key: 'documents', label: 'Documents Collection' },
+  { key: 'face_to_face', label: 'Face to Face Counselling' },
+  { key: 'tpt_treatment_start', label: 'TPT Treatment Start' },
+  { key: 'tpt_presumptive', label: 'TPT Presumptive' },
+  { key: 'adhar_face_authentication', label: 'Aadhaar Face Auth' },
+  { key: 'consent_with_id', label: 'Consent with ID' },
+  { key: 'culture_dst', label: 'Culture / DST' },
+  { key: 'kit_consumption', label: 'Kit Consumption' }
+];
+
 // --- My Profile Dashboard ---
 const MyProfileDashboard = ({ 
   formData, 
@@ -425,9 +456,14 @@ const MyProfileDashboard = ({
   cascadeSummary: propCascadeSummary, 
   loadingAlerts: propLoadingAlerts,
   onAutofill,
-  onRefreshCascade
+  onRefreshCascade,
+  stats: propStats,
+  setStats: propSetStats,
+  onRefreshStats
 }) => {
-  const [stats, setStats] = useState(null);
+  const [internalStats, setInternalStats] = useState(null);
+  const stats = propStats !== undefined ? propStats : internalStats;
+  const setStats = propSetStats || setInternalStats;
   const [selectedDate, setSelectedDate] = useState(() => getLocalYMD());
   const [copiedKey, setCopiedKey] = useState(null);
   const cascadeAlerts = propCascadeAlerts || [];
@@ -435,11 +471,16 @@ const MyProfileDashboard = ({
   const loadingAlerts = propLoadingAlerts || false;
   const fetchFoCascadeAlerts = onRefreshCascade || (() => {});
   const [editingModal, setEditingModal] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!stats);
 
   useEffect(() => {
+    if (stats) {
+      setLoading(false);
+      return;
+    }
     const fetchStats = async () => {
       try {
+        setLoading(true);
         const today = new Date();
         const monthStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -465,7 +506,7 @@ const MyProfileDashboard = ({
       }
     };
     fetchStats();
-  }, [formData]);
+  }, [formData, stats, setStats]);
 
   const activeAlerts = (propCascadeAlerts && propCascadeAlerts.length > 0) 
     ? propCascadeAlerts 
@@ -483,7 +524,8 @@ const MyProfileDashboard = ({
     if (!editingModal) return;
     const { date, category, action, oldId, newId } = editingModal;
     
-    const isLegacyAllowed = ['fdc_provided_ids', 'outcome_assigned_ids'].includes(category);
+    const cleanCatKey = (category || 'notification').replace(/_ids$/, '');
+    const isLegacyAllowed = ['fdc_provided', 'outcome_assigned'].includes(cleanCatKey);
     const cleanId = (newId || '').trim();
     const isValidLen = isLegacyAllowed ? (cleanId.length === 8 || cleanId.length === 9) : (cleanId.length === 9);
 
@@ -508,7 +550,7 @@ const MyProfileDashboard = ({
           working_place: formData.working_place,
           fo_name: formData.fo_name,
           date: date,
-          category: category,
+          category: cleanCatKey,
           action: action,
           old_id: oldId,
           new_id: newId ? newId.trim() : "",
@@ -525,15 +567,16 @@ const MyProfileDashboard = ({
           const updatedHistory = { ...prev.daily_history };
           const day = { ...updatedHistory[date] };
           const cats = { ...(day.categories || {}) };
-          cats[category] = data.updated_ids;
+          cats[cleanCatKey] = data.updated_ids;
+          delete cats[cleanCatKey + '_ids'];
           day.categories = cats;
-          day.total_ids = Object.values(cats).reduce((sum, arr) => sum + (arr ? arr.length : 0), 0);
+          day.total_ids = Object.values(cats).reduce((sum, arr) => sum + (Array.isArray(arr) ? arr.length : 0), 0);
           updatedHistory[date] = day;
 
           const updatedBreakdown = { ...(prev.breakdown || {}) };
-          if (updatedBreakdown[category] !== undefined) {
+          if (updatedBreakdown[cleanCatKey] !== undefined) {
             const countDiff = action === 'add' ? 1 : action === 'delete' ? -1 : 0;
-            updatedBreakdown[category] = Math.max(0, updatedBreakdown[category] + countDiff);
+            updatedBreakdown[cleanCatKey] = Math.max(0, updatedBreakdown[cleanCatKey] + countDiff);
           }
 
           return {
@@ -937,10 +980,42 @@ const MyProfileDashboard = ({
 
             {selectedDayData && selectedDayData.submitted ? (
               <div className="space-y-3">
+                {isDateEditable && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingModal({ 
+                      date: selectedDate, 
+                      category: 'notification', 
+                      action: 'add', 
+                      oldId: '', 
+                      newId: '', 
+                      error: '' 
+                    })}
+                    className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black transition-all shadow-xs flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
+                  >
+                    <span>➕</span>
+                    <span>Add Missing Patient ID (24h Edit)</span>
+                  </button>
+                )}
+
                 {selectedDayData.visited_names && selectedDayData.visited_names.length > 0 && (
                   <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Visited Doctors / Stores</span>
                     <p className="font-bold text-slate-700">{selectedDayData.visited_names.join(', ')}</p>
+                  </div>
+                )}
+
+                {/* Show note if day has 0 IDs recorded (Remarks-only submission) */}
+                {Object.values(selectedDayData.categories || {}).flat().length === 0 && (
+                  <div className="p-4 bg-slate-50/90 rounded-2xl border border-dashed border-slate-200 text-center space-y-1">
+                    <p className="text-xs font-bold text-slate-700">Is date ko koi Patient ID darj nahi hai (Remarks-only report).</p>
+                    {isDateEditable ? (
+                      <p className="text-[11px] text-emerald-700 font-medium">
+                        Aap upar diye gaye <strong>"+ Add Missing Patient ID"</strong> button se category select karke ID add kar sakte hain.
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-slate-400 font-medium">24 ghante beet chuke hain, ID add ya modify karne ke liye Admin se contact karein.</p>
+                    )}
                   </div>
                 )}
 
@@ -1034,13 +1109,33 @@ const MyProfileDashboard = ({
                   {editingModal.action === 'replace' ? '✏️ Correct Patient ID' : editingModal.action === 'delete' ? '🗑️ Remove Patient ID' : '➕ Add Missing Patient ID'}
                 </h4>
                 <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
-                  {editingModal.category.replace(/_/g, ' ').toUpperCase()} &bull; {editingModal.date}
+                  {editingModal.action === 'add' 
+                    ? `24H Edit Window \u2022 ${editingModal.date}`
+                    : `${(editingModal.category || '').replace(/_ids$/, '').replace(/_/g, ' ').toUpperCase()} \u2022 ${editingModal.date}`
+                  }
                 </p>
               </div>
               <button onClick={() => setEditingModal(null)} className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none">&times;</button>
             </div>
 
             <form onSubmit={handleExecuteIdEdit} className="space-y-3">
+              {editingModal.action === 'add' && (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                    Select Category / Indicator:
+                  </label>
+                  <select
+                    value={(editingModal.category || 'notification').replace(/_ids$/, '')}
+                    onChange={(e) => setEditingModal(prev => ({ ...prev, category: e.target.value, error: '' }))}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                  >
+                    {EDITABLE_CATEGORIES.map(c => (
+                      <option key={c.key} value={c.key}>{c.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {editingModal.action === 'delete' ? (
                 <div className="p-3 bg-red-50 rounded-2xl border border-red-100 text-center">
                   <p className="text-xs font-bold text-red-800 mb-1">Kya aap sach me ID <strong className="font-mono text-sm">{editingModal.oldId}</strong> ko delete karna chahte hain?</p>
@@ -1051,7 +1146,7 @@ const MyProfileDashboard = ({
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
                     {editingModal.action === 'replace' 
                       ? `Replace ID #${editingModal.oldId} With:` 
-                      : (['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? 'Enter 8 or 9-Digit Patient ID:' : 'Enter 9-Digit Patient ID:')
+                      : (['fdc_provided', 'outcome_assigned', 'fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? 'Enter 8 or 9-Digit Patient ID:' : 'Enter 9-Digit Patient ID:')
                     }
                   </label>
                   <input
@@ -1060,12 +1155,12 @@ const MyProfileDashboard = ({
                     maxLength={9}
                     value={editingModal.newId}
                     onChange={(e) => setEditingModal(prev => ({ ...prev, newId: e.target.value.replace(/\D/g, '') }))}
-                    placeholder={['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? "e.g. 12345678 or 332882518" : "e.g. 332882518"}
+                    placeholder={['fdc_provided', 'outcome_assigned', 'fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? "e.g. 12345678 or 332882518" : "e.g. 332882518"}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-indigo-500"
                     autoFocus
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    {['fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) 
+                    {['fdc_provided', 'outcome_assigned', 'fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) 
                       ? "Must be 8 or 9 digits (legacy ID allowed)." 
                       : "Must be exactly 9 digits."
                     }
@@ -2423,6 +2518,9 @@ function App() {
   const [cascadeSummary, setCascadeSummary] = useState({});
   const [loadingCascadeAlerts, setLoadingCascadeAlerts] = useState(false);
 
+  // Field Staff Monthly Ledger for Duplicate Warning
+  const [foMonthlyHistory, setFoMonthlyHistory] = useState(null);
+
   // Derived Live Metric Tallies for Floating Mini-HUD
   const liveTotalIds = useMemo(() => {
     const idKeys = [
@@ -2448,6 +2546,105 @@ function App() {
     return Array.isArray(formData.notification_ids) ? formData.notification_ids.length : 0;
   }, [formData.notification_ids]);
 
+  // Map of IDs reported by this officer earlier in the current month for non-blocking duplicate warnings
+  const monthlyReportedIdsMap = useMemo(() => {
+    if (!foMonthlyHistory || !foMonthlyHistory.daily_history) return {};
+    const map = {};
+    const catNames = {
+      notification: "TB Notification",
+      hiv_dm: "HIV & DM",
+      dbt: "DBT",
+      sample_collection: "Sample Collection",
+      sample_tested: "Samples Tested",
+      outcome_assigned: "Outcome Assigned",
+      home_visit: "Home Visit",
+      contact_tracing: "Contact Tracing",
+      follow_up: "Follow Up",
+      face_to_face: "Face to Face",
+      presumptive: "Presumptive",
+      documents: "Documents",
+      fdc_provided: "FDC Provided",
+      kit_consumption: "Kit Consumption",
+      differentiated_tb: "Differentiated TB",
+      tpt_treatment_start: "TPT Treatment Start",
+      tpt_presumptive: "TPT Presumptive",
+      adhar_face_authentication: "Aadhaar Face Auth",
+      consent_with_id: "Consent with ID",
+      culture_dst: "Culture / DST"
+    };
+
+    Object.entries(foMonthlyHistory.daily_history).forEach(([dateStr, dayObj]) => {
+      if (!dayObj || !dayObj.categories) return;
+      Object.entries(dayObj.categories).forEach(([rawCat, idList]) => {
+        if (!Array.isArray(idList)) return;
+        const cleanCat = rawCat.replace(/_ids$/, '');
+        const catLabel = catNames[cleanCat] || cleanCat.replace(/_/g, ' ').toUpperCase();
+        const normFieldKey = cleanCat + '_ids';
+
+        idList.forEach(id => {
+          const cleanId = String(id).trim();
+          if (!cleanId) return;
+          if (!map[cleanId]) map[cleanId] = [];
+          map[cleanId].push({
+            date: dateStr,
+            category: normFieldKey,
+            categoryClean: cleanCat,
+            categoryLabel: catLabel
+          });
+        });
+      });
+    });
+    return map;
+  }, [foMonthlyHistory]);
+
+  const checkMonthlyDuplicate = (field, id) => {
+    if (!monthlyReportedIdsMap || !monthlyReportedIdsMap[id]) return null;
+    const pastEntries = monthlyReportedIdsMap[id];
+    const cleanCurrentCat = (field || '').replace(/_ids$/, '');
+    const sameCatEntries = pastEntries.filter(e => e.categoryClean === cleanCurrentCat);
+    if (sameCatEntries.length > 0) {
+      const latest = sameCatEntries[sameCatEntries.length - 1];
+      return {
+        isSameCategory: true,
+        date: latest.date,
+        label: latest.categoryLabel
+      };
+    }
+    const firstOther = pastEntries[0];
+    return {
+      isSameCategory: false,
+      date: firstOther.date,
+      label: firstOther.categoryLabel
+    };
+  };
+
+  const fetchFoMonthlyHistory = async (district, fo_name, pin) => {
+    if (!district || !fo_name) return;
+    try {
+      const today = new Date();
+      const monthStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/my-profile-stats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          working_place: district,
+          fo_name: fo_name,
+          pin: pin || formData.pin,
+          month: monthStr
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          setFoMonthlyHistory(data);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch FO monthly ledger", e);
+    }
+  };
+
   const fetchFoCascadeAlerts = async (district, fo_name) => {
     if (!district || !fo_name) return;
     try {
@@ -2469,6 +2666,7 @@ function App() {
   useEffect(() => {
     if (isLoggedIn && formData.working_place && formData.fo_name) {
       fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+      fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
     }
   }, [isLoggedIn, formData.working_place, formData.fo_name]);
 
@@ -2861,6 +3059,7 @@ function App() {
         if (typeof navigator !== 'undefined' && navigator.onLine) {
           fetchFoBroadcasts(formData.working_place);
           fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+          fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
         }
         showToast(
           typeof navigator !== 'undefined' && !navigator.onLine 
@@ -2884,6 +3083,13 @@ function App() {
         showToast("Tip: Patient ko TPT Presumptive bucket me bhi record karein.", "success");
       }
     }
+
+    // ⚠️ Non-blocking monthly duplicate warning: Alert FO without preventing addition
+    const prevReport = checkMonthlyDuplicate(field, id);
+    if (prevReport && prevReport.isSameCategory) {
+      showToast(`⚠️ Dhyan dein: ID ${id} aapne ${prevReport.date} ko "${prevReport.label}" me pehle bhi report ki hai.`, "warning");
+    }
+
     setFormData(prev => ({ ...prev, [field]: [...(prev[field] || []), id] }));
   };
 
@@ -2892,11 +3098,27 @@ function App() {
       const current = prev[field] || [];
       const uniqueNew = newIds.filter(id => !current.includes(id));
       const duplicatesCount = newIds.length - uniqueNew.length;
-      if (duplicatesCount > 0) {
+
+      // ⚠️ Non-blocking monthly duplicate check: Alert FO if any pasted IDs were reported earlier this month
+      const monthlyDuplicates = uniqueNew.filter(id => {
+        const match = checkMonthlyDuplicate(field, id);
+        return match && match.isSameCategory;
+      });
+
+      if (monthlyDuplicates.length > 0) {
+        const sample = monthlyDuplicates.slice(0, 2).map(id => {
+          const match = checkMonthlyDuplicate(field, id);
+          return `#${id} (${match?.date || ''})`;
+        }).join(', ');
+        const extra = monthlyDuplicates.length > 2 ? ` (+${monthlyDuplicates.length - 2} aur)` : '';
+        const catLabel = checkMonthlyDuplicate(field, monthlyDuplicates[0])?.label || 'issi field';
+        showToast(`⚠️ Dhyan dein: ${monthlyDuplicates.length} IDs ${catLabel} me pehle bhi report ho chuki hain: ${sample}${extra}`, 'warning');
+      } else if (duplicatesCount > 0) {
         showToast(`${uniqueNew.length} IDs add hui (${duplicatesCount} duplicates ignore ki gayi)`, 'success');
       } else {
         showToast(`${uniqueNew.length} IDs add hui!`, 'success');
       }
+
       return {
         ...prev,
         [field]: [...current, ...uniqueNew]
@@ -3142,6 +3364,8 @@ function App() {
           isOffline: false
         });
         setShowPostSubmitSuccess(true);
+        fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
+        fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
       } else {
         const result = await response.json();
         showToast(result.detail || "Error in saving data.", "error");
@@ -3425,6 +3649,9 @@ function App() {
               loadingAlerts={loadingCascadeAlerts}
               onAutofill={handleAutofillPendingId}
               onRefreshCascade={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+              stats={foMonthlyHistory}
+              setStats={setFoMonthlyHistory}
+              onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
             />
           ) : currentView === 'tracker' ? (
             <PatientJourneyTracker 
@@ -3484,16 +3711,6 @@ function App() {
                 </div>
               )}
 
-              {/* 🚨 FO Predictive Cascade & Dropout Alerts - Action Center ALWAYS ON MAIN SCREEN */}
-              <PendingInterventionsActionCenter 
-                cascadeAlerts={cascadeAlerts}
-                cascadeSummary={cascadeSummary}
-                loading={loadingCascadeAlerts}
-                formData={formData}
-                onAutofill={handleAutofillPendingId}
-                showToast={showToast}
-                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
-              />
 
               {/* Real-time Floating Mini-HUD for daily entries */}
               <div className="sticky top-16 z-30 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-3 shadow-sm mb-4 transition-all">

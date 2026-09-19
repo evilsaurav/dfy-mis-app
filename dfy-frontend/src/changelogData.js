@@ -1,16 +1,47 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.0";
+export const APP_VERSION = "2.7.1";
 export const LAST_UPDATED_DATE = "19 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.7.1",
+    date: "19 Sep 2026",
+    title: "1-Click District WhatsApp Performance Report, 24-Hour FO Missing ID Suite & Monthly Duplicate ID Warnings",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📱 1-Click WhatsApp District Comprehensive Performance Report: Added manager-ready WhatsApp export with district totals and individual staff achievement percentages (targetAchievedPct) and status badges.",
+      "➕ 24-Hour FO Edit Suite (Remarks-Only Report Fix): Added master '+ Add Missing Patient ID' button and Category selector in Date Inspector so officers can add IDs even if the initial submission contained only remarks.",
+      "⚠️ Non-Blocking Monthly Duplicate ID Warning: Smart amber alerts notify Field Officers when an ID was previously submitted earlier in the month without obstructing the current submission.",
+      "🧹 Dashboard KPI Card Refinement: Streamlined the TB Notifications KPI card to 'Notifications' and removed the 'Primary Target' sub-label.",
+      "⚡ Form View Clutter Reduction: Removed the duplicate Pending Interventions card from the reporting form view to maintain a clean single-purpose layout alongside the dedicated ⚡ Pending dock tab."
+    ],
+    details: [
+      {
+        tag: "Admin Performance",
+        color: "emerald",
+        text: "District WhatsApp Performance Dispatch: Managers can now dispatch comprehensive district summaries including targets, notifications, tests, FDC, DBT, KM, and staff-by-staff target achievement percentages directly to WhatsApp in 1 click."
+      },
+      {
+        tag: "FO Self-Correction",
+        color: "indigo",
+        text: "Missing ID Addition in 24h Window: Resolved edge case where remarks-only daily reports hid category containers. Officers can now add missing IDs with an intuitive category selector directly from their profile calendar."
+      },
+      {
+        tag: "Data Quality",
+        color: "amber",
+        text: "Monthly Duplicate Warning: FO app checks current month reporting history and displays non-blocking alerts if an ID is re-reported in the same indicator, preventing accidental repeat submissions."
+      }
+    ]
+  },
+  {
     version: "v2.7.0",
     date: "19 Sep 2026",
     title: "Daily Notification Multi-District Tray Filter, FO Bottom Nav Dock, Patient Journey Tracker & Visual Help Guide",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "⚡ Dedicated Pending Interventions Hub: Added 5th bottom tab with real-time badge, patient search, 1-tap WhatsApp list dispatch, and 1-tap autofill into today's report.",
       "🎯 Multi-District Notification Tray Filter: Flexible district selection in Modal 0A supporting All Districts, single district, or multi-district custom chip decks with live instant search.",

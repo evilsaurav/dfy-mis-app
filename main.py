@@ -2608,8 +2608,10 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             
         if req.action in ["replace", "add"]:
             clean_new_id = str(req.new_id).strip()
-            if not clean_new_id.isdigit() or len(clean_new_id) != 9:
-                raise HTTPException(status_code=400, detail=f"Invalid Patient ID '{clean_new_id}'. Must be exactly 9 digits.")
+            valid_lens = [8, 9] if cat_key in ["fdc_provided_ids", "outcome_assigned_ids"] else [9]
+            if not clean_new_id.isdigit() or len(clean_new_id) not in valid_lens:
+                lens_desc = "8 or 9" if 8 in valid_lens else "9"
+                raise HTTPException(status_code=400, detail=f"Invalid Patient ID '{clean_new_id}'. Must be exactly {lens_desc} digits.")
             req.new_id = clean_new_id
             
         if req.edited_by == "FO" and req.pin:
