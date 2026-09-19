@@ -4432,70 +4432,169 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               )}
 
-            {/* The BIG 5 KPIs */}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
-              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Total KM</span>
-                  <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
-                    🚗
-                  </div>
-                </div>
-                <p className="text-2xl sm:text-3xl font-black text-slate-800 tabular-num tracking-tight">{totals.total_km}</p>
-                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-indigo-600/90">
-                  <span>Field Travel</span>
-                </div>
-              </div>
+            {/* Executive 4-Card KPI Summary Strip */}
+            {(() => {
+              // 1. Target & Achievement for TB Notifications
+              let scopedTarget = 0;
+              if (selectedDistrict !== 'All') {
+                scopedTarget = targetsData.filter(t => t.district === selectedDistrict).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+              } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+                scopedTarget = targetsData.filter(t => currentUser.allowed_districts.includes(t.district)).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+              } else {
+                scopedTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+              }
+              const notifCount = totals.notifications || 0;
+              const notifAchievedPct = scopedTarget > 0 ? ((notifCount / scopedTarget) * 100).toFixed(1) : null;
+              
+              // 2. Lab Testing & Yield
+              const testsCount = totals.tests || 0;
+              const presumptiveCount = totals.presumptive || 0;
+              const testYieldPct = presumptiveCount > 0 ? ((testsCount / presumptiveCount) * 100).toFixed(1) : null;
+              
+              // 3. Core Clinical Interventions
+              const hivDmCount = totals.hiv_dm || 0;
+              const dbtCount = totals.dbt || 0;
+              const contactsCount = totals.contact_tracing || 0;
+              const clinicalTotal = hivDmCount + dbtCount + contactsCount;
+              const clinicalCoveragePct = notifCount > 0 ? Math.min(100, Math.round((clinicalTotal / (notifCount * 3)) * 100)) : 0;
 
-              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Notifications</span>
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
-                    📋
-                  </div>
-                </div>
-                <p className="text-2xl sm:text-3xl font-black text-emerald-600 tabular-num tracking-tight">{totals.notifications}</p>
-              </div>
+              // 4. Field Travel & Active Staff
+              const totalKm = totals.total_km || 0;
+              const activeStaffCount = new Set(filteredRecords.map(r => r.fo_name).filter(Boolean)).size;
+              const avgKmPerStaff = activeStaffCount > 0 ? (totalKm / activeStaffCount).toFixed(1) : 0;
 
-              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Samples Tested</span>
-                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
-                    🔬
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+                  
+                  {/* CARD 1: TB Notifications */}
+                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                      <div className="flex items-center gap-1.5">
+                        {notifAchievedPct !== null ? (
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full tabular-num ${
+                            Number(notifAchievedPct) >= 90 ? 'badge-emerald' : Number(notifAchievedPct) >= 60 ? 'badge-teal' : 'badge-amber'
+                          }`}>
+                            {notifAchievedPct}%
+                          </span>
+                        ) : null}
+                        <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                          📋
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-900 tabular-num tracking-tight">{notifCount.toLocaleString('en-IN')}</p>
+                    {scopedTarget > 0 ? (
+                      <div className="mt-2 space-y-1">
+                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-700 ${
+                              Number(notifAchievedPct) >= 90 ? 'bg-emerald-500' : Number(notifAchievedPct) >= 60 ? 'bg-teal-600' : 'bg-amber-500'
+                            }`} 
+                            style={{ width: `${Math.min(100, Number(notifAchievedPct))}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-[11px] font-semibold text-slate-500 tabular-num truncate">
+                          Target: <strong className="text-slate-700 font-bold">{scopedTarget.toLocaleString('en-IN')}</strong> • {Number(notifAchievedPct) >= 100 ? 'Target Achieved' : `${Math.max(0, scopedTarget - notifCount).toLocaleString('en-IN')} remaining`}
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] font-semibold text-teal-800/90 mt-2 truncate">
+                        Primary Clinical Notifications
+                      </p>
+                    )}
                   </div>
-                </div>
-                <p className="text-2xl sm:text-3xl font-black text-blue-600 tabular-num tracking-tight">{totals.tests}</p>
-                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-blue-700">
-                  <span>Lab Diagnostics</span>
-                </div>
-              </div>
 
-              <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Presumptive</span>
-                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
-                    🩺
+                  {/* CARD 2: UDST Lab Testing */}
+                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">UDST Lab Testing</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge-indigo text-[10px] font-black px-2 py-0.5 rounded-full">
+                          UDST
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                          🔬
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-900 tabular-num tracking-tight">{testsCount.toLocaleString('en-IN')}</p>
+                    <div className="mt-2 space-y-1">
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="h-full bg-blue-600 rounded-full transition-all duration-700" 
+                          style={{ width: `${Math.min(100, Number(testYieldPct || 0))}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-[11px] font-semibold text-slate-500 tabular-num truncate">
+                        {testYieldPct !== null ? (
+                          <>Yield: <strong className="text-blue-800 font-bold">{testYieldPct}%</strong> of {presumptiveCount.toLocaleString('en-IN')} Presumptive</>
+                        ) : (
+                          <>Presumptive cases: {presumptiveCount.toLocaleString('en-IN')}</>
+                        )}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <p className="text-2xl sm:text-3xl font-black text-amber-600 tabular-num tracking-tight">{totals.presumptive}</p>
-                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-amber-700">
-                  <span>Symptomatic</span>
-                </div>
-              </div>
 
-              <div className="col-span-2 lg:col-span-1 glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/80 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden">
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">Doctor Visits</span>
-                  <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
-                    🏥
+                  {/* CARD 3: Core Clinical Cascade */}
+                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Clinical Cascade</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge-teal text-[10px] font-black px-2 py-0.5 rounded-full">
+                          Cascade
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                          🩺
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-900 tabular-num tracking-tight">{clinicalTotal.toLocaleString('en-IN')}</p>
+                    <div className="mt-2 space-y-1">
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="h-full bg-teal-600 rounded-full transition-all duration-700" 
+                          style={{ width: `${Math.max(8, clinicalCoveragePct)}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-[11px] font-semibold text-slate-500 tabular-num truncate" title={`HIV/DM: ${hivDmCount} • DBT: ${dbtCount} • Contacts: ${contactsCount}`}>
+                        HIV/DM: <strong className="text-slate-700 font-bold">{hivDmCount}</strong> • DBT: <strong className="text-slate-700 font-bold">{dbtCount}</strong> • Tracing: <strong className="text-slate-700 font-bold">{contactsCount}</strong>
+                      </p>
+                    </div>
                   </div>
+
+                  {/* CARD 4: Field Footprint & Travel */}
+                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Field Travel</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="badge-amber text-[10px] font-black px-2 py-0.5 rounded-full">
+                          {activeStaffCount} Staff
+                        </span>
+                        <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center text-sm font-black shrink-0 group-hover:scale-110 transition-transform">
+                          🚗
+                        </div>
+                      </div>
+                    </div>
+                    <p className="text-2xl sm:text-3xl font-black text-slate-900 tabular-num tracking-tight">
+                      {totalKm.toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-400 tracking-normal">KM</span>
+                    </p>
+                    <div className="mt-2 space-y-1">
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                        <div 
+                          className="h-full bg-amber-500 rounded-full transition-all duration-700" 
+                          style={{ width: `${Math.min(100, Math.round((Number(avgKmPerStaff) / 500) * 100))}%` }}
+                        ></div>
+                      </div>
+                      <p className="text-[11px] font-semibold text-slate-500 tabular-num truncate">
+                        Average <strong className="text-slate-700 font-bold">{avgKmPerStaff} KM</strong> per active Field Officer
+                      </p>
+                    </div>
+                  </div>
+
                 </div>
-                <p className="text-2xl sm:text-3xl font-black text-purple-600 tabular-num tracking-tight">{totals.doctor_visits}</p>
-                <div className="flex items-center gap-1 mt-1 text-[10px] font-bold text-purple-700">
-                  <span>Clinical Engagement</span>
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* Secondary Metrics Grid */}
             <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
