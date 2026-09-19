@@ -3615,45 +3615,44 @@ const availableDistrictsForFeed = useMemo(() => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50/50 p-4 sm:p-6 font-sans text-slate-800">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div className="min-h-screen bg-slate-50/50 p-2 sm:p-4 md:p-6 font-sans text-slate-800">
+      <div className="max-w-[1720px] w-full mx-auto space-y-4">
         
-        {/* Header & Controls */}
         {/* ========================================================================= */}
-        {/* --- TIER 1: BRAND IDENTITY, GLOBAL SCOPE FILTERS & ESSENTIAL UTILITIES --- */}
+        {/* --- EXECUTIVE TOP STICKY COMMAND BAR (FULL-WIDTH BRAND, FILTERS & UTILITIES) --- */}
         {/* ========================================================================= */}
-        <div className="bg-white/95 backdrop-blur-md p-4 sm:p-5 rounded-3xl shadow-sm border border-slate-200/80 space-y-4">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <header className="sticky top-0 z-40 command-bar-surface p-3 sm:p-3.5 rounded-2xl shadow-sm border border-slate-200/90 transition-all">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4">
             
             {/* 1. Left: Brand & Admin Identity */}
-            <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-600 to-indigo-800 text-white flex items-center justify-center font-black text-xl shadow-md shadow-indigo-600/25 shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-800 text-white flex items-center justify-center font-black text-lg shadow-sm shadow-teal-700/25 shrink-0">
                 📊
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black text-slate-800 tracking-tight">Analytics Dashboard</h1>
-                  <div className="flex items-center gap-1.5 bg-indigo-50/90 border border-indigo-100/90 px-2.5 py-0.5 rounded-full shadow-2xs">
+                  <h1 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">DFY TB Control Center</h1>
+                  <div className="flex items-center gap-1.5 bg-teal-50 border border-teal-200/90 px-2.5 py-0.5 rounded-full shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                    <span className="text-xs font-black text-indigo-900">{currentUser?.name || 'Super Admin'}</span>
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-indigo-200/80 text-indigo-800 px-2 py-0.5 rounded-full">
+                    <span className="text-xs font-black text-teal-950">{currentUser?.name || 'Super Admin'}</span>
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-teal-200/80 text-teal-900 px-2 py-0.5 rounded-full">
                       {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
                     </span>
                   </div>
                 </div>
-                <p className="text-slate-500 text-xs sm:text-sm font-medium mt-0.5">Monitoring {rawRecords.length} daily reports across Bihar</p>
+                <p className="text-slate-500 text-xs font-medium mt-0.5">Monitoring {rawRecords.length} daily reports across Bihar</p>
               </div>
             </div>
 
             {/* 2. Middle & Right: Scope Filters + Global Utilities */}
             <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
               {/* Scope Filters Group */}
-              <div className="flex flex-wrap items-center gap-2 bg-slate-100/70 border border-slate-200/80 p-1.5 rounded-2xl shadow-inner">
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 bg-slate-100/80 border border-slate-200/90 p-1 rounded-xl shadow-inner">
                 <input 
                   type="month" 
                   value={month} 
                   onChange={(e) => setMonth(e.target.value)} 
-                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 shadow-2xs transition-all cursor-pointer" 
+                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 shadow-2xs transition-all cursor-pointer" 
                 />
                 {isSuperAdmin && (
                   <button
@@ -3662,9 +3661,9 @@ const availableDistrictsForFeed = useMemo(() => {
                       setSelectedDistrict('All');
                       setSelectedFO('All');
                     }}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                       selectedDistrict === 'All'
-                        ? 'bg-indigo-600 text-white shadow-xs shadow-indigo-600/25'
+                        ? 'bg-teal-700 text-white shadow-xs shadow-teal-700/25'
                         : 'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200/90 shadow-2xs'
                     }`}
                     title="View All Districts"
@@ -3676,9 +3675,9 @@ const availableDistrictsForFeed = useMemo(() => {
                 <select 
                   value={selectedDistrict} 
                   onChange={(e) => {setSelectedDistrict(e.target.value); setSelectedFO('All');}} 
-                  className={`border px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all cursor-pointer ${
+                  className={`border px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 transition-all cursor-pointer ${
                     selectedDistrict !== 'All'
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900 ring-1 ring-indigo-300 shadow-xs'
+                      ? 'bg-teal-50 border-teal-300 text-teal-900 ring-1 ring-teal-300 shadow-xs'
                       : 'bg-white border-slate-200/90 text-slate-700 shadow-2xs'
                   }`}
                 >
@@ -3688,7 +3687,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   value={selectedFO} 
                   onChange={(e) => setSelectedFO(e.target.value)} 
                   disabled={selectedDistrict === 'All'} 
-                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 disabled:opacity-40 shadow-2xs cursor-pointer transition-all"
+                  className="bg-white border border-slate-200/90 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 disabled:opacity-40 shadow-2xs cursor-pointer transition-all"
                 >
                   {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
                 </select>
@@ -3697,7 +3696,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   <button
                     type="button"
                     onClick={() => copyDistrictWhatsAppReport(selectedDistrict)}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-black transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0 animate-fade-in"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-black transition-all shadow-xs flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0 animate-fade-in"
                     title={`1-Click WhatsApp Performance Report for ${selectedDistrict} with Staff Target Achievement %`}
                   >
                     <span>📱</span>
@@ -3708,7 +3707,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   <button
                     type="button"
                     onClick={copyWhatsAppBulletin}
-                    className="bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+                    className="bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
                     title="1-Click WhatsApp State Bulletin"
                   >
                     <span>📱</span>
@@ -3722,7 +3721,7 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-1.5">
                 {lastSyncedTime && (
                   <div 
-                    className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/90 border border-slate-200/80 text-[11px] font-bold text-slate-600 shadow-2xs"
+                    className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-teal-50/70 border border-teal-200/80 text-[11px] font-bold text-teal-900 shadow-2xs"
                     title={`Last Synced: ${lastSyncedTime} (${syncStatus === 'UP_TO_DATE' ? 'Data verified up-to-date via delta cache' : 'Live synchronized'})`}
                   >
                     <span className={`w-2 h-2 rounded-full ${syncStatus === 'SYNCING' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 shadow-xs shadow-emerald-500/50'}`}></span>
@@ -3731,6 +3730,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 )}
 
                 <button
+                  type="button"
                   onClick={() => {
                     fetchData(true);
                     fetchAttendance();
@@ -3743,7 +3743,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     showToast("✓ Dashboard refreshed from live database!", "success");
                   }}
                   disabled={isLoading}
-                  className="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-emerald-600/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Refresh Dashboard & Sync Latest Reports"
                 >
                   <span className={isLoading ? "animate-spin" : ""}>🔄</span>
@@ -3751,12 +3751,13 @@ const availableDistrictsForFeed = useMemo(() => {
                 </button>
 
                 <button
+                  type="button"
                   onClick={() => setShowAppGuideModal(true)}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-indigo-600/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="Admin SOP Manual & Feature Guide (Sub-Admin Help Center)"
                 >
                   <span>📘</span>
-                  <span className="hidden sm:inline">Help &amp; SOP</span>
+                  <span className="hidden sm:inline">SOP</span>
                 </button>
 
                 <button
@@ -3765,11 +3766,11 @@ const availableDistrictsForFeed = useMemo(() => {
                     setShowRecentIdEditsModal(true);
                     fetchRecentIdEdits();
                   }}
-                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer"
                   title="View all Patient ID additions, edits, and deletions across the past 7 days"
                 >
                   <span>🕒</span>
-                  <span className="hidden sm:inline">7-Day ID History</span>
+                  <span className="hidden sm:inline">History</span>
                 </button>
 
                 <button
@@ -3794,6 +3795,7 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 {isSuperAdmin && (
                   <button 
+                    type="button"
                     onClick={() => { setSecurityStatusMsg(''); setShowSecurityModal(true); }} 
                     className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
                     title="Admin Security Settings & Change Password"
@@ -3805,8 +3807,9 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 {isSuperAdmin && (
                   <button 
+                    type="button"
                     onClick={() => { setShowBackupModal(true); fetchBackupStatus(); }} 
-                    className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
+                    className="bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer" 
                     title="Automated Daily Cloud Backups (Google Cloud Storage Mumbai)"
                   >
                     <span>💾</span>
@@ -3815,6 +3818,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 )}
 
                 <button 
+                  type="button"
                   onClick={() => {
                     try {
                       localStorage.removeItem('dfy_admin_auth');
@@ -3834,11 +3838,13 @@ const availableDistrictsForFeed = useMemo(() => {
             </div>
 
           </div>
+        </header>
 
-          {/* ========================================================================= */}
-          {/* --- TIER 2: COMMAND DECK (ORGANIZED FUNCTIONAL CLUSTERS) --- */}
-          {/* ========================================================================= */}
-          <div className="pt-3 border-t border-slate-100 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
+        {/* ========================================================================= */}
+        {/* --- TIER 2: COMMAND DECK (ORGANIZED FUNCTIONAL CLUSTERS) --- */}
+        {/* ========================================================================= */}
+        <div className="bg-white/95 backdrop-blur-md p-3.5 sm:p-4 rounded-2xl shadow-xs border border-slate-200/80">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
             
             {/* CLUSTER 1: 🩺 CLINICAL & RECONCILIATION (5 cols on LG) */}
             <div className="lg:col-span-5 bg-gradient-to-br from-emerald-50/60 to-teal-50/40 border border-emerald-200/80 rounded-2xl p-3 flex flex-col justify-between space-y-2">
@@ -4143,15 +4149,15 @@ const availableDistrictsForFeed = useMemo(() => {
         )}
 
         {/* Primary Dashboard Navigation Tabs */}
-        <div className="bg-white p-2 sm:p-2.5 rounded-2xl shadow-xs border border-slate-200/80 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 animate-fade-in">
+        <div className="bg-white/95 backdrop-blur-md p-2 sm:p-2.5 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 animate-fade-in">
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               type="button"
               onClick={() => setActiveMainTab('overview')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 active:scale-95 ${
+              className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer ${
                 activeMainTab === 'overview'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/60'
+                  ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
+                  : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
               }`}
             >
               <span>📊</span>
@@ -4160,16 +4166,16 @@ const availableDistrictsForFeed = useMemo(() => {
             <button
               type="button"
               onClick={() => setActiveMainTab('staff_pacing')}
-              className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 active:scale-95 relative ${
+              className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 relative cursor-pointer ${
                 activeMainTab === 'staff_pacing'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/60'
+                  ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
+                  : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
               }`}
             >
               <span>🎯</span>
               <span>Staff Pacing &amp; Peer Comparison</span>
               {pacingStats.critical > 0 && (
-                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse">
+                <span className="bg-rose-500 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full animate-pulse tabular-num">
                   {pacingStats.critical} At Risk
                 </span>
               )}
@@ -4178,10 +4184,10 @@ const availableDistrictsForFeed = useMemo(() => {
               <button
                 type="button"
                 onClick={() => setActiveMainTab('district_benchmarks')}
-                className={`px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center gap-2 active:scale-95 ${
+                className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer ${
                   activeMainTab === 'district_benchmarks'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200/60'
+                    ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
+                    : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
                 }`}
               >
                 <span>🏢</span>
@@ -4190,9 +4196,9 @@ const availableDistrictsForFeed = useMemo(() => {
             )}
           </div>
 
-          <div className="flex items-center gap-2 text-[11px] font-bold text-slate-600 px-3 py-1.5 bg-indigo-50/60 rounded-xl border border-indigo-100/80 self-start md:self-auto">
+          <div className="flex items-center gap-2 text-[11px] font-bold text-teal-950 px-3 py-1.5 bg-teal-50/80 rounded-xl border border-teal-200/90 self-start md:self-auto tabular-num">
             <span>📅 {month}</span>
-            <span className="text-slate-300">&bull;</span>
+            <span className="text-teal-300">&bull;</span>
             <span>{workingDaysInfo.totalWorkingDays} Working Days ({workingDaysInfo.elapsedWorkingDays} Elapsed, {workingDaysInfo.remainingWorkingDays} Left)</span>
           </div>
         </div>
