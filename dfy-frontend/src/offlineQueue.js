@@ -1,16 +1,18 @@
-﻿// --- DFY MIS IndexedDB Offline Queue Engine ---
-const DB_NAME = 'DFY_MIS_OFFLINE_DB';
-const DB_VERSION = 1;
-const STORE_NAME = 'offline_reports_queue';
+// --- DFY MIS IndexedDB Offline Queue Engine ---
+export const DB_NAME = 'DFY_MIS_OFFLINE_DB';
+export const DB_VERSION = 2;
+export const STORE_NAME = 'offline_reports_queue';
+export const REGISTRY_STORE_NAME = 'district_notified_registry';
 
 export const openOfflineDB = () => {
   return new Promise((resolve, reject) => {
-    if (!window.indexedDB) {
+    const idb = typeof window !== 'undefined' ? window.indexedDB : (typeof indexedDB !== 'undefined' ? indexedDB : null);
+    if (!idb) {
       reject(new Error('IndexedDB is not supported on this device.'));
       return;
     }
 
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    const request = idb.open(DB_NAME, DB_VERSION);
 
     request.onupgradeneeded = (event) => {
       const db = event.target.result;
@@ -18,6 +20,9 @@ export const openOfflineDB = () => {
         const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' });
         store.createIndex('timestamp', 'timestamp', { unique: false });
         store.createIndex('fo_name', 'fo_name', { unique: false });
+      }
+      if (!db.objectStoreNames.contains(REGISTRY_STORE_NAME)) {
+        db.createObjectStore(REGISTRY_STORE_NAME, { keyPath: 'district' });
       }
     };
 
@@ -75,7 +80,7 @@ export const saveOfflineReport = async (payload) => {
       existing.push(item);
       localStorage.setItem(fallbackKey, JSON.stringify(existing));
       return item;
-    } catch (e) {
+    } catch {
       throw error;
     }
   }
@@ -105,7 +110,7 @@ export const getAllOfflineReports = async () => {
     try {
       const fallbackKey = 'dfy_offline_queue_fallback';
       return JSON.parse(localStorage.getItem(fallbackKey) || '[]');
-    } catch (e) {
+    } catch {
       return [];
     }
   }
@@ -118,7 +123,7 @@ export const getOfflineReportsCount = async () => {
   try {
     const reports = await getAllOfflineReports();
     return reports ? reports.length : 0;
-  } catch (e) {
+  } catch {
     return 0;
   }
 };
@@ -142,14 +147,14 @@ export const deleteOfflineReport = async (id) => {
         reject(event.target.error);
       };
     });
-  } catch (error) {
+  } catch {
     try {
       const fallbackKey = 'dfy_offline_queue_fallback';
       const existing = JSON.parse(localStorage.getItem(fallbackKey) || '[]');
       const filtered = existing.filter(item => item.id !== id);
       localStorage.setItem(fallbackKey, JSON.stringify(filtered));
       return true;
-    } catch (e) {
+    } catch {
       return false;
     }
   }
@@ -176,10 +181,11 @@ export const syncAllOfflineReports = async (apiBaseUrl, onReportSynced) => {
       });
 
       if (response.ok) {
+        const resData = await response.json().catch(() => ({}));
         await deleteOfflineReport(item.id);
         syncedCount++;
         if (onReportSynced) {
-          onReportSynced(item);
+          onReportSynced(item, resData);
         }
       } else {
         failedCount++;
@@ -192,4 +198,167 @@ export const syncAllOfflineReports = async (apiBaseUrl, onReportSynced) => {
   }
 
   return { syncedCount, failedCount };
+};
+
+/**
+ * Save district notification registry into IndexedDB with localStorage fallback
+ * @param {string} district - Canonical or raw district name
+ * @param {Object} registryMap - Map of patientId -> { date, fo_name }
+ * @param {number} [totalCount] - Total count of notifications
+ * @returns {Promise<Object|null>} The saved registry record
+ */
+export const saveDistrictRegistry = async (district, registryMap, totalCount) => {
+  const cleanDist = String(district || '').trim();
+  if (!cleanDist) return null;
+
+  const count = typeof totalCount === 'number'
+    ? totalCount
+    : Object.keys(registryMap || {}).length;
+
+  const record = {
+    district: cleanDist,
+    registry: registryMap || {},
+    total_count: count,
+    updated_at: Date.now()
+  };
+
+  const lsKey = `dfy_notif_reg_${cleanDist.toLowerCase()}`;
+
+  // Always mirror to localStorage as fallback
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(lsKey, JSON.stringify(record));
+    }
+  } catch (lsErr) {
+    console.warn('Failed to save district registry to localStorage:', lsErr);
+  }
+
+  try {
+    const db = await openOfflineDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(REGISTRY_STORE_NAME, 'readwrite');
+      const store = tx.objectStore(REGISTRY_STORE_NAME);
+      const request = store.put(record);
+
+      request.onsuccess = () => {
+        resolve(record);
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  } catch (error) {
+    console.warn('Failed to save district registry to IndexedDB, using localStorage fallback:', error);
+    return record;
+  }
+};
+
+/**
+ * Retrieve district notification registry from IndexedDB, falling back to localStorage
+ * @param {string} district - District name to look up
+ * @returns {Promise<Object|null>} The registry record or null if not found
+ */
+export const getDistrictRegistry = async (district) => {
+  const cleanDist = String(district || '').trim();
+  if (!cleanDist) return null;
+
+  const lsKey = `dfy_notif_reg_${cleanDist.toLowerCase()}`;
+
+  try {
+    const db = await openOfflineDB();
+    const result = await new Promise((resolve, reject) => {
+      const tx = db.transaction(REGISTRY_STORE_NAME, 'readonly');
+      const store = tx.objectStore(REGISTRY_STORE_NAME);
+      const request = store.get(cleanDist);
+
+      request.onsuccess = () => {
+        resolve(request.result || null);
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+
+    if (result && result.registry) {
+      return result;
+    }
+
+    // Secondary IndexedDB check: case-insensitive match if exact key didn't match
+    const allDocs = await new Promise((resolve) => {
+      try {
+        const tx = db.transaction(REGISTRY_STORE_NAME, 'readonly');
+        const store = tx.objectStore(REGISTRY_STORE_NAME);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => resolve([]);
+      } catch {
+        resolve([]);
+      }
+    });
+    const matched = allDocs.find(d => String(d.district).toLowerCase() === cleanDist.toLowerCase());
+    if (matched && matched.registry) {
+      return matched;
+    }
+  } catch (error) {
+    console.warn('Error reading district registry from IndexedDB, trying localStorage:', error);
+  }
+
+  // Fallback to localStorage
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const fallbackData = localStorage.getItem(lsKey);
+      if (fallbackData) {
+        return JSON.parse(fallbackData);
+      }
+    }
+  } catch (lsErr) {
+    console.warn('Error reading district registry from localStorage fallback:', lsErr);
+  }
+
+  return null;
+};
+
+/**
+ * Check if a patient ID is already notified in a given district
+ * @param {string} district - District name
+ * @param {string|number} patientId - Patient ID to check
+ * @returns {Promise<{ notified: boolean, date?: string, fo_name?: string }>}
+ */
+export const isPatientIdNotified = async (district, patientId) => {
+  if (!district || !patientId) {
+    return { notified: false };
+  }
+
+  const cleanPid = String(patientId).trim();
+  if (!cleanPid) {
+    return { notified: false };
+  }
+
+  try {
+    const regDoc = await getDistrictRegistry(district);
+    if (!regDoc || !regDoc.registry) {
+      return { notified: false };
+    }
+
+    const entry = regDoc.registry[cleanPid]
+      || regDoc.registry[cleanPid.toUpperCase()]
+      || regDoc.registry[cleanPid.toLowerCase()];
+
+    if (entry) {
+      if (typeof entry === 'object' && entry !== null) {
+        return {
+          notified: true,
+          date: entry.date,
+          fo_name: entry.fo_name
+        };
+      }
+      return { notified: true };
+    }
+  } catch (error) {
+    console.warn('Error checking patient ID notification status:', error);
+  }
+
+  return { notified: false };
 };
