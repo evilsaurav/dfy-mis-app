@@ -409,6 +409,10 @@ DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
 def record_report_mutation(action: str = "submit", doc_id: str = ""):
     global LAST_REPORTS_MODIFIED_TS
     LAST_REPORTS_MODIFIED_TS = time.time()
+    try:
+        cache.delete_prefix("dist_notif_registry_")
+    except Exception:
+        pass
     if action == "delete" and doc_id:
         DELETED_REPORTS_TOMBSTONES.append({
             "doc_id": str(doc_id).strip(),
@@ -470,6 +474,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 
         if req.force_refresh:
             record_report_mutation("force_refresh")
+            cache.delete_prefix("dist_notif_registry_")
             cache.delete_prefix("dash_")
             cache.delete_prefix("shared_raw_month_")
             cache.delete_prefix("attendance_")
@@ -893,6 +898,7 @@ async def submit_daily_report(report: DailyActivityReport):
 
         record_report_mutation("submit", doc_id)
         cache.delete(f"status_{doc_id}")
+        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("shared_raw_month_")
@@ -2888,6 +2894,7 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
         
         record_report_mutation("edit", doc_id)
         cache.delete(f"status_{doc_id}")
+        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("shared_raw_month_")
@@ -3176,6 +3183,7 @@ async def admin_feed_officer_data(
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("shared_raw_month_")
@@ -3311,6 +3319,7 @@ async def admin_delete_day_report(
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("shared_raw_month_")
@@ -3561,6 +3570,7 @@ async def admin_edit_day_report(
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
         cache.delete_prefix("dash_")
         cache.delete_prefix("shared_raw_month_")
@@ -6761,3 +6771,92 @@ async def get_patient_journey(patient_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# =========================================================================
+# --- District Notification Registry API (Duplicate Prevention & Sync) ---
+# =========================================================================
+@app.get("/api/district-notification-registry")
+async def get_district_notification_registry(
+    district: str,
+    months: int = 3,
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+):
+    try:
+        clean_dist = canonicalize_district(district.strip()) if district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+
+        # Sub-Admin RBAC check if credentials are provided
+        raw_token = None
+        if authorization and authorization.startswith("Bearer "):
+            raw_token = authorization.split("Bearer ", 1)[1].strip()
+        elif token:
+            raw_token = token.strip()
+
+        if raw_token:
+            try:
+                payload = jwt.decode(raw_token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+                admin_role = payload.get("role", "")
+                allowed = payload.get("allowed_districts", []) or payload.get("districts", [])
+                if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
+                    allowed_c = [canonicalize_district(a).lower() for a in allowed]
+                    if clean_dist.lower() not in allowed_c:
+                        raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+            except HTTPException:
+                raise
+            except jwt.ExpiredSignatureError:
+                raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+            except Exception:
+                raise HTTPException(status_code=401, detail="Invalid authentication token. Access denied.")
+
+        now = get_ist_now()
+        cur_month_str = now.strftime("%Y-%m")
+        cache_key = f"dist_notif_registry_{clean_dist}_{cur_month_str}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Calculate start date (months ago)
+        start_date = (now - timedelta(days=max(30, months * 30))).strftime("%Y-%m-01")
+        end_date = now.strftime("%Y-%m-%d")
+
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()
+        ))
+
+        registry = {}
+        for doc in docs:
+            d = doc.to_dict() if hasattr(doc, "to_dict") else doc
+            doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+            if doc_dist.lower() != clean_dist.lower():
+                continue
+            dt = str(d.get("date_of_reporting", "")).strip()
+            fo = str(d.get("fo_name", "")).strip()
+            notifs = d.get("notification_ids", []) or []
+            for nid in notifs:
+                clean_nid = str(nid).strip()
+                if clean_nid and len(clean_nid) >= 5:
+                    if clean_nid not in registry or dt < registry[clean_nid]["date"]:
+                        registry[clean_nid] = {
+                            "date": dt,
+                            "fo_name": fo
+                        }
+
+        result = {
+            "status": "success",
+            "district": clean_dist,
+            "total_count": len(registry),
+            "registry": registry,
+            "cached_at": now.isoformat()
+        }
+        cache.set(cache_key, result, ttl=7200) # 2 hours cache
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
