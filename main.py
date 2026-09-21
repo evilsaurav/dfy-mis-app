@@ -61,7 +61,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Set
 from datetime import datetime, timedelta, timezone
 import pandas as pd
 import io
@@ -411,6 +411,11 @@ def record_report_mutation(action: str = "submit", doc_id: str = ""):
     LAST_REPORTS_MODIFIED_TS = time.time()
     try:
         cache.delete_prefix("dist_notif_registry_")
+        cache.delete_prefix("shared_raw_month_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("dupe_audit_")
+        cache.delete_prefix("cascade_alerts_")
     except Exception:
         pass
     if action == "delete" and doc_id:
@@ -760,6 +765,99 @@ async def check_today_status(req: CheckStatusRequest):
     except Exception as e:
         return {"status": "not_started"}
 
+async def fetch_district_notification_registry(clean_dist: str, months: int = 3) -> Dict[str, Any]:
+    """
+    Fetches deduplicated district notification registry for the past N months (~90 days).
+    Caches in memory with 2-hour TTL (key: dist_notif_registry_{clean_dist}_{cur_month_str}).
+    Returns dict: {"status": "success", "district": clean_dist, "total_count": ..., "registry": registry, "cached_at": ...}
+    """
+    clean_dist = canonicalize_district(clean_dist.strip()) if clean_dist else ""
+    if not clean_dist:
+        return {"status": "error", "district": "", "total_count": 0, "registry": {}, "cached_at": ""}
+
+    now = get_ist_now()
+    cur_month_str = now.strftime("%Y-%m")
+    cache_key = f"dist_notif_registry_{clean_dist}_{cur_month_str}"
+    cached = cache.get(cache_key)
+    if cached is not None and isinstance(cached, dict) and "registry" in cached:
+        return cached
+
+    # Calculate start date (months ago)
+    start_date = (now - timedelta(days=max(30, months * 30))).strftime("%Y-%m-01")
+    end_date = now.strftime("%Y-%m-%d")
+
+    docs = await asyncio.to_thread(lambda: list(
+        db.collection("daily_field_reports")
+        .where("date_of_reporting", ">=", start_date)
+        .where("date_of_reporting", "<=", end_date)
+        .stream()
+    ))
+
+    registry = {}
+    for doc in docs:
+        d = doc.to_dict() if hasattr(doc, "to_dict") else doc
+        doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+        if doc_dist.lower() != clean_dist.lower():
+            continue
+        dt = str(d.get("date_of_reporting", "")).strip()
+        fo = str(d.get("fo_name", "")).strip()
+        did = getattr(doc, "id", "") or str(d.get("id", "") or d.get("doc_id", "")).strip()
+        if not did:
+            did = f"{doc_dist}_{fo}_{dt}".replace(" ", "_").lower()
+        notifs = d.get("notification_ids", []) or []
+        for nid in notifs:
+            clean_nid = str(nid).strip()
+            if clean_nid and len(clean_nid) >= 5:
+                if clean_nid not in registry or dt < registry[clean_nid]["date"]:
+                    registry[clean_nid] = {
+                        "date": dt,
+                        "fo_name": fo,
+                        "doc_id": did
+                    }
+
+    result = {
+        "status": "success",
+        "district": clean_dist,
+        "total_count": len(registry),
+        "registry": registry,
+        "cached_at": now.isoformat()
+    }
+    cache.set(cache_key, result, ttl=7200) # 2 hours cache
+    return result
+
+async def get_district_90day_notified_ids(
+    clean_dist: str,
+    exclude_doc_id: Optional[str] = None,
+    exclude_doc_ids: Optional[Any] = None,
+    months: int = 3
+) -> Set[str]:
+    """
+    Returns set of all notification IDs reported in the district over the last 90 days,
+    excluding any IDs whose earliest record matches exclude_doc_id or exclude_doc_ids.
+    """
+    clean_dist = canonicalize_district(clean_dist.strip()) if clean_dist else ""
+    if not clean_dist:
+        return set()
+
+    exclude_set = set()
+    if exclude_doc_id:
+        exclude_set.add(str(exclude_doc_id).strip().lower())
+    if exclude_doc_ids:
+        for ed in exclude_doc_ids:
+            if ed:
+                exclude_set.add(str(ed).strip().lower())
+
+    res = await fetch_district_notification_registry(clean_dist=clean_dist, months=months)
+    registry = res.get("registry", {}) if isinstance(res, dict) else {}
+
+    notified_set = set()
+    for clean_nid, info in registry.items():
+        doc_id_val = str(info.get("doc_id", "")).lower()
+        if exclude_set and doc_id_val and doc_id_val in exclude_set:
+            continue
+        notified_set.add(clean_nid)
+    return notified_set
+
 @app.post("/submit-daily-report")
 async def submit_daily_report(report: DailyActivityReport):
     try:
@@ -796,10 +894,34 @@ async def submit_daily_report(report: DailyActivityReport):
         # A 10-second lock ensures two simultaneous requests don't both increment the rollup counters
         submission_lock_key = f"submitting_{doc_id}"
         if cache.get(submission_lock_key):
-            return {"message": "Daily report submitted successfully"}
+            return {
+                "message": "Daily report submitted successfully",
+                "pruned_duplicate_notifications": [],
+                "pruned_count": 0
+            }
         cache.set(submission_lock_key, True, ttl=10)
 
+        # Ingestion Defense Gate: Auto-prune duplicate notification IDs across last 90 days
+        pruned_duplicates = []
+        valid_new_notifs = list(report.notification_ids or [])
+        if report.notification_ids:
+            try:
+                existing_notified_set = await get_district_90day_notified_ids(
+                    clean_dist=report.working_place,
+                    exclude_doc_id=doc_id,
+                    months=3
+                )
+                pruned_duplicates = [pid for pid in (report.notification_ids or []) if str(pid).strip() in existing_notified_set]
+                valid_new_notifs = [pid for pid in (report.notification_ids or []) if str(pid).strip() not in existing_notified_set]
+                if pruned_duplicates:
+                    print(f"[Duplicate Pruned] {len(pruned_duplicates)} duplicate notification IDs stripped from {doc_id}")
+            except Exception as dupe_err:
+                print(f"[Ingestion Defense Notice] Duplicate check notice: {dupe_err}")
+                pruned_duplicates = []
+                valid_new_notifs = list(report.notification_ids or [])
+
         payload = report.dict(exclude_unset=True)
+        payload["notification_ids"] = valid_new_notifs
         payload["status"] = "completed"
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
         payload["submission_count"] = 1
@@ -812,7 +934,7 @@ async def submit_daily_report(report: DailyActivityReport):
 
         is_new_submission = True
         delta_counts = {
-            "notifications": len(report.notification_ids or []),
+            "notifications": len(set(valid_new_notifs)),
             "tests": len(report.sample_tested_ids or []),
             "hiv_dm": len(report.hiv_dm_ids or []),
             "dbt": len(report.dbt_ids or []),
@@ -828,7 +950,7 @@ async def submit_daily_report(report: DailyActivityReport):
                 
                 # Compute delta for each category to ensure accurate rollup increments
                 old_notifs = set(d.get("notification_ids", []))
-                delta_counts["notifications"] = len(set(report.notification_ids or []) - old_notifs)
+                delta_counts["notifications"] = len(set(valid_new_notifs) - old_notifs)
 
                 old_tests = set(d.get("sample_tested_ids", []))
                 delta_counts["tests"] = len(set(report.sample_tested_ids or []) - old_tests)
@@ -905,7 +1027,11 @@ async def submit_daily_report(report: DailyActivityReport):
         cache.delete_prefix("attendance_")
         cache.delete_prefix("dupe_audit_")
         cache.delete_prefix("cascade_alerts_")
-        return {"message": "Daily report submitted successfully"}
+        return {
+            "message": "Daily report submitted successfully",
+            "pruned_duplicate_notifications": pruned_duplicates,
+            "pruned_count": len(pruned_duplicates)
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -2816,6 +2942,20 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
         current_list = list(data.get(cat_key, []))
         old_id_clean = str(req.old_id).strip()
         
+        if cat_key == "notification_ids" and req.action in ["replace", "add"]:
+            clean_new_id = str(req.new_id).strip()
+            existing_notified_set = await get_district_90day_notified_ids(
+                clean_dist=c_wp,
+                exclude_doc_id=doc_id,
+                exclude_doc_ids=candidate_doc_ids,
+                months=3
+            )
+            if clean_new_id in existing_notified_set:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Patient ID {clean_new_id} is already notified in a different report."
+                )
+
         if req.action == "replace":
             if old_id_clean not in current_list:
                 raise HTTPException(status_code=404, detail=f"Old ID '{old_id_clean}' not found in category '{cat_key}'.")
@@ -3027,6 +3167,21 @@ async def admin_feed_officer_data(
             f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{req.district}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
         ]
+
+        if cleaned_payload.get("notification_ids"):
+            existing_notified_set = await get_district_90day_notified_ids(
+                clean_dist=clean_wp,
+                exclude_doc_ids=candidate_doc_ids,
+                months=3
+            )
+            dupe_notifs = [pid for pid in cleaned_payload["notification_ids"] if pid in existing_notified_set]
+            if dupe_notifs:
+                sample_dupes = ", ".join(dupe_notifs[:5])
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate notification IDs detected in {clean_wp}: {sample_dupes}. Notification IDs cannot be re-used across reports."
+                )
+
         doc_ref = None
         doc_snap = None
         doc_id = candidate_doc_ids[0]
@@ -6810,50 +6965,7 @@ async def get_district_notification_registry(
             except Exception:
                 raise HTTPException(status_code=401, detail="Invalid authentication token. Access denied.")
 
-        now = get_ist_now()
-        cur_month_str = now.strftime("%Y-%m")
-        cache_key = f"dist_notif_registry_{clean_dist}_{cur_month_str}"
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
-
-        # Calculate start date (months ago)
-        start_date = (now - timedelta(days=max(30, months * 30))).strftime("%Y-%m-01")
-        end_date = now.strftime("%Y-%m-%d")
-
-        docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
-
-        registry = {}
-        for doc in docs:
-            d = doc.to_dict() if hasattr(doc, "to_dict") else doc
-            doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
-            if doc_dist.lower() != clean_dist.lower():
-                continue
-            dt = str(d.get("date_of_reporting", "")).strip()
-            fo = str(d.get("fo_name", "")).strip()
-            notifs = d.get("notification_ids", []) or []
-            for nid in notifs:
-                clean_nid = str(nid).strip()
-                if clean_nid and len(clean_nid) >= 5:
-                    if clean_nid not in registry or dt < registry[clean_nid]["date"]:
-                        registry[clean_nid] = {
-                            "date": dt,
-                            "fo_name": fo
-                        }
-
-        result = {
-            "status": "success",
-            "district": clean_dist,
-            "total_count": len(registry),
-            "registry": registry,
-            "cached_at": now.isoformat()
-        }
-        cache.set(cache_key, result, ttl=7200) # 2 hours cache
+        result = await fetch_district_notification_registry(clean_dist=clean_dist, months=months)
         return result
     except HTTPException:
         raise
