@@ -2850,8 +2850,8 @@ const availableDistrictsForFeed = useMemo(() => {
   // Option A: Daily Timeline Trend Data (Dynamic calendar days, peak day, daily average)
   const dailyTrendStats = useMemo(() => {
     let totalDays = 31;
-    let year = 2026;
-    let monthIdx = 8;
+    let year = new Date().getFullYear();
+    let monthIdx = new Date().getMonth();
     try {
       const [yStr, mStr] = (month || new Date().toISOString().slice(0, 7)).split('-');
       year = parseInt(yStr, 10);

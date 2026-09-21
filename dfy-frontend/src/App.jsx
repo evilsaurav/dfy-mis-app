@@ -16,6 +16,21 @@ const getLocalYMD = (d = new Date()) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
 
+// --- Centralized Future-Proof Patient ID Configuration ---
+// Enforces strict 9-digit validation today (blocking typos)
+// Built with architectural extensibility for future NTEP 10-digit rollout
+export const VALID_PATIENT_ID_CONFIG = {
+  standard: [9],
+  legacyAllowed: [8, 9],
+  isValidLength: (len, allow8 = false) => {
+    const validLens = allow8 ? [8, 9] : [9];
+    return validLens.includes(len);
+  },
+  getRegex: (allow8 = false) => {
+    return allow8 ? /\b\d{8,9}\b/g : /\b\d{9}\b/g;
+  }
+};
+
 // --- Simple Toast System ---
 const Toast = ({ message, type, onClose }) => {
   useEffect(() => {
@@ -43,14 +58,19 @@ const Toast = ({ message, type, onClose }) => {
 };
 
 // --- Modern Section Accordion Container (Default Open for Seamless Single-List Flow) ---
-const Accordion = ({ title, children, defaultOpen = true }) => {
+const Accordion = ({ id, title, children, defaultOpen = true }) => {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   return (
-    <div className="mb-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/90 overflow-hidden transition-all hover:border-teal-400/80">
+    <div 
+      id={id}
+      data-is-open={isOpen ? 'true' : 'false'}
+      className="scroll-mt-36 mb-4 bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/90 overflow-hidden transition-all hover:border-teal-400/80"
+    >
       <button 
         type="button"
+        data-accordion-btn
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full bg-slate-50/70 hover:bg-slate-100/70 px-4 py-3 sm:px-5 sm:py-3.5 flex justify-between items-center outline-none transition-all cursor-pointer select-none active:bg-slate-100/50 border-b border-slate-200/70"
+        className="w-full bg-slate-50/70 hover:bg-slate-100/70 px-4 py-3 sm:px-5 sm:py-3.5 flex justify-between items-center outline-none transition-all cursor-pointer select-none active:bg-slate-100/50 border-b border-slate-200/70 active:scale-[0.99]"
       >
         <span className="text-xs sm:text-sm font-black text-slate-900 tracking-wide uppercase flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-teal-600"></span>
@@ -1105,7 +1125,7 @@ const MyProfileDashboard = ({
                   <select
                     value={(editingModal.category || 'notification').replace(/_ids$/, '')}
                     onChange={(e) => setEditingModal(prev => ({ ...prev, category: e.target.value, error: '' }))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-teal-500 cursor-pointer"
                   >
                     {EDITABLE_CATEGORIES.map(c => (
                       <option key={c.key} value={c.key}>{c.label}</option>
@@ -1130,11 +1150,13 @@ const MyProfileDashboard = ({
                   <input
                     type="text"
                     inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
                     maxLength={9}
                     value={editingModal.newId}
                     onChange={(e) => setEditingModal(prev => ({ ...prev, newId: e.target.value.replace(/\D/g, '') }))}
                     placeholder={['fdc_provided', 'outcome_assigned', 'fdc_provided_ids', 'outcome_assigned_ids'].includes(editingModal.category) ? "e.g. 12345678 or 332882518" : "e.g. 332882518"}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 font-mono text-sm font-black text-slate-800 tracking-wider outline-none focus:ring-2 focus:ring-teal-500"
                     autoFocus
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
@@ -1151,11 +1173,11 @@ const MyProfileDashboard = ({
               )}
 
               <div className="pt-2 flex items-center justify-end gap-2">
-                <button type="button" onClick={() => setEditingModal(null)} className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100">Cancel</button>
+                <button type="button" onClick={() => setEditingModal(null)} className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer">Cancel</button>
                 <button
                   type="submit"
                   disabled={editingModal.loading}
-                  className={`px-4 py-2 rounded-xl text-xs font-black text-white shadow-md active:scale-95 transition-all ${editingModal.action === 'delete' ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'}`}
+                  className={`px-4 py-2 rounded-xl text-xs font-black text-white shadow-md active:scale-[0.98] transition-all cursor-pointer ${editingModal.action === 'delete' ? 'bg-red-600 hover:bg-red-700 shadow-red-600/20' : 'bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 shadow-teal-700/20'}`}
                 >
                   {editingModal.loading ? 'Saving...' : editingModal.action === 'delete' ? 'Confirm Delete' : 'Save ID'}
                 </button>
@@ -1231,14 +1253,14 @@ const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-12">
       {/* Header Card */}
-      <div className="bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-950/20 mb-5 border border-indigo-700/50">
+      <div className="bg-gradient-to-r from-teal-950 via-slate-900 to-teal-900 rounded-3xl p-6 text-white shadow-xl shadow-teal-950/20 mb-5 border border-teal-800/50">
         <div className="flex items-center gap-3 mb-2">
           <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20">
             🔍
           </div>
           <div>
             <h2 className="text-xl font-black tracking-tight">Nikshay Patient Tracker</h2>
-            <p className="text-xs text-indigo-200 font-medium">
+            <p className="text-xs text-teal-200 font-medium">
               Rogi ki clinical history aur Nikshay verification status dekhein
             </p>
           </div>
@@ -1255,16 +1277,18 @@ const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
           <input 
             type="text"
             inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="off"
             maxLength={9}
             value={searchId}
             onChange={(e) => setSearchId(e.target.value.replace(/\D/g, ''))}
             placeholder="Enter 8 or 9-digit Nikshay ID..."
-            className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm font-mono font-bold text-white placeholder:text-indigo-300/70 outline-none focus:ring-2 focus:ring-indigo-400 focus:bg-white/20 transition-all"
+            className="flex-1 bg-white/10 border border-white/20 rounded-2xl px-4 py-3 text-sm font-mono font-bold text-white placeholder:text-teal-200/70 outline-none focus:ring-2 focus:ring-teal-400 focus:bg-white/20 transition-all"
           />
           <button
             type="submit"
             disabled={loading || !searchId}
-            className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-black px-5 py-3 rounded-2xl shadow-lg shadow-emerald-600/30 text-xs uppercase tracking-wider transition-all active:scale-95 cursor-pointer flex items-center gap-1.5"
+            className="bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white font-black px-5 py-3 rounded-2xl shadow-lg shadow-emerald-600/30 text-xs uppercase tracking-wider transition-all active:scale-[0.98] cursor-pointer flex items-center gap-1.5"
           >
             {loading ? 'Searching...' : 'Search'}
           </button>
@@ -1644,45 +1668,49 @@ const FoHelpGuide = () => {
       )
     },
     {
-      id: "pending_attendance",
-      icon: "📅",
-      badge: "Attendance & Backlog",
-      badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
-      title: "4. Pending Dates & Chhuti (Attendance Tab)",
-      subtitle: "Bachi hui pichli reports aur holidays kaise bharein",
-      keywords: "pending tab attendance chhuti holiday bachi hui report missed date kal ki",
+      id: "pending_interventions",
+      icon: "⏳",
+      badge: "Clinical Follow-ups",
+      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
+      title: "4. Pending Interventions Action Center (Follow-up Tasks)",
+      subtitle: "Bache hue HIV/DM, DBT aur FDC tasks 1-tap me poore karein",
+      keywords: "pending tab interventions follow-up cascade action center dbt fdc hiv dm autofill whatsapp",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
           <p>
-            Agar pichle kisi din aap network issue ya field emergency ki wajah se report submit nahi kar paye the, toh unhe regularise karne ke liye:
+            Field me notify kiye gaye TB patients ke zaroori follow-up clinical interventions (HIV/DM screening, DBT bank details, FDC medicine) track aur regularise karne ke liye:
           </p>
 
           <div className="space-y-2.5">
             <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
               <div>
                 <strong className="text-slate-900 block font-bold">Pending Tab Kholein:</strong>
-                <span className="text-slate-600 text-[11px]">Bottom dock me <strong>&ldquo;Pending&rdquo;</strong> icon par tap karein. Yahan mahine ki saari dates dikhayi dengi.</span>
+                <span className="text-slate-600 text-[11px]">Bottom dock me <strong>&ldquo;Pending&rdquo;</strong> icon par tap karein. Yahan aapke district ke pending clinical interventions ki live priority list dikhegi.</span>
               </div>
             </div>
 
             <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
               <div>
-                <strong className="text-slate-900 block font-bold">Missed Date Chunein:</strong>
-                <span className="text-slate-600 text-[11px]">Jo din laal ya peele rang me pending dikh raha hai, us date card par click karein. Report form us date ke liye open ho jayega.</span>
+                <strong className="text-slate-900 block font-bold">1-Tap Quick Autofill:</strong>
+                <span className="text-slate-600 text-[11px]">Kisi bhi pending patient card par tap karein ya <strong>&ldquo;+ Form me Bharein&rdquo;</strong> dabayein. Patient ID automatically aaj ke relevant form bucket me add ho jayegi bina dubara type kiye.</span>
               </div>
             </div>
 
             <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
               <div>
-                <strong className="text-slate-900 block font-bold">Sunday ya Holiday Marking:</strong>
+                <strong className="text-slate-900 block font-bold">1-Tap WhatsApp Follow-up Export:</strong>
                 <span className="text-slate-600 text-[11px]">
-                  Agar us din Sunday ya Sarkari Holiday tha aur aapne field duty nahi ki thi, toh <strong>&ldquo;Mark Holiday / Chhuti&rdquo;</strong> button dabakar attendance clean rakhein. Isse fake 0 ID submit karne ki zaroorat nahi padti.
+                  <strong>&ldquo;Share WhatsApp List&rdquo;</strong> button dabakar aap poori pending list Coordinator ya Field Team ke sath share kar sakte hain taaki field visit plan asani se ban sake.
                 </span>
               </div>
             </div>
+          </div>
+
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3 text-[11px] text-teal-900 font-medium">
+            💡 <strong>Smart Efficiency:</strong> Jab aap pending patient ka intervention form me submit karte hain, toh wo pending list se automatically update ho jata hai.
           </div>
         </div>
       )
@@ -2074,17 +2102,17 @@ const FoHelpGuide = () => {
 const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, suggestedIds = [], onAddBulk, allow8Digit = false }) => {
   const [currentId, setCurrentId] = useState("");
   const safeIds = Array.isArray(ids) ? ids : [];
+  const cleanCurrent = currentId.trim();
 
-  const isCurrentValid = allow8Digit 
-    ? ((currentId.length === 8 || currentId.length === 9) && !isNaN(currentId))
-    : (currentId.length === 9 && !isNaN(currentId));
+  const isCurrentValid = VALID_PATIENT_ID_CONFIG.isValidLength(cleanCurrent.length, allow8Digit) && !isNaN(cleanCurrent);
+  const targetDigitsText = allow8Digit ? '8-9' : '9';
 
   const handleAdd = () => {
     const raw = currentId.trim();
     if (!raw) return;
 
     // Check if user pasted multiple IDs (separated by comma, space, newline)
-    const regex = allow8Digit ? /\b\d{8,9}\b/g : /\b\d{9}\b/g;
+    const regex = VALID_PATIENT_ID_CONFIG.getRegex(allow8Digit);
     const matches = raw.match(regex);
     if (matches && matches.length > 1) {
       if (onAddMultiple) {
@@ -2094,9 +2122,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
       }
     }
 
-    const isValid = allow8Digit 
-      ? ((raw.length === 8 || raw.length === 9) && !isNaN(raw)) 
-      : (raw.length === 9 && !isNaN(raw));
+    const isValid = VALID_PATIENT_ID_CONFIG.isValidLength(raw.length, allow8Digit) && !isNaN(raw);
 
     if (isValid) {
       onAdd(raw);
@@ -2116,13 +2142,17 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
   return (
     <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs hover:border-teal-300 transition-all group">
       <label className="block text-xs font-black text-slate-800 tracking-wider uppercase mb-3 flex items-center justify-between group-hover:text-teal-700 transition-colors">
-        <span className="flex items-center gap-1.5">
+        <span className="flex items-center gap-1.5 flex-wrap">
           <span>{title}</span>
-          {isCurrentValid && (
-            <span className="text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs">
-              ✓ Ready
+          {isCurrentValid ? (
+            <span className="text-emerald-800 bg-emerald-50 border border-emerald-300 px-2.5 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs animate-fade-in">
+              ✓ Ready ({cleanCurrent.length} Digits)
             </span>
-          )}
+          ) : cleanCurrent.length > 0 ? (
+            <span className="text-amber-800 bg-amber-50 border border-amber-300 px-2.5 py-0.5 rounded-full text-[10px] font-black inline-flex items-center gap-1 shadow-2xs animate-fade-in">
+              {cleanCurrent.length} / {targetDigitsText} digits
+            </span>
+          ) : null}
         </span>
         <span className={`px-2.5 py-0.5 rounded-full text-[10px] ml-1 font-black tabular-num transition-colors ${
           safeIds.length > 0 
@@ -2187,6 +2217,8 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
         <input 
           type="text"
           inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
           value={currentId}
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -2196,7 +2228,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
         <button 
           type="button"
           onClick={handleAdd} 
-          className="h-12 min-w-[76px] bg-teal-700 hover:bg-teal-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
+          className="h-12 min-w-[76px] bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-[0.98] transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
         >
           ADD
         </button>
@@ -2208,7 +2240,7 @@ const IdBucket = ({ title, ids, onAdd, onAddMultiple, onRemove, showToast, sugge
           {safeIds.map((id, index) => (
             <span 
               key={index} 
-              className="inline-flex items-center gap-2 bg-teal-50 text-teal-900 border border-teal-200/90 px-3 py-1.5 rounded-xl text-xs font-mono font-bold shadow-2xs hover:border-teal-300 transition-all"
+              className="inline-flex items-center gap-2 bg-teal-50/90 text-teal-950 border border-teal-200/90 px-3 py-1.5 rounded-xl text-xs font-mono font-bold shadow-2xs hover:border-teal-300 transition-all"
             >
               <span>{id}</span>
               <button 
@@ -2301,9 +2333,9 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
   };
 
   return (
-    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-slate-300 transition-all group space-y-3">
+    <div className="bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs hover:border-teal-300 transition-all group space-y-3">
       <div className="flex items-center justify-between">
-        <label className="block text-xs font-black text-slate-700 tracking-wider uppercase flex items-center gap-1.5 group-hover:text-indigo-600 transition-colors">
+        <label className="block text-xs font-black text-slate-700 tracking-wider uppercase flex items-center gap-1.5 group-hover:text-teal-700 transition-colors">
           <span>💊</span>
           <span>{title}</span>
           {isCurrentValidId && (
@@ -2317,9 +2349,9 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
 
       {/* Smart Notification ID Chips */}
       {suggestedIds && suggestedIds.length > 0 && (
-        <div className="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100/90 animate-fade-in">
+        <div className="bg-teal-50/70 p-2.5 rounded-xl border border-teal-100/90 animate-fade-in">
           <div className="flex justify-between items-center mb-1.5">
-            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 flex items-center gap-1">
+            <span className="text-[10px] font-black uppercase tracking-wider text-teal-900 flex items-center gap-1">
               <span>💡</span> Today's Notified IDs ({suggestedIds.length}):
             </span>
           </div>
@@ -2335,10 +2367,10 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                     setCurrentId(sid);
                     if (showToast) showToast(`Selected ID #${sid} for FDC!`, "info");
                   }}
-                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 flex items-center gap-1 cursor-pointer ${
+                  className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-[0.98] flex items-center gap-1 cursor-pointer ${
                     isAdded 
                       ? 'bg-emerald-100 border-emerald-200 text-emerald-800 opacity-80 cursor-default' 
-                      : 'bg-white hover:bg-indigo-600 hover:text-white border-indigo-200 text-indigo-700 shadow-sm'
+                      : 'bg-white hover:bg-teal-700 hover:text-white border-teal-200 text-teal-800 shadow-2xs'
                   }`}
                   title={isAdded ? "Already Added" : `Select ID #${sid}`}
                 >
@@ -2357,6 +2389,8 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         <input 
           type="text"
           inputMode="numeric"
+          pattern="[0-9]*"
+          autoComplete="off"
           value={currentId}
           onChange={(e) => setCurrentId(e.target.value)}
           onKeyDown={handleKeyDown}
@@ -2382,6 +2416,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
             <label className="block text-[10px] font-black uppercase text-slate-700 mb-1">Weight in KG (Wazan)</label>
             <input 
               type="number"
+              inputMode="decimal"
               step="0.5"
               min="4"
               max="150"
@@ -2561,7 +2596,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
         <button
           type="button"
           onClick={handleAddSmart}
-          className="w-full h-12 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white rounded-xl font-black shadow-md active:scale-98 transition-all text-xs tracking-wider uppercase cursor-pointer flex items-center justify-center"
+          className="w-full h-12 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white rounded-xl font-black shadow-md active:scale-[0.98] transition-all text-xs tracking-wider uppercase cursor-pointer flex items-center justify-center"
         >
           + Add to FDC Distribution
         </button>
@@ -4183,6 +4218,17 @@ function App() {
     { key: "consent_with_id_ids", label: "Consent with ID" }
   ];
 
+  const handleScrollToSection = (sectionId) => {
+    const el = document.getElementById(sectionId);
+    if (el) {
+      const accordionBtn = el.querySelector('button[data-accordion-btn]');
+      if (accordionBtn && el.getAttribute('data-is-open') === 'false') {
+        accordionBtn.click();
+      }
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50/50 font-sans pb-40 text-slate-800 flex flex-col">
       <Toast message={toast.message} type={toast.type} onClose={closeToast} />
@@ -4190,24 +4236,24 @@ function App() {
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 p-3.5 sm:p-4 sticky top-0 z-40 shadow-xs">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-indigo-600 via-indigo-600 to-indigo-800 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-md shadow-indigo-600/25 text-white font-black text-xl shrink-0">
+            <div className="bg-gradient-to-br from-teal-600 via-teal-700 to-emerald-700 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-md shadow-teal-700/20 text-white font-black text-xl shrink-0">
               <svg width="20" height="20" className="sm:w-[22px] sm:h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
             </div>
             <div>
-              <h1 className="text-base sm:text-lg font-black tracking-tight leading-tight text-slate-800">DFY <span className="text-indigo-600">REPORTING</span></h1>
+              <h1 className="text-base sm:text-lg font-black tracking-tight leading-tight text-slate-800">DFY <span className="text-teal-700">REPORTING</span></h1>
               <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider mt-0.5">Mobile MIS Portal</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 ml-auto">
-            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1 sm:gap-1.5 text-slate-500 hover:text-indigo-600 bg-slate-100/80 hover:bg-indigo-50 px-2.5 py-1 rounded-full transition-colors border border-transparent hover:border-indigo-100 text-[10px] font-black tracking-wider cursor-pointer" title="Admin Portal">
+            <button onClick={() => window.location.href = '/admin'} className="flex items-center gap-1 sm:gap-1.5 text-slate-500 hover:text-teal-700 bg-slate-100/80 hover:bg-teal-50 px-2.5 py-1 rounded-full transition-colors border border-transparent hover:border-teal-200 text-[10px] font-black tracking-wider cursor-pointer" title="Admin Portal">
               <svg width="12" height="12" className="sm:w-[13px] sm:h-[13px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M16 21v-2a4 4 0 0 0-4-3.87"/></svg>
               <span className="hidden sm:inline">ADMIN</span>
             </button>
-            <button onClick={handleInstallApp} className="flex items-center gap-1 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 px-3 py-1 rounded-full text-[10px] font-black shadow-xs shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer" title="Install App">
+            <button onClick={handleInstallApp} className="flex items-center gap-1 bg-gradient-to-r from-teal-700 to-emerald-700 text-white hover:from-teal-800 hover:to-emerald-800 px-3 py-1 rounded-full text-[10px] font-black shadow-xs shadow-teal-700/20 transition-all active:scale-[0.98] cursor-pointer" title="Install App">
               <span>📲</span>
               <span className="hidden xs:inline">Install</span>
             </button>
-            <div className="bg-indigo-50/90 text-indigo-700 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-indigo-100 shadow-2xs tracking-wider">v3.1</div>
+            <div className="bg-teal-50/90 text-teal-800 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-teal-200 shadow-2xs tracking-wider">v3.1</div>
             {(!isOnline || offlineQueueCount > 0) && (
               <button
                 onClick={triggerOfflineSync}
@@ -4252,7 +4298,7 @@ function App() {
           /* Login Screen */
           <div className="max-w-md mx-auto animate-fade-in-down w-full">
             <div className="text-center mb-8">
-              <div className="mx-auto bg-gradient-to-br from-indigo-500 to-indigo-600 text-white w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-md shadow-indigo-500/25">
+              <div className="mx-auto bg-gradient-to-br from-teal-600 to-emerald-700 text-white w-16 h-16 rounded-3xl flex items-center justify-center mb-4 shadow-md shadow-teal-700/20">
                 <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4" />
                 </svg>
@@ -4263,30 +4309,30 @@ function App() {
             
             {/* PWA Install Banner */}
             {showInstallBtn && (
-              <div className="mb-5 bg-gradient-to-r from-indigo-600 to-blue-600 rounded-3xl p-4 sm:p-5 text-white flex items-center justify-between shadow-lg shadow-indigo-500/20 border border-indigo-400/30 animate-fade-in">
+              <div className="mb-5 bg-gradient-to-r from-teal-700 via-teal-800 to-emerald-800 rounded-3xl p-4 sm:p-5 text-white flex items-center justify-between shadow-lg shadow-teal-900/20 border border-teal-600/30 animate-fade-in">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center text-xl shrink-0">
                     📲
                   </div>
                   <div>
                     <h4 className="text-xs sm:text-sm font-black tracking-wide leading-tight">Install Mobile App</h4>
-                    <p className="text-[10px] text-indigo-100 font-medium">Home screen par 1-click access</p>
+                    <p className="text-[10px] text-teal-100 font-medium">Home screen par 1-click access</p>
                   </div>
                 </div>
                 <button 
                   onClick={handleInstallApp}
-                  className="bg-white text-indigo-700 hover:bg-indigo-50 font-black text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md active:scale-95 transition-all shrink-0 uppercase tracking-wider cursor-pointer"
+                  className="bg-white text-teal-800 hover:bg-teal-50 font-black text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md active:scale-[0.98] transition-all shrink-0 uppercase tracking-wider cursor-pointer"
                 >
                   Install
                 </button>
               </div>
             )}
 
-            <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-[0_20px_50px_rgba(79,70,229,0.06)] p-6 sm:p-8 border border-slate-200/80">
+            <div className="bg-white/95 backdrop-blur-xl rounded-3xl shadow-[0_20px_50px_rgba(15,118,110,0.06)] p-6 sm:p-8 border border-slate-200/80">
               <div className="space-y-4">
                 <div>
                   <label className="block text-[10px] text-slate-500 font-black uppercase tracking-wider mb-1.5 ml-0.5">District (Zila)</label>
-                  <select value={formData.working_place} onChange={handleDistrictChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs cursor-pointer">
+                  <select value={formData.working_place} onChange={handleDistrictChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white transition-all shadow-2xs cursor-pointer">
                     <option value="">Select District</option>
                     {districts.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
@@ -4296,7 +4342,7 @@ function App() {
                   <div className="animate-fade-in">
                     <label className="block text-[10px] text-slate-500 font-black uppercase tracking-wider mb-1.5 ml-0.5">Select / Enter Name</label>
                     {directory[formData.working_place] && directory[formData.working_place].length > 0 ? (
-                      <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs cursor-pointer">
+                      <select value={formData.fo_name} onChange={handleNameChange} className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white transition-all shadow-2xs cursor-pointer">
                         <option value="">Select Name</option>
                         {directory[formData.working_place].map(name => <option key={name} value={name}>{name}</option>)}
                       </select>
@@ -4306,7 +4352,7 @@ function App() {
                         value={formData.fo_name}
                         onChange={handleNameChange}
                         placeholder="Apna Naam Likhein (e.g. Rajesh Kumar)"
-                        className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all shadow-2xs"
+                        className="w-full bg-slate-50/90 border border-slate-200/90 rounded-xl px-4 py-3 text-sm text-slate-800 font-bold outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-600 focus:bg-white transition-all shadow-2xs"
                         required
                       />
                     )}
@@ -4322,15 +4368,18 @@ function App() {
                       )}
                     </label>
                     <input 
-                      type="password" 
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete="off"
                       placeholder="****" 
                       maxLength="4" 
                       value={formData.pin} 
-                      onChange={(e) => setFormData({...formData, pin: e.target.value})} 
+                      onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} 
                       className={`w-full bg-slate-50/90 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200/90'} rounded-xl px-4 py-3.5 text-2xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner focus:bg-white`} 
                     />
                     {pinStatus === 'checking' && (
-                      <p className="text-[11px] text-indigo-500 font-bold text-center mt-1.5 animate-pulse">
+                      <p className="text-[11px] text-teal-600 font-bold text-center mt-1.5 animate-pulse">
                         Verifying PIN...
                       </p>
                     )}
@@ -4350,11 +4399,11 @@ function App() {
                 <button 
                   onClick={handleLogin}
                   disabled={pinStatus !== 'success' || isSubmitting}
-                  className={`w-full mt-4 py-3.5 rounded-xl font-black text-xs tracking-wider uppercase shadow-md transition-all cursor-pointer ${pinStatus === 'success' && !isSubmitting ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 hover:shadow-indigo-600/30 active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
+                  className={`w-full mt-4 py-3.5 rounded-xl font-black text-xs tracking-wider uppercase shadow-md transition-all cursor-pointer ${pinStatus === 'success' && !isSubmitting ? 'bg-gradient-to-r from-teal-700 to-emerald-700 text-white hover:from-teal-800 hover:to-emerald-800 hover:shadow-teal-700/30 active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
                 >
                   {isSubmitting ? (
                     <div className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-4 w-4 text-indigo-400" viewBox="0 0 24 24" fill="none">
+                      <svg className="animate-spin h-4 w-4 text-teal-400" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
@@ -4484,7 +4533,7 @@ function App() {
                   <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
                     <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border transition-colors ${
                       liveNotifCount > 0 
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 shadow-2xs' 
+                        ? 'bg-teal-50 text-teal-800 border-teal-200 shadow-2xs' 
                         : 'bg-slate-50 text-slate-400 border-slate-200'
                     }`} title="TB Notifications">
                       📋 {liveNotifCount} Notif
@@ -4505,9 +4554,32 @@ function App() {
                     </span>
                   </div>
                 </div>
+
+                {/* Sticky Category Quick-Jumping Pills (Scroll Navigator) */}
+                <div className="mt-2.5 pt-2 border-t border-slate-100/80 flex items-center gap-1.5 overflow-x-auto custom-scrollbar no-scrollbar py-0.5">
+                  <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 shrink-0 mr-0.5">Jump:</span>
+                  {[
+                    { id: 'sec-registration', label: '👤 Patient' },
+                    { id: 'sec-diagnostics', label: '🧪 Testing' },
+                    { id: 'sec-fieldwork', label: '🏠 Visits' },
+                    { id: 'sec-logistics', label: '💊 FDC / Logistics' },
+                    { id: 'sec-special', label: '⭐ Special' },
+                    { id: 'sec-doctors', label: '🩺 Doctors' },
+                    { id: 'sec-remarks', label: '📝 Remarks' },
+                  ].map((cat) => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleScrollToSection(cat.id)}
+                      className="text-[11px] font-bold px-2.5 py-1 rounded-xl bg-slate-100/80 hover:bg-teal-50 hover:text-teal-900 hover:border-teal-300 text-slate-600 border border-slate-200/80 transition-all active:scale-[0.98] shrink-0 cursor-pointer shadow-2xs whitespace-nowrap flex items-center gap-1"
+                    >
+                      {cat.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <Accordion title="1. Patient Registration" defaultOpen={true}>
+              <Accordion id="sec-registration" title="1. Patient Registration" defaultOpen={true}>
                   {group1.map((cat) => (
                     <IdBucket 
                       key={cat.key} 
@@ -4522,7 +4594,7 @@ function App() {
                     />
                   ))}
                 </Accordion>
-                <Accordion title="2. Diagnostics & Testing">
+                <Accordion id="sec-diagnostics" title="2. Diagnostics & Testing">
                   {group2.map((cat) => (
                     <IdBucket 
                       key={cat.key} 
@@ -4551,7 +4623,7 @@ function App() {
                     />
                   )}
                 </Accordion>
-                <Accordion title="3. Field Work & Visits">
+                <Accordion id="sec-fieldwork" title="3. Field Work & Visits">
                   {group3.map((cat) => (
                     <IdBucket 
                       key={cat.key} 
@@ -4566,7 +4638,7 @@ function App() {
                     />
                   ))}
                 </Accordion>
-                <Accordion title="4. Logistics & Outcomes">
+                <Accordion id="sec-logistics" title="4. Logistics & Outcomes">
                   {group4.map((cat) => {
                     if (cat.key === 'fdc_provided_ids') {
                       return (
@@ -4598,7 +4670,7 @@ function App() {
                     );
                   })}
                 </Accordion>
-                <Accordion title="5. Special Tracking">
+                <Accordion id="sec-special" title="5. Special Tracking">
                   {group5.map((cat) => (
                     <IdBucket 
                       key={cat.key} 
@@ -4613,20 +4685,20 @@ function App() {
                     />
                   ))}
                 </Accordion>
-                <Accordion title="6. Additional Remarks">
+                <Accordion id="sec-remarks" title="6. Additional Remarks">
                   <div className="p-4 sm:p-5">
                     <textarea 
                       value={formData.remark || ''} 
                       onChange={e => setFormData({...formData, remark: e.target.value})} 
                       placeholder="Koi extra information ya remark yahan likhein..." 
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder:text-slate-400 min-h-[120px]"
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-teal-500 transition-all placeholder:text-slate-400 min-h-[120px]"
                     ></textarea>
                   </div>
                 </Accordion>
 
               {/* Travel & Doctors Section */}
-              <div className="grid grid-cols-1 gap-4 mt-6">
-                <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-xs border border-emerald-200/80 overflow-hidden">
+              <div id="sec-doctors" className="grid grid-cols-1 gap-4 mt-6 scroll-mt-36">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-emerald-200/80 overflow-hidden">
                   <div className="bg-emerald-50/70 px-5 py-4 border-b border-emerald-100/90 flex items-center gap-2">
                     <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
                     <label className="block text-xs font-black text-emerald-900 tracking-wide uppercase">Doctor / Chemist Store Visits</label>
@@ -4643,7 +4715,7 @@ function App() {
                       <button 
                         type="button"
                         onClick={addDoctor} 
-                        className="h-12 min-w-[76px] bg-teal-700 hover:bg-teal-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-95 transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
+                        className="h-12 min-w-[76px] bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white px-4 rounded-xl font-black shadow-xs shadow-teal-700/20 active:scale-[0.98] transition-all text-xs tracking-wider uppercase shrink-0 flex items-center justify-center cursor-pointer"
                       >
                         ADD
                       </button>
@@ -4753,7 +4825,7 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('form')}
-              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
                 currentView === 'form' 
                   ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
@@ -4767,7 +4839,7 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('pending')}
-              className={`min-h-[48px] h-12 relative flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 relative flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
                 currentView === 'pending' 
                   ? 'bg-rose-50 text-rose-800 border border-rose-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
@@ -4786,7 +4858,7 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('tracker')}
-              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
                 currentView === 'tracker' 
                   ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
@@ -4800,7 +4872,7 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('profile')}
-              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
                 currentView === 'profile' 
                   ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
@@ -4814,7 +4886,7 @@ function App() {
             <button
               type="button"
               onClick={() => setCurrentView('guide')}
-              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all cursor-pointer ${
+              className={`min-h-[48px] h-12 flex flex-col items-center justify-center py-1 px-1 rounded-xl transition-all active:scale-95 cursor-pointer ${
                 currentView === 'guide' 
                   ? 'bg-teal-50 text-teal-800 border border-teal-200 font-black shadow-2xs' 
                   : 'text-slate-400 hover:text-slate-600 font-bold'
@@ -4849,7 +4921,7 @@ function App() {
                 <span className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
                   <span>📱</span> WhatsApp Summary:
                 </span>
-                <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full">
+                <span className="text-[10px] font-bold bg-teal-50 text-teal-800 px-2.5 py-0.5 rounded-full border border-teal-200/80">
                   {submittedReportSummary.totalIds} IDs Recorded
                 </span>
               </div>
@@ -4868,7 +4940,7 @@ function App() {
                     const shareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(submittedReportSummary.text)}`;
                     window.open(shareUrl, '_blank');
                   }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 active:scale-95 transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3.5 rounded-2xl shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 cursor-pointer"
                   title="Directly open WhatsApp to send summary"
                 >
                   <span className="text-base">💬</span>
@@ -4885,7 +4957,7 @@ function App() {
                       setTimeout(() => setCopiedPostSubmit(false), 2500);
                     }
                   }}
-                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3.5 rounded-2xl active:scale-95 transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 border border-slate-200 cursor-pointer"
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-3.5 rounded-2xl active:scale-[0.98] transition-all text-xs tracking-wider uppercase flex items-center justify-center gap-2 border border-slate-200 cursor-pointer"
                 >
                   <span>📋</span>
                   <span>{copiedPostSubmit ? '✓ Copied!' : 'Copy Text'}</span>
@@ -4899,7 +4971,7 @@ function App() {
                     setShowPostSubmitSuccess(false);
                     setCurrentView('profile');
                   }}
-                  className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-3 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
+                  className="bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold py-3 rounded-xl text-xs transition-all border border-teal-200/80 active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <span>✏️</span>
                   <span>Edit / Correct IDs</span>
