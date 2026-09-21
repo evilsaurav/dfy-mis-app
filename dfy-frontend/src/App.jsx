@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
 import { calculateFdcDosage } from './utils/fdcCalculator'
+import { APP_VERSION } from './changelogData'
 import { 
   saveOfflineReport, 
   getOfflineReportsCount, 
@@ -1907,6 +1908,70 @@ const FoHelpGuide = () => {
               <strong className="text-slate-900 font-bold block text-[11px]">Q: Agar phone kho jaye ya kharab ho jaye?</strong>
               <p className="text-slate-600 text-[11px]">
                 Aapki jo bhi reports submit ho chuki hain wo cloud database me 100% surakshit hain. Naye phone me apna District aur Naam chunein aur duty PIN daal kar turant apna kaam shuru karein.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "modern_ui_ergonomics",
+      icon: "⚡",
+      badge: "New UI Features (v2.7.6)",
+      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
+      title: "8. Quick Jump Pills, Numeric Keypad & Live Badges",
+      subtitle: "Naye UI features aur fast data entry ke aasan tareeqe",
+      keywords: "quick jump sticky pills dialpad keypad 9 digit badge tags remove number pad ergonomics v2.7.6",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3.5 space-y-1.5">
+            <span className="font-black text-teal-900 flex items-center gap-1.5">
+              <span>🚀</span>
+              <span>Fast Field Entry &amp; Ergonomics:</span>
+            </span>
+            <p className="text-teal-800 text-[11px]">
+              Version 2.7.6 me field officers ki speed aur sahuliyat ke liye naaye features jode gaye hain taaki reporting me kam se kam samay lage aur typing ki galtiyan na hon.
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+                <span>🧭</span>
+                <span>1. Sticky Category Quick-Jump Pills:</span>
+              </strong>
+              <p className="text-slate-600 text-[11px]">
+                Form ke upar sticky horizontal bar me categories (👤 Patient, 🧪 Testing, 🏠 Visits, 💊 FDC, ⭐ Special, 🩺 Doctors, 📝 Remarks) diye gaye hain. Kisi bhi pill par tap karte hi form seedhe us section par chala jayega aur section automatically open ho jayega. Bar-bar lamba scroll karne ki zaroorat nahi hai.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+                <span>📱</span>
+                <span>2. Direct Number Dialpad (Numeric Keypad):</span>
+              </strong>
+              <p className="text-slate-600 text-[11px]">
+                Nikshay ID, Duty PIN aur Patient Weight fields me tap karte hi aapke mobile par seedhe <strong>0-9 Number Keypad</strong> khulega. Ab keyboard me baar-baar &ldquo;123&rdquo; button dabane ki jhanjhat khatam ho gayi hai.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+                <span>🔢</span>
+                <span>3. Live 9-Digit Formatter &amp; Progress Badge:</span>
+              </strong>
+              <p className="text-slate-600 text-[11px]">
+                Nikshay ID type karte samay input box ke right corner me live counter dikhta hai (jaise <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px] font-mono">[ 7 / 9 digits ]</code>). Pure 9 digits hote hi green <code className="bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded text-[10px] font-mono font-bold">[ ✓ Ready ]</code> dikhega. Unglion se ginti karne ki zaroorat nahi padegi!
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+                <span>🏷️</span>
+                <span>4. Removable Patient Tag Chips:</span>
+              </strong>
+              <p className="text-slate-600 text-[11px]">
+                Report me add kiye gaye sabhi Patient IDs ab clean tags ke roop me dikhte hain. Agar galti se koi galat ID jud jaye, toh tag ke bagal me bane cross (✕) button par 1 tap karke use turant hata sakte hain.
               </p>
             </div>
           </div>
@@ -4253,7 +4318,7 @@ function App() {
               <span>📲</span>
               <span className="hidden xs:inline">Install</span>
             </button>
-            <div className="bg-teal-50/90 text-teal-800 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-teal-200 shadow-2xs tracking-wider">v3.1</div>
+            <div className="bg-teal-50/90 text-teal-800 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-teal-200 shadow-2xs tracking-wider">v{APP_VERSION}</div>
             {(!isOnline || offlineQueueCount > 0) && (
               <button
                 onClick={triggerOfflineSync}

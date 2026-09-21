@@ -1,16 +1,49 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.5";
+export const APP_VERSION = "2.7.6";
 export const LAST_UPDATED_DATE = "21 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.7.6",
+    date: "21 Sep 2026",
+    title: "Unified Health-Tech Modern UI, Sticky Category Pills, Direct Number Pad & Dynamic Future-Proofing",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🎨 Unified Health-Tech Design System: Harmonized all conflicting gradients across Header, Login Card, PWA Install Banner, and Modals into a sleek Emerald/Teal + Slate medical theme with soft rounded-2xl cards and frosted glass (backdrop-blur-md).",
+      "🧭 Sticky Category Quick-Jumping Pills: Added a horizontal quick-scroll pill bar below the Live Session Tally HUD (👤 Patient, 🧪 Testing, 🏠 Visits, 💊 FDC / Logistics, ⭐ Special, 🩺 Doctors, 📝 Remarks) with auto-scroll and auto-accordion expansion.",
+      "📱 Direct Numeric Touch Keypad: Enforced inputMode=\"numeric\" and pattern=\"[0-9]*\" across Patient ID, PIN, Weight, and Tracker inputs to directly open the large mobile dialpad.",
+      "🔢 Smart 9-Digit Live Formatter & Badge: Real-time visual progress counter inside IdBucket ([ 7 / 9 digits ] ➔ [ ✓ Ready (9 Digits) ]) preventing manual digit counting.",
+      "🛡️ Centralized Future-Proof Patient ID Architecture: Centralized VALID_PATIENT_ID_CONFIG ensuring 100% typo protection today while enabling 1-line app-wide migration when NTEP rolls out 10-digit IDs.",
+      "📅 Dynamic IST Year Rollover Safety: Bound all calendar date computations to new Date().getFullYear() ensuring seamless Jan 1st rollovers without manual code updates.",
+      "📖 Accurate Pending Interventions SOP: Updated FO Guide Topic 4 to accurately explain the Pending Interventions Action Center, 1-tap autofill, and WhatsApp export."
+    ],
+    details: [
+      {
+        tag: "Mobile Ergonomics",
+        color: "teal",
+        text: "Direct numeric dialpads and sticky category quick-jumping pills eliminate scrolling fatigue and keyboard mode switching for Field Officers in Bihar."
+      },
+      {
+        tag: "Design System",
+        color: "emerald",
+        text: "Cohesive health-tech visual language featuring tactile button presses (active:scale-[0.98]), frosted glass cards, and removable tag chips."
+      },
+      {
+        tag: "Future-Proofing",
+        color: "indigo",
+        text: "Centralized ID validation architecture and dynamic IST calendar math protect the platform from year boundary crashes and format migrations."
+      }
+    ]
+  },
+  {
     version: "v2.7.5",
     date: "21 Sep 2026",
     title: "Interactive Field Officer User Manual, Searchable Guide & Admin/Sub-Admin SOP Guide",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "📚 Comprehensive FO Field Manual: Transformed Tab 5 (Guide) into an interactive 7-topic manual with collapsible accordion cards and instant search filter.",
       "📝 Step-by-Step Reporting SOP: Clear instructions for daily field submission, WhatsApp multi-paste trick, and indicator distinctions.",
