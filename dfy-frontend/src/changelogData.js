@@ -1,16 +1,48 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.3";
-export const LAST_UPDATED_DATE = "20 Sep 2026";
+export const APP_VERSION = "2.7.4";
+export const LAST_UPDATED_DATE = "21 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.7.4",
+    date: "21 Sep 2026",
+    title: "Multi-Tier Duplicate Notification Prevention, Offline IndexedDB Registry, Interactive Modals & Sub-Admin RBAC 1-Click Repair Suite",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🛡️ Strict Duplicate Notification Prevention: TB Notifications are strictly unique per patient across the entire active treatment period (90 days). Repeat notifications for previously reported IDs are completely blocked.",
+      "📴 Offline Local District Registry (IndexedDB): Pre-caches 90-day district notifications locally on mobile devices for instant 0ms offline duplicate detection in remote villages with zero connectivity.",
+      "🚨 Red Strict Block Modal: Explains that TB notifications are unique to initial diagnosis and halts submission of repeat IDs in mobile reporting form.",
+      "⚠️ Amber Interactive Confirmation Modal: Prompts Field Officers when adding repeat entries to other clinical indicators (Home Visits, FDC, DBT, Follow-up), requiring explicit confirmation before addition.",
+      "🛡️ Server Ingestion Auto-Pruning: /submit-daily-report safely auto-prunes duplicate notification IDs from notification counters while keeping all other valid work (Visits, DBT, Remarks) completely intact.",
+      "🧹 Sub-Admin RBAC 1-Click Auto-Repair Suite: Admin Duplicate Radar now features a 1-click repair tab that detects cross-date duplicate notifications and decrements inflated rollups atomically with strict cross-district isolation."
+    ],
+    details: [
+      {
+        tag: "Data Integrity",
+        color: "rose",
+        text: "Dual-layer prevention (offline client cache + server ingestion gate) ensures TB notifications can never be inflated by repeat submissions across dates or officers."
+      },
+      {
+        tag: "Mobile Ergonomics",
+        color: "amber",
+        text: "Strict red blocking modal for notifications and amber confirmation modal for repeat clinical interventions prevent accidental data corruption in the field."
+      },
+      {
+        tag: "Admin Suite",
+        color: "emerald",
+        text: "1-click duplicate notification inflation detection and atomic rollup repair suite in Duplicate Radar with strict Sub-Admin RBAC cross-district isolation."
+      }
+    ]
+  },
   {
     version: "v2.7.3",
     date: "20 Sep 2026",
     title: "Executive Medical UI Design System Upgrade: Sticky Command Bar, 4-Card KPI Strip, Category Bands & FO Ergonomics",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "🎨 Medical Teal Design Tokens: Transformed color palette to DFY Medical Teal & Deep Emerald (#0f766e, #0d9488, #059669) for high visual clarity and professional health dashboard ergonomics.",
       "🧭 Top Sticky Command Bar: Replaced old top controls with a unified, sticky command bar featuring brand insignia, quick pill selectors, and full 1720px wide-screen real estate.",
