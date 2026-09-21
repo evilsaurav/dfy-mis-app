@@ -1,6 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
 import { calculateFdcDosage } from './utils/fdcCalculator'
+import { 
+  saveOfflineReport, 
+  getOfflineReportsCount, 
+  syncAllOfflineReports, 
+  saveDistrictRegistry, 
+  getDistrictRegistry, 
+  isPatientIdNotified 
+} from './offlineQueue'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
 const getLocalYMD = (d = new Date()) => {
@@ -2397,6 +2405,155 @@ const DEFAULT_BIHAR_DISTRICTS = [
   "Sitamarhi", "Vaishali"
 ];
 
+// --- Strict Duplicate Notification Blocking Modal ---
+export const DuplicateNotificationBlockModal = ({ isOpen, onClose, id, date, fo_name, foName }) => {
+  if (!isOpen) return null;
+  const reporter = fo_name || foName;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[115] flex items-center justify-center p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-2 border-rose-300 w-full max-w-sm sm:max-w-md animate-scale-up">
+        {/* Header with High-Contrast Rose Banner */}
+        <div className="bg-rose-50 border-b border-rose-200 p-5 flex items-start gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-rose-600 text-white flex items-center justify-center text-2xl shadow-lg shadow-rose-600/30 shrink-0">
+            🚫
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="inline-block px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider mb-1">
+              Duplicate TB Notification Blocked
+            </span>
+            <h3 className="text-lg font-black text-rose-900 leading-tight">
+              Yeh Patient ID Pehle Se Notified Hai!
+            </h3>
+          </div>
+          <button 
+            type="button"
+            onClick={onClose}
+            className="text-rose-400 hover:text-rose-700 text-2xl font-bold p-1 leading-none transition-colors cursor-pointer"
+            title="Band Karein"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-5 sm:p-6 space-y-4">
+          <div className="bg-rose-50 border border-rose-300 rounded-2xl p-4 text-rose-900 text-xs sm:text-sm font-medium leading-relaxed space-y-2">
+            <div className="flex items-center justify-between border-b border-rose-200/70 pb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Patient ID:</span>
+              <span className="font-mono font-black text-base text-rose-900">#{id}</span>
+            </div>
+            {date && (
+              <div className="flex items-center justify-between border-b border-rose-200/70 pb-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Original Date:</span>
+                <span className="font-bold text-rose-900">{date}</span>
+              </div>
+            )}
+            {reporter && (
+              <div className="flex items-center justify-between border-b border-rose-200/70 pb-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Reported By:</span>
+                <span className="font-bold text-rose-900">{reporter}</span>
+              </div>
+            )}
+            <p className="pt-1 text-[11px] text-rose-900 leading-normal">
+              <strong>Niyam:</strong> Nikshay niyam ke anusar TB Notification poore ilaaj ke dauran keval <strong>ek hi baar</strong> darj kiya jata hai. Is ID ko dobara Notification bucket me nahi joda ja sakta.
+            </p>
+          </div>
+
+          <p className="text-slate-500 text-[11px] font-semibold text-center">
+            Agar is patient ko aaj koi doosri suvidha (jaise DBT, FDC, Sample) di gayi hai, toh kripya us bucket me darj karein.
+          </p>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full py-3 px-4 bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-rose-600/30 transition-all uppercase tracking-wider cursor-pointer"
+          >
+            Theek Hai, Samajh Gaya / Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Interactive Repeat Intervention Confirmation Modal ---
+export const RepeatInterventionConfirmModal = ({ isOpen, onClose, id, label, date, onConfirm }) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[115] flex items-center justify-center p-4 animate-fade-in font-sans">
+      <div className="bg-white rounded-3xl overflow-hidden shadow-2xl border-2 border-amber-300 w-full max-w-sm sm:max-w-md animate-scale-up">
+        {/* Header with Warm Amber Banner */}
+        <div className="bg-amber-50 border-b border-amber-200 p-5 flex items-start gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center text-2xl shadow-lg shadow-amber-500/30 shrink-0">
+            ⚠️
+          </div>
+          <div className="flex-1 min-w-0">
+            <span className="inline-block px-2.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black uppercase tracking-wider mb-1">
+              Repeat Intervention Check
+            </span>
+            <h3 className="text-lg font-black text-amber-900 leading-tight">
+              Pehle Bhi Report Hua Hai
+            </h3>
+          </div>
+          <button 
+            type="button"
+            onClick={onClose}
+            className="text-amber-400 hover:text-amber-700 text-2xl font-bold p-1 leading-none transition-colors cursor-pointer"
+            title="Band Karein"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Modal Body */}
+        <div className="p-5 sm:p-6 space-y-4">
+          <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 text-amber-900 text-xs sm:text-sm font-medium leading-relaxed space-y-2">
+            <div className="flex items-center justify-between border-b border-amber-200/70 pb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Patient ID:</span>
+              <span className="font-mono font-black text-base text-amber-900">#{id}</span>
+            </div>
+            <div className="flex items-center justify-between border-b border-amber-200/70 pb-2">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Category:</span>
+              <span className="font-bold text-amber-900">{label || 'Same Category'}</span>
+            </div>
+            {date && (
+              <div className="flex items-center justify-between border-b border-amber-200/70 pb-2">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pichhli Tareekh:</span>
+                <span className="font-bold text-amber-900">{date}</span>
+              </div>
+            )}
+            <p className="pt-1 text-[11px] text-amber-900 leading-normal font-semibold">
+              ❓ Kya is patient ke liye yeh intervention aaj sach me dobara kiya gaya hai?
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (onConfirm) onConfirm();
+                onClose();
+              }}
+              className="w-full py-3 px-3 bg-amber-600 hover:bg-amber-700 active:scale-[0.98] text-white font-black text-xs rounded-xl shadow-md shadow-amber-600/30 transition-all tracking-wide cursor-pointer flex items-center justify-center gap-1"
+            >
+              <span>✅ Haan, Dobara Hua Hai (Add)</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-3 px-3 bg-slate-100 hover:bg-slate-200 active:scale-[0.98] text-slate-700 font-bold text-xs rounded-xl transition-all tracking-wide cursor-pointer flex items-center justify-center gap-1"
+            >
+              <span>❌ Galti Se Ho Gaya (Cancel)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 function App() {
   const [directory, setDirectory] = useState(() => {
     try {
@@ -2504,6 +2661,22 @@ function App() {
 
   // Field Staff Monthly Ledger for Duplicate Warning
   const [foMonthlyHistory, setFoMonthlyHistory] = useState(null);
+
+  // Duplicate Notification & Repeat Intervention Modal States
+  const [duplicateBlockModal, setDuplicateBlockModal] = useState({
+    isOpen: false,
+    id: '',
+    date: '',
+    fo_name: ''
+  });
+  const [repeatConfirmModal, setRepeatConfirmModal] = useState({
+    isOpen: false,
+    id: '',
+    field: '',
+    label: '',
+    date: '',
+    onConfirm: null
+  });
 
   // Derived Live Metric Tallies for Floating Mini-HUD
   const liveTotalIds = useMemo(() => {
@@ -2647,12 +2820,33 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (isLoggedIn && formData.working_place && formData.fo_name) {
-      fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
-      fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
+  const fetchAndStoreDistrictRegistry = useCallback(async (district) => {
+    const targetDist = district || formData.working_place;
+    if (!targetDist) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await fetch(`${API_BASE_URL}/api/district-notification-registry?district=${encodeURIComponent(targetDist)}&months=3`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.registry) {
+          await saveDistrictRegistry(data.district || targetDist, data.registry, data.total_count);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to sync district notification registry:", err);
     }
-  }, [isLoggedIn, formData.working_place, formData.fo_name]);
+  }, [formData.working_place]);
+
+  useEffect(() => {
+    if (isLoggedIn && formData.working_place) {
+      fetchAndStoreDistrictRegistry(formData.working_place);
+      if (formData.fo_name) {
+        fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+        fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
+      }
+    }
+  }, [isLoggedIn, formData.working_place, formData.fo_name, formData.pin, fetchAndStoreDistrictRegistry]);
 
   const fetchFoBroadcasts = async (district) => {
     if (!district) return;
@@ -2766,13 +2960,14 @@ function App() {
           if (!isOffline) {
             fetchFoBroadcasts(canonicalWp);
             fetchFoCascadeAlerts(canonicalWp, session.fo_name);
+            fetchAndStoreDistrictRegistry(canonicalWp);
           }
         }
       }
     } catch (e) {
       console.warn("Session restore error", e);
     }
-  }, []);
+  }, [fetchAndStoreDistrictRegistry]);
 
 
   const updateOfflineCount = async () => {
@@ -2787,12 +2982,18 @@ function App() {
     try {
       setIsSyncingOffline(true);
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await syncAllOfflineReports(API_BASE_URL, (syncedItem) => {
+      const res = await syncAllOfflineReports(API_BASE_URL, (syncedItem, resData) => {
+        if (resData && resData.pruned_count > 0) {
+          showToast(`ℹ️ Offline report (${syncedItem.date}) me se ${resData.pruned_count} duplicate notifications auto-prune kiye gaye.`, "info");
+        }
         showToast(`✓ Offline report for ${syncedItem.date} synced to server! 🎉`, "success");
       });
       await updateOfflineCount();
       if (res.syncedCount > 0) {
         showToast(`✓ All ${res.syncedCount} offline reports synced successfully!`, "success");
+        if (formData.working_place) {
+          fetchAndStoreDistrictRegistry(formData.working_place);
+        }
       }
     } catch (err) {
       console.warn("Offline sync error", err);
@@ -2806,6 +3007,9 @@ function App() {
       setIsOnline(true);
       showToast("🌐 Internet connected! Syncing offline reports...", "success");
       triggerOfflineSync();
+      if (formData.working_place) {
+        fetchAndStoreDistrictRegistry(formData.working_place);
+      }
     };
     const handleOffline = () => {
       setIsOnline(false);
@@ -3044,6 +3248,7 @@ function App() {
           fetchFoBroadcasts(formData.working_place);
           fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
           fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
+          fetchAndStoreDistrictRegistry(formData.working_place);
         }
         showToast(
           typeof navigator !== 'undefined' && !navigator.onLine 
@@ -3055,11 +3260,12 @@ function App() {
     }
   };
 
-  const addId = (field, id) => {
+  // --- Form Ingestion Gate & Duplicate Defense ---
+  const handleDirectAddId = async (field, id) => {
     const current = formData[field] || [];
     if (current.includes(id)) {
       showToast(`ID ${id} pehle se added hai!`, "error");
-      return;
+      return false;
     }
     if (field === 'tpt_treatment_start_ids') {
       const presumptive = formData.tpt_presumptive_ids || [];
@@ -3068,73 +3274,238 @@ function App() {
       }
     }
 
-    // ⚠️ Non-blocking monthly duplicate warning: Alert FO without preventing addition
-    const prevReport = checkMonthlyDuplicate(field, id);
-    if (prevReport && prevReport.isSameCategory) {
-      showToast(`⚠️ Dhyan dein: ID ${id} aapne ${prevReport.date} ko "${prevReport.label}" me pehle bhi report ki hai.`, "warning");
+    // 1. Strict Duplicate Notification Blocking Gate
+    if (field === 'notification_ids') {
+      let isDuplicate = false;
+      let dupDate = '';
+      let dupFoName = '';
+
+      // Check 1: 90-day canonical district registry in IndexedDB/localStorage
+      try {
+        const regCheck = await isPatientIdNotified(formData.working_place, id);
+        if (regCheck && regCheck.notified) {
+          isDuplicate = true;
+          dupDate = regCheck.date || '';
+          dupFoName = regCheck.fo_name || '';
+        }
+      } catch (e) {
+        console.warn("Registry lookup error:", e);
+      }
+
+      // Check 2: FO's current month reported history
+      if (!isDuplicate) {
+        const prevReport = checkMonthlyDuplicate(field, id);
+        if (prevReport && prevReport.isSameCategory) {
+          isDuplicate = true;
+          dupDate = prevReport.date || '';
+          dupFoName = formData.fo_name || '';
+        }
+      }
+
+      if (isDuplicate) {
+        setDuplicateBlockModal({
+          isOpen: true,
+          id: String(id),
+          date: dupDate,
+          fo_name: dupFoName
+        });
+        return false;
+      }
+
+      setFormData(prev => ({ ...prev, [field]: [...(prev[field] || []), id] }));
+      return true;
     }
 
+    // 2. Interactive Repeat Intervention Confirmation Gate (Non-notification fields)
+    const prevReport = checkMonthlyDuplicate(field, id);
+    if (prevReport && prevReport.isSameCategory) {
+      setRepeatConfirmModal({
+        isOpen: true,
+        id: String(id),
+        field: field,
+        label: prevReport.label || field,
+        date: prevReport.date || '',
+        onConfirm: () => {
+          setFormData(prev => {
+            const list = prev[field] || [];
+            if (!list.includes(id)) {
+              return { ...prev, [field]: [...list, id] };
+            }
+            return prev;
+          });
+          showToast(`✓ #${id} added to ${prevReport.label || field}!`, "success");
+        }
+      });
+      return false;
+    }
+
+    // Standard unique addition
     setFormData(prev => ({ ...prev, [field]: [...(prev[field] || []), id] }));
+    return true;
   };
 
-  const addMultipleIds = (field, newIds) => {
-    setFormData(prev => {
-      const current = prev[field] || [];
-      const uniqueNew = newIds.filter(id => !current.includes(id));
-      const duplicatesCount = newIds.length - uniqueNew.length;
+  const handleMultiAddIds = async (field, newIds) => {
+    if (!Array.isArray(newIds) || newIds.length === 0) return;
 
-      // ⚠️ Non-blocking monthly duplicate check: Alert FO if any pasted IDs were reported earlier this month
-      const monthlyDuplicates = uniqueNew.filter(id => {
-        const match = checkMonthlyDuplicate(field, id);
-        return match && match.isSameCategory;
-      });
+    const current = formData[field] || [];
+    const rawUnique = Array.from(new Set(newIds)).filter(id => !current.includes(id));
+    const inFormDuplicatesCount = newIds.length - rawUnique.length;
 
-      if (monthlyDuplicates.length > 0) {
-        const sample = monthlyDuplicates.slice(0, 2).map(id => {
-          const match = checkMonthlyDuplicate(field, id);
-          return `#${id} (${match?.date || ''})`;
-        }).join(', ');
-        const extra = monthlyDuplicates.length > 2 ? ` (+${monthlyDuplicates.length - 2} aur)` : '';
-        const catLabel = checkMonthlyDuplicate(field, monthlyDuplicates[0])?.label || 'issi field';
-        showToast(`⚠️ Dhyan dein: ${monthlyDuplicates.length} IDs ${catLabel} me pehle bhi report ho chuki hain: ${sample}${extra}`, 'warning');
-      } else if (duplicatesCount > 0) {
-        showToast(`${uniqueNew.length} IDs add hui (${duplicatesCount} duplicates ignore ki gayi)`, 'success');
+    // Strict multi-add filtering for Notification IDs
+    if (field === 'notification_ids') {
+      const uniqueNew = [];
+      const blockedDuplicates = [];
+
+      for (const id of rawUnique) {
+        let isDup = false;
+        let dupInfo = null;
+
+        try {
+          const regCheck = await isPatientIdNotified(formData.working_place, id);
+          if (regCheck && regCheck.notified) {
+            isDup = true;
+            dupInfo = regCheck;
+          }
+        } catch (e) {
+          console.warn("Registry lookup error in multi-add:", e);
+        }
+
+        if (!isDup) {
+          const monthMatch = checkMonthlyDuplicate(field, id);
+          if (monthMatch && monthMatch.isSameCategory) {
+            isDup = true;
+            dupInfo = monthMatch;
+          }
+        }
+
+        if (isDup) {
+          blockedDuplicates.push({ id, ...dupInfo });
+        } else {
+          uniqueNew.push(id);
+        }
+      }
+
+      if (uniqueNew.length > 0) {
+        setFormData(prev => {
+          const prevList = prev[field] || [];
+          const toAdd = uniqueNew.filter(id => !prevList.includes(id));
+          return {
+            ...prev,
+            [field]: [...prevList, ...toAdd]
+          };
+        });
+      }
+
+      if (blockedDuplicates.length > 0) {
+        const sample = blockedDuplicates.slice(0, 2).map(d => `#${d.id}`).join(', ');
+        const extra = blockedDuplicates.length > 2 ? ` (+${blockedDuplicates.length - 2} aur)` : '';
+        if (uniqueNew.length > 0) {
+          showToast(`⚠️ ${uniqueNew.length} IDs add hui. ${blockedDuplicates.length} duplicate TB Notifications block kiye gaye: ${sample}${extra}`, 'warning');
+        } else {
+          showToast(`🚫 Sabhi ${blockedDuplicates.length} IDs pehle se Notified hain aur block kar di gayi: ${sample}${extra}`, 'error');
+        }
+      } else if (inFormDuplicatesCount > 0) {
+        showToast(`${uniqueNew.length} IDs add hui (${inFormDuplicatesCount} duplicates ignore ki gayi)`, 'success');
       } else {
         showToast(`${uniqueNew.length} IDs add hui!`, 'success');
       }
+      return;
+    }
 
-      return {
-        ...prev,
-        [field]: [...current, ...uniqueNew]
-      };
+    // Standard multi-add with repeat warnings for other indicators
+    const uniqueNew = rawUnique;
+    const duplicatesCount = inFormDuplicatesCount;
+
+    const monthlyDuplicates = uniqueNew.filter(id => {
+      const match = checkMonthlyDuplicate(field, id);
+      return match && match.isSameCategory;
     });
+
+    if (uniqueNew.length > 0) {
+      setFormData(prev => {
+        const prevList = prev[field] || [];
+        const toAdd = uniqueNew.filter(id => !prevList.includes(id));
+        return {
+          ...prev,
+          [field]: [...prevList, ...toAdd]
+        };
+      });
+    }
+
+    if (monthlyDuplicates.length > 0) {
+      const sample = monthlyDuplicates.slice(0, 2).map(id => {
+        const match = checkMonthlyDuplicate(field, id);
+        return `#${id} (${match?.date || ''})`;
+      }).join(', ');
+      const extra = monthlyDuplicates.length > 2 ? ` (+${monthlyDuplicates.length - 2} aur)` : '';
+      const catLabel = checkMonthlyDuplicate(field, monthlyDuplicates[0])?.label || 'issi field';
+      showToast(`⚠️ Dhyan dein: ${monthlyDuplicates.length} IDs ${catLabel} me pehle bhi report ho chuki hain: ${sample}${extra}`, 'warning');
+    } else if (duplicatesCount > 0) {
+      showToast(`${uniqueNew.length} IDs add hui (${duplicatesCount} duplicates ignore ki gayi)`, 'success');
+    } else {
+      showToast(`${uniqueNew.length} IDs add hui!`, 'success');
+    }
   };
+
+  const addId = handleDirectAddId;
+  const addMultipleIds = handleMultiAddIds;
   
   const removeId = (field, idx) => {
     setFormData({ ...formData, [field]: formData[field].filter((_, i) => i !== idx) });
   };
 
   const handleAddFdc = (id, enrichedOrRegimen, strips) => {
-    addId('fdc_provided_ids', id);
+    const current = formData.fdc_provided_ids || [];
+    if (current.includes(id)) {
+      showToast(`ID ${id} pehle se added hai!`, "error");
+      return;
+    }
+
+    const newDetail = typeof enrichedOrRegimen === 'object' && enrichedOrRegimen !== null
+      ? { ...enrichedOrRegimen, id }
+      : { 
+          id, 
+          patient_name: `Patient #${id}`,
+          patient_type: 'adult',
+          weight_kg: null,
+          weight_band: '',
+          phase: 'IP',
+          fdc_type: enrichedOrRegimen || 'FDC 4', 
+          regimen_name: enrichedOrRegimen || '4 FDC (HRZE)', 
+          daily_dose_text: `${enrichedOrRegimen || 'FDC 4'} daily`,
+          supply_issued: `${strips || 1} strips`,
+          strips: strips || 1 
+        };
+
+    const prevReport = checkMonthlyDuplicate('fdc_provided_ids', id);
+    if (prevReport && prevReport.isSameCategory) {
+      setRepeatConfirmModal({
+        isOpen: true,
+        id: String(id),
+        field: 'fdc_provided_ids',
+        label: prevReport.label || 'FDC Medicine Distribution',
+        date: prevReport.date || '',
+        onConfirm: () => {
+          setFormData(prev => {
+            const existing = (prev.fdc_details || []).filter(d => d.id !== id);
+            const currentFdc = prev.fdc_provided_ids || [];
+            return {
+              ...prev,
+              fdc_provided_ids: currentFdc.includes(id) ? currentFdc : [...currentFdc, id],
+              fdc_details: [...existing, newDetail]
+            };
+          });
+          showToast(`✓ #${id} added to FDC Medicine Distribution!`, "success");
+        }
+      });
+      return;
+    }
+
     setFormData(prev => {
       const existing = (prev.fdc_details || []).filter(d => d.id !== id);
-      const newDetail = typeof enrichedOrRegimen === 'object' && enrichedOrRegimen !== null
-        ? { ...enrichedOrRegimen, id }
-        : { 
-            id, 
-            patient_name: `Patient #${id}`,
-            patient_type: 'adult',
-            weight_kg: null,
-            weight_band: '',
-            phase: 'IP',
-            fdc_type: enrichedOrRegimen || 'FDC 4', 
-            regimen_name: enrichedOrRegimen || '4 FDC (HRZE)', 
-            daily_dose_text: `${enrichedOrRegimen || 'FDC 4'} daily`,
-            supply_issued: `${strips || 1} strips`,
-            strips: strips || 1 
-          };
       return {
         ...prev,
+        fdc_provided_ids: [...(prev.fdc_provided_ids || []), id],
         fdc_details: [...existing, newDetail]
       };
     });
@@ -3166,14 +3537,16 @@ function App() {
     }));
   };
 
-  const handleAutofillPendingId = (fieldKey, patientId, label) => {
+  const handleAutofillPendingId = async (fieldKey, patientId, label) => {
     const current = formData[fieldKey] || [];
     if (current.includes(patientId)) {
       showToast(`ID #${patientId} pehle se ${label} me add hai!`, "error");
       return;
     }
-    addId(fieldKey, patientId);
-    showToast(`✓ #${patientId} added to ${label}!`, "success");
+    const added = await handleDirectAddId(fieldKey, patientId);
+    if (added) {
+      showToast(`✓ #${patientId} added to ${label}!`, "success");
+    }
     setCurrentView('form');
   };
   
@@ -3350,6 +3723,7 @@ function App() {
         setShowPostSubmitSuccess(true);
         fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
         fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+        fetchAndStoreDistrictRegistry(formData.working_place);
       } else {
         const result = await response.json();
         showToast(result.detail || "Error in saving data.", "error");
@@ -4423,6 +4797,25 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Duplicate TB Notification Strict Blocking Modal */}
+      <DuplicateNotificationBlockModal
+        isOpen={duplicateBlockModal.isOpen}
+        onClose={() => setDuplicateBlockModal({ isOpen: false, id: '', date: '', fo_name: '' })}
+        id={duplicateBlockModal.id}
+        date={duplicateBlockModal.date}
+        fo_name={duplicateBlockModal.fo_name}
+      />
+
+      {/* Repeat Intervention Interactive Confirmation Modal */}
+      <RepeatInterventionConfirmModal
+        isOpen={repeatConfirmModal.isOpen}
+        onClose={() => setRepeatConfirmModal({ isOpen: false, id: '', field: '', label: '', date: '', onConfirm: null })}
+        id={repeatConfirmModal.id}
+        label={repeatConfirmModal.label}
+        date={repeatConfirmModal.date}
+        onConfirm={repeatConfirmModal.onConfirm}
+      />
 
       {/* Branding Footer */}
         <footer className="w-full text-center py-6 mt-auto">
