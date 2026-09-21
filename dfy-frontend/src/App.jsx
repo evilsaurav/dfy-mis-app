@@ -2887,7 +2887,7 @@ function App() {
     }
   };
 
-  const handleDismissPopup = (broadcastId) => {
+  const dismissBroadcastPopup = (broadcastId) => {
     try {
       const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
       if (!seenIds.includes(broadcastId)) {
@@ -2897,6 +2897,7 @@ function App() {
     } catch (e) {}
     setUnreadBroadcastPopup(null);
   };
+  const handleDismissPopup = dismissBroadcastPopup;
 
   // PWA Install Prompt Listener
   useEffect(() => {
