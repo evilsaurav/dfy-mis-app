@@ -416,6 +416,7 @@ def record_report_mutation(action: str = "submit", doc_id: str = ""):
         cache.delete_prefix("attendance_")
         cache.delete_prefix("dupe_audit_")
         cache.delete_prefix("cascade_alerts_")
+        cache.delete_prefix("dupe_scan_")
     except Exception:
         pass
     if action == "delete" and doc_id:
@@ -451,7 +452,20 @@ async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> lis
         .where("date_of_reporting", "<=", end_date)
         .stream()
     ))
-    raw_list = [d.to_dict() for d in docs]
+    raw_list = []
+    for d in docs:
+        item = d.to_dict() if hasattr(d, "to_dict") else dict(d)
+        did = getattr(d, "id", None) or item.get("id") or item.get("doc_id")
+        if not did:
+            c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+            fo = str(item.get("fo_name", "")).strip()
+            dt = str(item.get("date_of_reporting", "")).strip()
+            did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+        if "id" not in item:
+            item["id"] = did
+        if "doc_id" not in item:
+            item["doc_id"] = did
+        raw_list.append(item)
     cache.set(cache_key, raw_list, ttl=3600) # 1-hour shared cache (invalidated on mutation)
     return raw_list
 
@@ -6971,4 +6985,239 @@ async def get_district_notification_registry(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# --- Admin Duplicate Notification Scan & Auto-Repair Endpoints (RBAC) ---
+# =========================================================================
+
+class RepairDuplicateRequest(BaseModel):
+    month: str
+    district: str
+    instance_doc_id: str
+    duplicate_ids: List[str]
+
+@app.get("/admin/scan-duplicate-notifications")
+async def scan_duplicate_notifications(
+    month: Optional[str] = Query(None),
+    districts: Optional[str] = Query(None),
+    force_refresh: bool = Query(False),
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        clean_month = str(month).strip() if month and str(month).strip() else get_ist_now().strftime("%Y-%m")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+        allowed_c = {canonicalize_district(d).lower() for d in allowed if d}
+        is_subadmin = (admin_role == "SUB_ADMIN" and "all" not in allowed_c and "All" not in allowed)
+
+        filter_districts = None
+        if districts and districts.strip() and districts.strip().lower() != "all":
+            filter_districts = {canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()}
+
+        if is_subadmin:
+            if filter_districts is not None:
+                filter_districts = filter_districts.intersection(allowed_c)
+            else:
+                filter_districts = set(allowed_c)
+
+        raw_reports = await get_raw_monthly_reports(clean_month, force=force_refresh)
+
+        filtered_reports = []
+        for d in raw_reports:
+            data = d if isinstance(d, dict) else (d.to_dict() if hasattr(d, "to_dict") else {})
+            wp = data.get("working_place", "") or data.get("district", "")
+            c_wp = canonicalize_district(wp)
+            if not c_wp:
+                continue
+            if filter_districts is not None and c_wp.lower() not in filter_districts:
+                continue
+            filtered_reports.append(data)
+
+        # Sort reports chronologically by date_of_reporting ASC
+        filtered_reports.sort(key=lambda r: str(r.get("date_of_reporting", "")).strip())
+
+        first_seen = {}  # pid -> { "date": dt, "fo_name": fo, "doc_id": doc_id, "district": dist }
+        instances_map = {}  # repeat_doc_id -> instance dict
+
+        for d in filtered_reports:
+            c_wp = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+            fo = str(d.get("fo_name", "Unknown")).strip()
+            dt = str(d.get("date_of_reporting", "")).strip()
+            doc_id = getattr(d, "id", None) or d.get("id") or d.get("doc_id")
+            if not doc_id:
+                doc_id = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+
+            notifs = d.get("notification_ids", []) or []
+            seen_in_this_doc = set()
+            for nid in notifs:
+                clean_nid = str(nid).strip()
+                if not clean_nid or len(clean_nid) < 5:
+                    continue
+                if clean_nid in seen_in_this_doc:
+                    continue
+                seen_in_this_doc.add(clean_nid)
+
+                if clean_nid in first_seen:
+                    orig = first_seen[clean_nid]
+                    if orig["doc_id"] != doc_id:
+                        if doc_id not in instances_map:
+                            instances_map[doc_id] = {
+                                "district": c_wp,
+                                "fo_name": fo,
+                                "repeat_date": dt,
+                                "repeat_doc_id": doc_id,
+                                "duplicate_ids": [],
+                                "original_occurrences": []
+                            }
+                        instances_map[doc_id]["duplicate_ids"].append(clean_nid)
+                        instances_map[doc_id]["original_occurrences"].append({
+                            "id": clean_nid,
+                            "date": orig["date"],
+                            "fo_name": orig["fo_name"]
+                        })
+                else:
+                    first_seen[clean_nid] = {
+                        "date": dt,
+                        "fo_name": fo,
+                        "doc_id": doc_id,
+                        "district": c_wp
+                    }
+
+        instances = list(instances_map.values())
+        total_inflated = sum(len(inst["duplicate_ids"]) for inst in instances)
+
+        return {
+            "status": "success",
+            "month": clean_month,
+            "total_instances": len(instances),
+            "total_inflated_count": total_inflated,
+            "instances": instances
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/repair-duplicate-notifications")
+async def repair_duplicate_notifications(
+    req: RepairDuplicateRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        clean_dist = canonicalize_district(req.district.strip()) if req.district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+        clean_doc_id = str(req.instance_doc_id).strip() if req.instance_doc_id else ""
+        if not clean_doc_id:
+            raise HTTPException(status_code=400, detail="instance_doc_id is required.")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+        allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+        target_c = clean_dist.lower()
+
+        if admin_role == "SUB_ADMIN":
+            if "All" not in allowed and "all" not in allowed_c and target_c not in allowed_c:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Permission Denied: You do not have access to repair data for district '{req.district}'."
+                )
+
+        # 1. Retrieve document instance_doc_id from daily_field_reports
+        doc_ref = db.collection("daily_field_reports").document(clean_doc_id)
+        doc_snap = await asyncio.to_thread(doc_ref.get)
+        if not doc_snap.exists:
+            raise HTTPException(status_code=404, detail=f"Report document '{clean_doc_id}' not found.")
+
+        report_data = doc_snap.to_dict() or {}
+
+        # 2. Verify canonical district matches
+        doc_district = canonicalize_district(report_data.get("working_place", "") or report_data.get("district", ""))
+        if doc_district.lower() != target_c:
+            raise HTTPException(
+                status_code=400,
+                detail=f"District mismatch: document belongs to '{doc_district}', but request specified '{req.district}'."
+            )
+
+        if admin_role == "SUB_ADMIN" and "All" not in allowed and "all" not in allowed_c:
+            if doc_district.lower() not in allowed_c:
+                raise HTTPException(
+                    status_code=403, 
+                    detail=f"Permission Denied: You do not have access to repair data for district '{doc_district}'."
+                )
+
+        # 3. Filter notification_ids = [pid for pid in current_notifs if pid not in req.duplicate_ids]
+        current_notifs = list(report_data.get("notification_ids") or [])
+        dupe_set = {str(x).strip() for x in (req.duplicate_ids or []) if str(x).strip()}
+        filtered = [pid for pid in current_notifs if str(pid).strip() not in dupe_set]
+
+        # 4. Calculate removed_count = len(current_notifs) - len(filtered)
+        removed_count = len(current_notifs) - len(filtered)
+
+        # 5. Update document with filtered notification IDs (if any removed)
+        if removed_count > 0:
+            await asyncio.to_thread(lambda: doc_ref.update({
+                "notification_ids": filtered,
+                "last_repaired_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "last_repaired_by": admin.get("username") or admin.get("user_id") or "admin"
+            }))
+
+            # 6. Atomically decrement daily_district_rollups:
+            # rollup_ref.set({"notifications": firestore.Increment(-removed_count)}, merge=True)
+            report_date = str(report_data.get("date_of_reporting") or report_data.get("date", "")).strip()
+            if not report_date:
+                parts = clean_doc_id.split("_")
+                if len(parts) >= 3 and len(parts[-1]) == 10 and "-" in parts[-1]:
+                    report_date = parts[-1]
+
+            if report_date and doc_district:
+                rollup_id = f"{report_date}_{doc_district}".replace(" ", "_").lower()
+                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                await asyncio.to_thread(lambda: rollup_ref.set({
+                    "notifications": firestore.Increment(-removed_count),
+                    "last_updated": firestore.SERVER_TIMESTAMP
+                }, merge=True))
+
+            # 7. Log audit in admin_audit_logs
+            actor_name = admin.get("name") or admin.get("username") or "Admin"
+            actor_id = admin.get("user_id") or admin.get("username", "admin")
+            await log_admin_activity(
+                action_type="REPAIR_DUPLICATE_NOTIFICATIONS",
+                details=f"Removed {removed_count} duplicate notification IDs from document {clean_doc_id} ({doc_district})",
+                user_name=actor_name,
+                user_id=actor_id,
+                role=admin.get("role", "SUB_ADMIN"),
+                district=doc_district,
+                target_officer=report_data.get("fo_name", ""),
+                diff={
+                    "doc_id": clean_doc_id,
+                    "removed_count": removed_count,
+                    "duplicate_ids": req.duplicate_ids
+                }
+            )
+
+            # 8. Invalidate caches: dash_, shared_raw_month_, dupe_audit_, dist_notif_registry_
+            record_report_mutation("repair", clean_doc_id)
+            cache.delete(f"status_{clean_doc_id}")
+            cache.delete_prefix("dash_")
+            cache.delete_prefix("shared_raw_month_")
+            cache.delete_prefix("dupe_audit_")
+            cache.delete_prefix("dist_notif_registry_")
+            cache.delete_prefix("dupe_scan_")
+            cache.delete_prefix("profile_")
+            cache.delete_prefix("attendance_")
+
+        # 9. Return response
+        return {
+            "status": "success",
+            "message": f"Successfully removed {removed_count} duplicate notification IDs.",
+            "removed_count": removed_count
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
