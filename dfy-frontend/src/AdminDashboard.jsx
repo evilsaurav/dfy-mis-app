@@ -11306,9 +11306,10 @@ const availableDistrictsForFeed = useMemo(() => {
                   { key: 'daily_reports', label: 'FO Daily Reports & Edits', icon: '🔍', desc: 'Attendance, 24h edit window' },
                   { key: 'targets', label: 'Targets & Daily Progression', icon: '🎯', desc: 'Target allocation & trajectory' },
                   { key: 'staff', label: 'Staff Directory & Duty PINs', icon: '👥', desc: 'Officer onboarding & PIN reset' },
-                  { key: 'duplicate_radar', label: 'Duplicate Radar & Cascade', icon: '🛡️', desc: 'Cross-district duplicate detection' },
-                  { key: 'audit_trail', label: 'Roles & Audit Trail (RBAC)', icon: '📜', desc: 'Admin vs Sub-Admin permissions' },
-                  { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top 5 questions answered' }
+                  { key: 'duplicate_radar', label: 'Duplicate Radar & 1-Click Fix', icon: '🛡️', desc: 'Cross-date duplicates & 1-click repair' },
+                  { key: 'excel_reports', label: 'Excel Reports & State KPI', icon: '📊', desc: '33-sheet KPI, Nikshay & dumps' },
+                  { key: 'audit_trail', label: 'Admin vs Sub-Admin (RBAC)', icon: '📜', desc: 'District boundary protection & logs' },
+                  { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' }
                 ]
                   .filter(topic => {
                     if (!appGuideSearch.trim()) return true;
@@ -11496,77 +11497,173 @@ const availableDistrictsForFeed = useMemo(() => {
                   </div>
                 )}
 
-                {/* TOPIC 6: Duplicate Radar & Cascade */}
+                {/* TOPIC 6: Duplicate Radar & 1-Click Auto-Repair */}
                 {appGuideActiveTopic === 'duplicate_radar' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                       <span className="text-xl">🛡️</span>
-                      <h4 className="text-sm font-black text-slate-900">Duplicate Patient Radar &amp; Clinical Cascade</h4>
+                      <h4 className="text-sm font-black text-slate-900">Duplicate Patient Radar &amp; 1-Click Auto-Repair Suite</h4>
                     </div>
 
-                    <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl text-rose-900 space-y-1">
-                      <div className="font-bold">🚨 Cross-District Duplicate Collision:</div>
-                      <p className="text-[11px]">
-                        Agar ek hi 9-digit patient ID do alag-alag officers ya do alag districts me submit hoti hai, toh Duplicate Radar red alert raise karta hai. Sub-Admin ko dono officers se baat karke physical OPD slip se verify karna hota hai ki asli patient kiske paas hai.
-                      </p>
-                    </div>
+                    <p>
+                      Duplicate Radar district aur state level par patient ID collisions aur inflated reporting ko detect aur resolve karta hai:
+                    </p>
 
-                    <div className="space-y-1">
-                      <div className="font-bold text-slate-800">Cascade Dropout Alerts:</div>
-                      <p className="text-slate-600">
-                        TB Notification ke baad agar 14 din tak HIV/DM screening ya Bank details pending rehti hain, toh patient dropout hone ka khatra hota hai. Sub-Admin in patients ko home visit ke liye assign karein.
-                      </p>
+                    <div className="space-y-3">
+                      {/* Tab 1 */}
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 block font-bold text-xs">Tab 1: Same-Day Duplicate Check (Within District)</strong>
+                        <p className="text-slate-600 text-[11px]">
+                          Agar ek hi district me do alag officers ne ek hi din same patient ID daal di hai, toh yahan alert dikhta hai. Sub-Admin dono officers se baat karke pata karte hain ki asli patient kisne visit kiya.
+                        </p>
+                      </div>
+
+                      {/* Tab 2 */}
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 block font-bold text-xs">Tab 2: Cross-District Collision (Between Districts)</strong>
+                        <p className="text-slate-600 text-[11px]">
+                          Agar ek patient ID Bihar ke do alag districts (e.g. Patna aur Gaya) me submit hui hai, toh State Coordinator OPD slip aur address se verify karke ek district me retain karte hain.
+                        </p>
+                      </div>
+
+                      {/* Tab 3 */}
+                      <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl space-y-2">
+                        <div className="flex items-center gap-1.5 font-black text-rose-950 text-xs">
+                          <span>🚨</span>
+                          <span>Tab 3: Notification Inflation &amp; 1-Click Auto-Repair (Most Critical)</span>
+                        </div>
+                        <p className="text-rose-900 text-[11px] leading-relaxed">
+                          <strong>Kyu hota hai:</strong> Kabhi-kabhi Field Officer 1st-5th tareekh ke patients report karne ke baad, 6th tareekh ki report me wahi 1-5 tareekh ke 20 IDs fir se Notification box me copy-paste kar dete hain. Isse district rollup me total +20 inflate ho jata hai.
+                        </p>
+                        
+                        <div className="bg-white/90 border border-rose-200 rounded-xl p-3 text-[11px] text-rose-950 space-y-2">
+                          <strong>⚡ 1-Click Auto-Repair Dabane Par Kya Hota Hai:</strong>
+                          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-700">
+                            <li><strong>Earliest Valid Date Safe:</strong> Patient ID jis pehli tareekh ko submit hui thi (e.g. 1st Sept), wo record bilkul intact aur surakshit rehta hai.</li>
+                            <li><strong>Duplicate Stripped:</strong> Baad wali date (e.g. 6th Sept) ki report ke `notification_ids` array se repeat ID hata di jati hai.</li>
+                            <li><strong>Rollup Corrected (Atomic):</strong> System us date ke district rollup me se turant count ghata deta hai (`firestore.Increment(-N)`). Total accurate ho jata hai.</li>
+                            <li><strong>Baki Kaam 100% Safe:</strong> Us officer ki 6th Sept ki Home Visits, FDC Dawai, DBT Bank entry, aur KM Remarks bilkul safe rehte hain!</li>
+                            <li><strong>Sub-Admin RBAC Protection:</strong> Sub-Admin sirf apne assigned district ka data scan aur repair kar sakta hai. Kisi aur district par 403 Forbidden lagta hai.</li>
+                          </ol>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* TOPIC 7: Roles & Audit Trail */}
+                {/* TOPIC 7: Excel Reports & Statewide Exports */}
+                {appGuideActiveTopic === 'excel_reports' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                      <span className="text-xl">📊</span>
+                      <h4 className="text-sm font-black text-slate-900">State Excel Reports &amp; 33-Sheet KPI Export</h4>
+                    </div>
+
+                    <p>
+                      DFY MIS me statewide monitoring aur review meetings ke liye multiple ready-to-present Excel formats uplabdh hain:
+                    </p>
+
+                    <div className="space-y-2.5">
+                      <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-indigo-950 block font-bold text-xs">1. 33-Sheet Bihar State KPI Workbook (.xlsx):</strong>
+                        <p className="text-indigo-900 text-[11px]">
+                          Isme Sheet 1 statewide consolidated ranking hoti hai, aur aage ki 32 sheets har district ka dedicated scorecard hoti hain. Har sheet me professional openpyxl borders, colors, target achievement % aur daily breakdown rehta hai.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 block font-bold text-xs">2. Nikshay Format 24-Column Sheet:</strong>
+                        <p className="text-slate-600 text-[11px]">
+                          Notification Tray se download hone wali sheet official Nikshay Portal column order me format hoti hai taaki verification direct ho sake.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 block font-bold text-xs">3. Raw Field Activity Dump &amp; Attendance Matrix:</strong>
+                        <p className="text-slate-600 text-[11px]">
+                          Har Field Officer dwara submit kiye gaye single-single day ka raw log, travel kilometers, remarks aur monthly attendance status.
+                        </p>
+                      </div>
+
+                      <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900">
+                        🛡️ <strong>Server RAM Guard:</strong> Heavy 33-sheet export backend me `asyncio.Semaphore(1)` aur explicit garbage collection se chalta hai, taaki server par kabhi RAM crash na ho.
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TOPIC 8: Roles & Audit Trail */}
                 {appGuideActiveTopic === 'audit_trail' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                       <span className="text-xl">📜</span>
-                      <h4 className="text-sm font-black text-slate-900">Multi-Admin Roles &amp; Complete Audit Trail</h4>
+                      <h4 className="text-sm font-black text-slate-900">Multi-Admin Roles, District Boundaries &amp; Audit Logs</h4>
                     </div>
 
-                    <ul className="list-disc list-inside space-y-2 text-slate-600">
-                      <li><strong>Super Admin:</strong> Full statewide access, dumps upload, user create/delete, security settings, backups.</li>
-                      <li><strong>Sub-Admin / District Coordinator:</strong> Sirf unke assigned districts ka data dikhta hai. Doosre district ke records unke liye strictly isolated aur hidden hote hain.</li>
-                      <li><strong>Audit Trail Transparency:</strong> Target badalna, staff PIN reset, day delete karna — har action actor ke user ID aur IST timestamp ke saath Firestore audit logs me record hota hai.</li>
-                    </ul>
+                    <div className="space-y-2.5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                        <div className="bg-purple-50 border border-purple-200 p-3 rounded-2xl space-y-1">
+                          <strong className="text-purple-950 font-bold block text-xs">👑 Super Admin:</strong>
+                          <ul className="list-disc list-inside space-y-0.5 text-purple-900 pl-1">
+                            <li>Pure Bihar ke sabhi 22+ districts ka complete access.</li>
+                            <li>Official Nikshay State Excel Dumps upload karna.</li>
+                            <li>Sub-Admin accounts create aur manage karna.</li>
+                            <li>Statewide monthly targets configure karna.</li>
+                          </ul>
+                        </div>
+
+                        <div className="bg-sky-50 border border-sky-200 p-3 rounded-2xl space-y-1">
+                          <strong className="text-sky-950 font-bold block text-xs">🛡️ District Sub-Admin:</strong>
+                          <ul className="list-disc list-inside space-y-0.5 text-sky-900 pl-1">
+                            <li>Sirf unke assigned canonical districts ka data dikhta hai.</li>
+                            <li>Apne district ke FOs ki reports review aur PIN reset.</li>
+                            <li>Apne district ka Duplicate Radar 1-Click Auto-Repair.</li>
+                            <li>Doosre districts ka data access ya modify karna strictly 403 Blocked.</li>
+                          </ul>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1 text-[11px] text-slate-700">
+                        <strong className="text-slate-900 block font-bold text-xs">Tamper-Evident Audit Trail:</strong>
+                        <p>
+                          Jab bhi koi admin target change karta hai, staff PIN reset karta hai, report delete karta hai, ya duplicate repair run karta hai — har action actor ke username, IP/token aur IST timestamp ke saath Firestore audit ledger me permanently darj ho jata hai.
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                {/* TOPIC 8: FAQs & Solutions */}
+                {/* TOPIC 9: FAQs & Solutions */}
                 {appGuideActiveTopic === 'faqs' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
                       <span className="text-xl">❓</span>
-                      <h4 className="text-sm font-black text-slate-900">Frequently Asked Questions (FAQs)</h4>
+                      <h4 className="text-sm font-black text-slate-900">Frequently Asked Questions (Admin FAQs)</h4>
                     </div>
 
                     <div className="space-y-3">
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q1: Notification ID Nikshay portal par nahi mil rahi hai, kya karein?</strong>
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 font-bold block text-xs">Q1: Duplicate 1-Click Fix chalane ke baad agar FO bole ki patient ki visit genuine thi?</strong>
+                        <p className="text-slate-600 text-[11px]">
+                          Chinta ki baat nahi hai! 1-Click Fix sirf duplicate &ldquo;TB Notification count&rdquo; ko theek karta hai. Us din ki Home Visit, FDC dawai, aur Travel KM report me waise hi safe rehte hain.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 font-bold block text-xs">Q2: Notification ID Nikshay portal par nahi mil rahi hai, kya karein?</strong>
                         <p className="text-slate-600 text-[11px]">
                           Pehle check karein ki reporting kitne din pehle hui hai. Agar 3 din (&le;72h) se kam huye hain, toh Government server sync hone ka wait karein. Agar 3 din se purana hai, toh Nikshay search bar me manually type karein.
                         </p>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q2: Excel me 24 columns kaise paste karein taaki cell kharab na hon?</strong>
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
+                        <strong className="text-slate-900 font-bold block text-xs">Q3: FO ka Duty PIN reset kaise karein?</strong>
                         <p className="text-slate-600 text-[11px]">
-                          Notification Tray me `📑 Copy Table (24-Cols)` dabayein. Excel me blank sheet khol kar Row 1 Column A (Cell A1) select karein aur `Ctrl + V` dabayein. Saare 24 columns exact headers aur alignment ke saath set ho jayenge.
+                          <strong>Staff Directory</strong> tab me jayein, us officer ke naam ke aage bane `Reset PIN` button par click karein aur naya 4-digit PIN enter karke save karein. FO naye PIN se turant login kar sakta hai.
                         </p>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q3: FO keh raha hai uska form locked hai?</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Submission ke 24 ghante baad FO edit window expire ho jati hai. Agar koi zaroori update hai, toh Admin Feed feature se use update karwaya ja sakta hai.
-                        </p>
-                      </div>
-
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
                         <strong className="text-slate-900 font-bold block text-xs">Q4: Render server par extra load toh nahi padega?</strong>
                         <p className="text-slate-600 text-[11px]">
                           Nahi, yeh Guide aur Notification Tray 100% Client-Side React me operate karte hain. Iska Render ke 512MB RAM aur CPU par 0.00% load padta hai.

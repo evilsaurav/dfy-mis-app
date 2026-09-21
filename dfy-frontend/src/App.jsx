@@ -1428,6 +1428,8 @@ const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
 // --- Field Officer Help, Guidelines & Visual System Workflow Guide ---
 const FoHelpGuide = () => {
   const [activeStage, setActiveStage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [openTopic, setOpenTopic] = useState("daily_reporting");
 
   const stages = [
     {
@@ -1480,20 +1482,456 @@ const FoHelpGuide = () => {
     }
   ];
 
+  const guideTopics = [
+    {
+      id: "daily_reporting",
+      icon: "📝",
+      badge: "SOP Step-by-Step",
+      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
+      title: "1. Rozana Daily Report Kaise Bharein",
+      subtitle: "Field se report submit karne ka aasan niyam",
+      keywords: "report bharna submit daily notification visit dbt fdc remarks travel",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3.5 space-y-1.5">
+            <span className="font-black text-teal-900 flex items-center gap-1.5">
+              <span>🎯</span>
+              <span>Daily Target &amp; Timing:</span>
+            </span>
+            <p className="text-teal-800 text-[11px]">
+              Field Officer ko rozana field visit complete karne ke baad sham <strong>7:00 PM</strong> se pehle apni daily report submit karni hoti hai.
+            </p>
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">District aur Apna Naam Chunein:</strong>
+                <span className="text-slate-600 text-[11px]">App kholte hi apna assigned District aur Dropdown se apna Naam select karein. Duty PIN enter karein.</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">TB Notification Box (Naye Patients):</strong>
+                <span className="text-slate-600 text-[11px]">
+                  Jo naye TB confirm patient aaj notify huye hain, unki 9-digit Nikshay ID yahan enter karein. Ek ID likhkar Enter dabayein ya Add karein.
+                </span>
+                <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 text-[11px] text-indigo-900">
+                  <strong>💡 WhatsApp Paste Trick:</strong> Agar aapke WhatsApp group ya register me 5-10 IDs ek sath likhi hain, toh poora message copy karke yahan input box me paste kar dein! App automatically saari valid IDs ko extract karke add kar lega.
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">Other Interventions (Alag-Alag Box):</strong>
+                <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-slate-600 mt-1">
+                  <li><strong>Home Visit:</strong> Jin patients ke ghar jakar physical counseling ki unki IDs.</li>
+                  <li><strong>FDC Dawai:</strong> Jinhe mahine ki dawa strip handover ki unki IDs.</li>
+                  <li><strong>DBT Bank Details:</strong> Jinka bank khata / Aadhaar seed kiya.</li>
+                  <li><strong>UDST Test:</strong> Jinka Drug Susceptibility sample bheja.</li>
+                  <li><strong>Follow-up:</strong> Regular 2/4/6 mahine ki follow-up visit.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">4</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">Travel KM &amp; Remarks (Zaroori):</strong>
+                <span className="text-slate-600 text-[11px]">
+                  Field me chala gaya total kilometer aur aaj ki field activity ka brief remark (jaise gaon ka naam ya camp) darj karke <strong>&ldquo;Submit Daily Report&rdquo;</strong> button dabayein.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "duplicate_rules",
+      icon: "🚨",
+      badge: "Strict NTEP Niyam",
+      badgeColor: "bg-rose-100 text-rose-800 border-rose-200",
+      title: "2. Duplicate Notification vs Repeat Visit (Lal vs Peela Modal)",
+      subtitle: "Galat ID submit hone se bachane wale naye rules",
+      keywords: "duplicate notification block repeat visit modal amber red lal peela 90 din",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 space-y-2">
+            <span className="font-black text-rose-900 flex items-center gap-1.5">
+              <span>🛑</span>
+              <span>Lal Modal: Strict Duplicate Notification Block</span>
+            </span>
+            <p className="text-rose-950 text-[11px]">
+              NTEP niyam ke anusar TB patient ka Notification uske pure treatment cycle (90 din) me <strong>sirf 1 baar</strong> hi darj hota hai.
+            </p>
+            <div className="bg-white/80 border border-rose-200 rounded-xl p-2.5 text-[11px] text-rose-900 space-y-1">
+              <strong>🔴 Agar Lal Alert Modal aaye to kya hoga?</strong>
+              <p>
+                Agar aapne aisi Patient ID Notification box me daali jo pichle 90 dino me aapne ya kisi doosre FO ne pehle se report kar rakhi hai, toh app use <strong>Hard Block</strong> kar dega. Wo ID submit nahi ho sakti. Modal me dikhega ki kis date ko kis officer ne pehle report kiya tha.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+            <span className="font-black text-amber-900 flex items-center gap-1.5">
+              <span>⚠️</span>
+              <span>Peela Modal: Repeat Visit Confirmation (Allowable)</span>
+            </span>
+            <p className="text-amber-950 text-[11px]">
+              Agar koi purana TB patient hai aur aap uske ghar <strong>dobara Home Visit</strong> karne gaye hain, ya <strong>agli FDC dawai</strong> dene gaye hain, ya <strong>DBT bank passbook</strong> lene gaye hain, toh yeh legitimate care activity hai!
+            </p>
+            <div className="bg-white/80 border border-amber-200 rounded-xl p-2.5 text-[11px] text-amber-900 space-y-1">
+              <strong>🟡 Agar Peela Alert Modal aaye to kya karein?</strong>
+              <p>
+                Home Visit ya FDC box me purani ID daalne par Peela Warning Modal aayega: <em>&ldquo;Yeh patient pehle notify ho chuka hai. Kya aap dobara visit/dawai confirm karte hain?&rdquo;</em>. Bas <strong>&ldquo;Haan, Confirm Karein&rdquo;</strong> dabayein aur entry jud jayegi.
+              </p>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] text-slate-700">
+            <strong>📌 Rule of Thumb:</strong> Notification box me sirf naya patient aayega. Repeat visit ke liye Home Visit / FDC box use karein.
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "offline_sync",
+      icon: "📶",
+      badge: "No Internet Vault",
+      badgeColor: "bg-sky-100 text-sky-800 border-sky-200",
+      title: "3. Offline Mode & Zero-Loss Sync",
+      subtitle: "Gaon me bina internet ke report submit karna",
+      keywords: "offline sync bina network internet zero loss pending queue vault indexeddb",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <p>
+            Remote dehat ya jungle area me jahan bilkul internet nahi hota, wahan app bina kisi rukawat ke 100% smooth chalta hai.
+          </p>
+
+          <div className="space-y-2">
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-sky-950 block font-bold">1. Bina Network Report Submit Karein:</strong>
+              <span className="text-sky-900 text-[11px]">
+                Jab network nahi hoga, toh &ldquo;Submit Daily Report&rdquo; dabane par data fail nahi hota. Wo aapke phone ki encrypted internal memory (IndexedDB) me surakshit save ho jata hai.
+              </span>
+            </div>
+
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-sky-950 block font-bold">2. Top Header me Status Dekhein:</strong>
+              <span className="text-sky-900 text-[11px]">
+                Offline report submit hote hi screen ke upar peele rang ka badge dikhega: <strong>&ldquo;Offline Queued (1 report)&rdquo;</strong>.
+              </span>
+            </div>
+
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-sky-950 block font-bold">3. Internet Aane Par Auto-Sync:</strong>
+              <span className="text-sky-900 text-[11px]">
+                Jaise hi aap bazaar ya sadak par aayenge jahan network aayega, app background me cloud par report sync kar dega. Ya aap chahein toh top bar ke <strong>&ldquo;Sync Now&rdquo;</strong> button ko tap karke turant bhej sakte hain.
+              </span>
+            </div>
+          </div>
+
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-900 font-medium">
+            🛡️ <strong>Zero Data Loss Guarantee:</strong> Phone band ho jaye, battery khatam ho jaye, ya phone restart ho jaye — aapki offline report phone se kabhi delete nahi hoti jab tak wo cloud par upload na ho jaye.
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "pending_attendance",
+      icon: "📅",
+      badge: "Attendance & Backlog",
+      badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
+      title: "4. Pending Dates & Chhuti (Attendance Tab)",
+      subtitle: "Bachi hui pichli reports aur holidays kaise bharein",
+      keywords: "pending tab attendance chhuti holiday bachi hui report missed date kal ki",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <p>
+            Agar pichle kisi din aap network issue ya field emergency ki wajah se report submit nahi kar paye the, toh unhe regularise karne ke liye:
+          </p>
+
+          <div className="space-y-2.5">
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">Pending Tab Kholein:</strong>
+                <span className="text-slate-600 text-[11px]">Bottom dock me <strong>&ldquo;Pending&rdquo;</strong> icon par tap karein. Yahan mahine ki saari dates dikhayi dengi.</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">Missed Date Chunein:</strong>
+                <span className="text-slate-600 text-[11px]">Jo din laal ya peele rang me pending dikh raha hai, us date card par click karein. Report form us date ke liye open ho jayega.</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+              <div>
+                <strong className="text-slate-900 block font-bold">Sunday ya Holiday Marking:</strong>
+                <span className="text-slate-600 text-[11px]">
+                  Agar us din Sunday ya Sarkari Holiday tha aur aapne field duty nahi ki thi, toh <strong>&ldquo;Mark Holiday / Chhuti&rdquo;</strong> button dabakar attendance clean rakhein. Isse fake 0 ID submit karne ki zaroorat nahi padti.
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "edit_correction",
+      icon: "⏱️",
+      badge: "24-Hr Grace Window",
+      badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
+      title: "5. 24-Ghante ke Andar Galat ID Theek Karna",
+      subtitle: "Clerical galti bina Admin ke khud edit karne ka tarika",
+      keywords: "edit id correction 24 ghante galti typo pencil delete profile tab",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <p>
+            Agar report submit karne ke baad kisi Nikshay ID me koi typo ya galti ho gayi ho, toh aapko District Coordinator ya Admin ko phone karne ki zaroorat nahi hai:
+          </p>
+
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2">
+            <span className="font-black text-amber-900 flex items-center gap-1.5">
+              <span>✏️</span>
+              <span>Self-Correction Steps (24 Hours):</span>
+            </span>
+            <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-950 pl-1">
+              <li>Niche diye gaye <strong>Profile</strong> tab par tap karein.</li>
+              <li>Calendar me us tareekh par click karein jis din ki report me galti hui thi.</li>
+              <li>ID ke bagal me bane pencil <strong>✏️</strong> icon par tap karke nayi correct ID save karein, ya <strong>❌</strong> se galat ID delete karein.</li>
+            </ol>
+          </div>
+
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-[11px] text-rose-900 font-medium">
+            ⚠️ <strong>Important Constraint:</strong> Yeh self-service edit window submission ke <strong>24 ghante</strong> tak hi open rehti hai. 24 ghante beetne ke baad security lock lag jata hai taaki data tamper na ho sake. Uske baad sirf State Admin hi badlav kar sakte hain.
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "patient_tracker",
+      icon: "🔍",
+      badge: "Nikshay Status Live",
+      badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200",
+      title: "6. Patient Tracker (Nikshay Verification Status)",
+      subtitle: "Apne patient ka government verification status check karein",
+      keywords: "patient tracker nikshay status verification green shield search 9 digit journey",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <p>
+            Aapne jo patients report kiye hain, unka Nikshay Portal par verification aur DBT status check karne ke liye:
+          </p>
+
+          <div className="space-y-2">
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-indigo-950 block font-bold">1. Tracker Tab Kholein:</strong>
+              <span className="text-indigo-900 text-[11px]">
+                Bottom dock me <strong>&ldquo;Tracker&rdquo;</strong> icon par tap karein aur patient ki 9-digit Nikshay ID search bar me daalein.
+              </span>
+            </div>
+
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-indigo-950 block font-bold">2. Status Badges ka Matlab:</strong>
+              <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-indigo-900 mt-1">
+                <li><span className="font-bold text-emerald-700">🟢 Green Shield (Verified):</span> State Coordinator ne Nikshay dump se cross-match karke verify kar diya hai.</li>
+                <li><span className="font-bold text-amber-700">🟡 Amber Badge (Pending Sync):</span> Report darj hai, agle 24-72 ghante me official portal par reconcile hogi.</li>
+                <li><span className="font-bold text-sky-700">🔵 DBT Validated:</span> Patient ka bank khata Poshan sahayata ke liye verified hai.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      id: "fdc_and_faqs",
+      icon: "💊",
+      badge: "Dawai Dosage & Help",
+      badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      title: "7. FDC Dawa Dosage Chart & Field FAQs",
+      subtitle: "Wazan ke anusar tablet niyam aur aam sawal",
+      keywords: "fdc medicine dosage tablet strip wazan band weight faqs dhyan dein adult pediatric",
+      content: (
+        <div className="space-y-4 text-xs text-slate-700 leading-relaxed">
+          <div className="space-y-2">
+            <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+              <span>⚖️</span>
+              <span>Adult Regimen (≥ 18 Yrs) — IP: 4 FDC (HRZE) • CP: 3 FDC (HRE)</span>
+            </h4>
+            <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+              <table className="w-full text-[11px] text-left">
+                <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-2">Weight Band</th>
+                    <th className="p-2">Daily Dose</th>
+                    <th className="p-2">IP Supply (28d)</th>
+                    <th className="p-2">CP Supply (56d)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
+                  <tr>
+                    <td className="p-2 font-mono">25–34 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">2 tabs</td>
+                    <td className="p-2">4 strips</td>
+                    <td className="p-2">8 strips</td>
+                  </tr>
+                  <tr className="bg-slate-50/50">
+                    <td className="p-2 font-mono">35–49 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">3 tabs</td>
+                    <td className="p-2">6 strips</td>
+                    <td className="p-2">12 strips</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-mono">50–64 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">4 tabs</td>
+                    <td className="p-2">8 strips</td>
+                    <td className="p-2">16 strips</td>
+                  </tr>
+                  <tr className="bg-slate-50/50">
+                    <td className="p-2 font-mono">65–75 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">5 tabs</td>
+                    <td className="p-2">10 strips</td>
+                    <td className="p-2">20 strips</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-mono">&gt; 75 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">6 tabs</td>
+                    <td className="p-2">12 strips</td>
+                    <td className="p-2">24 strips</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+              <span>🧒</span>
+              <span>Pediatric Regimen (&lt; 18 Yrs) — IP: 3 FDC-P + E • CP: 2 FDC-P + E</span>
+            </h4>
+            <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+              <table className="w-full text-[11px] text-left">
+                <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="p-2">Weight Band</th>
+                    <th className="p-2">Daily Tabs</th>
+                    <th className="p-2">Strips (28 Days)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
+                  <tr>
+                    <td className="p-2 font-mono">4–7 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">1 tab HRZ + 1 tab E</td>
+                    <td className="p-2">1 strip HRZ + 1 strip E</td>
+                  </tr>
+                  <tr className="bg-slate-50/50">
+                    <td className="p-2 font-mono">8–11 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">2 tabs HRZ + 2 tabs E</td>
+                    <td className="p-2">2 strips HRZ + 2 strips E</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2 font-mono">12–15 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">3 tabs HRZ + 3 tabs E</td>
+                    <td className="p-2">3 strips HRZ + 3 strips E</td>
+                  </tr>
+                  <tr className="bg-slate-50/50">
+                    <td className="p-2 font-mono">16–24 kg</td>
+                    <td className="p-2 text-indigo-700 font-bold">4 tabs HRZ + 4 tabs E</td>
+                    <td className="p-2">4 strips HRZ + 4 strips E</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Quick FAQs */}
+          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+            <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+              <span>❓</span>
+              <span>Aam Field Sawal (Field FAQs)</span>
+            </h4>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 font-bold block text-[11px]">Q: Agar patient ki ID 8-digit hai toh form lega?</strong>
+              <p className="text-slate-600 text-[11px]">
+                Haan, puraane NTEP legacy records ke liye form 8-digit aur naye patients ke liye 9-digit dono accept karta hai.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 font-bold block text-[11px]">Q: Duplicate Notification alert aane par kya patient ki visit bhi ruk jayegi?</strong>
+              <p className="text-slate-600 text-[11px]">
+                Bilkul nahi! Duplicate alert sirf TB Notification count par lagta hai. Patient ki Home Visit, FDC dawai aur DBT bante rahenge. Bas ID ko Home Visit ya FDC box me daalein.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-slate-900 font-bold block text-[11px]">Q: Agar phone kho jaye ya kharab ho jaye?</strong>
+              <p className="text-slate-600 text-[11px]">
+                Aapki jo bhi reports submit ho chuki hain wo cloud database me 100% surakshit hain. Naye phone me apna District aur Naam chunein aur duty PIN daal kar turant apna kaam shuru karein.
+              </p>
+            </div>
+          </div>
+        </div>
+      )
+    }
+  ];
+
+  const filteredTopics = guideTopics.filter(t => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase().trim();
+    return (
+      t.title.toLowerCase().includes(q) ||
+      t.subtitle.toLowerCase().includes(q) ||
+      t.keywords.toLowerCase().includes(q)
+    );
+  });
+
   return (
-    <div className="w-full max-w-lg mx-auto animate-fade-in pb-12 space-y-5">
+    <div className="w-full max-w-lg mx-auto animate-fade-in pb-16 space-y-5">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-teal-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-950/20 border border-teal-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20">
+          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20 shrink-0">
             📖
           </div>
           <div>
-            <h2 className="text-xl font-black tracking-tight">FO Help & App Guide</h2>
+            <h2 className="text-xl font-black tracking-tight">FO Field Manual &amp; App Guide</h2>
             <p className="text-xs text-teal-200 font-medium">
-              MIS App karyapranali flowchart, NTEP FDC dawai niyam aur guidelines
+              Daily Reporting, Duplicate Niyam, Offline Mode &amp; Dawai Rules
             </p>
           </div>
+        </div>
+
+        {/* Quick Search Bar */}
+        <div className="mt-4 relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search topic (e.g. report, duplicate, offline, edit, dawai)..."
+            className="w-full bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl px-4 py-2.5 pl-9 text-xs text-white placeholder-teal-200/70 outline-none focus:ring-2 focus:ring-teal-400 font-medium"
+          />
+          <span className="absolute left-3 top-3 text-sm text-teal-200">🔍</span>
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="absolute right-3 top-2.5 text-xs text-teal-200 hover:text-white font-bold bg-white/10 px-2 py-0.5 rounded-full"
+            >
+              Clear
+            </button>
+          )}
         </div>
       </div>
 
@@ -1566,133 +2004,67 @@ const FoHelpGuide = () => {
         })()}
       </div>
 
-      {/* NTEP FDC Medicine Dosage Table */}
-      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-3">
-        <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-          <span>💊</span>
-          <span>NTEP FDC Dawai Dosage Table (Weight Bands)</span>
-        </h3>
-        <p className="text-[11px] text-slate-500 font-medium">
-          Wazan ke anusar niyamit daily dose aur blister pack supply:
-        </p>
-
-        {/* Adult Regimen Table */}
-        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-          <div className="bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 flex justify-between">
-            <span>Adult Regimen (≥ 18 Yrs)</span>
-            <span>IP: 4 FDC (HRZE) • CP: 3 FDC (HRE)</span>
-          </div>
-          <table className="w-full text-[11px] text-left">
-            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-              <tr>
-                <th className="p-2">Weight Band</th>
-                <th className="p-2">Daily Dose</th>
-                <th className="p-2">IP Supply (28d)</th>
-                <th className="p-2">CP Supply (56d)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
-              <tr>
-                <td className="p-2 font-mono">25–34 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">2 tabs</td>
-                <td className="p-2">4 strips</td>
-                <td className="p-2">8 strips</td>
-              </tr>
-              <tr className="bg-slate-50/50">
-                <td className="p-2 font-mono">35–49 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">3 tabs</td>
-                <td className="p-2">6 strips</td>
-                <td className="p-2">12 strips</td>
-              </tr>
-              <tr>
-                <td className="p-2 font-mono">50–64 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">4 tabs</td>
-                <td className="p-2">8 strips</td>
-                <td className="p-2">16 strips</td>
-              </tr>
-              <tr className="bg-slate-50/50">
-                <td className="p-2 font-mono">65–75 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">5 tabs</td>
-                <td className="p-2">10 strips</td>
-                <td className="p-2">20 strips</td>
-              </tr>
-              <tr>
-                <td className="p-2 font-mono">&gt; 75 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">6 tabs</td>
-                <td className="p-2">12 strips</td>
-                <td className="p-2">24 strips</td>
-              </tr>
-            </tbody>
-          </table>
+      {/* 7 Accordion Topic Cards */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between px-1">
+          <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+            <span>📚</span>
+            <span>FO Detailed User Manual ({filteredTopics.length} Topics)</span>
+          </h3>
+          <span className="text-[10px] text-slate-500 font-bold">Tap card to expand</span>
         </div>
 
-        {/* Pediatric Regimen Table */}
-        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs mt-3">
-          <div className="bg-slate-100/90 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-700 flex justify-between">
-            <span>Pediatric Regimen (&lt; 18 Yrs)</span>
-            <span>IP: 3 FDC-P + E • CP: 2 FDC-P + E</span>
+        {filteredTopics.length === 0 ? (
+          <div className="bg-white rounded-3xl p-8 text-center border border-slate-200 shadow-sm space-y-2">
+            <span className="text-3xl">🔍</span>
+            <p className="text-xs font-black text-slate-800">Koi topic nahi mila &ldquo;{searchQuery}&rdquo; ke liye</p>
+            <p className="text-[11px] text-slate-500">Kripya doosra keyword type karein jaise &lsquo;report&rsquo;, &lsquo;duplicate&rsquo;, ya &lsquo;dawai&rsquo;.</p>
           </div>
-          <table className="w-full text-[11px] text-left">
-            <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
-              <tr>
-                <th className="p-2">Weight Band</th>
-                <th className="p-2">Daily Tabs</th>
-                <th className="p-2">Strips (28 Days)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700 font-semibold">
-              <tr>
-                <td className="p-2 font-mono">4–7 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">1 tab HRZ + 1 tab E</td>
-                <td className="p-2">1 strip HRZ + 1 strip E</td>
-              </tr>
-              <tr className="bg-slate-50/50">
-                <td className="p-2 font-mono">8–11 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">2 tabs HRZ + 2 tabs E</td>
-                <td className="p-2">2 strips HRZ + 2 strips E</td>
-              </tr>
-              <tr>
-                <td className="p-2 font-mono">12–15 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">3 tabs HRZ + 3 tabs E</td>
-                <td className="p-2">3 strips HRZ + 3 strips E</td>
-              </tr>
-              <tr className="bg-slate-50/50">
-                <td className="p-2 font-mono">16–24 kg</td>
-                <td className="p-2 text-indigo-700 font-bold">4 tabs HRZ + 4 tabs E</td>
-                <td className="p-2">4 strips HRZ + 4 strips E</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+        ) : (
+          filteredTopics.map((topic) => {
+            const isOpen = openTopic === topic.id || searchQuery.trim().length > 0;
+            return (
+              <div
+                key={topic.id}
+                className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden transition-all"
+              >
+                {/* Accordion Trigger Header */}
+                <button
+                  type="button"
+                  onClick={() => setOpenTopic(openTopic === topic.id ? "" : topic.id)}
+                  className="w-full p-4 sm:p-5 flex items-start justify-between text-left hover:bg-slate-50/80 transition-all cursor-pointer gap-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl p-2 bg-slate-100 rounded-2xl shrink-0 mt-0.5">{topic.icon}</span>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
+                        <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${topic.badgeColor}`}>
+                          {topic.badge}
+                        </span>
+                      </div>
+                      <h4 className="text-sm font-black text-slate-900 tracking-tight leading-snug">
+                        {topic.title}
+                      </h4>
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                        {topic.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`text-slate-400 font-black text-sm p-1 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-teal-600' : ''}`}>
+                    ▼
+                  </span>
+                </button>
 
-      {/* 24-Hour ID Self-Correction Policy */}
-      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-2">
-        <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-          <span>⏱️</span>
-          <span>24-Hour ID Self-Correction Niyam</span>
-        </h3>
-        <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
-          Agar report submit karne ke baad kisi Nikshay ID me koi typo ya galti ho gayi ho, toh aapko Admin se sampark karne ki zaroorat nahi hai:
-        </p>
-        <ul className="space-y-1 text-[11px] text-slate-700">
-          <li className="flex items-start gap-1.5">
-            <span className="text-emerald-600 font-black">1.</span>
-            <span>Niche diye gaye <strong>Profile</strong> tab par click karein.</span>
-          </li>
-          <li className="flex items-start gap-1.5">
-            <span className="text-emerald-600 font-black">2.</span>
-            <span>Jis din report bhari thi, us calendar date par tap karein.</span>
-          </li>
-          <li className="flex items-start gap-1.5">
-            <span className="text-emerald-600 font-black">3.</span>
-            <span>ID ke bagal me bane pencil ✏️ icon par click karke nayi ID save karein ya ❌ se delete karein.</span>
-          </li>
-          <li className="flex items-start gap-1.5">
-            <span className="text-amber-600 font-black">⚠️</span>
-            <span>24 ghante beet jane ke baad record lock ho jata hai, jiske baad sirf State Admin hi badlav kar sakte hain.</span>
-          </li>
-        </ul>
+                {/* Collapsible Content */}
+                {isOpen && (
+                  <div className="px-4 pb-5 pt-1 border-t border-slate-100 animate-fade-in">
+                    {topic.content}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

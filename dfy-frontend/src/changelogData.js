@@ -1,16 +1,43 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.4";
+export const APP_VERSION = "2.7.5";
 export const LAST_UPDATED_DATE = "21 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.7.5",
+    date: "21 Sep 2026",
+    title: "Interactive Field Officer User Manual, Searchable Guide & Admin/Sub-Admin SOP Guide",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📚 Comprehensive FO Field Manual: Transformed Tab 5 (Guide) into an interactive 7-topic manual with collapsible accordion cards and instant search filter.",
+      "📝 Step-by-Step Reporting SOP: Clear instructions for daily field submission, WhatsApp multi-paste trick, and indicator distinctions.",
+      "🚨 Duplicate Notification & Repeat Visit Guidance: Ground explanations of Red Strict Block modal vs Amber Repeat Visit confirmation modal.",
+      "📶 Offline & Zero-Loss Sync Protocol: Complete guide on no-network submission, IndexedDB encryption, and auto-sync.",
+      "⏱️ 24-Hour Self-Correction Manual: Step-by-step instructions on fixing typos in Profile tab before 24h admin lock.",
+      "📘 Enhanced Admin & Sub-Admin SOP Guide: Added dedicated chapters on Duplicate Radar 1-Click Repair, 33-Sheet KPI Excel reports, and Super Admin vs Sub-Admin RBAC boundaries."
+    ],
+    details: [
+      {
+        tag: "FO Manual",
+        color: "teal",
+        text: "Interactive 7-topic accordion guide with instant search bar, field tips, and dosage charts in Hindi/Hinglish for effortless field reference."
+      },
+      {
+        tag: "Admin SOP",
+        color: "indigo",
+        text: "Comprehensive operating procedures covering 1-click duplicate auto-repair, statewide KPI generation, and Sub-Admin cross-district isolation."
+      }
+    ]
+  },
+  {
     version: "v2.7.4",
     date: "21 Sep 2026",
     title: "Multi-Tier Duplicate Notification Prevention, Offline IndexedDB Registry, Interactive Modals & Sub-Admin RBAC 1-Click Repair Suite",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🛡️ Strict Duplicate Notification Prevention: TB Notifications are strictly unique per patient across the entire active treatment period (90 days). Repeat notifications for previously reported IDs are completely blocked.",
       "📴 Offline Local District Registry (IndexedDB): Pre-caches 90-day district notifications locally on mobile devices for instant 0ms offline duplicate detection in remote villages with zero connectivity.",
