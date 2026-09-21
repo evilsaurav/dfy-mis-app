@@ -782,7 +782,7 @@ async def check_today_status(req: CheckStatusRequest):
 async def fetch_district_notification_registry(clean_dist: str, months: int = 3) -> Dict[str, Any]:
     """
     Fetches deduplicated district notification registry for the past N months (~90 days).
-    Caches in memory with 2-hour TTL (key: dist_notif_registry_{clean_dist}_{cur_month_str}).
+    Caches in memory with 2-hour TTL (key: dist_notif_registry_{clean_dist}_{cur_month_str}_{months}).
     Returns dict: {"status": "success", "district": clean_dist, "total_count": ..., "registry": registry, "cached_at": ...}
     """
     clean_dist = canonicalize_district(clean_dist.strip()) if clean_dist else ""
@@ -791,7 +791,7 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
 
     now = get_ist_now()
     cur_month_str = now.strftime("%Y-%m")
-    cache_key = f"dist_notif_registry_{clean_dist}_{cur_month_str}"
+    cache_key = f"dist_notif_registry_{clean_dist}_{cur_month_str}_{months}"
     cached = cache.get(cache_key)
     if cached is not None and isinstance(cached, dict) and "registry" in cached:
         return cached
@@ -917,7 +917,7 @@ async def submit_daily_report(report: DailyActivityReport):
 
         # Ingestion Defense Gate: Auto-prune duplicate notification IDs across last 90 days
         pruned_duplicates = []
-        valid_new_notifs = list(report.notification_ids or [])
+        valid_new_notifs = list(dict.fromkeys(report.notification_ids or []))
         if report.notification_ids:
             try:
                 existing_notified_set = await get_district_90day_notified_ids(
@@ -926,13 +926,13 @@ async def submit_daily_report(report: DailyActivityReport):
                     months=3
                 )
                 pruned_duplicates = [pid for pid in (report.notification_ids or []) if str(pid).strip() in existing_notified_set]
-                valid_new_notifs = [pid for pid in (report.notification_ids or []) if str(pid).strip() not in existing_notified_set]
+                valid_new_notifs = list(dict.fromkeys([pid for pid in (report.notification_ids or []) if str(pid).strip() not in existing_notified_set]))
                 if pruned_duplicates:
                     print(f"[Duplicate Pruned] {len(pruned_duplicates)} duplicate notification IDs stripped from {doc_id}")
             except Exception as dupe_err:
                 print(f"[Ingestion Defense Notice] Duplicate check notice: {dupe_err}")
                 pruned_duplicates = []
-                valid_new_notifs = list(report.notification_ids or [])
+                valid_new_notifs = list(dict.fromkeys(report.notification_ids or []))
 
         payload = report.dict(exclude_unset=True)
         payload["notification_ids"] = valid_new_notifs
