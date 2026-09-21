@@ -2678,6 +2678,14 @@ function App() {
     onConfirm: null
   });
 
+  // Current working place and officer name refs to prevent stale closure in listeners
+  const workingPlaceRef = useRef(formData.working_place);
+  const foNameRef = useRef(formData.fo_name);
+  useEffect(() => {
+    workingPlaceRef.current = formData.working_place;
+    foNameRef.current = formData.fo_name;
+  }, [formData.working_place, formData.fo_name]);
+
   // Derived Live Metric Tallies for Floating Mini-HUD
   const liveTotalIds = useMemo(() => {
     const idKeys = [
@@ -2821,7 +2829,7 @@ function App() {
   };
 
   const fetchAndStoreDistrictRegistry = useCallback(async (district) => {
-    const targetDist = district || formData.working_place;
+    const targetDist = district || workingPlaceRef.current || formData.working_place;
     if (!targetDist) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
@@ -2858,31 +2866,39 @@ function App() {
         const list = data.broadcasts || [];
         setActiveFoBroadcasts(list);
 
-        // Check if there is an unread broadcast for popup
-        try {
-          const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
-          const unread = list.find(b => !seenIds.includes(b.id));
-          if (unread && !unreadBroadcastPopup) {
-            setUnreadBroadcastPopup(unread);
+        // Check for latest unread HIGH/URGENT announcement
+        if (list.length > 0) {
+          const highPriority = list.filter(b => b.priority === 'HIGH');
+          if (highPriority.length > 0) {
+            const latest = highPriority[0];
+            try {
+              const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+              if (!seenIds.includes(latest.id)) {
+                setUnreadBroadcastPopup(latest);
+              }
+            } catch (e) {
+              setUnreadBroadcastPopup(latest);
+            }
           }
-        } catch (e) {}
+        }
       }
-    } catch (e) {
-      console.warn("Failed to fetch FO broadcasts", e);
+    } catch (err) {
+      console.warn("Failed to fetch active FO broadcasts", err);
     }
   };
 
-  const dismissBroadcastPopup = (id) => {
+  const handleDismissPopup = (broadcastId) => {
     try {
       const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
-      if (!seenIds.includes(id)) {
-        seenIds.push(id);
+      if (!seenIds.includes(broadcastId)) {
+        seenIds.push(broadcastId);
         localStorage.setItem('dfy_seen_broadcasts', JSON.stringify(seenIds));
       }
     } catch (e) {}
     setUnreadBroadcastPopup(null);
   };
 
+  // PWA Install Prompt Listener
   useEffect(() => {
     const handleBeforeInstall = (e) => {
       e.preventDefault();
@@ -2991,8 +3007,11 @@ function App() {
       await updateOfflineCount();
       if (res.syncedCount > 0) {
         showToast(`✓ All ${res.syncedCount} offline reports synced successfully!`, "success");
-        if (formData.working_place) {
-          fetchAndStoreDistrictRegistry(formData.working_place);
+        const currentDistrict = workingPlaceRef.current || formData.working_place || (typeof localStorage !== 'undefined' ? (() => {
+          try { return JSON.parse(localStorage.getItem('dfy_user_session') || '{}')?.working_place; } catch { return ''; }
+        })() : '');
+        if (currentDistrict) {
+          fetchAndStoreDistrictRegistry(currentDistrict);
         }
       }
     } catch (err) {
@@ -3007,8 +3026,17 @@ function App() {
       setIsOnline(true);
       showToast("🌐 Internet connected! Syncing offline reports...", "success");
       triggerOfflineSync();
-      if (formData.working_place) {
-        fetchAndStoreDistrictRegistry(formData.working_place);
+      const currentDistrict = workingPlaceRef.current || formData.working_place || (typeof localStorage !== 'undefined' ? (() => {
+        try { return JSON.parse(localStorage.getItem('dfy_user_session') || '{}')?.working_place; } catch { return ''; }
+      })() : '');
+      if (currentDistrict) {
+        fetchAndStoreDistrictRegistry(currentDistrict);
+        const currentFo = foNameRef.current || formData.fo_name || (typeof localStorage !== 'undefined' ? (() => {
+          try { return JSON.parse(localStorage.getItem('dfy_user_session') || '{}')?.fo_name; } catch { return ''; }
+        })() : '');
+        if (currentFo) {
+          fetchFoCascadeAlerts(currentDistrict, currentFo);
+        }
       }
     };
     const handleOffline = () => {

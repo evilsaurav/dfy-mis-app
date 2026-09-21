@@ -334,3 +334,30 @@ test('Form Ingestion Gate: Offline sync triggers pruned notification toast when 
   assert.ok(toasts[0].msg.includes('3 duplicate notifications auto-prune kiye gaye'));
   assert.strictEqual(toasts[1].type, 'success');
 });
+
+test('Form Ingestion Gate: Mid-session reconnection listener fetches registry using active workingPlaceRef', async () => {
+  // Initial state was empty string at mount time
+  const initialWorkingPlace = "";
+  const workingPlaceRef = { current: initialWorkingPlace };
+
+  let fetchedDistrict = null;
+  const mockFetchAndStoreDistrictRegistry = async (district) => {
+    fetchedDistrict = district;
+  };
+
+  // Reconnection handler simulates closure created at mount time
+  const handleOnline = async () => {
+    const currentDistrict = workingPlaceRef.current || initialWorkingPlace;
+    if (currentDistrict) {
+      await mockFetchAndStoreDistrictRegistry(currentDistrict);
+    }
+  };
+
+  // User selects/logs into Buxar mid-session (updates ref)
+  workingPlaceRef.current = 'Buxar';
+
+  // Network drops and reconnects
+  await handleOnline();
+
+  assert.strictEqual(fetchedDistrict, 'Buxar', 'Mid-session reconnect must fetch registry for the updated active district, not initial empty state');
+});
