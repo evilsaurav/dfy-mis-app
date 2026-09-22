@@ -104,3 +104,57 @@ async def test_dashboard_data_delta_response_returns_only_modified_records():
     assert res["records"][0]["fo_name"] in ["FO 2", "Fo 2"]
     assert res["records"][0]["notifications"] == 2
 
+@pytest.mark.asyncio
+async def test_subadmin_cold_query_scoped_to_district():
+    month_prefix = "2026-09"
+    # Ensure cache is completely empty
+    main.cache.delete(f"shared_raw_month_{month_prefix}")
+    main.cache.delete_prefix(f"shared_raw_month_{month_prefix}_")
+
+    # Mock db to verify that query filter is called with working_place == "Sitamarhi"
+    mock_coll = MagicMock()
+    mock_query = MagicMock()
+    mock_query.where.return_value = mock_query
+    
+    fake_doc = MagicMock()
+    fake_doc.id = "sitamarhi_fo1_2026-09-01"
+    fake_doc.to_dict.return_value = {
+        "id": "sitamarhi_fo1_2026-09-01",
+        "working_place": "Sitamarhi",
+        "fo_name": "Sitamarhi FO",
+        "date_of_reporting": "2026-09-01",
+        "notification_ids": ["999"]
+    }
+    mock_query.stream.return_value = [fake_doc]
+    mock_coll.where.return_value = mock_query
+
+    original_db = main.db
+    try:
+        mock_db = MagicMock()
+        mock_db.collection.return_value = mock_coll
+        main.db = mock_db
+
+        req = main.DashboardRequest(
+            month_prefix=month_prefix,
+            districts="Sitamarhi",
+            force_refresh=True
+        )
+        subadmin_ctx = {
+            "role": "SUB_ADMIN",
+            "allowed_districts": ["Sitamarhi"],
+            "user_id": "sub_sitamarhi"
+        }
+
+        res = await main.get_dashboard_data(req, admin=subadmin_ctx)
+        assert res["status"] == "success"
+        assert len(res["records"]) == 1
+        assert res["records"][0]["working_place"] == "Sitamarhi"
+
+        # Verify that mock_coll.where was invoked with working_place
+        where_calls = [call[0] for call in mock_coll.where.call_args_list] + [call[0] for call in mock_query.where.call_args_list]
+        has_district_filter = any(len(c) >= 3 and c[0] in ["working_place", "district"] and c[2] == "Sitamarhi" for c in where_calls)
+        assert has_district_filter is True
+    finally:
+        main.db = original_db
+
+

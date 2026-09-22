@@ -617,27 +617,62 @@ def get_last_mutation_str() -> str:
     dt = datetime.fromtimestamp(LAST_REPORTS_MODIFIED_TS, timezone(timedelta(hours=5, minutes=30)))
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
-async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> list:
+async def get_raw_monthly_reports(
+    month_prefix: str, 
+    force: bool = False, 
+    district_filter: Optional[Set[str]] = None
+) -> list:
     """
     Shared in-memory cache for monthly daily_field_reports.
     Avoids redundant 2,000-read collection streams when /admin/dashboard-data,
     /admin/duplicate-audit, and pacing queries run concurrently.
+    When district_filter is provided (Sub-Admin), queries only those districts from Firestore.
     """
-    cache_key = f"shared_raw_month_{month_prefix}"
+    clean_dists = set()
+    if district_filter:
+        clean_dists = {canonicalize_district(d) for d in district_filter if d and str(d).strip().lower() != "all"}
+
+    # 1. Check if statewide full cache is in memory
+    full_cache_key = f"shared_raw_month_{month_prefix}"
     if not force:
-        cached = cache.get(cache_key)
-        if cached is not None and isinstance(cached, list):
-            return cached
+        cached_full = cache.get(full_cache_key)
+        if cached_full is not None and isinstance(cached_full, list):
+            if clean_dists:
+                return [d for d in cached_full if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
+            return cached_full
+
+    # 2. Check if district-scoped cache is in memory
+    dist_cache_key = full_cache_key
+    if clean_dists:
+        dist_cache_key = f"{full_cache_key}_{'_'.join(sorted(clean_dists)).replace(' ', '_').lower()}"
+        if not force:
+            cached_dist = cache.get(dist_cache_key)
+            if cached_dist is not None and isinstance(cached_dist, list):
+                return cached_dist
 
     start_date = f"{month_prefix}-01"
     end_date = f"{month_prefix}-31"
 
-    docs = await asyncio.to_thread(lambda: list(
-        db.collection("daily_field_reports")
-        .where("date_of_reporting", ">=", start_date)
-        .where("date_of_reporting", "<=", end_date)
-        .stream()
-    ))
+    # 3. Stream from Firestore (scoped by district if clean_dists specified)
+    docs = []
+    if clean_dists:
+        for c_dist in clean_dists:
+            sub_docs = await asyncio.to_thread(lambda d_name=c_dist: list(
+                db.collection("daily_field_reports")
+                .where("working_place", "==", d_name)
+                .where("date_of_reporting", ">=", start_date)
+                .where("date_of_reporting", "<=", end_date)
+                .stream()
+            ))
+            docs.extend(sub_docs)
+    else:
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()
+        ))
+
     raw_list = []
     for d in docs:
         item = d.to_dict() if hasattr(d, "to_dict") else dict(d)
@@ -652,7 +687,8 @@ async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> lis
         if "doc_id" not in item:
             item["doc_id"] = did
         raw_list.append(item)
-    cache.set(cache_key, raw_list, ttl=3600) # 1-hour shared cache (invalidated on mutation)
+
+    cache.set(dist_cache_key, raw_list, ttl=3600) # 1-hour shared cache
     return raw_list
 
 def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) -> Optional[dict]:
@@ -776,7 +812,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 }
 
             # Mutations occurred since timestamp: Try serving DELTA from in-memory raw reports
-            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False)
+            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False, district_filter=allowed_dist_set)
             if raw_docs:
                 delta_records = []
                 for d in raw_docs:
@@ -819,7 +855,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         # Load from shared monthly reports cache
         records = []
         try:
-            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh))
+            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh), district_filter=allowed_dist_set)
             for data in raw_docs:
                 rec = format_dashboard_record(data, allowed_dist_set)
                 if rec:
