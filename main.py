@@ -248,6 +248,7 @@ def create_access_token(user_data: dict) -> str:
     payload = {
         "sub": str(user_data.get("user_id") or user_data.get("username", "admin")),
         "username": user_data.get("username", "admin"),
+        "name": user_data.get("name") or user_data.get("username", "admin"),
         "role": user_data.get("role", "SUB_ADMIN"),
         "districts": user_data.get("allowed_districts", ["All"]),
         "allowed_districts": user_data.get("allowed_districts", ["All"]),
@@ -7406,5 +7407,136 @@ async def repair_duplicate_notifications(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# --- Backend Leave Management Endpoints (/admin/attendance/mark-leave, unmark-leave) ---
+# =========================================================================
+
+class MarkLeaveReq(BaseModel):
+    district: str
+    fo_name: str
+    date: str  # YYYY-MM-DD
+    status: str = "leave"  # "leave" | "absent" | "weekly_off"
+    reason_type: str = "Casual"  # "Medical" | "Casual" | "Official Work" | "Personal" | "Uninformed"
+    remark: Optional[str] = ""
+
+class UnmarkLeaveReq(BaseModel):
+    district: str
+    fo_name: str
+    date: str  # YYYY-MM-DD
+
+@app.post("/admin/attendance/mark-leave")
+async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)):
+    try:
+        clean_dist = canonicalize_district(req.district.strip()) if req.district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+        if not clean_fo:
+            raise HTTPException(status_code=400, detail="Valid Field Officer name is required.")
+        clean_date = req.date.strip()
+        if not clean_date:
+            raise HTTPException(status_code=400, detail="Valid date is required.")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+            if "All" not in allowed and "all" not in allowed_c and clean_dist.lower() not in allowed_c and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
+
+        doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
+
+        actor_name = admin.get("name") or admin.get("username") or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username") or "admin"
+        actor_role = admin.get("role", "SUB_ADMIN")
+        marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+
+        leave_data = {
+            "date": clean_date,
+            "district": clean_dist,
+            "fo_name": req.fo_name.strip(),
+            "status": req.status,
+            "reason_type": req.reason_type,
+            "remark": req.remark or "",
+            "marked_by_name": actor_name,
+            "marked_by_id": actor_id,
+            "marked_by_role": actor_role,
+            "marked_at": marked_at
+        }
+
+        await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
+
+        cache.delete_prefix(f"attendance_{clean_date}")
+
+        await log_admin_activity(
+            action_type="LEAVE_MARKED",
+            details=f"Marked {req.status} for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.reason_type}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            target_officer=req.fo_name.strip(),
+            diff={
+                "date": clean_date,
+                "status": req.status,
+                "reason_type": req.reason_type,
+                "remark": req.remark or ""
+            }
+        )
+
+        return {"success": True, "message": "Leave recorded successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/attendance/unmark-leave")
+async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_admin)):
+    try:
+        clean_dist = canonicalize_district(req.district.strip()) if req.district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+        if not clean_fo:
+            raise HTTPException(status_code=400, detail="Valid Field Officer name is required.")
+        clean_date = req.date.strip()
+        if not clean_date:
+            raise HTTPException(status_code=400, detail="Valid date is required.")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+            if "All" not in allowed and "all" not in allowed_c and clean_dist.lower() not in allowed_c and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
+
+        doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
+        await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).delete())
+
+        cache.delete_prefix(f"attendance_{clean_date}")
+
+        actor_name = admin.get("name") or admin.get("username") or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username") or "admin"
+        actor_role = admin.get("role", "SUB_ADMIN")
+
+        await log_admin_activity(
+            action_type="LEAVE_UNMARKED",
+            details=f"Removed leave for {req.fo_name.strip()} ({clean_dist}) on {clean_date}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            target_officer=req.fo_name.strip(),
+            diff={"date": clean_date}
+        )
+
+        return {"success": True, "message": "Leave removed successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
