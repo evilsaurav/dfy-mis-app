@@ -33,71 +33,15 @@
 - Produces: `upsert_in_memory_report(month_prefix: str, report_data: dict, action: str = "submit")`
 - Modifies: `record_report_mutation(action: str, doc_id: str, district: str, date: str, old_district: str, report_data: Optional[dict] = None)`
 
-- [ ] **Step 1: Write failing test in `tests/test_incremental_delta_sync.py`**
-
-```python
-import pytest
-from unittest.mock import MagicMock
-import main
-
-def test_upsert_in_memory_report_appends_and_updates():
-    month_prefix = "2026-09"
-    cache_key = f"shared_raw_month_{month_prefix}"
-    main.cache.delete(cache_key)
-
-    # Initial list in cache
-    initial_reports = [
-        {"id": "gaya_fo1_2026-09-01", "fo_name": "FO 1", "working_place": "Gaya", "notifications": [101]},
-        {"id": "buxar_fo2_2026-09-01", "fo_name": "FO 2", "working_place": "Buxar", "notifications": [102]},
-    ]
-    main.cache.set(cache_key, list(initial_reports), ttl=3600)
-
-    # 1. Update existing report
-    updated_report = {"id": "gaya_fo1_2026-09-01", "fo_name": "FO 1", "working_place": "Gaya", "notifications": [101, 103], "last_edited_at": "2026-09-22 22:30:00"}
-    main.upsert_in_memory_report(month_prefix, updated_report, action="submit")
-
-    cached_after_update = main.cache.get(cache_key)
-    assert len(cached_after_update) == 2
-    assert cached_after_update[0]["notifications"] == [101, 103]
-
-    # 2. Append new report
-    new_report = {"id": "patna_fo3_2026-09-02", "fo_name": "FO 3", "working_place": "Patna", "notifications": [104], "submitted_at": "2026-09-22 22:31:00"}
-    main.upsert_in_memory_report(month_prefix, new_report, action="submit")
-
-    cached_after_append = main.cache.get(cache_key)
-    assert len(cached_after_append) == 3
-    assert cached_after_append[2]["id"] == "patna_fo3_2026-09-02"
-
-    # 3. Delete report
-    main.upsert_in_memory_report(month_prefix, {"id": "buxar_fo2_2026-09-01"}, action="delete")
-    cached_after_delete = main.cache.get(cache_key)
-    assert len(cached_after_delete) == 2
-    assert all(r["id"] != "buxar_fo2_2026-09-01" for r in cached_after_delete)
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `pytest tests/test_incremental_delta_sync.py -k "test_upsert_in_memory_report_appends_and_updates" -v`  
-Expected: FAIL (`AttributeError: module 'main' has no attribute 'upsert_in_memory_report'`)
-
-- [ ] **Step 3: Implement `upsert_in_memory_report` and modify `record_report_mutation` in `main.py`**
-
-In `main.py`:
-1. Add `upsert_in_memory_report(month_prefix: str, report_data: dict, action: str = "submit")`.
-2. In `record_report_mutation`, remove:
-   ```python
-   cache.delete_prefix(f"shared_raw_month_{month_prefix}")
-   cache.delete_prefix(f"dash_{month_prefix}_")
-   ```
-   Instead, if `report_data` is provided, invoke `upsert_in_memory_report(month_prefix, report_data, action=action)`.
-3. In `/submit-daily-report`, `/admin/feed-officer-data`, and `/admin/reports/edit-day`, pass `report_data` into `record_report_mutation`.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `pytest tests/test_incremental_delta_sync.py -k "test_upsert_in_memory_report_appends_and_updates" -v`  
-Expected: PASS
-
-- [ ] **Step 5: Verify Python compilation & commit**
+- [x] **Step 1: Write failing test in `tests/test_incremental_delta_sync.py`**
+...
+- [x] **Step 2: Run test to verify it fails**
+...
+- [x] **Step 3: Implement `upsert_in_memory_report` and modify `record_report_mutation` in `main.py`**
+...
+- [x] **Step 4: Run test to verify it passes**
+...
+- [x] **Step 5: Verify Python compilation & commit**
 
 ```bash
 python -m py_compile main.py
@@ -117,7 +61,7 @@ git commit -m "feat(backend): implement in-memory report upsert and anti-wipe mu
 - Consumes: `LAST_REPORTS_MODIFIED_TS`, `DELETED_REPORTS_TOMBSTONES`, `get_raw_monthly_reports`
 - Produces: Response dictionary with `mode: "NO_CHANGE" | "DELTA" | "FULL"`, `records: list`, `deleted_ids: list`, `synced_at: str`
 
-- [ ] **Step 1: Write failing test for delta responses in `tests/test_incremental_delta_sync.py`**
+- [x] **Step 1: Write failing test for delta responses in `tests/test_incremental_delta_sync.py`**
 
 ```python
 import pytest
@@ -149,12 +93,12 @@ def test_dashboard_data_delta_response(monkeypatch):
     headers = {"Authorization": "Bearer mock_state_admin_token"} # Use mock auth helper
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_incremental_delta_sync.py -k "test_dashboard_data_delta_response" -v`  
 Expected: FAIL (`mode` is `FULL` instead of `DELTA` or returns full array)
 
-- [ ] **Step 3: Implement delta filtering in `get_dashboard_data` (`main.py`)**
+- [x] **Step 3: Implement delta filtering in `get_dashboard_data` (`main.py`)**
 
 In `get_dashboard_data`:
 1. Check if `req.since` is provided, `not req.force_refresh`, and in-memory `shared_raw_month_{month_prefix}` exists.
@@ -165,12 +109,12 @@ In `get_dashboard_data`:
    Format indicators and return `mode: "DELTA"`, `records: formatted_delta`, `deleted_ids: recent_deletions`.
 4. If no `req.since` or cold cache or `req.force_refresh`: Return `mode: "FULL"`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_incremental_delta_sync.py -k "test_dashboard_data_delta_response" -v`  
 Expected: PASS
 
-- [ ] **Step 5: Verify Python compilation & commit**
+- [x] **Step 5: Verify Python compilation & commit**
 
 ```bash
 python -m py_compile main.py
@@ -190,7 +134,7 @@ git commit -m "feat(backend): implement incremental delta response mode in get_d
 - Consumes: `admin.get("allowed_districts")`, `canonicalize_district`
 - Modifies: `get_raw_monthly_reports` to accept optional `districts: Optional[Set[str]] = None`
 
-- [ ] **Step 1: Write failing test in `tests/test_incremental_delta_sync.py`**
+- [x] **Step 1: Write failing test in `tests/test_incremental_delta_sync.py`**
 
 ```python
 def test_subadmin_cold_query_scoped_to_district(monkeypatch):
@@ -198,24 +142,24 @@ def test_subadmin_cold_query_scoped_to_district(monkeypatch):
     # it only fetches documents belonging to that district rather than the entire collection.
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest tests/test_incremental_delta_sync.py -k "test_subadmin_cold_query_scoped_to_district" -v`  
 Expected: FAIL
 
-- [ ] **Step 3: Implement district-scoped query in `get_raw_monthly_reports`**
+- [x] **Step 3: Implement district-scoped query in `get_raw_monthly_reports`**
 
 In `get_raw_monthly_reports`:
 If `districts` is specified and does not contain `"all"` / `"All"`:
 - Partition queries by canonical district or query by date range and isolate by district key.
 - Save to a district-partitioned cache key `f"shared_raw_month_{month_prefix}_{district_tag}"` so sub-admins don't overwrite the statewide cache.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest tests/test_incremental_delta_sync.py -k "test_subadmin_cold_query_scoped_to_district" -v`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 python -m py_compile main.py
@@ -235,7 +179,7 @@ git commit -m "feat(backend): partition sub-admin cold queries by district to el
 - Consumes: `data.mode`, `data.records`, `data.deleted_ids`, `data.synced_at`
 - Produces: Seamlessly updated `rawRecords` state in React without full table unmounting or blank screen flickers.
 
-- [ ] **Step 1: Write failing Node test in `tests/test_delta_merge.mjs`**
+- [x] **Step 1: Write failing Node test in `tests/test_delta_merge.mjs`**
 
 ```javascript
 import test from 'node:test';
@@ -278,12 +222,12 @@ test('mergeDelta inserts new records into existing array without duplicates', ()
 });
 ```
 
-- [ ] **Step 2: Run test to verify it passes initial logic**
+- [x] **Step 2: Run test to verify it passes initial logic**
 
 Run: `node tests/test_delta_merge.mjs`  
 Expected: PASS
 
-- [ ] **Step 3: Implement Map-Based Delta-Merge in `AdminDashboard.jsx` (`fetchData`)**
+- [x] **Step 3: Implement Map-Based Delta-Merge in `AdminDashboard.jsx` (`fetchData`)**
 
 Update `fetchData` in `AdminDashboard.jsx`:
 1. When `data.mode === 'NO_CHANGE'`, set status `UP_TO_DATE` and do not re-render records.
@@ -291,7 +235,7 @@ Update `fetchData` in `AdminDashboard.jsx`:
 3. Save updated records to `localStorage`.
 4. Update `lastSyncedTime`.
 
-- [ ] **Step 4: Verify frontend lint and build**
+- [x] **Step 4: Verify frontend lint and build**
 
 Run:
 ```bash
@@ -300,7 +244,7 @@ npm --prefix dfy-frontend run build
 ```
 Expected: 0 errors, build code 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add dfy-frontend/src/AdminDashboard.jsx tests/test_delta_merge.mjs
@@ -319,11 +263,11 @@ git commit -m "feat(frontend): implement Map-based incremental delta merge in Ad
 - Consumes: `fetchData`, `lastSyncedTime`, `isAuthenticated`
 - Produces: 45s silent delta interval, window onfocus listener, smart refresh button.
 
-- [ ] **Step 1: Write test verifying smart refresh behavior**
+- [x] **Step 1: Write test verifying smart refresh behavior**
 
 Verify that non-forced refresh does not purge localStorage or pass `force_refresh: true`.
 
-- [ ] **Step 2: Implement 45s silent polling and window focus listener in `AdminDashboard.jsx`**
+- [x] **Step 2: Implement 45s silent polling and window focus listener in `AdminDashboard.jsx`**
 
 1. In `AdminDashboard.jsx`, add `useEffect` interval for 45 seconds when `isAuthenticated`:
    ```javascript
@@ -340,7 +284,7 @@ Verify that non-forced refresh does not purge localStorage or pass `force_refres
    - Single Click: calls `fetchData(false)` + `fetchAttendance(false)`. Targets and directory are preserved from memory.
    - Shift + Click: calls `fetchData(true)` + full reset for intentional diagnostic bypass.
 
-- [ ] **Step 3: Verify frontend lint and build**
+- [x] **Step 3: Verify frontend lint and build**
 
 Run:
 ```bash
@@ -349,7 +293,7 @@ npm --prefix dfy-frontend run build
 ```
 Expected: 0 errors, build code 0.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add dfy-frontend/src/AdminDashboard.jsx tests/test_delta_merge.mjs
@@ -363,17 +307,17 @@ git commit -m "feat(frontend): add 45s silent auto-sync and optimize Refresh but
 **Files:**
 - Audit: All modified backend & frontend files
 
-- [ ] **Step 1: Run complete backend automated test suite**
+- [x] **Step 1: Run complete backend automated test suite**
 
 Run: `pytest tests/test_incremental_delta_sync.py tests/test_attendance_leaves_and_lifecycle.py tests/test_ingestion_defense.py -v`  
 Expected: All tests pass.
 
-- [ ] **Step 2: Run complete frontend node test suites**
+- [x] **Step 2: Run complete frontend node test suites**
 
 Run: `node tests/test_delta_merge.mjs; node tests/test_form_ingestion_gate.mjs; node tests/test_duplicate_radar_repair.mjs; node tests/test_offline_queue.mjs`  
 Expected: All tests pass.
 
-- [ ] **Step 3: Run Python compilation and Frontend production build**
+- [x] **Step 3: Run Python compilation and Frontend production build**
 
 Run:
 ```bash
@@ -383,11 +327,11 @@ npm --prefix dfy-frontend run build
 ```
 Expected: All exit with code 0, 0 lint errors.
 
-- [ ] **Step 4: Inspect Git Diff Audit**
+- [x] **Step 4: Inspect Git Diff Audit**
 
 Run: `git diff HEAD~5`  
 Expected: Only intended delta sync and read optimization changes present.
 
-- [ ] **Step 5: Present results to User for Approval Gate before Push**
+- [x] **Step 5: Present results to User for Approval Gate before Push**
 
 Request explicit user approval per GEMINI.md Rule 5.
