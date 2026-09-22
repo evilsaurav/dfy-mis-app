@@ -662,5 +662,16 @@ async def test_today_attendance_cutoff_and_leaves():
             assert "Suresh Singh" not in fut_names
             assert "Ramesh Kumar" in fut_names
 
+            # 6. Test Sub-Admin RBAC on /admin/today-attendance
+            subadmin_jamui_token = make_admin_token(role="SUB_ADMIN", allowed_districts=["Jamui"])
+            sub_headers = {"Authorization": f"Bearer {subadmin_jamui_token}"}
+            # Querying allowed district (Jamui) succeeds
+            res_sub_ok = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Jamui", headers=sub_headers)
+            assert res_sub_ok.status_code == 200
+            # Querying disallowed district (Gaya) returns 403
+            res_sub_bad = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Gaya", headers=sub_headers)
+            assert res_sub_bad.status_code == 403
+            assert "Permission denied" in res_sub_bad.json().get("detail", "")
+
 
 

@@ -2472,7 +2472,8 @@ async def get_today_attendance(
                 else:
                     allowed_dist_set = subadmin_allowed
 
-        cache_key = f"attendance_{target_date}_{districts or 'all'}"
+        effective_dist = ",".join(sorted(allowed_dist_set)) if allowed_dist_set else (districts or 'all')
+        cache_key = f"attendance_{target_date}_{effective_dist}"
         if force_refresh:
             cache.delete(cache_key)
         else:
@@ -2503,7 +2504,7 @@ async def get_today_attendance(
                     continue
                 
                 is_active = d.get("is_active") is not False and d.get("status") != "inactive"
-                inactive_since = (d.get("inactive_since") or "").strip()
+                inactive_since = (d.get("inactive_since") or "").strip()[:10]
                 
                 is_included = False
                 if is_active:
