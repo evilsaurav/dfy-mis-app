@@ -696,10 +696,42 @@ const MyProfileDashboard = ({
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  const targetVal = stats ? (Number(stats.target) || 0) : 0;
-  const breakdown = stats ? (stats.breakdown || {}) : {};
-  const notifAchieved = Number(breakdown.notification) || 0;
+  const workingDaysInfo = stats?.working_days_info;
+  const targetVal = Number(stats?.target) || 50;
+  const notifAchieved = Number(stats?.breakdown?.notification) || 0;
   const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
+  const remainingTarget = Math.max(0, targetVal - notifAchieved);
+
+  const totalWorkingDays = workingDaysInfo?.total_working_days || 24;
+  const elapsedWorkingDays = workingDaysInfo?.elapsed_working_days || 1;
+  const remainingWorkingDays = workingDaysInfo?.remaining_working_days || 0;
+  const declaredHolidays = workingDaysInfo?.declared_holidays || 1;
+
+  const requiredRunRate = workingDaysInfo?.required_run_rate ?? (remainingWorkingDays > 0 ? Number((remainingTarget / remainingWorkingDays).toFixed(1)) : remainingTarget);
+  const currentRunRate = workingDaysInfo?.current_run_rate ?? (elapsedWorkingDays > 0 ? Number((notifAchieved / elapsedWorkingDays).toFixed(1)) : 0);
+  const expectedToDate = workingDaysInfo?.expected_to_date ?? Math.round((targetVal * elapsedWorkingDays) / Math.max(1, totalWorkingDays));
+  const paceDiff = workingDaysInfo?.pace_diff ?? (notifAchieved - expectedToDate);
+  const expectedPercent = targetVal > 0 ? Math.min(100, Math.round((expectedToDate / targetVal) * 100)) : 0;
+
+  const isTargetAchieved = notifAchieved >= targetVal && targetVal > 0;
+  const numReqRunRate = Number(requiredRunRate) || 0;
+
+  const coachingMessage = useMemo(() => {
+    if (isTargetAchieved) {
+      return "Zabardast! Aapne is mahine ka target poora kar liya hai. Ab har nayi notification aapke record ko aur uncha karegi. Keep it up!";
+    }
+    if (paceDiff > 0) {
+      return `Bahut khoob! Aap expected pace se ${paceDiff} notification${paceDiff > 1 ? 's' : ''} aage chal rahe hain. Target cross karne ke liye roz ${currentRunRate}/day ki speed banaye rakhein.`;
+    }
+    if (paceDiff === 0) {
+      return `Aap bilkul sahi schedule par hain. Mahine ke ant tak 100% target poora karne ke liye baaki ${remainingWorkingDays} dino mein roz ${requiredRunRate} notifications karte rahein.`;
+    }
+    // Behind pace
+    if (remainingWorkingDays > 0) {
+      return `Aap expected pace se ${Math.abs(paceDiff)} notification${Math.abs(paceDiff) > 1 ? 's' : ''} peeche hain. Baki bache ${remainingWorkingDays} working days mein target complete karne ke liye roz kam se kam ${requiredRunRate} notifications darj karein.`;
+    }
+    return "Mahine ka aakhri din hai! Bacha hua target poora karne ke liye aaj hi zaroori notifications report karein.";
+  }, [isTargetAchieved, paceDiff, currentRunRate, remainingWorkingDays, requiredRunRate]);
 
   const last7Days = useMemo(() => {
     const list = [];
@@ -801,47 +833,193 @@ const MyProfileDashboard = ({
               </div>
             )}
             
-            <div className="mt-8 flex justify-center items-center">
-              <div className="relative w-40 h-40">
-                <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                  <path className="text-slate-100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-                  <path className="text-indigo-500 transition-all duration-1000 ease-out" strokeDasharray={`${percent}, 100`} d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" />
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-3xl font-black text-slate-800">{percent}%</span>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">Target</span>
+            {/* Modern Glassmorphic Field Command Card */}
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-indigo-500/20 relative overflow-hidden mt-6 text-left">
+              {/* Subtle ambient backdrop glows */}
+              <div className="absolute -top-16 -right-16 w-36 h-36 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -bottom-16 -left-16 w-36 h-36 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Header Bar */}
+              <div className="flex items-center justify-between gap-2 mb-4 relative z-10">
+                {/* Status Pill with live pulse dot */}
+                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-black border backdrop-blur-md shadow-sm ${
+                  isTargetAchieved
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-950/40'
+                    : paceDiff > 0
+                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 shadow-cyan-950/40'
+                      : paceDiff === 0
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-950/40'
+                        : 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-amber-950/40'
+                }`}>
+                  <span className="relative flex h-2 w-2">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                      isTargetAchieved
+                        ? 'bg-emerald-400'
+                        : paceDiff > 0
+                          ? 'bg-cyan-400'
+                          : paceDiff === 0
+                            ? 'bg-emerald-400'
+                            : 'bg-amber-400'
+                    }`}></span>
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
+                      isTargetAchieved
+                        ? 'bg-emerald-400'
+                        : paceDiff > 0
+                          ? 'bg-cyan-400'
+                          : paceDiff === 0
+                            ? 'bg-emerald-400'
+                            : 'bg-amber-400'
+                    }`}></span>
+                  </span>
+                  <span>
+                    {isTargetAchieved
+                      ? '🏆 Target Completed!'
+                      : paceDiff > 0
+                        ? `🚀 Ahead of Pace (+${paceDiff})`
+                        : paceDiff === 0
+                          ? '🟢 On Track'
+                          : `⚠️ Needs Acceleration (${Math.abs(paceDiff)} behind)`}
+                  </span>
+                </div>
+
+                {/* Current Velocity Tag */}
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/60 text-slate-200 text-xs font-bold backdrop-blur-sm shadow-inner">
+                  <span className="text-indigo-400">⚡</span>
+                  <span className="text-[11px] sm:text-xs">Velocity: <span className="font-black text-white">{currentRunRate}</span>/day</span>
                 </div>
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4 mt-8 pt-6 border-t border-slate-100">
-               <div>
-                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Target</p>
-                 <p className="text-xl font-black text-slate-700">{targetVal}</p>
-               </div>
-               <div>
-                 <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-1">Notification Achieved</p>
-                 <p className="text-xl font-black text-indigo-600">{notifAchieved}</p>
-               </div>
-            </div>
 
-            {/* Target Status Indicator */}
-            <div className="mt-4 pt-4 border-t border-slate-100">
-              {notifAchieved >= targetVal && targetVal > 0 ? (
-                <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-3 flex items-center justify-center gap-2 text-emerald-700 text-xs font-bold">
-                  <span>🎉</span>
-                  <span>Target Completed! Mubarak ho bhai!</span>
-                </div>
-              ) : (
-                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 flex items-center justify-between text-xs font-bold text-amber-800">
-                  <span className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                    Pending Target:
+              {/* Dual-Track Progress Section */}
+              <div className="my-5 relative z-10 pt-5 pb-1">
+                {/* Expected Benchmark Tooltip above track */}
+                <div 
+                  className="absolute top-0 -translate-x-1/2 flex flex-col items-center pointer-events-none transition-all duration-500"
+                  style={{ left: `${Math.min(94, Math.max(6, expectedPercent))}%` }}
+                >
+                  <span className="px-1.5 py-0.5 bg-slate-800/95 border border-amber-400/50 text-amber-300 rounded text-[9px] font-extrabold shadow-md whitespace-nowrap">
+                    Today's Pace: {expectedToDate}
                   </span>
-                  <span className="bg-white px-2.5 py-1 rounded-xl text-amber-700 shadow-sm border border-amber-200">
-                    {Math.max(0, targetVal - notifAchieved)} Notifications baaki hain
+                  <span className="w-0.5 h-1.5 bg-amber-400/90"></span>
+                </div>
+
+                {/* Outer Track */}
+                <div className="bg-slate-800/80 rounded-full h-4 relative overflow-visible border border-slate-700/50">
+                  {/* Fill Bar */}
+                  <div 
+                    className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-700 shadow-sm"
+                    style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
+                  />
+
+                  {/* Benchmark Pin Indicator */}
+                  <div 
+                    className="absolute -top-1 bottom-0 w-1.5 bg-amber-400 rounded-full shadow-[0_0_8px_rgba(251,191,36,0.9)] -translate-x-1/2 z-10 h-6 -mt-0.5 border border-slate-900"
+                    style={{ left: `${Math.min(100, Math.max(0, expectedPercent))}%` }}
+                    title={`Today's Expected Benchmark: ${expectedToDate} notifications`}
+                  />
+                </div>
+
+                {/* Progress Scale Labels */}
+                <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 mt-2 px-0.5">
+                  <span>0%</span>
+                  <span className="text-slate-300 font-extrabold">{percent}% Achieved</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              {/* 4-Metric Grid */}
+              <div className="grid grid-cols-2 gap-2.5 sm:gap-3 my-4 relative z-10">
+                {/* Metric 1: Target */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-3 sm:p-3.5 flex flex-col backdrop-blur-sm">
+                  <span className="text-[10px] sm:text-[11px] font-black text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                    <span>🎯</span> Target
+                  </span>
+                  <span className="text-xl sm:text-2xl font-black text-white mt-1.5">{targetVal}</span>
+                  <span className="text-[10px] text-slate-400 font-semibold mt-0.5">Monthly Goal</span>
+                </div>
+
+                {/* Metric 2: Achieved */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-3 sm:p-3.5 flex flex-col backdrop-blur-sm">
+                  <span className="text-[10px] sm:text-[11px] font-black text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                    <span>✅</span> Achieved
+                  </span>
+                  <div className="flex items-baseline gap-1.5 mt-1.5">
+                    <span className="text-xl sm:text-2xl font-black text-emerald-400">{notifAchieved}</span>
+                    <span className="text-xs font-bold text-slate-400">({percent}%)</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    {remainingTarget > 0 ? `${remainingTarget} pending` : 'Target crushed!'}
                   </span>
                 </div>
-              )}
+
+                {/* Metric 3: Days Left */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-3 sm:p-3.5 flex flex-col backdrop-blur-sm">
+                  <span className="text-[10px] sm:text-[11px] font-black text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                    <span>📅</span> Days Left
+                  </span>
+                  <div className="flex items-baseline gap-1.5 mt-1.5">
+                    <span className="text-xl sm:text-2xl font-black text-white">{remainingWorkingDays}</span>
+                    <span className="text-xs font-bold text-slate-300">Working Days</span>
+                  </div>
+                  <span className="text-[9px] sm:text-[10px] text-indigo-300/80 font-medium mt-0.5 leading-tight">
+                    Sundays & {declaredHolidays} {declaredHolidays === 1 ? 'holiday' : 'holidays'} off
+                  </span>
+                </div>
+
+                {/* Metric 4: Required Run-Rate */}
+                <div className="bg-slate-800/60 border border-slate-700/50 rounded-2xl p-3 sm:p-3.5 flex flex-col backdrop-blur-sm">
+                  <span className="text-[10px] sm:text-[11px] font-black text-slate-400 flex items-center gap-1.5 uppercase tracking-wider">
+                    <span>⚡</span> Req. Run-Rate
+                  </span>
+                  <div className="flex items-baseline gap-1 mt-1.5">
+                    <span className={`text-xl sm:text-2xl font-black ${
+                      isTargetAchieved || numReqRunRate <= 2
+                        ? 'text-emerald-400'
+                        : numReqRunRate <= 4
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                    }`}>
+                      {requiredRunRate}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400">/ Day</span>
+                  </div>
+                  <span className={`text-[10px] font-bold mt-0.5 ${
+                    isTargetAchieved || numReqRunRate <= 2
+                      ? 'text-emerald-300'
+                      : numReqRunRate <= 4
+                        ? 'text-amber-300'
+                        : 'text-rose-300'
+                  }`}>
+                    {isTargetAchieved
+                      ? 'Goal Achieved! 🎉'
+                      : numReqRunRate <= 2
+                        ? 'Comfortable Pace'
+                        : numReqRunRate <= 4
+                          ? 'Moderate Effort'
+                          : 'Sprint Required'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Contextual Hindi Coaching Box */}
+              <div className="bg-indigo-950/60 border border-indigo-500/30 rounded-2xl p-3.5 sm:p-4 text-xs font-medium leading-relaxed text-indigo-100 flex items-start gap-2.5 backdrop-blur-sm relative z-10 mt-3">
+                <span className="text-base sm:text-lg flex-shrink-0 mt-0.5">
+                  {isTargetAchieved ? '🏆' : paceDiff > 0 ? '🚀' : paceDiff === 0 ? '🎯' : '💡'}
+                </span>
+                <div className="flex-1 text-left">
+                  <p className="font-bold text-white text-[11px] sm:text-xs mb-0.5">
+                    {isTargetAchieved 
+                      ? 'Target Mubarak!' 
+                      : paceDiff > 0 
+                        ? 'Shandar Raftar!' 
+                        : paceDiff === 0 
+                          ? 'Sahi Disha Mein!' 
+                          : 'Coaching Tip & Target Guidance'}
+                  </p>
+                  <p className="text-indigo-200/90 text-[11px] sm:text-xs leading-normal">
+                    {coachingMessage}
+                  </p>
+                </div>
+              </div>
             </div>
           </>
         )}
