@@ -1,16 +1,54 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.7.6";
-export const LAST_UPDATED_DATE = "21 Sep 2026";
+export const APP_VERSION = "2.8.0";
+export const LAST_UPDATED_DATE = "22 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.0",
+    date: "22 Sep 2026",
+    title: "Attendance Radar Leaves, Staff Active/Inactive Lifecycle, FO Target Pacing Command Card & Declared Holidays Engine",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🌴 Attendance Radar 1-Click Leave Management: Added instant leave marking and restoration modal in Attendance Radar. Staff on leave are moved to a dedicated 'On Leave (N)' tab with purple badging and custom absence remarks.",
+      "📱 WhatsApp Summary Leave Exclusion: Daily Attendance WhatsApp digest generator now excludes staff marked on leave from the 'Missing' section and categorizes them under a dedicated '🌴 Chhuti Par (On Leave)' block.",
+      "👥 Staff Active/Inactive Lifecycle & Cutoff Isolation: Administrators can deactivate inactive/transferred staff with a single click. Deactivated staff are excluded from attendance rosters from their deactivation date forward, while fully preserving all historical reports, past monthly rollups, and audit trails.",
+      "🔒 Hardened Inactive PIN Verification Lockout: Inactive staff accounts are strictly barred from logging in or submitting daily reports via /verify-pin, returning a clear Hindi advisory message.",
+      "🎯 Field Officer Target Pacing Command Card: Re-engineered FO Profile tab with a modern glassmorphic Field Command Card featuring dual-track circular progress rings, working days countdown, remaining target volume, and daily run-rate velocity vs recovery velocity.",
+      "🗓️ Dynamic Declared Holidays & Sunday Engine: Pacing engine accurately eliminates Sundays and syncs declared government holidays from the backend (/admin/pacing/settings), ensuring realistic daily run-rate targets.",
+      "🛡️ Enterprise Sub-Admin RBAC Hardening: Cross-district isolation enforced across all leave marking, leave unmarking, and staff deactivation endpoints, preventing cross-district data tampering."
+    ],
+    details: [
+      {
+        tag: "Attendance & Leaves",
+        color: "purple",
+        text: "1-click leave tagging, dedicated On-Leave radar tab, and WhatsApp digest auto-exclusion keep attendance tracking clean and operational without falsely penalizing absent staff."
+      },
+      {
+        tag: "Staff Lifecycle",
+        color: "indigo",
+        text: "Active/Inactive status toggling with precise date cutoff isolation (inactive_since) ensures historical integrity of past reports while decluttering current rosters."
+      },
+      {
+        tag: "Performance Velocity",
+        color: "emerald",
+        text: "FO Command Card equips field workers with actionable pacing insights, run-rate velocity, and Sunday/holiday-adjusted target forecasting directly on mobile."
+      },
+      {
+        tag: "Security & RBAC",
+        color: "teal",
+        text: "Strict Sub-Admin authorization gates and PIN lockout prevent unauthorized modifications and obsolete report submissions across all 22+ districts."
+      }
+    ]
+  },
   {
     version: "v2.7.6",
     date: "21 Sep 2026",
     title: "Unified Health-Tech Modern UI, Sticky Category Pills, Direct Number Pad & Dynamic Future-Proofing",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🎨 Unified Health-Tech Design System: Harmonized all conflicting gradients across Header, Login Card, PWA Install Banner, and Modals into a sleek Emerald/Teal + Slate medical theme with soft rounded-2xl cards and frosted glass (backdrop-blur-md).",
       "🧭 Sticky Category Quick-Jumping Pills: Added a horizontal quick-scroll pill bar below the Live Session Tally HUD (👤 Patient, 🧪 Testing, 🏠 Visits, 💊 FDC / Logistics, ⭐ Special, 🩺 Doctors, 📝 Remarks) with auto-scroll and auto-accordion expansion.",

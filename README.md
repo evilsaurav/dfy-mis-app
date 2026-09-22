@@ -1,5 +1,7 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
+[![Version](https://img.shields.io/badge/Version-v2.8.0-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite_8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
@@ -32,6 +34,10 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [5. Enterprise RBAC & Single-Day Report Deletion](#5-enterprise-rbac--single-day-report-deletion)
   - [6. Broadcast & Urgent Announcement System](#6-broadcast--urgent-announcement-system)
   - [7. Audit Trail Radar & Security Recovery](#7-audit-trail-radar--security-recovery)
+  - [8. Attendance Radar Leave & Absence Tracking Engine](#8--attendance-radar-leave--absence-tracking-engine)
+  - [9. Staff Active/Inactive Lifecycle & Historical Retrospection](#9--staff-activeinactive-lifecycle--historical-retrospection)
+  - [10. Field Officer Target Pacing Command Card & Dynamic Working Days](#10--field-officer-target-pacing-command-card--dynamic-working-days)
+  - [11. Multi-Tier Duplicate Notification Prevention & 1-Click Auto-Repair Suite](#11--multi-tier-duplicate-notification-prevention--1-click-auto-repair-suite)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -156,6 +162,77 @@ flowchart TD
 
 ---
 
+### 8. 🌴 Attendance Radar Leave & Absence Tracking Engine
+- **1-Click Modal Leave Tagging (`AttendanceLeaveModal`)**:
+  - Coordinators can mark any field officer as on leave or absent directly from the Missing Staff list with a single click.
+  - Supports structured absence categorization: `Medical`, `Casual`, `Official Work`, `Personal`, and `Uninformed`, along with custom coordinator remarks.
+- **Dedicated "On Leave (N)" Tab**:
+  - Staff marked on leave are automatically segregated into an independent "On Leave" radar view with distinct purple badging (`bg-purple-50 text-purple-700`).
+  - Includes a 1-click **"Unmark Leave" / "Restore"** action (`POST /admin/attendance/unmark-leave`) that safely returns the officer to active attendance tracking without penalties.
+- **Smart WhatsApp Summary Auto-Exclusion**:
+  - The 1-click WhatsApp daily attendance digest generator automatically excludes staff on leave from the "Missing Officers" roster.
+  - Generates a clean, categorized `🌴 Chhuti Par (On Leave)` roster in the final text, ensuring state leadership receives crisp, actionable morning summaries.
+- **Atomic Cache Eviction & RBAC Isolation**:
+  - Leave records persist in Firestore collection `daily_staff_leaves` with keys `{date}_{district}_{fo_name}`.
+  - Automatically purges date-scoped attendance cache keys (`attendance_{date}_*`).
+  - Strict Sub-Admin RBAC validation prevents coordinators from marking or modifying leave for staff outside their assigned districts (HTTP 403).
+
+---
+
+### 9. 👥 Staff Active/Inactive Lifecycle & Historical Retrospection
+- **Zero Historical Data Corruption**:
+  - When field staff resign, transfer, or complete their tenure, administrators can toggle their status to `INACTIVE` with a single click.
+  - Automatically records an `inactive_since` date timestamp (`YYYY-MM-DD`).
+  - Past daily reports, monthly KPI aggregates, historical district rollups, and audit trails for deactivated staff remain 100% intact and uncorrupted.
+- **Strict Date Cutoff Isolation (`inactive_since`)**:
+  - In `GET /admin/today-attendance`, staff deactivated before or on the queried date are completely excluded from attendance rosters.
+  - When reviewing historical dates prior to their deactivation, staff correctly appear in the attendance roster, preserving accurate historical field accountability.
+- **Hardened Inactive PIN Verification Lockout**:
+  - `/verify-pin` rejects inactive staff with HTTP 403: *"Aapka account inactive hai. Kripya State Coordinator se sampark karein."*
+  - Completely blocks inactive or relieved personnel from submitting reports or logging into the PWA.
+- **Admin Staff Management Suite**:
+  - Staff management directory features fast filter tabs: `All`, `Active`, and `Inactive`.
+  - Color-coded action buttons: Red "Deactivate" / Emerald "Reactivate" with high-stakes confirmation dialogs (`StaffStatusToggleModal`).
+  - Sub-Admin RBAC guards enforce district isolation on `POST /admin/staff/toggle-status`.
+
+---
+
+### 10. 🎯 Field Officer Target Pacing Command Card & Dynamic Working Days
+- **Modern Glassmorphic Field Command Card**:
+  - Integrated into the Field Officer mobile PWA Profile tab (`App.jsx`).
+  - Features dual-track visual progress rings contrasting **Notification Achievement Progress** against **Elapsed Working Days Progress**.
+- **Dynamic Calendar Math & Holiday Synchronization**:
+  - Automatically calculates real working days for any month:
+    $$W_{\text{total}} = D_{\text{total}} - S_{\text{count}} - H_{\text{declared}}$$
+  - Identifies and excludes all calendar Sundays ($S_{\text{count}} \in [4, 5]$).
+  - Dynamically fetches state/district declared government holidays ($H_{\text{declared}}$) via `GET /admin/pacing/settings` and `/my-profile-stats`.
+- **Actionable Run-Rate Velocity Analytics**:
+  - **Current Daily Run-Rate ($V_{\text{actual}}$)**: $\frac{\text{Achieved Notifications}}{\max(1, W_{\text{elapsed}})}$
+  - **Required Recovery Velocity ($V_{\text{recovery}}$)**: $\frac{\max(0, \text{Target} - \text{Achieved})}{\max(1, W_{\text{remaining}})}$
+  - Dynamic status indicator badges: `🟢 On Track` ($\ge 90\%$), `🟡 At Risk` ($70\% - 89\%$), or `🔴 Behind Target` ($< 70\%$).
+  - Displays remaining notifications needed to achieve monthly targets.
+
+---
+
+### 11. 🛡️ Multi-Tier Duplicate Notification Prevention & 1-Click Auto-Repair Suite
+- **90-Day Offline District Notification Registry (IndexedDB)**:
+  - Mobile devices cache all notification IDs registered across the district within the active 90-day clinical treatment window via `GET /api/district-notification-registry`.
+  - Enables instant 0ms duplicate detection in remote villages with zero mobile connectivity.
+- **Strict Red Block Modal (`DuplicateNotificationBlockModal`)**:
+  - TB Notifications are legally and clinically unique to initial diagnosis (1 notification per patient).
+  - Repeat notification entries for already-registered Nikshay IDs are strictly halted with an unmissable red warning dialog.
+- **Interactive Amber Confirmation Modal (`RepeatInterventionConfirmModal`)**:
+  - For non-notification indicators (Home Visits, Follow-ups, DBT, FDC Kits), repeat entries are valid clinical re-interventions.
+  - Displays an amber advisory requiring explicit officer confirmation before adding the repeat ID to the tally.
+- **Server Ingestion Auto-Pruning Gate (`POST /submit-daily-report`)**:
+  - Safely auto-prunes duplicate notification IDs from counters before committing to Firestore.
+  - Preserves all valid clinical work (visitations, testing, DBT, remarks) without failing the submission.
+- **Admin Duplicate Radar 1-Click Auto-Repair Suite**:
+  - Scans cross-date and cross-officer duplicate notifications (`GET /admin/scan-duplicate-notifications`).
+  - 1-click repair endpoint (`POST /admin/repair-duplicate-notifications`) strips duplicate notification IDs from records and atomically decrements inflated `daily_district_rollups` with Sub-Admin RBAC validation.
+
+---
+
 ## 📍 Districts Covered
 
 The system supports active staff and reporting across **22+ Districts of Bihar**:
@@ -201,6 +278,12 @@ Mis field report/
 ├── firebase_key.json           # Firebase Admin Service Account credentials (git-ignored)
 ├── generate_templates.py       # Helper scripts for Excel template generation
 ├── templates/                  # Excel KPI report templates & assets
+├── tests/                      # Automated Python and Node test batteries
+│   ├── test_attendance_leaves_and_lifecycle.py
+│   ├── test_district_registry.py
+│   ├── test_ingestion_defense.py
+│   ├── test_repair_duplicate_notifications.py
+│   └── test_scoped_caching.py
 │
 └── dfy-frontend/               # React 19 + Vite Frontend Application
     ├── index.html              # App entry HTML with PWA meta tags
@@ -210,8 +293,9 @@ Mis field report/
     │   ├── manifest.json       # Progressive Web App (PWA) manifest
     │   └── favicon.svg         # DFY brand icon
     └── src/
-        ├── App.jsx             # Field Officer Mobile PWA: 100% offline PIN, queue, alerts, forms
-        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Analytics Dashboard
+        ├── App.jsx             # Field Officer Mobile PWA: offline PIN, pacing card, duplicate modals
+        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Analytics Dashboard with Attendance Leaves & Repair Suite
+        ├── changelogData.js    # Client-side in-app changelog & version history
         ├── offlineQueue.js     # IndexedDB offline storage & auto-sync engine
         ├── staff_directory.json # Master local baseline staff directory
         ├── main.jsx            # React root mount point & Router
@@ -225,42 +309,55 @@ Mis field report/
 ### 1. Field Reporting & Staff Authentication
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/verify-pin` | Verify 4-digit staff PIN against master directory |
-| `POST` | `/submit-daily-report` | Submit daily clinical report & patient IDs (idempotent, rollups) |
+| `POST` | `/verify-pin` | Verify 4-digit staff PIN (blocks inactive staff accounts with HTTP 403) |
+| `POST` | `/submit-daily-report` | Submit daily clinical report & patient IDs (idempotent, rollups, duplicate notification auto-pruning) |
 | `POST` | `/check-today-status` | Check if officer has submitted a report today |
-| `POST` | `/my-profile-stats` | Fetch officer-specific monthly summary & history |
+| `POST` | `/my-profile-stats` | Fetch officer-specific monthly summary, dynamic working days & pacing velocity |
+| `GET` | `/api/district-notification-registry` | Fetch 90-day district notifications for offline IndexedDB duplicate prevention cache |
 
 ### 2. Admin Analytics, RBAC & Report Management
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/admin/login` | Admin & Sub-Admin credentials login with RBAC permissions |
 | `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing (`force_refresh` support) |
-| `POST` | `/admin/reports/delete-day` | **New**: Delete an officer's single-day report with atomic rollup rollback & RBAC |
+| `POST` | `/admin/reports/delete-day` | Delete an officer's single-day report with atomic rollup rollback & RBAC |
 | `GET` | `/admin/attendance/live` | Live field staff attendance radar (submitted vs missing) |
+| `GET` | `/admin/today-attendance` | Live attendance radar with date cutoff (`inactive_since`), submitted vs missing vs on-leave resolution |
 | `GET` | `/admin/users/list` | Super Admin: List all Admin and Sub-Admin accounts |
 | `POST` | `/admin/users/create` | Super Admin: Provision new Sub-Admin user with permitted districts |
 | `POST` | `/admin/users/update` | Super Admin: Update user permissions and assigned districts |
 | `POST` | `/admin/emergency-reset` | Emergency master key / PIN password reset |
 
-### 3. Target Management & Staff Suite
+### 3. Attendance Leaves & Staff Lifecycle
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/admin/attendance/mark-leave` | Mark staff as on-leave/absent with reason category, remark, and Sub-Admin RBAC |
+| `POST` | `/admin/attendance/unmark-leave` | Revert staff from leave back to active attendance tracking with Sub-Admin RBAC |
+| `POST` | `/admin/staff/toggle-status` | Toggle staff `ACTIVE`/`INACTIVE` status with `inactive_since` cutoff date and Sub-Admin RBAC |
+| `GET` | `/admin/pacing/settings` | Fetch declared government holidays and calendar pacing settings for month/district |
+| `POST` | `/admin/pacing/settings` | Update declared government holidays per month (statewide default or district override) with RBAC |
+
+### 4. Target Management & Staff Suite
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/get-targets` | Fetch monthly targets (filtered by permitted districts) |
 | `POST` | `/set-targets` | Update monthly targets with audit trail logging |
 | `GET` | `/staff-directory` | Fetch normalized master staff directory |
-| `GET` | `/admin/staff/list` | Fetch active staff list with PINs and designations |
+| `GET` | `/admin/staff/list` | Fetch active/inactive staff list with PINs, designations, and status badges |
 | `POST` | `/admin/staff/update-pin` | Reset staff member PIN |
 | `GET` | `/admin/staff/export-pins` | Export master PIN directory to Excel (`.xlsx`) |
 
-### 4. Cascade Alerts & Duplicate Radar
+### 5. Cascade Alerts & Duplicate Notification Radar
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/reports/cascade-alerts` | Fetch clinical cascade dropouts and patient dropout alerts |
 | `GET` | `/admin/export-cascade-alerts` | Export clinical cascade dropout action sheet (`.xlsx`) |
 | `GET` | `/api/duplicate-audit` | Scan and report duplicate patient IDs across officers |
 | `POST` | `/api/edit-record-id` | Correct / replace patient ID with audit trail record |
+| `GET` | `/admin/scan-duplicate-notifications` | Deep scan for cross-date duplicate notification IDs within a month, with Sub-Admin RBAC |
+| `POST` | `/admin/repair-duplicate-notifications` | 1-click auto-repair of duplicate notification documents with atomic rollup rollback and Sub-Admin RBAC |
 
-### 5. Broadcasts & Announcements
+### 6. Broadcasts & Announcements
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/api/broadcasts/create` | Create targeted broadcast notice with RBAC validation |
@@ -268,14 +365,14 @@ Mis field report/
 | `GET` | `/api/broadcasts/all` | List all broadcasts in Central Broadcast Studio |
 | `POST` | `/api/broadcasts/delete` | Deactivate/delete broadcast notice across all portals |
 
-### 6. Excel Report Studio Exports
+### 7. Excel Report Studio Exports
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/admin/export-state-summary` | Download Statewide Executive Consolidation (`.xlsx`) |
 | `GET` | `/download-district-kpi` | Download District-specific drilldown workbook (`.xlsx`) |
 | `GET` | `/admin/export-fo-dossier` | Download Single Officer Performance Dossier (`.xlsx`) |
 
-### 7. Automated Cloud Backups & Disaster Recovery (Option A)
+### 8. Automated Cloud Backups & Disaster Recovery (Option A)
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/admin/backup/status` | Super Admin: Live backup status, storage bucket location, and snapshots list |

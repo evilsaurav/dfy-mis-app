@@ -4,7 +4,7 @@
 > *Author:* Health Informatics & Analytics Engineering  
 > *Platform:* FastAPI Backend + Google Cloud Firestore + React 19 Engine  
 > *Coverage:* 22+ Districts in Bihar, India  
-> *Version:* 2.4.0 (Enterprise Production-Hardened)
+> *Version:* 2.5.0 (Attendance Leaves, Lifecycle Cutoff & Duplicate Defense)
 
 ---
 
@@ -129,31 +129,73 @@ For every field staff member (ADC, TC, FO):
 
 ---
 
-### 3.5 Real-Time Attendance Radar Engine
-- Compares the active staff roster from `staff_directory` against today's submitted reports from `daily_field_reports`:
-  $$\\text{Missing Staff} = \\text{Staff Directory} \\setminus \\text{Today Submissions}$$
-- Categorizes staff into:
-  - **Submitted Full** (Reported $\\ge 1$ patient interactions or active travel)
-  - **Submitted Partial** (Only morning odometer photo logged, afternoon clinical report pending)
-  - **Missing / Absent** (Zero reports received by cut-off time)
+### 3.5 Real-Time Attendance Radar & Leave Resolution Engine
+- **Three-Tier Roster Resolution**:
+  Compares active staff roster from `staff_directory` against today's submitted reports (`daily_field_reports`) and leave records (`daily_staff_leaves`):
+  1. **Submitted**: Staff who submitted $\ge 1$ clinical report or odometer transit for the queried date.
+  2. **On Leave**: Staff with an active record in `daily_staff_leaves` (`{date}_{district}_{fo}`).
+     - Classified by reason: `Medical`, `Casual`, `Official Work`, `Personal`, `Uninformed`.
+     - Excluded from "Missing Officers" tally and segregated into a dedicated purple "On Leave" tab.
+  3. **Missing**: Unsubmitted staff who are neither submitted nor on leave.
+- **WhatsApp Digest Auto-Exclusion**:
+  $$\text{Missing Roster}_{\text{WhatsApp}} = \text{Staff}_{\text{Active}} \setminus (\text{Submitted} \cup \text{On Leave})$$
+  Staff on leave are extracted into a dedicated `🌴 Chhuti Par (On Leave)` roster, ensuring state coordinators are not alarmed by authorized absences.
 
 ---
 
-### 3.6 Automated 30-Day Audit Trail Retention Engine
+### 3.6 Staff Active/Inactive Lifecycle & Cutoff Algorithm
+- **Historical Retrospection Principle**:
+  Deactivating a staff member must never rewrite or erase past operational history.
+- **Algorithm**:
+  Given query date $D_{\text{query}}$ and staff directory entry with $\text{status}$ and $\text{inactive\_since}$:
+  $$\text{Is Eligible}(D_{\text{query}}) = \begin{cases} 
+  \text{False} & \text{if } \text{status} == \text{"inactive"} \text{ and } \text{inactive\_since} \le D_{\text{query}} \\
+  \text{True} & \text{otherwise}
+  \end{cases}$$
+- **Impact Matrix**:
+  | Scenario | Evaluation | Result in Attendance Radar |
+  |---|---|---|
+  | Staff deactivated on Sep 15, viewing Sep 22 | $\text{inactive\_since (15)} \le \text{query (22)}$ | **Excluded** from roster |
+  | Staff deactivated on Sep 15, viewing Sep 10 | $\text{inactive\_since (15)} > \text{query (10)}$ | **Included** in historical roster |
+  | Deactivated staff attempts PIN login | `/verify-pin` checks `is_active !== false` | **Rejected** with HTTP 403 |
+
+---
+
+### 3.7 Multi-Tier Duplicate Notification Ingestion & Atomic Rollup Rollback
+- **Client Tier (0ms Offline IndexedDB)**:
+  - Mobile client downloads district notification registry for the active 90-day treatment window.
+  - Intercepts repeat notification entries with a **Strict Red Block Modal**, halting accidental duplication.
+- **Server Ingestion Auto-Pruning Gate (`POST /submit-daily-report`)**:
+  - When reports are ingested, server checks existing notifications in the active treatment window:
+    $$\text{clean\_notifs} = [nid \text{ for } nid \in \text{incoming} \text{ if } nid \notin \text{existing\_treatment\_registry}]$$
+  - Auto-prunes duplicate IDs from `notification_ids` and decrements daily rollup increment:
+    $$\Delta \text{Rollup}_{\text{notif}} = \text{len}(\text{clean\_notifs})$$
+  - Preserves all valid clinical outreach (Visits, DBT, Remarks) without rejecting the submission.
+- **1-Click Admin Repair & Rollback Pipeline (`POST /admin/repair-duplicate-notifications`)**:
+  1. Reads target document from `daily_field_reports`.
+  2. Filters out specified duplicate IDs: $\text{filtered} = [id \text{ for } id \in \text{current} \text{ if } id \notin \text{duplicate\_ids}]$.
+  3. Updates report document in Firestore with `last_repaired_at` and `last_repaired_by`.
+  4. Atomically decrements daily district rollup:
+     $$\text{daily\_district\_rollups}.\text{update}(\{\text{"notifications"}: \text{firestore.Increment}(-\text{removed\_count})\})$$
+  5. Purges scoped cache keys (`status_{doc_id}`, `dash_`, `profile_`) and writes an immutable audit record to `admin_audit_logs`.
+
+---
+
+### 3.8 Automated 30-Day Audit Trail Retention Engine
 - **Lifecycle of an Administrative Action**:
-  1. Target edit, ID deletion, or user creation triggers `log_admin_activity()`.
+  1. Target edit, ID deletion, leave marking, or staff status toggle triggers `log_admin_activity()`.
   2. Appends document to `admin_audit_logs` collection with `timestamp: YYYY-MM-DD HH:MM:SS`.
   3. Every 6 hours and upon server boot, `prune_expired_audit_logs(30)` evaluates:
-     $$\\text{cutoff} = (\\text{now} - 30\\text{ days}).\\text{strftime}(\"%Y-%m-%d %H:%M:%S\")$$
+     $$\text{cutoff} = (\text{now} - 30\text{ days}).\text{strftime}("%Y-%m-%d %H:%M:%S")$$
   4. Deletes matching documents via Firestore batch commits (`db.batch().delete(doc.reference)`).
   5. The UI displays an active retention status chip: `🛡️ Retention: 30 Days (Auto-Pruned)`.
 
 ---
 
-### 3.7 Excel Reporting & Streaming Engine (`openpyxl`)
+### 3.9 Excel Reporting & Streaming Engine (`openpyxl`)
 - Utilizes `openpyxl` with predefined professional formatting constants:
   - `EXCEL_HEADER_BORDER`, `EXCEL_THIN_BORDER`, `EXCEL_TOTAL_ROW_BORDER`.
-  - Auto-computed column widths: $\\text{width} = \\max(\\text{cell length}) + 4$.
+  - Auto-computed column widths: $\text{width} = \max(\text{cell length}) + 4$.
   - Number formatting: centered numbers, left-aligned officer names.
 - **District ZIP Streamer**: Streams all 22+ district `.xlsx` files compressed on-the-fly into a single `.zip` archive via `StreamingResponse(io.BytesIO(...))` with zero temporary disk file footprint on Render.
 

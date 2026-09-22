@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Google Cloud Firestore & Firebase Cloud Storage  
-> *Version:* 3.2.0 (Enterprise Offline-First & Real-Time Sync Hardened)  
+> *Version:* 3.3.0 (Attendance Leaves, Staff Lifecycle Cutoff, FO Pacing & Duplicate Prevention)  
 > *Status:* Production Active
 
 ---
@@ -209,6 +209,60 @@ flowchart LR
 - **Master Recovery Key**: `DFY-RESCUE-9921` backed by emergency security PIN `7788`.
 - **One-Click Emergency Access Card**: Generates an offline credentials card (`.txt`) for the Chief Medical Officer / State Program Manager.
 - **Self-Healing Reset**: `/admin/emergency-reset` verifies recovery credentials and restores administrative access directly in Firestore.
+
+### 6.4 Attendance Leave & Absence Subsystem (`daily_staff_leaves`)
+- **State Persistence**: Leave entries are stored in the dedicated Firestore collection `daily_staff_leaves` with deterministic keys formatted as `{YYYY-MM-DD}_{canonical_district}_{fo_name_normalized}`.
+- **Leave Lifecycle**:
+  - `POST /admin/attendance/mark-leave`: Records staff absence with category (`Medical`, `Casual`, `Official Work`, `Personal`, `Uninformed`) and remarks.
+  - `POST /admin/attendance/unmark-leave`: Deletes the leave document, reverting staff to standard attendance evaluation.
+- **Date-Scoped Cache Invalidation**: Leave mutations trigger `cache.delete_prefix(f"attendance_{clean_date}")`, ensuring immediate consistency without flushing unrelated caches.
+- **Sub-Admin Isolation**: Mutations strictly enforce `canonicalize_district(req.district) in allowed_districts`, rejecting unauthorized requests with HTTP 403.
+
+### 6.5 Staff Active/Inactive Lifecycle & Cutoff Architecture (`inactive_since`)
+- **Status Persistence**: Staff documents in `staff_directory` maintain `status: "active" | "inactive"`, `is_active: bool`, and `inactive_since: "YYYY-MM-DD"`.
+- **Cutoff Isolation in Attendance Radar (`GET /admin/today-attendance`)**:
+  - For any queried date $D$, staff are excluded from the roster if:
+    $$\text{status} == \text{"inactive"} \quad \text{and} \quad \text{inactive\_since} \le D$$
+  - When inspecting historical dates prior to `inactive_since`, staff correctly appear in historical attendance rosters, maintaining full historical auditing accuracy.
+- **Hardened Inactive PIN Verification Lockout**:
+  - `/verify-pin` queries the staff directory and immediately halts if `is_active == False` or `status == "inactive"`, returning HTTP 403 and preventing any unauthorized daily reports.
+- **Zero Historical Data Corruption**:
+  - Past daily reports in `daily_field_reports` and monthly rollups in `daily_district_rollups` are completely preserved, preventing retrospective KPI corruption.
+
+### 6.6 Declared Government Holidays & Pacing Engine Synchronization
+- **Settings Store**: Declared monthly holidays are persisted in Firestore under `pacing_settings/{YYYY-MM}` (statewide default) and `pacing_settings/{YYYY-MM}_{district}` (district override).
+- **Two-Tier Fallback Hierarchy**:
+  1. District-specific override document (`{month}_{district}`).
+  2. Statewide month document (`{month}`).
+  3. Default fallback: 1 declared holiday.
+- **API Endpoints**: `GET /admin/pacing/settings` and `POST /admin/pacing/settings` with Sub-Admin RBAC validation (Sub-Admins cannot mutate statewide settings).
+- **Real-Time Client Synchronization**: FO profile requests (`/my-profile-stats`) dynamically incorporate the active holiday settings into working days formulas.
+
+### 6.7 Multi-Tier Duplicate Notification Prevention & Auto-Repair Pipeline
+```mermaid
+flowchart TD
+    subgraph Mobile_Tier [Mobile Edge Tier - 0ms Offline Detection]
+        Input[Nikshay ID Entered] --> ClientReg{In 90-Day District Registry?<br/>IndexedDB Cache}
+        ClientReg -->|Yes & Indicator == Notification| RedModal[🚨 Strict Red Block Modal<br/>Submission Halted]
+        ClientReg -->|Yes & Indicator != Notification| AmberModal[⚠️ Amber Confirm Modal<br/>Re-Intervention Allowed]
+        ClientReg -->|No| Allowed[✓ Added to Queue]
+    end
+
+    subgraph Ingestion_Tier [FastAPI Ingestion Defense Gate]
+        Submit[POST /submit-daily-report] --> ServerPrune{Check Existing Notifications in Treatment Window}
+        ServerPrune -->|Duplicate Found| Prune[Auto-Prune from notification_ids<br/>Retain Visits, DBT, Remarks]
+        ServerPrune -->|Clean| Persist[Persist to Firestore & Update Rollups]
+        Prune --> Persist
+    end
+
+    subgraph Admin_Repair_Tier [Admin Duplicate Radar Suite]
+        Scan[GET /admin/scan-duplicate-notifications] --> Repair[POST /admin/repair-duplicate-notifications]
+        Repair --> StripDoc[Strip Duplicates from daily_field_reports]
+        Repair --> RollbackRollup[Atomically Decrement daily_district_rollups]
+        Repair --> ScopedCache[Purge Scoped Cache Keys]
+        Repair --> AuditLog[Write admin_audit_logs]
+    end
+```
 
 ---
 
