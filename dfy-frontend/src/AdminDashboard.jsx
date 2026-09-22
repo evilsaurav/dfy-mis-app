@@ -186,6 +186,9 @@ export default function AdminDashboard() {
   const [staffList, setStaffList] = useState([]);
   const [staffSearchQuery, setStaffSearchQuery] = useState("");
   const [staffFilterDistrict, setStaffFilterDistrict] = useState("All");
+  const [staffStatusFilter, setStaffStatusFilter] = useState('all'); // 'all' | 'active' | 'inactive'
+  const [staffToggleModal, setStaffToggleModal] = useState(null); // { officer, targetStatus, effectiveDate, error }
+  const [isTogglingStaff, setIsTogglingStaff] = useState(false);
   const [showPinMap, setShowPinMap] = useState({});
   const [pinChangeModal, setPinChangeModal] = useState(null); // { name, district, newPin, error, loading }
   const [addStaffModal, setAddStaffModal] = useState(null); // { district, name, pin, designation, target, error, loading }
@@ -2170,11 +2173,12 @@ export default function AdminDashboard() {
   const fetchStaffList = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      let q = "";
+      const params = new URLSearchParams();
+      params.append("status_filter", "all");
       if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-        q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+        params.append("districts", currentUser.allowed_districts.join(','));
       }
-      const res = await authFetch(`${API_BASE_URL}/admin/staff/list${q}`);
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/list?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setStaffList(data.staff || []);
@@ -2285,6 +2289,80 @@ export default function AdminDashboard() {
       }
     } catch (err) {
       setDeleteStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteToggleStaffStatus = async (e) => {
+    if (e) e.preventDefault();
+    if (!staffToggleModal || !staffToggleModal.officer) return;
+    const { officer, targetStatus, effectiveDate } = staffToggleModal;
+
+    if (!canManageStaff) {
+      setStaffToggleModal(prev => ({ ...prev, error: "Permission denied. You do not have staff management permissions." }));
+      return;
+    }
+
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowed = currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase());
+      const targetDist = canonicalizeDistrict(officer.district || '').toLowerCase();
+      if (!allowed.includes(targetDist)) {
+        setStaffToggleModal(prev => ({ ...prev, error: `Permission denied. You cannot manage staff in district '${officer.district}'.` }));
+        return;
+      }
+    }
+
+    setIsTogglingStaff(true);
+    setStaffToggleModal(prev => ({ ...prev, error: "" }));
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const effDate = targetStatus === 'inactive' ? (effectiveDate || new Date().toISOString().slice(0, 10)) : undefined;
+      const payload = {
+        district: officer.district,
+        fo_name: officer.name,
+        status: targetStatus,
+        ...(effDate ? { effective_date: effDate } : {})
+      };
+
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/toggle-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        // Optimistically update staffList
+        const resolvedInactiveSince = targetStatus === 'inactive' ? (effDate || new Date().toISOString().slice(0, 10)) : null;
+        setStaffList(prev => prev.map(s => {
+          const isMatch = (s.id && officer.id && s.id === officer.id) || (s.name === officer.name && s.district === officer.district);
+          if (isMatch) {
+            return {
+              ...s,
+              is_active: targetStatus === 'active',
+              status: targetStatus,
+              inactive_since: resolvedInactiveSince
+            };
+          }
+          return s;
+        }));
+
+        fetchDirectory();
+        fetchAttendance(true);
+        setStaffToggleModal(null);
+        showToast(
+          targetStatus === 'inactive'
+            ? `Officer ${officer.name} marked as Inactive.`
+            : `Officer ${officer.name} reactivated successfully!`,
+          'success'
+        );
+      } else {
+        setStaffToggleModal(prev => ({ ...prev, error: data.detail || "Failed to update staff status." }));
+      }
+    } catch (err) {
+      setStaffToggleModal(prev => ({ ...prev, error: "Network error. Please try again." }));
+    } finally {
+      setIsTogglingStaff(false);
     }
   };
 
@@ -3488,7 +3566,7 @@ const availableDistrictsForFeed = useMemo(() => {
         const distTargets = (targetsData || []).filter(t => canonicalizeDistrict(t.district) === key);
         let tSum = distTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
         if (tSum === 0) {
-          const staffCount = (staffList || []).filter(s => canonicalizeDistrict(s.district) === key).length;
+          const staffCount = (staffList || []).filter(s => canonicalizeDistrict(s.district) === key && s.is_active !== false && s.status !== 'inactive').length;
           tSum = (staffCount > 0 ? staffCount : 1) * 50;
         }
         map[key].target = tSum;
@@ -3647,6 +3725,7 @@ const availableDistrictsForFeed = useMemo(() => {
     // Include registered staff from staffList (Admin Staff Management suite)
     if (staffList && staffList.length > 0) {
       staffList.forEach(s => {
+        if (s.is_active === false || s.status === 'inactive') return;
         const cleanName = (s.name || '').trim();
         const cDist = canonicalizeDistrict(s.district || '');
         if (cleanName && cDist) {
@@ -7223,10 +7302,10 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
                 <div>
                   <h3 className="text-xl font-black text-slate-800">Field Staff &amp; PIN Management Suite</h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{staffList.length} Active Officers across {districts.filter(d => d !== 'All').length} Districts</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{staffList.filter(s => s.is_active !== false && s.status !== 'inactive').length} Active Officers ({staffList.length} Total) across {districts.filter(d => d !== 'All').length} Districts</p>
                 </div>
               </div>
-              <button onClick={() => setShowStaffSuite(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none self-end sm:self-center">&times;</button>
+              <button onClick={() => setShowStaffSuite(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none self-end sm:self-center cursor-pointer">&times;</button>
             </div>
 
             {/* Action Bar: District Filter, Search & Exports */}
@@ -7255,7 +7334,7 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => setAddStaffModal({ district: staffFilterDistrict !== 'All' ? staffFilterDistrict : (districts.filter(d => d !== 'All')[0] || 'Jamui'), name: '', pin: String(Math.floor(1000 + Math.random() * 9000)), designation: 'Field Officer', target: 50, error: '' })}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>+</span> Add Employee
                 </button>
@@ -7264,7 +7343,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/staff/export-pins?district=${staffFilterDistrict}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
                   title="1-Click Download Excel Directory with 4-digit PINs"
                 >
                   <span>📥</span> Download PINs ({staffFilterDistrict})
@@ -7272,90 +7351,183 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Staff Table */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar my-2 pr-1">
-              {(() => {
-                const filteredStaff = staffList.filter(s => {
-                  if (staffFilterDistrict !== 'All' && s.district !== staffFilterDistrict) return false;
-                  if (staffSearchQuery.trim()) {
-                    const q = staffSearchQuery.trim().toLowerCase();
-                    return s.name.toLowerCase().includes(q) || String(s.pin).includes(q) || s.district.toLowerCase().includes(q);
-                  }
-                  return true;
-                });
+            {/* Filter Tabs: All | Active | Inactive */}
+            {(() => {
+              const totalCount = staffList.length;
+              const activeCount = staffList.filter(s => s.is_active !== false && s.status !== 'inactive').length;
+              const inactiveCount = staffList.filter(s => s.is_active === false || s.status === 'inactive').length;
 
-                if (filteredStaff.length === 0) {
+              const filteredStaff = staffList.filter(s => {
+                if (staffFilterDistrict !== 'All' && s.district !== staffFilterDistrict) return false;
+
+                const isActive = s.is_active !== false && s.status !== 'inactive';
+                if (staffStatusFilter === 'active' && !isActive) return false;
+                if (staffStatusFilter === 'inactive' && isActive) return false;
+
+                if (staffSearchQuery.trim()) {
+                  const q = staffSearchQuery.trim().toLowerCase();
                   return (
-                    <div className="text-center py-16 text-slate-400 font-bold text-xs">
-                      Koi matching officer nahi mila.
-                    </div>
+                    (s.name && s.name.toLowerCase().includes(q)) ||
+                    String(s.pin || '').includes(q) ||
+                    (s.district && s.district.toLowerCase().includes(q)) ||
+                    (s.designation && s.designation.toLowerCase().includes(q))
                   );
                 }
+                return true;
+              });
 
-                return (
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 text-slate-400 font-black uppercase text-[10px] tracking-wider sticky top-0 border-b border-slate-100">
-                        <th className="p-3">District</th>
-                        <th className="p-3">Officer Name</th>
-                        <th className="p-3">Designation</th>
-                        <th className="p-3">4-Digit PIN</th>
-                        <th className="p-3 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
-                      {filteredStaff.map((s, idx) => {
-                        const isPinVisible = showPinMap[s.id];
-                        return (
-                          <tr key={idx} className="hover:bg-blue-50/30 transition-colors">
-                            <td className="p-3 font-bold text-indigo-700">{s.district}</td>
-                            <td className="p-3 font-black text-slate-800">{s.name}</td>
-                            <td className="p-3">
-                              <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
-                                {s.designation || 'Field Officer'}
-                              </span>
-                            </td>
-                            <td className="p-3">
-                              <div className="inline-flex items-center gap-1.5 font-mono text-xs font-black bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                                <span>{isPinVisible ? s.pin : '••••'}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => setShowPinMap(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
-                                  className="text-slate-400 hover:text-slate-600 text-[11px]"
-                                  title={isPinVisible ? "Hide PIN" : "Show PIN"}
-                                >
-                                  {isPinVisible ? '🙈' : '👁️'}
-                                </button>
-                              </div>
-                            </td>
-                            <td className="p-3 text-right space-x-2">
-                              <button
-                                onClick={() => setPinChangeModal({
-                                  name: s.name,
-                                  district: s.district,
-                                  newPin: s.pin,
-                                  designation: s.designation || 'Field Officer',
-                                  error: ''
-                                })}
-                                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-colors"
-                              >
-                                ✏️ Edit Details
-                              </button>
-                              <button
-                                onClick={() => setDeleteStaffModal({ name: s.name, district: s.district, error: '' })}
-                                className="text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-lg transition-colors"
-                              >
-                                🗑️ Delete
-                              </button>
-                            </td>
+              return (
+                <>
+                  <div className="py-2.5 flex items-center justify-between gap-2 border-b border-slate-100/80">
+                    <div className="inline-flex items-center gap-1 bg-slate-100 p-1 rounded-2xl">
+                      <button
+                        type="button"
+                        onClick={() => setStaffStatusFilter('all')}
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                          staffStatusFilter === 'all'
+                            ? 'bg-white text-slate-800 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        All ({totalCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStaffStatusFilter('active')}
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                          staffStatusFilter === 'active'
+                            ? 'bg-white text-emerald-700 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+                        Active ({activeCount})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setStaffStatusFilter('inactive')}
+                        className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer ${
+                          staffStatusFilter === 'inactive'
+                            ? 'bg-white text-slate-700 shadow-sm'
+                            : 'text-slate-500 hover:text-slate-700'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0"></span>
+                        Inactive ({inactiveCount})
+                      </button>
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 font-semibold hidden sm:block">
+                      Showing {filteredStaff.length} of {totalCount} officers
+                    </div>
+                  </div>
+
+                  {/* Staff Table */}
+                  <div className="flex-1 overflow-y-auto custom-scrollbar my-2 pr-1">
+                    {filteredStaff.length === 0 ? (
+                      <div className="text-center py-16 text-slate-400 font-bold text-xs">
+                        Koi matching officer nahi mila.
+                      </div>
+                    ) : (
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-400 font-black uppercase text-[10px] tracking-wider sticky top-0 border-b border-slate-100">
+                            <th className="p-3">District</th>
+                            <th className="p-3">Officer Name</th>
+                            <th className="p-3">Designation</th>
+                            <th className="p-3">4-Digit PIN</th>
+                            <th className="p-3">Status</th>
+                            <th className="p-3 text-right">Actions</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                );
-              })()}
-            </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                          {filteredStaff.map((s, idx) => {
+                            const isPinVisible = showPinMap[s.id];
+                            const isActive = s.is_active !== false && s.status !== 'inactive';
+                            return (
+                              <tr key={s.id || idx} className="hover:bg-blue-50/30 transition-colors">
+                                <td className="p-3 font-bold text-indigo-700">{s.district}</td>
+                                <td className="p-3 font-black text-slate-800">{s.name}</td>
+                                <td className="p-3">
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                    {s.designation || 'Field Officer'}
+                                  </span>
+                                </td>
+                                <td className="p-3">
+                                  <div className="inline-flex items-center gap-1.5 font-mono text-xs font-black bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
+                                    <span>{isPinVisible ? s.pin : '••••'}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setShowPinMap(prev => ({ ...prev, [s.id]: !prev[s.id] }))}
+                                      className="text-slate-400 hover:text-slate-600 text-[11px] cursor-pointer"
+                                      title={isPinVisible ? "Hide PIN" : "Show PIN"}
+                                    >
+                                      {isPinVisible ? '🙈' : '👁️'}
+                                    </button>
+                                  </div>
+                                </td>
+                                <td className="p-3">
+                                  {isActive ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStaffToggleModal({
+                                        officer: s,
+                                        targetStatus: 'inactive',
+                                        effectiveDate: new Date().toISOString().slice(0, 10),
+                                        error: ''
+                                      })}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+                                      title="Click to deactivate officer"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                      Active
+                                    </button>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStaffToggleModal({
+                                        officer: s,
+                                        targetStatus: 'active',
+                                        error: ''
+                                      })}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors cursor-pointer"
+                                      title="Click to reactivate officer"
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
+                                      Inactive {s.inactive_since ? `(${s.inactive_since})` : ''}
+                                    </button>
+                                  )}
+                                </td>
+                                <td className="p-3 text-right space-x-2">
+                                  <button
+                                    onClick={() => setPinChangeModal({
+                                      name: s.name,
+                                      district: s.district,
+                                      newPin: s.pin,
+                                      designation: s.designation || 'Field Officer',
+                                      error: ''
+                                    })}
+                                    className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    ✏️ Edit Details
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteStaffModal({ name: s.name, district: s.district, error: '' })}
+                                    className="text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    🗑️ Delete
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Modal Footer */}
             <div className="pt-3 border-t border-slate-100 flex justify-between items-center text-xs text-slate-400 font-semibold">
@@ -7575,6 +7747,114 @@ const availableDistrictsForFeed = useMemo(() => {
                   className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-md shadow-red-600/20 active:scale-95 transition-all"
                 >
                   {deleteStaffModal.loading ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Staff Status Toggle Confirmation Modal */}
+      {staffToggleModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg font-black ${
+                  staffToggleModal.targetStatus === 'inactive' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+                }`}>
+                  {staffToggleModal.targetStatus === 'inactive' ? '⏸️' : '▶️'}
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-800">
+                    {staffToggleModal.targetStatus === 'inactive' ? 'Deactivate Officer' : 'Reactivate Officer'}
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    {staffToggleModal.officer?.name} ({staffToggleModal.officer?.district})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isTogglingStaff && setStaffToggleModal(null)}
+                disabled={isTogglingStaff}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none disabled:opacity-50 cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteToggleStaffStatus} className="space-y-4">
+              {staffToggleModal.targetStatus === 'inactive' ? (
+                <>
+                  <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/60 text-amber-900 text-xs">
+                    <p className="font-bold mb-1 flex items-center gap-1.5">
+                      <span>⚠️</span> Kya aap sach me <strong>{staffToggleModal.officer?.name}</strong> ko deactivate karna chahte hain?
+                    </p>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Officer ka login <code>/verify-pin</code> block ho jayega aur current attendance se hat jayega. Purana historical data 100% safe rahega.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                      Effective Cutoff Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={staffToggleModal.effectiveDate || new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => setStaffToggleModal(prev => ({ ...prev, effectiveDate: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-amber-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1 font-semibold">
+                      Is tareekh aur iske baad se officer attendance roster me nahi dikhega.
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200/60 text-emerald-900 text-xs">
+                  <p className="font-bold mb-1 flex items-center gap-1.5">
+                    <span>✅</span> Reactivate <strong>{staffToggleModal.officer?.name}</strong> ({staffToggleModal.officer?.district})
+                  </p>
+                  <p className="text-[11px] text-emerald-800 leading-relaxed">
+                    Officer active ho jayega aur login kar sakega.
+                  </p>
+                </div>
+              )}
+
+              {staffToggleModal.error && (
+                <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100">
+                  {staffToggleModal.error}
+                </p>
+              )}
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setStaffToggleModal(null)}
+                  disabled={isTogglingStaff}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isTogglingStaff}
+                  className={`font-bold px-4 py-2 rounded-xl text-xs shadow-md active:scale-95 transition-all text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+                    staffToggleModal.targetStatus === 'inactive'
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                      : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/20'
+                  }`}
+                >
+                  {isTogglingStaff ? (
+                    <>
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>{staffToggleModal.targetStatus === 'inactive' ? 'Deactivate' : 'Reactivate'}</span>
+                  )}
                 </button>
               </div>
             </form>
