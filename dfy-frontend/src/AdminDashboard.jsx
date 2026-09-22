@@ -9738,7 +9738,7 @@ const availableDistrictsForFeed = useMemo(() => {
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
             <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-3xl sm:max-w-4xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto font-sans">
               {/* Header */}
-              <div className="flex justify-between items-start pb-3 border-b border-slate-100 mb-3">
+              <div className="flex justify-between items-start pb-3 border-b border-slate-100 mb-3 shrink-0">
                 <div>
                   <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                     <span>Field Officer Attendance Radar</span>
@@ -9770,7 +9770,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* 📅 Date Navigation Bar (Instant In-Memory Derivation) */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1">
                     <span>📅</span> Date:
@@ -9850,7 +9850,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* 📊 District Attendance Rollup Scorecard Pills */}
-              <div className="mb-3 space-y-1.5">
+              <div className="mb-2.5 space-y-1.5 shrink-0">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                     District Rollup Radar ({districtAttendanceRollup.length} Districts)
@@ -9923,7 +9923,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* Navigation Tabs (4 Tabs: Missing, Submitted, On Leave, Defaulters) */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setActiveAttendanceTab('missing')}
@@ -9984,63 +9984,76 @@ const availableDistrictsForFeed = useMemo(() => {
 
               {/* ⏰ Time Filter Chips (Rendered under Submitted Tab) */}
               {activeAttendanceTab === 'submitted' && (
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 custom-scrollbar text-[11px] font-bold">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 shrink-0 mr-1">Time:</span>
-                  <button
-                    onClick={() => setAttendanceTimeFilter('all')}
-                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 ${
-                      attendanceTimeFilter === 'all'
-                        ? 'bg-slate-800 text-white border-slate-800'
-                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    All Times ({timeCounts.all})
-                  </button>
-                  <button
-                    onClick={() => setAttendanceTimeFilter('on_time')}
-                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
-                      attendanceTimeFilter === 'on_time'
-                        ? 'bg-emerald-600 text-white border-emerald-600 font-black'
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <span>🟢</span> On-Time: 5 PM - 8 PM ({timeCounts.on_time})
-                  </button>
-                  <button
-                    onClick={() => setAttendanceTimeFilter('late')}
-                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
-                      attendanceTimeFilter === 'late'
-                        ? 'bg-amber-600 text-white border-amber-600 font-black'
-                        : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                    }`}
-                  >
-                    <span>🟡</span> Late: 8 PM - 10 PM ({timeCounts.late})
-                  </button>
-                  <button
-                    onClick={() => setAttendanceTimeFilter('delayed')}
-                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
-                      attendanceTimeFilter === 'delayed'
-                        ? 'bg-rose-600 text-white border-rose-600 font-black'
-                        : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
-                    }`}
-                  >
-                    <span>🔴</span> Night: &gt; 10 PM ({timeCounts.delayed})
-                  </button>
-                  <button
-                    onClick={() => setAttendanceTimeFilter('early')}
-                    className={`px-2.5 py-1 rounded-lg border transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
-                      attendanceTimeFilter === 'early'
-                        ? 'bg-blue-600 text-white border-blue-600 font-black'
-                        : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
-                    }`}
-                  >
-                    <span>ℹ️</span> Mid-Day: &lt; 5 PM ({timeCounts.early})
-                  </button>
+                <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl px-3 py-2 mb-2.5 shrink-0">
+                  <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar py-0.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 shrink-0 flex items-center gap-1">
+                      <span>⏰</span> Time:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceTimeFilter('all')}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs font-bold ${
+                        attendanceTimeFilter === 'all'
+                          ? 'bg-slate-800 text-white border-slate-800 shadow-xs'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      All Times ({timeCounts.all})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceTimeFilter('on_time')}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs flex items-center gap-1.5 ${
+                        attendanceTimeFilter === 'on_time'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs font-black'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100 font-bold'
+                      }`}
+                    >
+                      <span>🟢</span>
+                      <span>On-Time: 5 PM - 8 PM ({timeCounts.on_time})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceTimeFilter('late')}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs flex items-center gap-1.5 ${
+                        attendanceTimeFilter === 'late'
+                          ? 'bg-amber-600 text-white border-amber-600 shadow-xs font-black'
+                          : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 font-bold'
+                      }`}
+                    >
+                      <span>🟡</span>
+                      <span>Late: 8 PM - 10 PM ({timeCounts.late})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceTimeFilter('delayed')}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs flex items-center gap-1.5 ${
+                        attendanceTimeFilter === 'delayed'
+                          ? 'bg-rose-600 text-white border-rose-600 shadow-xs font-black'
+                          : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100 font-bold'
+                      }`}
+                    >
+                      <span>🔴</span>
+                      <span>Night: &gt; 10 PM ({timeCounts.delayed})</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAttendanceTimeFilter('early')}
+                      className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs flex items-center gap-1.5 ${
+                        attendanceTimeFilter === 'early'
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-black'
+                          : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 font-bold'
+                      }`}
+                    >
+                      <span>ℹ️</span>
+                      <span>Mid-Day: &lt; 5 PM ({timeCounts.early})</span>
+                    </button>
+                  </div>
                 </div>
               )}
 
               {/* Quick Search */}
-              <div className="mb-2.5">
+              <div className="mb-2.5 shrink-0">
                 <div className="relative">
                   <input
                     type="text"
@@ -10062,7 +10075,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* List Container */}
-              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-[220px]">
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-0">
                 {activeAttendanceTab === 'missing' ? (
                   filteredMissing.length > 0 ? (
                     filteredMissing.map((fo, idx) => {
@@ -10267,7 +10280,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* Action Footer */}
-              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 mt-auto">
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 mt-auto shrink-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   {activeAttendanceTab === 'missing' ? (
                     <button 
