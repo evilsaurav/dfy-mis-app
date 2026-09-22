@@ -696,9 +696,10 @@ const MyProfileDashboard = ({
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   };
 
+  const breakdown = stats?.breakdown || {};
   const workingDaysInfo = stats?.working_days_info;
   const targetVal = Number(stats?.target) || 50;
-  const notifAchieved = Number(stats?.breakdown?.notification) || 0;
+  const notifAchieved = Number(breakdown?.notification) || 0;
   const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
   const remainingTarget = Math.max(0, targetVal - notifAchieved);
 
@@ -1368,16 +1369,22 @@ const MyProfileDashboard = ({
 
       <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 px-2">Work Breakdown</h3>
       <div className="grid grid-cols-2 gap-3">
-        {Object.entries(breakdown).map(([k, v]) => {
-           if (v === 0) return null;
-           const label = k.replace(/_/g, " ");
-           return (
-             <div key={k} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider truncate mr-2">{label}</span>
-               <span className="text-lg font-black text-slate-800">{v}</span>
-             </div>
-           )
-         })}
+        {Object.entries(breakdown).filter(([, v]) => Number(v) > 0).length === 0 ? (
+          <p className="col-span-2 text-xs text-slate-400 font-medium text-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+            Abhi tak is mahine koi work record darj nahi hua hai.
+          </p>
+        ) : (
+          Object.entries(breakdown).map(([k, v]) => {
+            if (!v || v === 0) return null;
+            const label = k.replace(/_/g, " ");
+            return (
+              <div key={k} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider truncate mr-2">{label}</span>
+                <span className="text-lg font-black text-slate-800">{v}</span>
+              </div>
+            );
+          })
+        )}
       </div>
         </>
       )}
