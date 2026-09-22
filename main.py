@@ -655,6 +655,90 @@ async def get_raw_monthly_reports(month_prefix: str, force: bool = False) -> lis
     cache.set(cache_key, raw_list, ttl=3600) # 1-hour shared cache (invalidated on mutation)
     return raw_list
 
+def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) -> Optional[dict]:
+    if not isinstance(data, dict):
+        return None
+    wp = data.get("working_place", "Unknown") or data.get("district", "Unknown")
+    c_wp = canonicalize_district(wp)
+    if allowed_dist_set and c_wp not in allowed_dist_set:
+        return None
+
+    fo = str(data.get("fo_name", "Unknown")).strip()
+    dt = str(data.get("date_of_reporting", "") or data.get("date", "")).strip()
+    did = data.get("id") or data.get("doc_id")
+    if not did:
+        did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+
+    return {
+        "id": did,
+        "doc_id": did,
+        "date": dt,
+        "date_of_reporting": dt,
+        "working_place": c_wp,
+        "fo_name": canonicalize_fo_name(fo, c_wp),
+        
+        # Big 5
+        "total_km": data.get("total_km", 0) or 0,
+        "notifications": len(data.get("notification_ids", [])),
+        "tests": len(data.get("sample_tested_ids", [])),
+        "presumptive": len(data.get("presumptive_ids", [])),
+        "doctor_visits": len(data.get("visited_names", [])),
+        
+        # Group 1
+        "hiv_dm": len(data.get("hiv_dm_ids", [])),
+        "dbt": len(data.get("dbt_ids", [])),
+        
+        # Group 2
+        "sample_collection": len(data.get("sample_collection_ids", [])),
+        "outcome_assigned": len(data.get("outcome_assigned_ids", [])),
+        
+        # Group 3
+        "home_visits": len(data.get("home_visit_ids", [])),
+        "contact_tracing": len(data.get("contact_tracing_ids", [])),
+        "follow_ups": len(data.get("follow_up_ids", [])),
+        "face_to_face": len(data.get("face_to_face_ids", [])),
+        
+        # Group 4
+        "documents": len(data.get("documents_ids", [])),
+        "fdc_provided": len(data.get("fdc_provided_ids", [])),
+        "kit_consumption": len(data.get("kit_consumption_ids", [])),
+        
+        # Group 5 (New Fields & Special)
+        "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
+        "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
+        "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
+        "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
+        "consent_with_id": len(data.get("consent_with_id_ids", [])),
+        "culture_dst": len(data.get("culture_dst_ids", [])),
+        
+        # Raw ID Lists for FO Drill-Down Inspector
+        "notification_ids": data.get("notification_ids", []),
+        "hiv_dm_ids": data.get("hiv_dm_ids", []),
+        "dbt_ids": data.get("dbt_ids", []),
+        "sample_collection_ids": data.get("sample_collection_ids", []),
+        "sample_tested_ids": data.get("sample_tested_ids", []),
+        "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
+        "home_visit_ids": data.get("home_visit_ids", []),
+        "contact_tracing_ids": data.get("contact_tracing_ids", []),
+        "follow_up_ids": data.get("follow_up_ids", []),
+        "face_to_face_ids": data.get("face_to_face_ids", []),
+        "presumptive_ids": data.get("presumptive_ids", []),
+        "documents_ids": data.get("documents_ids", []),
+        "fdc_provided_ids": data.get("fdc_provided_ids", []),
+        "fdc_details": data.get("fdc_details", []),
+        "kit_consumption_ids": data.get("kit_consumption_ids", []),
+        "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
+        "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
+        "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
+        "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
+        "consent_with_id_ids": data.get("consent_with_id_ids", []),
+        "culture_dst_ids": data.get("culture_dst_ids", []),
+        "visited_names": data.get("visited_names", []),
+        "remark": data.get("remark", ""),
+        
+        "is_override": data.get("is_override_used", False)
+    }
+
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_current_admin)):
     try:
@@ -662,20 +746,53 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
         last_mut_str = get_last_mutation_str()
 
-        # Delta Sync Guard: If client has fresh cache and no mutations occurred, return NO_CHANGE (0 reads)
+        allowed_dist_set = None
+        if req.districts and req.districts.strip() and req.districts.strip() != "All":
+            allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
+
+        # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
+        if admin.get("role") == "SUB_ADMIN":
+            raw_dists = admin.get("allowed_districts") or admin.get("districts") or []
+            user_allowed = set([canonicalize_district(d) for d in raw_dists])
+            if "All" not in user_allowed:
+                if allowed_dist_set:
+                    allowed_dist_set = allowed_dist_set.intersection(user_allowed)
+                else:
+                    allowed_dist_set = user_allowed
+
+        # Delta Sync Guard: Check if client has existing valid cache
         if req.since and req.cached_count and not req.force_refresh:
-            try:
-                if str(req.since).strip() >= last_mut_str:
-                    recent_deletions = [t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES if t.get("deleted_at", "") > str(req.since).strip()]
-                    return {
-                        "status": "success",
-                        "mode": "NO_CHANGE",
-                        "records": [],
-                        "synced_at": last_mut_str,
-                        "deleted_ids": recent_deletions
-                    }
-            except Exception as e:
-                print(f"Delta sync check notice: {e}")
+            since_str = str(req.since).strip()
+            recent_deletions = [t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES if t.get("deleted_at", "") > since_str]
+
+            if since_str >= last_mut_str:
+                # 0 Firestore reads!
+                return {
+                    "status": "success",
+                    "mode": "NO_CHANGE",
+                    "records": [],
+                    "synced_at": last_mut_str,
+                    "deleted_ids": recent_deletions
+                }
+
+            # Mutations occurred since timestamp: Try serving DELTA from in-memory raw reports
+            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False)
+            if raw_docs:
+                delta_records = []
+                for d in raw_docs:
+                    mod_ts = str(d.get("last_edited_at") or d.get("timestamp_completed") or d.get("submitted_at") or d.get("timestamp") or "")
+                    if mod_ts > since_str:
+                        formatted = format_dashboard_record(d, allowed_dist_set)
+                        if formatted:
+                            delta_records.append(formatted)
+
+                return {
+                    "status": "success",
+                    "mode": "DELTA",
+                    "records": delta_records,
+                    "synced_at": last_mut_str,
+                    "deleted_ids": recent_deletions
+                }
 
         if req.force_refresh:
             record_report_mutation("force_refresh")
@@ -699,97 +816,14 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                     cached["mode"] = "FULL"
                 return cached
 
-        allowed_dist_set = None
-        if req.districts and req.districts.strip() and req.districts.strip() != "All":
-            allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
-
-        # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
-        if admin.get("role") == "SUB_ADMIN":
-            raw_dists = admin.get("allowed_districts") or admin.get("districts") or []
-            user_allowed = set([canonicalize_district(d) for d in raw_dists])
-            if "All" not in user_allowed:
-                if allowed_dist_set:
-                    allowed_dist_set = allowed_dist_set.intersection(user_allowed)
-                else:
-                    allowed_dist_set = user_allowed
-
         # Load from shared monthly reports cache
         records = []
         try:
             raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh))
             for data in raw_docs:
-                wp = data.get("working_place", "Unknown")
-                c_wp = canonicalize_district(wp)
-                if allowed_dist_set and c_wp not in allowed_dist_set:
-                    continue
-
-                records.append({
-                    "date": data.get("date_of_reporting", ""),
-                    "date_of_reporting": data.get("date_of_reporting", ""),
-                    "working_place": c_wp,
-                    "fo_name": canonicalize_fo_name(data.get("fo_name", "Unknown"), c_wp),
-                    
-                    # Big 5
-                    "total_km": data.get("total_km", 0) or 0,
-                    "notifications": len(data.get("notification_ids", [])),
-                    "tests": len(data.get("sample_tested_ids", [])),
-                    "presumptive": len(data.get("presumptive_ids", [])),
-                    "doctor_visits": len(data.get("visited_names", [])),
-                    
-                    # Group 1
-                    "hiv_dm": len(data.get("hiv_dm_ids", [])),
-                    "dbt": len(data.get("dbt_ids", [])),
-                    
-                    # Group 2
-                    "sample_collection": len(data.get("sample_collection_ids", [])),
-                    "outcome_assigned": len(data.get("outcome_assigned_ids", [])),
-                    
-                    # Group 3
-                    "home_visits": len(data.get("home_visit_ids", [])),
-                    "contact_tracing": len(data.get("contact_tracing_ids", [])),
-                    "follow_ups": len(data.get("follow_up_ids", [])),
-                    "face_to_face": len(data.get("face_to_face_ids", [])),
-                    
-                    # Group 4
-                    "documents": len(data.get("documents_ids", [])),
-                    "fdc_provided": len(data.get("fdc_provided_ids", [])),
-                    "kit_consumption": len(data.get("kit_consumption_ids", [])),
-                    
-                    # Group 5 (New Fields & Special)
-                    "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
-                    "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
-                    "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
-                    "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
-                    "consent_with_id": len(data.get("consent_with_id_ids", [])),
-                    "culture_dst": len(data.get("culture_dst_ids", [])),
-                    
-                    # Raw ID Lists for FO Drill-Down Inspector
-                    "notification_ids": data.get("notification_ids", []),
-                    "hiv_dm_ids": data.get("hiv_dm_ids", []),
-                    "dbt_ids": data.get("dbt_ids", []),
-                    "sample_collection_ids": data.get("sample_collection_ids", []),
-                    "sample_tested_ids": data.get("sample_tested_ids", []),
-                    "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
-                    "home_visit_ids": data.get("home_visit_ids", []),
-                    "contact_tracing_ids": data.get("contact_tracing_ids", []),
-                    "follow_up_ids": data.get("follow_up_ids", []),
-                    "face_to_face_ids": data.get("face_to_face_ids", []),
-                    "presumptive_ids": data.get("presumptive_ids", []),
-                    "documents_ids": data.get("documents_ids", []),
-                    "fdc_provided_ids": data.get("fdc_provided_ids", []),
-                    "fdc_details": data.get("fdc_details", []),
-                    "kit_consumption_ids": data.get("kit_consumption_ids", []),
-                    "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
-                    "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
-                    "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
-                    "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
-                    "consent_with_id_ids": data.get("consent_with_id_ids", []),
-                    "culture_dst_ids": data.get("culture_dst_ids", []),
-                    "visited_names": data.get("visited_names", []),
-                    "remark": data.get("remark", ""),
-                    
-                    "is_override": data.get("is_override_used", False)
-                })
+                rec = format_dashboard_record(data, allowed_dist_set)
+                if rec:
+                    records.append(rec)
             
             if records:
                 try:
