@@ -72,6 +72,7 @@ import re
 import openpyxl
 import jwt
 import bcrypt
+import calendar
 
 firebase_creds_env = os.environ.get("FIREBASE_CREDENTIALS")
 if firebase_creds_env:
@@ -2156,9 +2157,9 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 raise HTTPException(status_code=401, detail="Invalid PIN")
             
         # Step 2: Fetch Target (Month-Scoped with Fallback)
+        req_month = (req.month.strip() if req.month else "") or get_ist_now().strftime("%Y-%m")
         target_val = 50
         try:
-            req_month = req.month or datetime.now().strftime("%Y-%m")
             for tid in [f"{req_month}_{c_wp}_{req.fo_name}".replace(" ", "").lower(), f"{c_wp}_{req.fo_name}".replace(" ", "").lower()]:
                 m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
                 if m_doc.exists:
@@ -2316,6 +2317,79 @@ async def my_profile_stats(req: ProfileStatsRequest):
         if streak_days >= 5:
             badges.append({"id": "streak", "title": "Streak Master", "icon": "??", "desc": f"{streak_days} days continuous reporting"})
         
+        # Step 4: Resolve Declared Holidays & Working Days Pacing Info
+        declared_holidays = 1
+        try:
+            p_cache_key = f"pacing_settings_{req_month}_{c_wp}"
+            cached_pacing = cache.get(p_cache_key)
+            if cached_pacing and isinstance(cached_pacing, dict):
+                declared_holidays = int(cached_pacing.get("declared_holidays", 1))
+            else:
+                dist_doc_id = f"{req_month}_{c_wp}"
+                doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(dist_doc_id).get())
+                if doc_snap.exists:
+                    declared_holidays = int(doc_snap.to_dict().get("declared_holidays", 1))
+                    cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
+                else:
+                    state_doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(req_month).get())
+                    if state_doc_snap.exists:
+                        declared_holidays = int(state_doc_snap.to_dict().get("declared_holidays", 1))
+                    else:
+                        declared_holidays = 1
+                    cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
+        except Exception as p_err:
+            print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
+            declared_holidays = 1
+
+        try:
+            y_str, m_str = req_month.split("-")
+            year_val, month_val = int(y_str), int(m_str)
+            _, total_days = calendar.monthrange(year_val, month_val)
+        except Exception:
+            now_d = get_ist_now().date()
+            year_val, month_val = now_d.year, now_d.month
+            _, total_days = calendar.monthrange(year_val, month_val)
+
+        ist_today = get_ist_now().date()
+        if req_month == ist_today.strftime("%Y-%m"):
+            day_of_month = ist_today.day
+        else:
+            day_of_month = total_days
+
+        sundays_in_month = 0
+        elapsed_sundays = 0
+        for d_idx in range(1, total_days + 1):
+            dt_cur = datetime(year_val, month_val, d_idx).date()
+            if dt_cur.weekday() == 6:  # Sunday
+                sundays_in_month += 1
+                if d_idx <= day_of_month:
+                    elapsed_sundays += 1
+
+        total_working_days = max(1, total_days - sundays_in_month - declared_holidays)
+        elapsed_working_days = max(0, min(total_working_days, day_of_month - elapsed_sundays - min(declared_holidays, int((day_of_month / total_days) * declared_holidays))))
+        remaining_working_days = max(0, total_working_days - elapsed_working_days)
+
+        notif_achieved = stats.get("notification", 0)
+        remaining_target = max(0, target_val - notif_achieved)
+        required_run_rate = round(remaining_target / remaining_working_days, 1) if remaining_working_days > 0 else float(remaining_target)
+        current_run_rate = round(notif_achieved / max(1, elapsed_working_days), 1)
+        expected_to_date = round((target_val * elapsed_working_days) / total_working_days)
+        pace_diff = notif_achieved - expected_to_date
+
+        working_days_info = {
+            "month": req_month,
+            "total_days": total_days,
+            "sundays": sundays_in_month,
+            "declared_holidays": declared_holidays,
+            "total_working_days": total_working_days,
+            "elapsed_working_days": elapsed_working_days,
+            "remaining_working_days": remaining_working_days,
+            "required_run_rate": required_run_rate,
+            "current_run_rate": current_run_rate,
+            "expected_to_date": expected_to_date,
+            "pace_diff": pace_diff
+        }
+
         res = {
             "success": True,
             "target": target_val,
@@ -2324,7 +2398,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
             "daily_history": daily_history,
             "streak_days": streak_days,
             "total_km": total_km_month,
-            "badges": badges
+            "badges": badges,
+            "working_days_info": working_days_info
         }
         cache.set(cache_key, res, ttl=20)
         return res
@@ -7707,6 +7782,161 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# --- Backend Declared Holidays Pacing Sync Endpoints (/admin/pacing/settings) ---
+# =========================================================================
+
+class PacingSettingsReq(BaseModel):
+    month: str  # YYYY-MM
+    district: str = "all"  # "all" or canonical district
+    declared_holidays: int = 1
+
+
+@app.get("/admin/pacing/settings")
+async def get_pacing_settings(
+    month: Optional[str] = Query(default=None),
+    district: Optional[str] = Query(default=None),
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        clean_month = month.strip() if month else get_ist_now().strftime("%Y-%m")
+        if not re.match(r'^\d{4}-\d{2}$', clean_month):
+            raise HTTPException(status_code=400, detail="Invalid month format (YYYY-MM required)")
+
+        clean_dist = None
+        if district and district.strip().lower() != "all":
+            clean_dist = canonicalize_district(district.strip())
+
+        cache_key = f"pacing_settings_{clean_month}_{clean_dist or 'all'}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Resolution logic:
+        # 1. If district is provided and canonical district != "all":
+        # Check Firestore collection pacing_settings document f"{clean_month}_{clean_dist}".
+        if clean_dist:
+            doc = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(f"{clean_month}_{clean_dist}").get())
+            if doc.exists:
+                d = doc.to_dict() or {}
+                res = {
+                    "success": True,
+                    "month": clean_month,
+                    "district": clean_dist,
+                    "declared_holidays": d.get("declared_holidays", 1),
+                    "is_override": True
+                }
+                cache.set(cache_key, res, ttl=1800)
+                return res
+
+        # 2. Check state default document f"{clean_month}".
+        state_doc = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(clean_month).get())
+        if state_doc.exists:
+            d = state_doc.to_dict() or {}
+            res = {
+                "success": True,
+                "month": clean_month,
+                "district": "all",
+                "declared_holidays": d.get("declared_holidays", 1),
+                "is_override": False
+            }
+            cache.set(cache_key, res, ttl=1800)
+            return res
+
+        # 3. Fallback: return default
+        res = {
+            "success": True,
+            "month": clean_month,
+            "district": clean_dist or "all",
+            "declared_holidays": 1,
+            "is_override": False
+        }
+        cache.set(cache_key, res, ttl=1800)
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/admin/pacing/settings")
+async def update_pacing_settings(
+    req: PacingSettingsReq,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        clean_month = req.month.strip() if req.month else ""
+        if not clean_month or not re.match(r'^\d{4}-\d{2}$', clean_month):
+            raise HTTPException(status_code=400, detail="Invalid month format (YYYY-MM required)")
+
+        clamped_holidays = max(0, min(15, int(req.declared_holidays)))
+
+        clean_dist = "all"
+        if req.district and req.district.strip().lower() != "all":
+            clean_dist = canonicalize_district(req.district.strip())
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            if clean_dist == "all":
+                raise HTTPException(status_code=403, detail="Sub-Admins cannot modify statewide default holidays.")
+            allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+            if "All" not in allowed and "all" not in allowed_c and clean_dist.lower() not in allowed_c and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
+
+        doc_id = clean_month if clean_dist == "all" else f"{clean_month}_{clean_dist}"
+
+        actor_name = admin.get("name") or admin.get("username") or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username") or "admin"
+        actor_role = admin.get("role", "SUPER_ADMIN")
+        updated_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+
+        doc_data = {
+            "month": clean_month,
+            "district": clean_dist,
+            "declared_holidays": clamped_holidays,
+            "updated_by": actor_name,
+            "updated_by_id": actor_id,
+            "updated_by_role": actor_role,
+            "updated_at": updated_at
+        }
+
+        await asyncio.to_thread(lambda: db.collection("pacing_settings").document(doc_id).set(doc_data, merge=True))
+
+        # Cache eviction
+        cache.delete(f"pacing_settings_{clean_month}_{clean_dist}")
+        cache.delete(f"pacing_settings_{clean_month}_all")
+        if clean_dist == "all":
+            cache.delete_prefix(f"pacing_settings_{clean_month}")
+        cache.delete_prefix("profile_")
+
+        # Log admin activity
+        await log_admin_activity(
+            action_type="PACING_SETTINGS_UPDATED",
+            details=f"Updated declared holidays for {clean_dist} ({clean_month}) to {clamped_holidays}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            diff={
+                "month": clean_month,
+                "district": clean_dist,
+                "declared_holidays": clamped_holidays
+            }
+        )
+
+        return {
+            "success": True,
+            "message": "Pacing settings saved successfully.",
+            "declared_holidays": clamped_holidays
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 

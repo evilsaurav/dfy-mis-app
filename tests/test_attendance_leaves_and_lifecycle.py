@@ -71,15 +71,20 @@ class MockFirestore:
             MockDocRef(name, doc_id, self.store).get()
             for doc_id in list(self.store.get(name, {}).keys())
         ]
+        coll_mock.where.side_effect = lambda *args, **kwargs: coll_mock
         return coll_mock
 
 @pytest.fixture(autouse=True)
 def clear_attendance_cache():
     cache.delete_prefix("attendance_")
     cache.delete_prefix("admin_staff_full_list")
+    cache.delete_prefix("pacing_settings_")
+    cache.delete_prefix("profile_")
     yield
     cache.delete_prefix("attendance_")
     cache.delete_prefix("admin_staff_full_list")
+    cache.delete_prefix("pacing_settings_")
+    cache.delete_prefix("profile_")
 
 @pytest.mark.asyncio
 async def test_mark_and_unmark_leave_success():
@@ -385,4 +390,130 @@ async def test_staff_toggle_status_and_pin_block():
             )
             assert rbac_allowed.status_code == 200
             assert rbac_allowed.json().get("success") is True
+
+
+@pytest.mark.asyncio
+async def test_pacing_settings_and_profile_working_days():
+    mock_db = MockFirestore()
+    superadmin_token = make_admin_token(role="SUPER_ADMIN")
+    superadmin_headers = {"Authorization": f"Bearer {superadmin_token}"}
+
+    subadmin_token = make_admin_token(
+        role="SUB_ADMIN",
+        allowed_districts=["Jamui"],
+        username="subadmin_jamui"
+    )
+    subadmin_headers = {"Authorization": f"Bearer {subadmin_token}"}
+
+    # Pre-populate staff_directory and staff_targets for officer
+    mock_db.store["staff_directory"] = {
+        "jamui_rameshkumar": {
+            "district": "Jamui",
+            "name": "Ramesh Kumar",
+            "pin": "1234",
+            "status": "active",
+            "is_active": True
+        }
+    }
+    mock_db.store["staff_targets"] = {
+        "2026-09_jamui_rameshkumar": {
+            "target": 50
+        }
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            # 1. Super Admin sets statewide default holidays (month=2026-09, district="all", declared_holidays=3)
+            res_state = await ac.post(
+                "/admin/pacing/settings",
+                json={"month": "2026-09", "district": "all", "declared_holidays": 3},
+                headers=superadmin_headers
+            )
+            assert res_state.status_code == 200, res_state.text
+            assert res_state.json().get("success") is True
+            assert res_state.json().get("declared_holidays") == 3
+
+            # 2. Super Admin sets district override for Jamui (declared_holidays=2)
+            res_jamui_super = await ac.post(
+                "/admin/pacing/settings",
+                json={"month": "2026-09", "district": "Jamui", "declared_holidays": 2},
+                headers=superadmin_headers
+            )
+            assert res_jamui_super.status_code == 200
+            assert res_jamui_super.json().get("declared_holidays") == 2
+
+            # 3. Sub-Admin for Jamui sets Jamui override (declared_holidays=4) -> HTTP 200
+            res_jamui_sub = await ac.post(
+                "/admin/pacing/settings",
+                json={"month": "2026-09", "district": "Jamui", "declared_holidays": 4},
+                headers=subadmin_headers
+            )
+            assert res_jamui_sub.status_code == 200
+            assert res_jamui_sub.json().get("declared_holidays") == 4
+
+            # 4. Sub-Admin for Jamui tries to set statewide "all" -> HTTP 403
+            res_sub_all = await ac.post(
+                "/admin/pacing/settings",
+                json={"month": "2026-09", "district": "all", "declared_holidays": 1},
+                headers=subadmin_headers
+            )
+            assert res_sub_all.status_code == 403
+            assert "Sub-Admins cannot modify statewide default holidays" in res_sub_all.json().get("detail", "")
+
+            # 5. Sub-Admin for Jamui tries to set Gaya override -> HTTP 403
+            res_sub_gaya = await ac.post(
+                "/admin/pacing/settings",
+                json={"month": "2026-09", "district": "Gaya", "declared_holidays": 1},
+                headers=subadmin_headers
+            )
+            assert res_sub_gaya.status_code == 403
+            assert "Permission denied" in res_sub_gaya.json().get("detail", "")
+
+            # 6. Query GET /admin/pacing/settings?month=2026-09&district=Jamui -> gets Jamui override (4 holidays, is_override=True)
+            get_jamui = await ac.get("/admin/pacing/settings?month=2026-09&district=Jamui", headers=superadmin_headers)
+            assert get_jamui.status_code == 200
+            d_jamui = get_jamui.json()
+            assert d_jamui.get("success") is True
+            assert d_jamui.get("month") == "2026-09"
+            assert d_jamui.get("district") == "Jamui"
+            assert d_jamui.get("declared_holidays") == 4
+            assert d_jamui.get("is_override") is True
+
+            # 7. Query GET /admin/pacing/settings?month=2026-09&district=Gaya -> gets state default (3 holidays, is_override=False)
+            get_gaya = await ac.get("/admin/pacing/settings?month=2026-09&district=Gaya", headers=superadmin_headers)
+            assert get_gaya.status_code == 200
+            d_gaya = get_gaya.json()
+            assert d_gaya.get("success") is True
+            assert d_gaya.get("month") == "2026-09"
+            assert d_gaya.get("declared_holidays") == 3
+            assert d_gaya.get("is_override") is False
+
+            # 8. Query /my-profile-stats -> verifies working_days_info present with correct fields
+            prof_res = await ac.post(
+                "/my-profile-stats",
+                json={
+                    "working_place": "Jamui",
+                    "fo_name": "Ramesh Kumar",
+                    "pin": "1234",
+                    "month": "2026-09"
+                }
+            )
+            assert prof_res.status_code == 200, prof_res.text
+            prof_data = prof_res.json()
+            assert prof_data.get("success") is True
+            assert "working_days_info" in prof_data
+            winfo = prof_data["working_days_info"]
+            assert winfo["month"] == "2026-09"
+            assert winfo["total_days"] == 30
+            assert winfo["sundays"] == 4
+            assert winfo["declared_holidays"] == 4
+            assert winfo["total_working_days"] == 22  # 30 - 4 - 4
+            assert "elapsed_working_days" in winfo
+            assert "remaining_working_days" in winfo
+            assert "required_run_rate" in winfo
+            assert "current_run_rate" in winfo
+            assert "expected_to_date" in winfo
+            assert "pace_diff" in winfo
+
 
