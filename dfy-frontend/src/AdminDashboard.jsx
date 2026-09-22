@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 
@@ -214,6 +214,7 @@ export default function AdminDashboard() {
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [lastSyncedTime, setLastSyncedTime] = useState('');
   const [syncStatus, setSyncStatus] = useState('LIVE'); // 'LIVE' | 'SYNCING' | 'UP_TO_DATE'
+  const lastFocusSyncRef = useRef(Date.now());
 
   // Toast Notification System
   const [toast, setToast] = useState(null);
@@ -2626,7 +2627,7 @@ Keep this file safe in your Google Drive or personal diary.
   };
 
 
-  const fetchData = async (forceRefresh = false) => {
+  const fetchData = async (forceRefresh = false, silent = false) => {
     const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
     let cachedData = null;
     try {
@@ -2640,13 +2641,13 @@ Keep this file safe in your Google Drive or personal diary.
     if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !forceRefresh) {
       setRawRecords(cachedData.records);
       if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
       setSyncStatus('UP_TO_DATE');
     } else {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
     }
 
-    setError('');
+    if (!silent) setError('');
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
@@ -2671,12 +2672,44 @@ Keep this file safe in your Google Drive or personal diary.
         throw new Error(errData.detail || `Server responded with status ${res.status}`);
       }
       const data = await res.json();
+      lastFocusSyncRef.current = Date.now();
 
       if (data.mode === 'NO_CHANGE') {
         // Data has not changed since last sync! 0 Firestore reads!
         setSyncStatus('UP_TO_DATE');
         if (data.synced_at) setLastSyncedTime(data.synced_at);
+      } else if (data.mode === 'DELTA') {
+        setRawRecords(prev => {
+          const currentList = (prev && prev.length > 0) ? prev : (cachedData?.records || []);
+          const map = new Map(currentList.map(r => [r.id || r.doc_id, r]));
+          
+          // 1. Remove deleted tombstones
+          if (Array.isArray(data.deleted_ids)) {
+            data.deleted_ids.forEach(delId => map.delete(delId));
+          }
+          // 2. Upsert newly modified / added records
+          if (Array.isArray(data.records)) {
+            data.records.forEach(newRec => {
+              const id = newRec.id || newRec.doc_id;
+              if (id) map.set(id, newRec);
+            });
+          }
+          const updated = Array.from(map.values());
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify({
+              synced_at: data.synced_at || new Date().toLocaleString(),
+              records: updated
+            }));
+          } catch (storageErr) {
+            console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+          }
+          return updated;
+        });
+        const syncStamp = data.synced_at || new Date().toLocaleString();
+        setLastSyncedTime(syncStamp);
+        setSyncStatus('LIVE');
       } else {
+        // Mode FULL
         const newRecords = Array.isArray(data.records) ? data.records : [];
         setRawRecords(newRecords);
         const syncStamp = data.synced_at || new Date().toLocaleString();
@@ -2692,21 +2725,25 @@ Keep this file safe in your Google Drive or personal diary.
         }
       }
 
-      if (currentUser?.role !== 'SUB_ADMIN') {
-        setSelectedDistrict('All');
+      if (forceRefresh) {
+        if (currentUser?.role !== 'SUB_ADMIN') {
+          setSelectedDistrict('All');
+        }
+        setSelectedFO('All');
       }
-      setSelectedFO('All');
     } catch (err) {
       console.error("Dashboard fetch error:", err);
-      // Resilient fallback: If offline/network glitch and cachedData exists, keep displaying it
-      if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0) {
-        setRawRecords(cachedData.records);
-        setError('Offline notice: Showing previously synchronized data.');
-      } else {
-        setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
+      if (!silent) {
+        // Resilient fallback: If offline/network glitch and cachedData exists, keep displaying it
+        if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0) {
+          setRawRecords(cachedData.records);
+          setError('Offline notice: Showing previously synchronized data.');
+        } else {
+          setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
+        }
       }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   };
 
@@ -2773,6 +2810,31 @@ Keep this file safe in your Google Drive or personal diary.
       fetchDuplicateScan();
     }
   }, [showDuplicateModal, duplicateRadarTab]);
+
+  // Background Silent Auto-Sync & Tab-Focus Sync (0-read delta polling)
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    // 1. Silent interval every 45 seconds
+    const intervalId = setInterval(() => {
+      fetchData(false, true); // forceRefresh = false, silent = true
+    }, 45000);
+
+    // 2. Tab focus listener: delta sync if last sync was > 30s ago
+    const handleFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusSyncRef.current > 30000) {
+        lastFocusSyncRef.current = now;
+        fetchData(false, true);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [isAuthenticated, month]);
 
   // Derived Filter Lists (Filtered by RBAC for Sub-Admins)
   const districts = useMemo(() => {
@@ -4302,23 +4364,31 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    fetchData(true);
-                    fetchAttendance();
-                    fetchDirectory();
-                    loadTargets('All');
-                    fetchDuplicateAudit();
-                    fetchDuplicateScan(true);
-                    fetchStaffList();
-                    fetchActiveBroadcasts();
-                    if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
-                    showToast("✓ Dashboard refreshed from live database!", "success");
+                  onClick={(e) => {
+                    if (e.shiftKey) {
+                      // Hard refresh / diagnostic bypass
+                      fetchData(true);
+                      fetchAttendance(true);
+                      fetchDirectory();
+                      loadTargets('All');
+                      fetchDuplicateAudit();
+                      fetchDuplicateScan(true);
+                      fetchStaffList();
+                      fetchActiveBroadcasts();
+                      if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
+                      showToast("✓ Full database refresh complete (forced reload).", "info");
+                    } else {
+                      // Smart Delta Refresh: 0-read / minimal read overhead
+                      fetchData(false);
+                      fetchAttendance(false);
+                      showToast("✓ Synced with database (delta check complete).", "success");
+                    }
                   }}
                   disabled={isLoading}
                   className={`bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                     isLoading ? 'cursor-wait animate-pulse' : ''
                   }`}
-                  title="Refresh Dashboard & Sync Latest Reports"
+                  title="Click to sync latest updates (Delta Mode). Shift+Click for full database reload."
                 >
                   <svg className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
