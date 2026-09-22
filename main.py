@@ -801,6 +801,7 @@ async def get_directory():
 
 @app.post("/verify-pin")
 async def verify_pin(data: PinCheck):
+    cached_pin = None
     try:
         c_wp = canonicalize_district(data.working_place)
         clean_fo = re.sub(r'[^a-zA-Z0-9]', '', data.fo_name).lower()
@@ -829,6 +830,9 @@ async def verify_pin(data: PinCheck):
         cached_pin = cache.get(cache_key)
         
         if cached_pin is not None:
+            if cached_pin == "__DEACTIVATED__":
+                pin_rate_limiter.record_failure(primary_id)
+                return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
             if verify_password(str(data.pin), str(cached_pin)) or str(data.pin) == str(cached_pin):
                 pin_rate_limiter.reset(primary_id)
                 return {"valid": True}
@@ -841,8 +845,9 @@ async def verify_pin(data: PinCheck):
                 if staff_doc.exists:
                     doc_data = staff_doc.to_dict() or {}
                     if doc_data.get("is_active") is False or doc_data.get("status") == "inactive":
+                        cache.set(cache_key, "__DEACTIVATED__", ttl=3600)
                         pin_rate_limiter.record_failure(primary_id)
-                        return {"valid": False, "error": "Staff account is inactive."}
+                        return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
                     real_pin = doc_data.get("pin")
                     cache.set(cache_key, str(real_pin), ttl=3600)
                     if verify_password(str(data.pin), str(real_pin)) or str(data.pin) == str(real_pin):
@@ -853,12 +858,25 @@ async def verify_pin(data: PinCheck):
         except Exception as fe:
             print(f"PIN Firestore check notice (quota/network): {fe}")
             # If 4-digit PIN entered during Firestore read quota outage, allow in fallback mode
+            # BUT ensure fallback digit bypass NEVER bypasses a known inactive account
+            if cached_pin == "__DEACTIVATED__":
+                pin_rate_limiter.record_failure(primary_id)
+                return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
+            try:
+                baseline = load_baseline_staff_directory()
+                active_fos = [name.strip().lower() for name in baseline.get(c_wp, [])]
+                if active_fos and data.fo_name.strip().lower() not in active_fos:
+                    return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
+            except Exception:
+                pass
             if str(data.pin).isdigit() and len(str(data.pin)) == 4:
                 return {"valid": True, "fallback": True}
 
         pin_rate_limiter.record_failure(primary_id)
         return {"valid": False}
     except Exception:
+        if cached_pin == "__DEACTIVATED__":
+            return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
         if str(data.pin).isdigit() and len(str(data.pin)) == 4:
             return {"valid": True, "fallback": True}
         return {"valid": False}
@@ -4019,10 +4037,23 @@ class DeleteStaffReq(BaseModel):
     district: str
     name: str
 
+class ToggleStaffStatusReq(BaseModel):
+    district: str
+    fo_name: str
+    status: str  # "active" | "inactive"
+    effective_date: Optional[str] = None  # YYYY-MM-DD
+
 @app.get("/admin/staff/list")
-async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+async def get_staff_full_list(
+    districts: Optional[str] = None,
+    status_filter: Optional[str] = "active",
+    admin: dict = Depends(get_current_admin)
+):
     try:
-        cache_key = f"admin_staff_full_list_{districts or 'all'}"
+        norm_status = (status_filter or "active").strip().lower()
+        if norm_status not in ["active", "inactive", "all"]:
+            norm_status = "active"
+        cache_key = f"admin_staff_full_list_{districts or 'all'}_{norm_status}"
         cached = cache.get(cache_key)
         if cached is not None and isinstance(cached, dict):
             return cached
@@ -4035,8 +4066,13 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
         staff = []
         for doc in docs:
             d = doc.to_dict()
-            if d.get("is_active") is False or d.get("status") == "inactive":
+            is_active = d.get("is_active") is not False and d.get("status") != "inactive"
+            if norm_status == "active" and not is_active:
                 continue
+            elif norm_status == "inactive" and is_active:
+                continue
+            # If norm_status == "all", include both
+
             dist = d.get("district")
             if dist and d.get("name"):
                 if allowed_dist_set and dist not in allowed_dist_set:
@@ -4048,8 +4084,9 @@ async def get_staff_full_list(districts: Optional[str] = None, admin: dict = Dep
                     "pin": str(d.get("pin", "")),
                     "designation": d.get("designation", "Field Officer"),
                     "created_at": d.get("created_at", ""),
-                    "status": "active",
-                    "is_active": True
+                    "status": "active" if is_active else "inactive",
+                    "is_active": is_active,
+                    "inactive_since": d.get("inactive_since")
                 })
         staff.sort(key=lambda s: (s["district"], s["name"]))
         res = {"success": True, "staff": staff}
@@ -4331,6 +4368,139 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         )
         
         return {"success": True, "message": f"Officer '{clean_name}' removed from directory."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/staff/toggle-status")
+async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(get_current_admin)):
+    try:
+        clean_dist = canonicalize_district(req.district.strip()) if req.district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="District is required.")
+        clean_fo = req.fo_name.strip() if req.fo_name else ""
+        if not clean_fo:
+            raise HTTPException(status_code=400, detail="Staff name is required.")
+
+        # Sub-admin RBAC check
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+            if "All" not in allowed and "all" not in allowed_c and clean_dist.lower() not in allowed_c and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot manage staff in district '{clean_dist}'.")
+
+        # Candidate doc IDs resolution
+        clean_fo_alpha = re.sub(r'[^a-zA-Z0-9]', '', clean_fo).lower()
+        candidate_ids = [
+            f"{clean_dist}_{clean_fo}".replace(" ", "").lower(),
+            f"{req.district.strip()}_{clean_fo}".replace(" ", "").lower(),
+            f"{clean_dist.replace(' ', '')}_{clean_fo_alpha}".lower()
+        ]
+        if "aurangabad" in clean_dist.lower():
+            candidate_ids.extend([f"aurangabad_{clean_fo_alpha}", f"aurangabad_{clean_fo}".replace(" ", "").lower()])
+        if "champaran" in clean_dist.lower():
+            candidate_ids.extend([f"eastchamparan_{clean_fo_alpha}", f"east_champaran_{clean_fo_alpha}"])
+        if "bhojpur" in clean_dist.lower():
+            candidate_ids.extend([f"bhojpur_{clean_fo_alpha}"])
+
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+        primary_id = candidate_ids[0]
+
+        target_doc = None
+        target_ref = None
+        target_doc_id = None
+        for cid in candidate_ids:
+            doc_ref = db.collection("staff_directory").document(cid)
+            doc_snap = await asyncio.to_thread(doc_ref.get)
+            if doc_snap.exists:
+                target_doc = doc_snap
+                target_ref = doc_ref
+                target_doc_id = cid
+                break
+
+        if not target_doc:
+            raise HTTPException(status_code=404, detail=f"Staff record for '{clean_fo}' in '{clean_dist}' not found.")
+
+        today_str = get_ist_now().strftime("%Y-%m-%d")
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+
+        status_norm = req.status.strip().lower()
+        if status_norm == "inactive":
+            is_active = False
+            status_val = "inactive"
+            inactive_since = req.effective_date.strip() if req.effective_date and req.effective_date.strip() else today_str
+            update_data = {
+                "is_active": False,
+                "status": "inactive",
+                "inactive_since": inactive_since,
+                "updated_at": now_str
+            }
+        elif status_norm == "active":
+            is_active = True
+            status_val = "active"
+            inactive_since = None
+            update_data = {
+                "is_active": True,
+                "status": "active",
+                "inactive_since": None,
+                "updated_at": now_str
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Invalid status. Must be 'active' or 'inactive'.")
+
+        await asyncio.to_thread(lambda: target_ref.set(update_data, merge=True))
+
+        # Sync staff_directory_snapshot.json (remove if inactive, add if active)
+        if os.path.exists("staff_directory_snapshot.json"):
+            try:
+                with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
+                    snap = json.load(f)
+                if snap and isinstance(snap, dict):
+                    if clean_dist not in snap:
+                        snap[clean_dist] = []
+                    existing_names_lower = [n.strip().lower() for n in snap[clean_dist]]
+                    if not is_active:
+                        snap[clean_dist] = [n for n in snap[clean_dist] if n.strip().lower() != clean_fo.lower()]
+                    else:
+                        if clean_fo.lower() not in existing_names_lower:
+                            snap[clean_dist].append(clean_fo)
+                            snap[clean_dist].sort()
+                    with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
+                        json.dump(snap, f, indent=2)
+            except Exception as se:
+                print(f"Failed to update staff_directory_snapshot.json: {se}")
+
+        # Invalidate caches
+        cache.delete(f"pin_{target_doc_id}")
+        cache.delete(f"pin_{primary_id}")
+        cache.delete("staff_directory_list")
+        cache.delete("staff_directory_dict")
+        cache.delete_prefix("admin_staff_full_list")
+        cache.delete_prefix("attendance_")
+
+        # Admin Activity Logging
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="STAFF_STATUS_TOGGLED",
+            details=f"Admin {actor_name} set status of officer '{clean_fo}' in {clean_dist} to {status_val}",
+            district=clean_dist,
+            target_officer=clean_fo,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={
+                "district": clean_dist,
+                "target_officer": clean_fo,
+                "status": status_val,
+                "is_active": is_active,
+                "inactive_since": inactive_since
+            }
+        )
+
+        return {"success": True, "message": f"Staff '{req.fo_name}' status set to {req.status}."}
     except HTTPException:
         raise
     except Exception as e:
