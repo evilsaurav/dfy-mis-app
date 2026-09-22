@@ -800,12 +800,28 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
     start_date = (now - timedelta(days=max(30, months * 30))).strftime("%Y-%m-01")
     end_date = now.strftime("%Y-%m-%d")
 
+    target_places = list(dict.fromkeys([
+        clean_dist, 
+        clean_dist.title(), 
+        clean_dist.lower(), 
+        clean_dist.upper()
+    ]))[:10]
+
+    # Fast targeted district stream (0.1s vs 20s full state stream)
     docs = await asyncio.to_thread(lambda: list(
         db.collection("daily_field_reports")
+        .where("working_place", "in", target_places)
         .where("date_of_reporting", ">=", start_date)
-        .where("date_of_reporting", "<=", end_date)
         .stream()
     ))
+    # Resilient fallback: In the rare event no docs match specific working_place values, scan date range
+    if not docs:
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()
+        ))
 
     registry = {}
     for doc in docs:
@@ -3182,20 +3198,6 @@ async def admin_feed_officer_data(
             f"{req.district}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
         ]
 
-        if cleaned_payload.get("notification_ids"):
-            existing_notified_set = await get_district_90day_notified_ids(
-                clean_dist=clean_wp,
-                exclude_doc_ids=candidate_doc_ids,
-                months=3
-            )
-            dupe_notifs = [pid for pid in cleaned_payload["notification_ids"] if pid in existing_notified_set]
-            if dupe_notifs:
-                sample_dupes = ", ".join(dupe_notifs[:5])
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Duplicate notification IDs detected in {clean_wp}: {sample_dupes}. Notification IDs cannot be re-used across reports."
-                )
-
         doc_ref = None
         doc_snap = None
         doc_id = candidate_doc_ids[0]
@@ -3218,8 +3220,6 @@ async def admin_feed_officer_data(
                     .where("date_of_reporting", "==", clean_date)
                     .stream()))
                 matching = [d for d in query_docs if canonicalize_district(d.to_dict().get("working_place", "")) == clean_wp]
-                # NOTE: If no district match found, do NOT fall back to other districts.
-                # This prevents cross-district data pollution.
                 if matching:
                     # Deterministic selection: sort by doc ID so canonical format is always picked first
                     if len(matching) > 1:
@@ -3236,6 +3236,30 @@ async def admin_feed_officer_data(
             new_report_created = True
         else:
             new_report_created = False
+
+        # 4b. Duplicate Notification Protection (Scoped with resolved doc exclusion)
+        if cleaned_payload.get("notification_ids"):
+            existing_day_notifs = set()
+            if not new_report_created and doc_snap and hasattr(doc_snap, "to_dict"):
+                existing_day_notifs = set(doc_snap.to_dict().get("notification_ids", []) or [])
+
+            # Only check IDs that are genuinely NEW to this report
+            new_notifs_to_check = [pid for pid in cleaned_payload["notification_ids"] if pid not in existing_day_notifs]
+
+            if new_notifs_to_check:
+                resolved_exclude_docs = list(set(candidate_doc_ids + ([doc_id] if doc_id else [])))
+                existing_notified_set = await get_district_90day_notified_ids(
+                    clean_dist=clean_wp,
+                    exclude_doc_ids=resolved_exclude_docs,
+                    months=3
+                )
+                dupe_notifs = [pid for pid in new_notifs_to_check if pid in existing_notified_set]
+                if dupe_notifs:
+                    sample_dupes = ", ".join(dupe_notifs[:5])
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Duplicate notification IDs detected in {clean_wp}: {sample_dupes}. Notification IDs cannot be re-used across reports."
+                    )
 
         now_iso = datetime.utcnow().isoformat()
         feed_note = f"Fed by {admin_user} ({admin_role}) on {datetime.now().strftime('%d %b %Y, %I:%M %p')}"

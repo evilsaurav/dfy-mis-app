@@ -2793,6 +2793,7 @@ const availableDistrictsForFeed = useMemo(() => {
     }
 
     setFeedLoading(true);
+    let feedSavedSuccessfully = false;
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await authFetch(`${API_BASE_URL}/admin/feed-officer-data`, {
@@ -2800,17 +2801,45 @@ const availableDistrictsForFeed = useMemo(() => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      const data = await res.json();
+      
+      let data = {};
+      try {
+        data = await res.json();
+      } catch (jsonErr) {
+        data = { detail: `Server responded with status ${res.status}: ${res.statusText || 'Unexpected server response'}` };
+      }
+
       if (res.ok) {
+        feedSavedSuccessfully = true;
         setFeedSuccess(`✓ Saved successfully for ${feedFoName} (${feedDistrict}) on ${feedDate}! Total ${totalIdsCount} Patient IDs processed.`);
-        await fetchData(true);
+        setFeedError('');
       } else {
-        setFeedError(data.detail || 'Failed to feed data.');
+        const errorMsg = typeof data?.detail === 'string'
+          ? data.detail
+          : Array.isArray(data?.detail)
+            ? data.detail.map(d => (d.msg || JSON.stringify(d))).join(', ')
+            : (data?.detail ? JSON.stringify(data.detail) : 'Failed to feed data.');
+        setFeedError(errorMsg);
       }
     } catch (err) {
-      setFeedError('Network error connecting to backend.');
+      console.error('[handleAdminFeedSubmit] Error connecting to backend:', err);
+      const isFailedFetch = err?.name === 'TypeError' || String(err?.message || '').toLowerCase().includes('failed to fetch');
+      setFeedError(
+        isFailedFetch
+          ? 'Network connection error: Unable to reach backend server. Please verify your internet or retry in a few moments.'
+          : `Error saving data: ${err.message || 'Unknown network error'}`
+      );
     } finally {
       setFeedLoading(false);
+    }
+
+    // Decoupled Background Refresh: Never let dashboard re-sync network lag mask a successful save
+    if (feedSavedSuccessfully) {
+      try {
+        await fetchData(true);
+      } catch (refreshErr) {
+        console.warn('[handleAdminFeedSubmit] Background dashboard refresh notice:', refreshErr);
+      }
     }
   };
 
@@ -3802,11 +3831,19 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-1.5">
                 {lastSyncedTime && (
                   <div 
-                    className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-teal-50/70 border border-teal-200/80 text-[11px] font-bold text-teal-900 shadow-2xs"
+                    className={`hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11px] font-bold shadow-2xs transition-all ${
+                      syncStatus === 'SYNCING'
+                        ? 'bg-amber-50/90 border-amber-300 text-amber-900 animate-pulse'
+                        : 'bg-teal-50/80 border-teal-200/90 text-teal-900'
+                    }`}
                     title={`Last Synced: ${lastSyncedTime} (${syncStatus === 'UP_TO_DATE' ? 'Data verified up-to-date via delta cache' : 'Live synchronized'})`}
                   >
-                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'SYNCING' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500 shadow-xs shadow-emerald-500/50'}`}></span>
-                    <span>{syncStatus === 'SYNCING' ? 'Syncing...' : syncStatus === 'UP_TO_DATE' ? 'Cached (Up-to-date)' : 'Live Synced'}</span>
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      syncStatus === 'SYNCING' 
+                        ? 'bg-amber-500 animate-ping' 
+                        : 'bg-emerald-500 shadow-xs shadow-emerald-500/50'
+                    }`}></span>
+                    <span>{syncStatus === 'SYNCING' ? 'Syncing Live...' : syncStatus === 'UP_TO_DATE' ? 'Cached (Up-to-date)' : 'Live Synced'}</span>
                   </div>
                 )}
 
@@ -3825,10 +3862,16 @@ const availableDistrictsForFeed = useMemo(() => {
                     showToast("✓ Dashboard refreshed from live database!", "success");
                   }}
                   disabled={isLoading}
-                  className="bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  className={`bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
+                    isLoading ? 'cursor-wait animate-pulse' : ''
+                  }`}
                   title="Refresh Dashboard & Sync Latest Reports"
                 >
-                  <span className={isLoading ? "animate-spin" : ""}>🔄</span>
+                  <svg className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10"></polyline>
+                    <polyline points="1 20 1 14 7 14"></polyline>
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                  </svg>
                   <span className="hidden sm:inline">{isLoading ? "Syncing..." : "Refresh"}</span>
                 </button>
 
@@ -4416,7 +4459,72 @@ const availableDistrictsForFeed = useMemo(() => {
         )}
 
         {isLoading ? (
-          <div className="text-center py-20 font-bold text-slate-500">Loading Data...</div>
+          <div className="w-full space-y-6 py-4 animate-fade-in">
+            {/* Top Loading Header / Sync Pulse Indicator */}
+            <div className="bg-white/85 backdrop-blur-md rounded-3xl p-5 sm:p-6 border border-slate-200/90 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-teal-500 via-teal-600 to-emerald-600 flex items-center justify-center text-white shadow-md shadow-teal-600/20 shrink-0">
+                  <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-800 tracking-tight flex items-center gap-2">
+                    <span>Synchronizing Bihar Field Records...</span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0"></span>
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-slate-500 font-medium">Aggregating district targets, daily FDC dosages &amp; clinical rollups</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-black px-3 py-1.5 rounded-full bg-teal-50 text-teal-800 border border-teal-200 shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse"></span>
+                <span>Zero-Lag Cloud Stream Active</span>
+              </div>
+            </div>
+
+            {/* 4 Skeleton KPI Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs space-y-3 animate-pulse">
+                  <div className="flex justify-between items-center">
+                    <div className="h-3 w-20 bg-slate-200 rounded-md"></div>
+                    <div className="h-6 w-6 bg-slate-100 rounded-lg"></div>
+                  </div>
+                  <div className="h-7 w-28 bg-slate-300 rounded-lg"></div>
+                  <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-slate-200 rounded-full w-2/3"></div>
+                  </div>
+                  <div className="flex justify-between">
+                    <div className="h-2.5 w-12 bg-slate-200 rounded"></div>
+                    <div className="h-2.5 w-16 bg-slate-200 rounded"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Main Table Skeleton */}
+            <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 sm:p-6 space-y-4 animate-pulse">
+              <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+                <div className="h-4 w-40 bg-slate-200 rounded-md"></div>
+                <div className="flex gap-2">
+                  <div className="h-7 w-24 bg-slate-100 rounded-xl"></div>
+                  <div className="h-7 w-24 bg-slate-100 rounded-xl"></div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {[1, 2, 3, 4, 5].map((row) => (
+                  <div key={row} className="flex items-center gap-4 py-2 border-b border-slate-50 last:border-0">
+                    <div className="h-8 w-8 bg-slate-100 rounded-full shrink-0"></div>
+                    <div className="h-4 w-32 bg-slate-200 rounded shrink-0"></div>
+                    <div className="h-4 w-24 bg-slate-100 rounded shrink-0"></div>
+                    <div className="h-4 flex-1 bg-slate-100 rounded hidden md:block"></div>
+                    <div className="h-6 w-20 bg-slate-200 rounded-full shrink-0"></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         ) : error ? (
           <div className="text-center py-12 bg-rose-50 border border-rose-200 rounded-3xl p-6 space-y-3 shadow-sm max-w-xl mx-auto my-8">
             <span className="text-3xl">⚠️</span>
@@ -7840,12 +7948,16 @@ const availableDistrictsForFeed = useMemo(() => {
                           type="button"
                           disabled={isDownloadingKpi || (selectedKpiDistricts.length === 0 && availableKpiDistricts.length === 0)}
                           onClick={handleDownloadScopedZip}
-                          className="mt-3 w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-indigo-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                            isDownloadingKpi
+                              ? 'bg-indigo-400 text-white cursor-wait animate-pulse'
+                              : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-indigo-600/20 cursor-pointer'
+                          }`}
                         >
                           {isDownloadingKpi ? (
                             <>
-                              <span className="animate-spin">⏳</span>
-                              <span>Processing... (Please wait)</span>
+                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              <span>Generating Scoped ZIP Archive...</span>
                             </>
                           ) : (
                             <>
@@ -7871,12 +7983,16 @@ const availableDistrictsForFeed = useMemo(() => {
                           type="button"
                           disabled={isDownloadingKpi || selectedKpiDistricts.length === 0}
                           onClick={handleDownloadSequentialQueue}
-                          className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                            isDownloadingKpi
+                              ? 'bg-emerald-400 text-white cursor-wait animate-pulse'
+                              : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white shadow-emerald-600/20 cursor-pointer'
+                          }`}
                         >
                           {isDownloadingKpi ? (
                             <>
-                              <span className="animate-spin">⏳</span>
-                              <span>Queue Running...</span>
+                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              <span>Queue Running Safely...</span>
                             </>
                           ) : (
                             <>
@@ -7909,10 +8025,23 @@ const availableDistrictsForFeed = useMemo(() => {
                         type="button"
                         disabled={isDownloadingKpi}
                         onClick={handleDownloadKpi}
-                        className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+                        className={`font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 active:scale-95 shrink-0 ${
+                          isDownloadingKpi
+                            ? 'bg-indigo-400 text-white cursor-wait animate-pulse'
+                            : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white cursor-pointer'
+                        }`}
                       >
-                        <span>📥</span>
-                        <span>Download</span>
+                        {isDownloadingKpi ? (
+                          <>
+                            <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                            <span>Generating 33 Sheets...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>📥</span>
+                            <span>Download</span>
+                          </>
+                        )}
                       </button>
                     </div>
                   </div>
@@ -8117,12 +8246,16 @@ const availableDistrictsForFeed = useMemo(() => {
                             type="button"
                             disabled={isDownloadingMedicineReport || (selectedMedDistricts.length === 0 && availableKpiDistricts.length === 0)}
                             onClick={handleDownloadMedicineReport}
-                            className="mt-3 w-full bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-teal-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                            className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                              isDownloadingMedicineReport
+                                ? 'bg-teal-400 text-white cursor-wait animate-pulse'
+                                : 'bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white shadow-teal-600/20 cursor-pointer'
+                            }`}
                           >
                             {isDownloadingMedicineReport ? (
                               <>
-                                <span className="animate-spin">⏳</span>
-                                <span>Processing... (Please wait)</span>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                <span>Generating Medicine Workbook...</span>
                               </>
                             ) : (
                               <>
@@ -8148,12 +8281,16 @@ const availableDistrictsForFeed = useMemo(() => {
                             type="button"
                             disabled={isDownloadingMedicineReport || (selectedMedDistricts.length === 0 && availableKpiDistricts.length === 0)}
                             onClick={handleDownloadSequentialMedQueue}
-                            className="mt-3 w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 active:scale-95 cursor-pointer"
+                            className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                              isDownloadingMedicineReport
+                                ? 'bg-emerald-400 text-white cursor-wait animate-pulse'
+                                : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white shadow-emerald-600/20 cursor-pointer'
+                            }`}
                           >
                             {isDownloadingMedicineReport ? (
                               <>
-                                <span className="animate-spin">⏳</span>
-                                <span>Queue Running...</span>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                <span>Queue Running Safely...</span>
                               </>
                             ) : (
                               <>
@@ -9613,11 +9750,32 @@ const availableDistrictsForFeed = useMemo(() => {
                 />
               </div>
 
+              {/* Premium Live Submission Feedback */}
+              {feedLoading && (
+                <div className="p-4 bg-gradient-to-r from-indigo-50/95 via-sky-50/95 to-teal-50/95 border border-indigo-200/90 rounded-2xl flex items-center gap-3.5 shadow-xs animate-pulse">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-slate-900">Validating IDs &amp; Syncing to Cloud Database...</span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-black bg-indigo-100 text-indigo-800 border border-indigo-200 uppercase tracking-wider">Cloud Stream</span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                      Checking district registry, merging indicators and recording audit trail. Please wait.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Error Alert */}
               {feedError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-start gap-2 animate-fade-in">
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-start gap-2 animate-fade-in shadow-2xs">
                   <span className="text-base shrink-0">⚠️</span>
-                  <span>{feedError}</span>
+                  <div className="flex-1">
+                    <p className="font-bold">{feedError}</p>
+                    <p className="text-[10px] text-rose-600 font-normal mt-0.5">If problem persists, check network or retry with fewer IDs.</p>
+                  </div>
                 </div>
               )}
 

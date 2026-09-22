@@ -128,7 +128,7 @@ async def test_district_notification_registry_caching_and_invalidation():
         mock_coll.where.return_value = mock_query1
         mock_query2 = MagicMock()
         mock_query1.where.return_value = mock_query2
-        mock_query2.stream.return_value = iter(mock_docs)
+        mock_query2.stream.side_effect = lambda: iter(mock_docs)
 
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
