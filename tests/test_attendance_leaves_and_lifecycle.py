@@ -59,20 +59,40 @@ class MockDocRef:
         snap.reference = self
         return snap
 
+class MockCollection:
+    def __init__(self, coll_name: str, store: dict, filters=None):
+        self.coll_name = coll_name
+        self.store = store
+        self.filters = filters or []
+
+    def document(self, doc_id: str):
+        return MockDocRef(self.coll_name, doc_id, self.store)
+
+    def add(self, data):
+        return (None, MockDocRef(self.coll_name, "auto_id", self.store))
+
+    def where(self, field, op, val):
+        new_filters = list(self.filters) + [(field, op, val)]
+        return MockCollection(self.coll_name, self.store, new_filters)
+
+    def stream(self):
+        docs = []
+        for doc_id, data in list(self.store.get(self.coll_name, {}).items()):
+            match = True
+            for field, op, val in self.filters:
+                if op == "==" and data.get(field) != val:
+                    match = False
+                    break
+            if match:
+                docs.append(MockDocRef(self.coll_name, doc_id, self.store).get())
+        return docs
+
 class MockFirestore:
     def __init__(self):
         self.store = {}
 
     def collection(self, name: str):
-        coll_mock = MagicMock()
-        coll_mock.document.side_effect = lambda doc_id: MockDocRef(name, doc_id, self.store)
-        coll_mock.add.side_effect = lambda data: (None, MockDocRef(name, "auto_id", self.store))
-        coll_mock.stream.side_effect = lambda: [
-            MockDocRef(name, doc_id, self.store).get()
-            for doc_id in list(self.store.get(name, {}).keys())
-        ]
-        coll_mock.where.side_effect = lambda *args, **kwargs: coll_mock
-        return coll_mock
+        return MockCollection(name, self.store)
 
 @pytest.fixture(autouse=True)
 def clear_attendance_cache():
@@ -515,5 +535,132 @@ async def test_pacing_settings_and_profile_working_days():
             assert "current_run_rate" in winfo
             assert "expected_to_date" in winfo
             assert "pace_diff" in winfo
+
+
+@pytest.mark.asyncio
+async def test_today_attendance_cutoff_and_leaves():
+    mock_db = MockFirestore()
+    superadmin_token = make_admin_token(role="SUPER_ADMIN")
+    headers = {"Authorization": f"Bearer {superadmin_token}"}
+
+    # Pre-populate staff_directory with two active officers in Jamui
+    mock_db.store["staff_directory"] = {
+        "jamui_rameshkumar": {
+            "district": "Jamui",
+            "name": "Ramesh Kumar",
+            "pin": "1234",
+            "designation": "Field Officer",
+            "status": "active",
+            "is_active": True,
+            "created_at": "2026-09-01 10:00:00"
+        },
+        "jamui_sureshsingh": {
+            "district": "Jamui",
+            "name": "Suresh Singh",
+            "pin": "5678",
+            "designation": "Field Officer",
+            "status": "active",
+            "is_active": True,
+            "created_at": "2026-09-01 10:00:00"
+        }
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            # 1. Initially both officers have not submitted and have no leaves
+            res0 = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Jamui&force_refresh=true", headers=headers)
+            assert res0.status_code == 200
+            d0 = res0.json()
+            assert d0["total_staff"] == 2
+            assert d0["missing_count"] == 2
+            assert d0["on_leave_count"] == 0
+            assert d0["submitted_count"] == 0
+            missing_names0 = [s["fo_name"] for s in d0["missing_fos"]]
+            assert "Ramesh Kumar" in missing_names0
+            assert "Suresh Singh" in missing_names0
+
+            # 2. Mark leave for Ramesh Kumar on 2026-09-22
+            mark_res = await ac.post("/admin/attendance/mark-leave", json={
+                "district": "Jamui",
+                "fo_name": "Ramesh Kumar",
+                "date": "2026-09-22",
+                "status": "leave",
+                "reason_type": "Medical",
+                "remark": "High fever"
+            }, headers=headers)
+            assert mark_res.status_code == 200
+
+            # 3. Query today attendance again: Ramesh Kumar should move to on_leave_fos
+            res1 = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Jamui&force_refresh=true", headers=headers)
+            assert res1.status_code == 200
+            d1 = res1.json()
+            assert "on_leave_fos" in d1
+            assert "on_leave_count" in d1
+            assert d1["on_leave_count"] == 1
+            assert d1["missing_count"] == 1
+            assert len(d1["on_leave_fos"]) == 1
+            assert d1["on_leave_fos"][0]["fo_name"] == "Ramesh Kumar"
+            assert d1["on_leave_fos"][0]["status"] == "leave"
+            assert d1["on_leave_fos"][0]["reason_type"] == "Medical"
+            assert d1["on_leave_fos"][0]["remark"] == "High fever"
+            missing_names1 = [s["fo_name"] for s in d1["missing_fos"]]
+            assert "Ramesh Kumar" not in missing_names1
+            assert "Suresh Singh" in missing_names1
+
+            # 4. Unmark leave for Ramesh Kumar
+            unmark_res = await ac.post("/admin/attendance/unmark-leave", json={
+                "district": "Jamui",
+                "fo_name": "Ramesh Kumar",
+                "date": "2026-09-22"
+            }, headers=headers)
+            assert unmark_res.status_code == 200
+
+            # Ramesh Kumar should return to missing_fos
+            res2 = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Jamui&force_refresh=true", headers=headers)
+            assert res2.status_code == 200
+            d2 = res2.json()
+            assert d2["on_leave_count"] == 0
+            assert d2["missing_count"] == 2
+            missing_names2 = [s["fo_name"] for s in d2["missing_fos"]]
+            assert "Ramesh Kumar" in missing_names2
+
+            # 5. Test Staff Lifecycle Cutoff (inactive_since)
+            # Deactivate Suresh Singh with effective_date = 2026-09-22
+            deact_res = await ac.post("/admin/staff/toggle-status", json={
+                "district": "Jamui",
+                "fo_name": "Suresh Singh",
+                "status": "inactive",
+                "effective_date": "2026-09-22"
+            }, headers=headers)
+            assert deact_res.status_code == 200
+
+            # Query attendance for past date "2026-09-21" (before deactivation): Suresh Singh MUST be included
+            res_past = await ac.get("/admin/today-attendance?date=2026-09-21&districts=Jamui&force_refresh=true", headers=headers)
+            assert res_past.status_code == 200
+            d_past = res_past.json()
+            assert d_past["total_staff"] == 2
+            past_names = [s["fo_name"] for s in d_past["missing_fos"]]
+            assert "Suresh Singh" in past_names
+            assert "Ramesh Kumar" in past_names
+
+            # Query attendance for current date "2026-09-22" (effective deactivation date): Suresh Singh MUST be excluded
+            res_curr = await ac.get("/admin/today-attendance?date=2026-09-22&districts=Jamui&force_refresh=true", headers=headers)
+            assert res_curr.status_code == 200
+            d_curr = res_curr.json()
+            assert d_curr["total_staff"] == 1
+            curr_names = [s["fo_name"] for s in d_curr["missing_fos"]]
+            assert "Suresh Singh" not in curr_names
+            assert "Ramesh Kumar" in curr_names
+
+            # Query attendance for future date "2026-09-23": Suresh Singh MUST be excluded
+            res_fut = await ac.get("/admin/today-attendance?date=2026-09-23&districts=Jamui&force_refresh=true", headers=headers)
+            assert res_fut.status_code == 200
+            d_fut = res_fut.json()
+            assert d_fut["total_staff"] == 1
+            fut_names = [s["fo_name"] for s in d_fut["missing_fos"]]
+            assert "Suresh Singh" not in fut_names
+            assert "Ramesh Kumar" in fut_names
+
 
 

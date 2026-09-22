@@ -2452,57 +2452,113 @@ async def get_today_attendance(
 ):
     try:
         ensure_daily_backup_scheduled()
-        if not date:
-            date = get_ist_now().strftime("%Y-%m-%d")
+        target_date = date.strip() if date and date.strip() else get_ist_now().strftime("%Y-%m-%d")
             
-        cache_key = f"attendance_{date}_{districts or 'all'}"
+        allowed_dist_set = None
+        if districts and districts.strip() and districts.strip() != "All":
+            allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
+
+        # Sub-Admin RBAC validation
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            admin_allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            if admin_allowed and "All" not in admin_allowed:
+                subadmin_allowed = set([canonicalize_district(d.strip()).lower() for d in admin_allowed if d.strip()])
+                if allowed_dist_set is not None:
+                    forbidden = allowed_dist_set - subadmin_allowed
+                    if forbidden:
+                        raise HTTPException(status_code=403, detail="Permission denied. You do not have access to the requested district(s).")
+                    allowed_dist_set = allowed_dist_set.intersection(subadmin_allowed)
+                else:
+                    allowed_dist_set = subadmin_allowed
+
+        cache_key = f"attendance_{target_date}_{districts or 'all'}"
         if force_refresh:
             cache.delete(cache_key)
         else:
             cached = cache.get(cache_key)
             if cached is not None:
                 return cached
-            
-        allowed_dist_set = None
-        if districts and districts.strip() and districts.strip() != "All":
-            allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
 
-        # 1. Fetch all active staff (using cached directory with L2 persistence)
+        # 1. Fetch staff roster applying inactive_since cutoff
         staff_list = []
-        cached_dir = cache.get("staff_directory_dict") or await get_directory()
-        if cached_dir and isinstance(cached_dir, dict):
-            for dist, names in cached_dir.items():
-                c_dist = canonicalize_district(dist)
-                if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+        raw_staff_docs = []
+        try:
+            raw_staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        except Exception as fe:
+            print(f"Firestore staff_directory stream notice: {fe}")
+            raw_staff_docs = []
+
+        if raw_staff_docs:
+            for doc in raw_staff_docs:
+                d = doc.to_dict() if hasattr(doc, "to_dict") else {}
+                if not d:
                     continue
-                for clean_fo in names:
-                    if clean_fo and str(clean_fo).strip():
-                        staff_list.append({
-                            "district": c_dist,
-                            "fo_name": str(clean_fo).strip(),
-                            "designation": "Field Officer"
-                        })
-        else:
-            cached_dir = load_baseline_staff_directory()
-            for dist, names in (cached_dir or {}).items():
-                c_dist = canonicalize_district(dist)
-                if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                raw_dist = d.get("district") or ""
+                dist = canonicalize_district(raw_dist)
+                fo_name = (d.get("name") or "").strip()
+                if not dist or not fo_name:
                     continue
-                for clean_fo in names:
-                    if clean_fo and str(clean_fo).strip():
-                        staff_list.append({
-                            "district": c_dist,
-                            "fo_name": str(clean_fo).strip(),
-                            "designation": "Field Officer"
-                        })
+                if allowed_dist_set and dist.lower() not in allowed_dist_set:
+                    continue
                 
+                is_active = d.get("is_active") is not False and d.get("status") != "inactive"
+                inactive_since = (d.get("inactive_since") or "").strip()
+                
+                is_included = False
+                if is_active:
+                    if not inactive_since or target_date < inactive_since:
+                        is_included = True
+                else:
+                    if inactive_since and target_date < inactive_since:
+                        is_included = True
+                        
+                if not is_included:
+                    continue
+                    
+                staff_list.append({
+                    "district": dist,
+                    "fo_name": fo_name,
+                    "designation": d.get("designation", "Field Officer"),
+                    "status": "active" if is_active else "inactive",
+                    "is_active": is_active,
+                    "inactive_since": inactive_since or None
+                })
+        else:
+            cached_dir = cache.get("staff_directory_dict") or await get_directory()
+            if cached_dir and isinstance(cached_dir, dict):
+                for dist, names in cached_dir.items():
+                    c_dist = canonicalize_district(dist)
+                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                        continue
+                    for clean_fo in names:
+                        if clean_fo and str(clean_fo).strip():
+                            staff_list.append({
+                                "district": c_dist,
+                                "fo_name": str(clean_fo).strip(),
+                                "designation": "Field Officer"
+                            })
+            else:
+                cached_dir = load_baseline_staff_directory()
+                for dist, names in (cached_dir or {}).items():
+                    c_dist = canonicalize_district(dist)
+                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                        continue
+                    for clean_fo in names:
+                        if clean_fo and str(clean_fo).strip():
+                            staff_list.append({
+                                "district": c_dist,
+                                "fo_name": str(clean_fo).strip(),
+                                "designation": "Field Officer"
+                            })
+
         # 2. Fetch daily field reports for this date
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", date).stream()))
+        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
         if not report_docs:
-            report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", date).stream()))
+            report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
         reports_map = {}
         for doc in report_docs:
-            d = doc.to_dict()
+            d = doc.to_dict() if hasattr(doc, "to_dict") else {}
             dist = canonicalize_district(d.get('working_place', ''))
             if allowed_dist_set and dist.lower() not in allowed_dist_set:
                 continue
@@ -2530,38 +2586,76 @@ async def get_today_attendance(
                 "timestamp_raw": iso_ts,
                 "total_km": total_km
             }
-            
+
+        # 3. Query daily_staff_leaves for target_date
+        leave_docs = []
+        try:
+            leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
+        except Exception as le:
+            print(f"Firestore daily_staff_leaves stream notice: {le}")
+            leave_docs = []
+
+        leaves_map = {}
+        for ldoc in leave_docs:
+            ld = ldoc.to_dict() if hasattr(ldoc, "to_dict") else {}
+            if not ld:
+                continue
+            dist = canonicalize_district(ld.get("district", ""))
+            if allowed_dist_set and dist.lower() not in allowed_dist_set:
+                continue
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', ld.get("fo_name", "")).lower()
+            lkey = f"{dist}_{clean_fo}".replace(" ", "").lower()
+            leaves_map[lkey] = {
+                "district": dist,
+                "fo_name": ld.get("fo_name", "").strip(),
+                "status": ld.get("status", "leave"),
+                "reason_type": ld.get("reason_type", "Casual"),
+                "remark": ld.get("remark", ""),
+                "marked_by_name": ld.get("marked_by_name", "Admin"),
+                "marked_at": ld.get("marked_at", "")
+            }
+
+        # 4. Segregate staff into submitted_full, submitted_partial, on_leave_fos, and missing_fos
         submitted_full = []
         submitted_partial = []
+        on_leave_fos = []
         missing_fos = []
         matched_report_keys = set()
         
         for s in staff_list:
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
             key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
+            
+            # Helper for alias matching (e.g. Ashwani Kumar vs Ashwani Kr Keshri)
+            alias_key = None
+            if "ashwanikrkeshri" in key:
+                alias_key = f"{s['district']}_ashwanikumar".replace(" ", "").lower()
+            elif "ashwanikumar" in key:
+                alias_key = f"{s['district']}_ashwanikrkeshri".replace(" ", "").lower()
+
+            matched_rkey = None
             if key in reports_map:
-                matched_report_keys.add(key)
-                rep = reports_map[key]
+                matched_rkey = key
+            elif alias_key and alias_key in reports_map:
+                matched_rkey = alias_key
+
+            if matched_rkey:
+                matched_report_keys.add(matched_rkey)
+                rep = reports_map[matched_rkey]
                 info = {**s, **rep}
                 if rep["submission_count"] >= 2:
                     submitted_full.append(info)
                 else:
                     submitted_partial.append(info)
             else:
-                # Also check alias (e.g. Ashwani Kumar vs Ashwani Kr Keshri)
-                alias_key = None
-                if "ashwanikrkeshri" in key:
-                    alias_key = f"{s['district']}_ashwanikumar".replace(" ", "").lower()
-                elif "ashwanikumar" in key:
-                    alias_key = f"{s['district']}_ashwanikrkeshri".replace(" ", "").lower()
-                if alias_key and alias_key in reports_map:
-                    matched_report_keys.add(alias_key)
-                    rep = reports_map[alias_key]
-                    info = {**s, **rep}
-                    if rep["submission_count"] >= 2:
-                        submitted_full.append(info)
-                    else:
-                        submitted_partial.append(info)
+                matched_lkey = None
+                if key in leaves_map:
+                    matched_lkey = key
+                elif alias_key and alias_key in leaves_map:
+                    matched_lkey = alias_key
+
+                if matched_lkey:
+                    on_leave_fos.append({**s, **leaves_map[matched_lkey]})
                 else:
                     missing_fos.append(s)
 
@@ -2583,17 +2677,20 @@ async def get_today_attendance(
         missing_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
         submitted_full.sort(key=lambda x: (x["district"], x["fo_name"]))
         submitted_partial.sort(key=lambda x: (x["district"], x["fo_name"]))
+        on_leave_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
 
         res = {
-            "date": date,
+            "date": target_date,
             "total_staff": len(staff_list),
             "submitted_count": len(submitted_fos),
             "submitted_full_count": len(submitted_full),
             "submitted_partial_count": len(submitted_partial),
+            "on_leave_count": len(on_leave_fos),
             "missing_count": len(missing_fos),
             "submitted_fos": submitted_fos,
             "submitted_full": submitted_full,
             "submitted_partial": submitted_partial,
+            "on_leave_fos": on_leave_fos,
             "missing_fos": missing_fos
         }
         cache.set(cache_key, res, ttl=60)
