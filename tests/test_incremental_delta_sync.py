@@ -1,5 +1,6 @@
 import pytest
 import asyncio
+import time
 from unittest.mock import MagicMock
 import os
 import sys
@@ -229,6 +230,226 @@ async def test_subadmin_tombstone_isolation():
     # Sub-Admin must ONLY see their district's tombstone!
     assert "gaya_doc_del" in res["deleted_ids"]
     assert "buxar_doc_del" not in res["deleted_ids"]
+
+
+def test_simple_ttl_cache_get_keys_with_prefix():
+    c = main.SimpleTTLCache()
+    c.set("shared_raw_month_2026-09_gaya", "val1", ttl=3600)
+    c.set("shared_raw_month_2026-09_patna", "val2", ttl=3600)
+    c.set("shared_raw_month_2026-08_gaya", "val3", ttl=3600)
+    # Manually inject an expired key
+    with c._lock:
+        c._cache["shared_raw_month_2026-09_expired"] = (time.time() - 10, "val_exp")
+
+    keys = c.get_keys_with_prefix("shared_raw_month_2026-09_")
+    assert "shared_raw_month_2026-09_gaya" in keys
+    assert "shared_raw_month_2026-09_patna" in keys
+    assert "shared_raw_month_2026-08_gaya" not in keys
+    assert "shared_raw_month_2026-09_expired" not in keys
+
+
+@pytest.mark.asyncio
+async def test_edit_patient_id_cache_mutation():
+    month_prefix = "2026-09"
+    doc_id = "gaya_ramesh_kumar_2026-09-10"
+    cache_key = f"shared_raw_month_{month_prefix}"
+    main.cache.delete(cache_key)
+
+    initial_cached = [{
+        "id": doc_id,
+        "doc_id": doc_id,
+        "working_place": "Gaya",
+        "fo_name": "Ramesh Kumar",
+        "date_of_reporting": "2026-09-10",
+        "notification_ids": ["111111111", "222222222"],
+        "notifications": 2,
+        "total_km": 15
+    }]
+    main.cache.set(cache_key, list(initial_cached), ttl=3600)
+
+    mock_coll = MagicMock()
+    mock_doc_ref = MagicMock()
+    fake_doc = MagicMock()
+    fake_doc.exists = True
+    fake_doc.id = doc_id
+    fake_doc.to_dict.return_value = dict(initial_cached[0])
+    mock_doc_ref.get.return_value = fake_doc
+    mock_coll.document.return_value = mock_doc_ref
+
+    original_db = main.db
+    try:
+        mock_db = MagicMock()
+        mock_db.collection.return_value = mock_coll
+        main.db = mock_db
+
+        req = main.EditIdRequest(
+            working_place="Gaya",
+            fo_name="Ramesh Kumar",
+            date="2026-09-10",
+            category="notification_ids",
+            old_id="111111111",
+            new_id="999999999",
+            action="replace",
+            edited_by="Admin"
+        )
+        admin_ctx = {"role": "SUPER_ADMIN", "allowed_districts": ["All"], "username": "admin", "name": "Admin"}
+        res = await main.edit_patient_id(req, admin=admin_ctx)
+        assert res["success"] is True
+
+        cached = main.cache.get(cache_key)
+        assert cached is not None
+        cached_doc = next(r for r in cached if r["id"] == doc_id)
+        assert "999999999" in cached_doc["notification_ids"]
+        assert "111111111" not in cached_doc["notification_ids"]
+        assert cached_doc["total_km"] == 15
+    finally:
+        main.db = original_db
+
+
+@pytest.mark.asyncio
+async def test_repair_duplicate_notifications_cache_mutation():
+    month_prefix = "2026-09"
+    doc_id = "gaya_ramesh_kumar_2026-09-10"
+    cache_key = f"shared_raw_month_{month_prefix}"
+    main.cache.delete(cache_key)
+
+    initial_cached = [{
+        "id": doc_id,
+        "doc_id": doc_id,
+        "working_place": "Gaya",
+        "fo_name": "Ramesh Kumar",
+        "date_of_reporting": "2026-09-10",
+        "notification_ids": ["111111111", "222222222", "222222222"],
+        "notifications": 3,
+        "total_km": 20
+    }]
+    main.cache.set(cache_key, list(initial_cached), ttl=3600)
+
+    mock_coll = MagicMock()
+    mock_doc_ref = MagicMock()
+    fake_doc = MagicMock()
+    fake_doc.exists = True
+    fake_doc.id = doc_id
+    fake_doc.to_dict.return_value = dict(initial_cached[0])
+    mock_doc_ref.get.return_value = fake_doc
+    mock_coll.document.return_value = mock_doc_ref
+
+    original_db = main.db
+    try:
+        mock_db = MagicMock()
+        mock_db.collection.return_value = mock_coll
+        main.db = mock_db
+
+        req = main.RepairDuplicateRequest(
+            month=month_prefix,
+            district="Gaya",
+            instance_doc_id=doc_id,
+            duplicate_ids=["222222222"]
+        )
+        admin_ctx = {"role": "SUPER_ADMIN", "allowed_districts": ["All"], "username": "admin", "name": "Admin"}
+        res = await main.repair_duplicate_notifications(req, admin=admin_ctx)
+        assert res["status"] == "success"
+        assert res["removed_count"] == 2
+
+        cached = main.cache.get(cache_key)
+        assert cached is not None
+        cached_doc = next(r for r in cached if r["id"] == doc_id)
+        assert cached_doc["notification_ids"] == ["111111111"]
+        assert cached_doc["notifications"] == 1
+        assert cached_doc["total_km"] == 20
+    finally:
+        main.db = original_db
+
+
+@pytest.mark.asyncio
+async def test_admin_feed_officer_data_cache_mutation_merge_and_new():
+    month_prefix = "2026-09"
+    doc_id = "gaya_ramesh_kumar_2026-09-10"
+    cache_key = f"shared_raw_month_{month_prefix}"
+    main.cache.delete(cache_key)
+
+    initial_cached = [{
+        "id": doc_id,
+        "doc_id": doc_id,
+        "working_place": "Gaya",
+        "fo_name": "Ramesh Kumar",
+        "date_of_reporting": "2026-09-10",
+        "notification_ids": ["111111111"],
+        "notifications": 1,
+        "total_km": 30
+    }]
+    main.cache.set(cache_key, list(initial_cached), ttl=3600)
+
+    # 1. Test Merge Into Existing Doc
+    mock_coll = MagicMock()
+    mock_doc_ref = MagicMock()
+    fake_doc = MagicMock()
+    fake_doc.exists = True
+    fake_doc.id = doc_id
+    fake_doc.to_dict.return_value = dict(initial_cached[0])
+    mock_doc_ref.get.return_value = fake_doc
+    mock_coll.document.return_value = mock_doc_ref
+
+    original_db = main.db
+    try:
+        mock_db = MagicMock()
+        mock_db.collection.return_value = mock_coll
+        main.db = mock_db
+
+        req = main.AdminFeedDataRequest(
+            district="Gaya",
+            fo_name="Ramesh Kumar",
+            date_of_reporting="2026-09-10",
+            notification_ids=["222222222"]
+        )
+        admin_ctx = {"role": "SUPER_ADMIN", "allowed_districts": ["All"], "username": "admin", "name": "Admin"}
+        res = await main.admin_feed_officer_data(req, admin=admin_ctx)
+        assert res["success"] is True
+
+        cached = main.cache.get(cache_key)
+        assert cached is not None
+        cached_doc = next(r for r in cached if r["id"] == doc_id)
+        assert "222222222" in cached_doc["notification_ids"]
+        assert "111111111" in cached_doc["notification_ids"]
+        assert cached_doc["working_place"] == "Gaya"
+        assert cached_doc["fo_name"] == "Ramesh Kumar"
+        assert cached_doc["total_km"] == 30
+
+        # 2. Test Creating Brand New Doc via Admin Feed
+        new_doc_id = "gaya_suresh_singh_2026-09-15"
+        mock_doc_ref2 = MagicMock()
+        fake_doc2 = MagicMock()
+        fake_doc2.exists = False
+        fake_doc2.id = new_doc_id
+        mock_doc_ref2.get.return_value = fake_doc2
+        
+        def doc_side_effect(cid):
+            if cid == doc_id:
+                return mock_doc_ref
+            return mock_doc_ref2
+
+        mock_coll.document.side_effect = doc_side_effect
+        mock_coll.where.return_value.where.return_value.stream.return_value = []
+
+        req_new = main.AdminFeedDataRequest(
+            district="Gaya",
+            fo_name="Suresh Singh",
+            date_of_reporting="2026-09-15",
+            notification_ids=["333333333"]
+        )
+        res_new = await main.admin_feed_officer_data(req_new, admin=admin_ctx)
+        assert res_new["success"] is True
+
+        cached2 = main.cache.get(cache_key)
+        assert len(cached2) == 2
+        new_cached_doc = next(r for r in cached2 if r["id"] == new_doc_id)
+        assert new_cached_doc["working_place"] == "Gaya"
+        assert new_cached_doc["fo_name"] == "Suresh Singh"
+        assert new_cached_doc["notification_ids"] == ["333333333"]
+        assert new_cached_doc["notifications"] == 1
+    finally:
+        main.db = original_db
+
 
 
 

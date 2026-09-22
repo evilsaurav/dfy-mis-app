@@ -202,6 +202,11 @@ class SimpleTTLCache:
             for k in keys_to_del:
                 del self._cache[k]
 
+    def get_keys_with_prefix(self, prefix: str) -> List[str]:
+        with self._lock:
+            now = time.time()
+            return [k for k, (exp, _) in self._cache.items() if k.startswith(prefix) and exp > now]
+
     def clear(self):
         with self._lock:
             self._cache.clear()
@@ -543,8 +548,7 @@ def upsert_in_memory_report(
     old_wp = canonicalize_district(old_district) if old_district else ""
     old_wp_tag = old_wp.replace(" ", "_").lower() if old_wp else ""
 
-    with cache._lock:
-        dist_cache_keys = [k for k in cache._cache.keys() if k.startswith(f"shared_raw_month_{month_prefix}_")]
+    dist_cache_keys = cache.get_keys_with_prefix(f"shared_raw_month_{month_prefix}_")
 
     for k in dist_cache_keys:
         if wp_tag and wp_tag in k:
@@ -3547,6 +3551,7 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             role=actor_role,
             diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
         )
+        data.update(doc_update)
         data["id"] = doc_id
         data["doc_id"] = doc_id
         data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
@@ -3853,7 +3858,14 @@ async def admin_feed_officer_data(
             diff={"date": clean_date, "created_new_report": new_report_created, "summary": summary_str}
         )
 
-        feed_cached = dict(cleaned_payload)
+        if new_report_created:
+            feed_cached = dict(doc_data)
+            feed_cached["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+            feed_cached["submitted_at"] = feed_cached["timestamp_completed"]
+        else:
+            feed_cached = dict(existing_data)
+            feed_cached.update(update_data)
+
         feed_cached["id"] = doc_id
         feed_cached["doc_id"] = doc_id
         feed_cached["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
@@ -7911,6 +7923,8 @@ async def repair_duplicate_notifications(
             )
 
             # 8. Invalidate caches (Scoped)
+            report_data["notification_ids"] = filtered
+            report_data["notifications"] = len(filtered)
             report_data["id"] = clean_doc_id
             report_data["doc_id"] = clean_doc_id
             report_data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
