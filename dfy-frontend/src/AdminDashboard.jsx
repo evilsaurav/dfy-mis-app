@@ -200,7 +200,11 @@ export default function AdminDashboard() {
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
   const [copiedAttendance, setCopiedAttendance] = useState(false);
-  const [attendanceActiveTab, setAttendanceActiveTab] = useState('missing'); // 'missing' | 'submitted' | 'defaulters'
+  const [activeAttendanceTab, setActiveAttendanceTab] = useState('missing'); // 'missing' | 'submitted' | 'on_leave' | 'defaulters'
+  const [leaveActionModal, setLeaveActionModal] = useState(null); // { district, fo_name, date, status: 'leave', reason_type: 'Casual', remark: '' }
+  const [isSavingLeave, setIsSavingLeave] = useState(false);
+  const attendanceActiveTab = activeAttendanceTab;
+  const setAttendanceActiveTab = setActiveAttendanceTab;
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
   const [attendanceDistrictFilter, setAttendanceDistrictFilter] = useState('All');
   const [attendanceTimeFilter, setAttendanceTimeFilter] = useState('all'); // 'all' | 'on_time' | 'late' | 'delayed' | 'early'
@@ -821,18 +825,67 @@ export default function AdminDashboard() {
       ? new Set(currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase()))
       : null;
 
-    const staffList = [];
+    // Fast lookup for inactive_since / lifecycle status from staffList
+    const staffMetaMap = {};
+    (staffList || []).forEach(s => {
+      const d = canonicalizeDistrict(s.district || '').toLowerCase();
+      const cleanFo = (s.name || s.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      staffMetaMap[`${d}_${cleanFo}`] = s;
+    });
+
+    const staffRoster = [];
     Object.entries(staffDirectory).forEach(([rawDist, names]) => {
       const cDist = canonicalizeDistrict(rawDist);
       if (allowedDistSet && !allowedDistSet.has(cDist.toLowerCase())) return;
       (names || []).forEach(name => {
         if (name && String(name).trim()) {
-          staffList.push({
+          const foName = String(name).trim();
+          const cleanFo = foName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+          const meta = staffMetaMap[`${cDist.toLowerCase()}_${cleanFo}`];
+
+          // Filter out any staff whose inactive_since is on or before targetDate
+          if (meta) {
+            const isInactive = meta.is_active === false || meta.status === 'inactive';
+            const inactiveSince = (meta.inactive_since || '').slice(0, 10);
+            if (isInactive) {
+              if (!inactiveSince || targetDate >= inactiveSince) return;
+            } else {
+              if (inactiveSince && targetDate >= inactiveSince) return;
+            }
+          }
+
+          staffRoster.push({
             district: cDist,
-            fo_name: String(name).trim(),
-            designation: "Field Officer"
+            fo_name: foName,
+            designation: (meta && meta.designation) || "Field Officer"
           });
         }
+      });
+    });
+
+    // Also include any active staff from staffList not in static staffDirectory
+    const existingRosterKeys = new Set(staffRoster.map(s => `${canonicalizeDistrict(s.district).toLowerCase()}_${s.fo_name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`));
+    (staffList || []).forEach(s => {
+      const cDist = canonicalizeDistrict(s.district || '');
+      if (allowedDistSet && !allowedDistSet.has(cDist.toLowerCase())) return;
+      const foName = (s.name || s.fo_name || '').trim();
+      if (!foName) return;
+      const cleanFo = foName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const key = `${cDist.toLowerCase()}_${cleanFo}`;
+      if (existingRosterKeys.has(key)) return;
+
+      const isInactive = s.is_active === false || s.status === 'inactive';
+      const inactiveSince = (s.inactive_since || '').slice(0, 10);
+      if (isInactive) {
+        if (!inactiveSince || targetDate >= inactiveSince) return;
+      } else {
+        if (inactiveSince && targetDate >= inactiveSince) return;
+      }
+
+      staffRoster.push({
+        district: cDist,
+        fo_name: foName,
+        designation: s.designation || "Field Officer"
       });
     });
 
@@ -870,12 +923,23 @@ export default function AdminDashboard() {
       };
     });
 
+    // Existing leaves for this date (from state if same targetDate)
+    const leavesMap = {};
+    if (attendance && (attendance.date === targetDate || !attendance.date) && attendance.on_leave_fos) {
+      attendance.on_leave_fos.forEach(l => {
+        const dist = canonicalizeDistrict(l.district || '');
+        const cleanFo = (l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        leavesMap[`${dist}_${cleanFo}`.toLowerCase()] = l;
+      });
+    }
+
     const submittedFull = [];
     const submittedPartial = [];
+    const onLeaveFos = [];
     const missingFos = [];
     const matchedKeys = new Set();
 
-    staffList.forEach(s => {
+    staffRoster.forEach(s => {
       const cleanFo = s.fo_name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const key = `${s.district}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
       if (reportsMap[key]) {
@@ -884,6 +948,8 @@ export default function AdminDashboard() {
         const info = { ...s, ...rep };
         if (rep.submission_count >= 2) submittedFull.push(info);
         else submittedPartial.push(info);
+      } else if (leavesMap[key]) {
+        onLeaveFos.push({ ...s, ...leavesMap[key] });
       } else {
         missingFos.push(s);
       }
@@ -897,17 +963,20 @@ export default function AdminDashboard() {
 
     const submittedFos = [...submittedFull, ...submittedPartial].sort((a, b) => (b.timestamp_raw || '').localeCompare(a.timestamp_raw || ''));
     missingFos.sort((a, b) => a.district.localeCompare(b.district) || a.fo_name.localeCompare(b.fo_name));
+    onLeaveFos.sort((a, b) => a.district.localeCompare(b.district) || a.fo_name.localeCompare(b.fo_name));
 
     return {
       date: targetDate,
-      total_staff: staffList.length,
+      total_staff: staffRoster.length,
       submitted_count: submittedFos.length,
       submitted_full_count: submittedFull.length,
       submitted_partial_count: submittedPartial.length,
+      on_leave_count: onLeaveFos.length,
       missing_count: missingFos.length,
       submitted_fos: submittedFos,
       submitted_full: submittedFull,
       submitted_partial: submittedPartial,
+      on_leave_fos: onLeaveFos,
       missing_fos: missingFos,
       is_derived: true
     };
@@ -1051,10 +1120,261 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleExecuteMarkLeave = async () => {
+    if (!leaveActionModal) return;
+    if (isSavingLeave) return;
+
+    const { district, fo_name, date, status, reason_type, remark } = leaveActionModal;
+    if (!district || !fo_name) {
+      showToast("⚠️ District and Field Officer name are required.", "error");
+      return;
+    }
+
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowed = currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase());
+      if (!allowed.includes(canonicalizeDistrict(district).toLowerCase())) {
+        showToast("⚠️ Permission denied for this district.", "error");
+        return;
+      }
+    }
+
+    setIsSavingLeave(true);
+    const targetDate = date || attendanceDate;
+    const leaveStatus = status || 'leave';
+    const leaveReason = reason_type || 'Casual';
+    const leaveRemark = remark || '';
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = {
+        district,
+        fo_name,
+        date: targetDate,
+        status: leaveStatus,
+        reason_type: leaveReason,
+        remark: leaveRemark
+      };
+
+      const res = await authFetch(`${API_BASE_URL}/admin/attendance/mark-leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to record leave");
+
+      // Optimistic state update: move officer from missing_fos to on_leave_fos
+      setAttendance(prev => {
+        if (!prev) return prev;
+        const cleanFo = fo_name.trim().toLowerCase();
+        const cleanDist = canonicalizeDistrict(district).toLowerCase();
+
+        const nextMissing = (prev.missing_fos || []).filter(
+          f => !(f.fo_name.trim().toLowerCase() === cleanFo && canonicalizeDistrict(f.district).toLowerCase() === cleanDist)
+        );
+
+        const newLeaveRecord = {
+          district,
+          fo_name,
+          status: leaveStatus,
+          reason_type: leaveReason,
+          remark: leaveRemark,
+          marked_by_name: currentUser?.name || currentUser?.username || 'Admin',
+          marked_at: new Date().toISOString()
+        };
+
+        const nextLeaves = [
+          ...(prev.on_leave_fos || []).filter(
+            f => !(f.fo_name.trim().toLowerCase() === cleanFo && canonicalizeDistrict(f.district).toLowerCase() === cleanDist)
+          ),
+          newLeaveRecord
+        ].sort((a, b) => a.district.localeCompare(b.district) || a.fo_name.localeCompare(b.fo_name));
+
+        return {
+          ...prev,
+          missing_fos: nextMissing,
+          missing_count: nextMissing.length,
+          on_leave_fos: nextLeaves,
+          on_leave_count: nextLeaves.length
+        };
+      });
+
+      showToast(`✓ Marked ${leaveStatus === 'absent' ? 'absent' : leaveStatus === 'weekly_off' ? 'weekly off' : 'leave'} for ${fo_name}`, "success");
+      setLeaveActionModal(null);
+      fetchAttendance(true, targetDate);
+    } catch (err) {
+      console.error("Mark leave error:", err);
+      showToast(`⚠️ ${err.message}`, "error");
+    } finally {
+      setIsSavingLeave(false);
+    }
+  };
+
+  const handleExecuteUnmarkLeave = async (district, fo_name, date) => {
+    if (isSavingLeave) return;
+
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowed = currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase());
+      if (!allowed.includes(canonicalizeDistrict(district).toLowerCase())) {
+        showToast("⚠️ Permission denied for this district.", "error");
+        return;
+      }
+    }
+
+    if (!window.confirm(`Kya aap sure hain ki ${fo_name} (${district}) ka leave revert karna chahte hain?`)) {
+      return;
+    }
+
+    setIsSavingLeave(true);
+    const targetDate = date || attendanceDate;
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/attendance/unmark-leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district, fo_name, date: targetDate })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to revert leave");
+
+      // Optimistic state update: move officer back to missing_fos
+      setAttendance(prev => {
+        if (!prev) return prev;
+        const cleanFo = fo_name.trim().toLowerCase();
+        const cleanDist = canonicalizeDistrict(district).toLowerCase();
+
+        const nextLeaves = (prev.on_leave_fos || []).filter(
+          f => !(f.fo_name.trim().toLowerCase() === cleanFo && canonicalizeDistrict(f.district).toLowerCase() === cleanDist)
+        );
+
+        const alreadyMissing = (prev.missing_fos || []).some(
+          f => f.fo_name.trim().toLowerCase() === cleanFo && canonicalizeDistrict(f.district).toLowerCase() === cleanDist
+        );
+
+        const nextMissing = alreadyMissing
+          ? prev.missing_fos
+          : [...(prev.missing_fos || []), { district, fo_name, designation: "Field Officer" }].sort(
+              (a, b) => a.district.localeCompare(b.district) || a.fo_name.localeCompare(b.fo_name)
+            );
+
+        return {
+          ...prev,
+          on_leave_fos: nextLeaves,
+          on_leave_count: nextLeaves.length,
+          missing_fos: nextMissing,
+          missing_count: nextMissing.length
+        };
+      });
+
+      showToast(`✓ Leave reverted for ${fo_name}`, "success");
+      fetchAttendance(true, targetDate);
+    } catch (err) {
+      console.error("Unmark leave error:", err);
+      showToast(`⚠️ ${err.message}`, "error");
+    } finally {
+      setIsSavingLeave(false);
+    }
+  };
+
+  const fetchPacingSettings = async (targetMonth = month, targetDistrict = selectedDistrict) => {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let distParam = "all";
+      if (targetDistrict && targetDistrict !== 'All') {
+        distParam = canonicalizeDistrict(targetDistrict);
+      } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts?.length > 0 && !currentUser.allowed_districts.includes('All')) {
+        distParam = canonicalizeDistrict(currentUser.allowed_districts[0]);
+      }
+      const res = await authFetch(`${API_BASE_URL}/admin/pacing/settings?month=${targetMonth}&district=${distParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && typeof data.declared_holidays === 'number') {
+          setPacingHolidaysCount(data.declared_holidays);
+        }
+      }
+    } catch (err) {
+      console.error("Fetch pacing settings error:", err);
+    }
+  };
+
+  const handleUpdatePacingHolidays = async (delta) => {
+    const newCount = Math.max(0, Math.min(15, (Number(pacingHolidaysCount) || 0) + delta));
+    setPacingHolidaysCount(newCount);
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let distParam = "all";
+      if (selectedDistrict && selectedDistrict !== 'All') {
+        distParam = canonicalizeDistrict(selectedDistrict);
+      } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts?.length > 0 && !currentUser.allowed_districts.includes('All')) {
+        distParam = canonicalizeDistrict(currentUser.allowed_districts[0]);
+      }
+
+      if (currentUser?.role === 'SUB_ADMIN' && distParam === 'all') {
+        showToast("⚠️ Sub-Admins must select their district to configure holidays.", "error");
+        return;
+      }
+
+      const res = await authFetch(`${API_BASE_URL}/admin/pacing/settings`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month,
+          district: distParam,
+          declared_holidays: newCount
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Failed to update declared holidays");
+      }
+      showToast(`✓ Declared holidays updated to ${newCount}`, "success");
+    } catch (err) {
+      console.error("Update pacing holidays error:", err);
+      showToast(`⚠️ ${err.message}`, "error");
+    }
+  };
+
+  const copyOnLeaveSummary = () => {
+    const list = attendance?.on_leave_fos || [];
+    if (!list || list.length === 0) return;
+    const byDistrict = {};
+    list.forEach(fo => {
+      if (!byDistrict[fo.district]) byDistrict[fo.district] = [];
+      byDistrict[fo.district].push(fo);
+    });
+
+    let msg = `*DFY MIS - Staff On Leave / Absent*\n`;
+    msg += `Date: ${attendance.date || attendanceDate}\n`;
+    msg += `Total On Leave/Absent: ${list.length} FOs\n\n`;
+
+    for (let dist in byDistrict) {
+      msg += `*${dist}:*\n`;
+      byDistrict[dist].forEach(fo => {
+        const statusLabel = fo.status === 'absent' ? '⚠️ Absent' : fo.status === 'weekly_off' ? '📅 Weekly Off' : '🏖️ Leave';
+        msg += `  - ${fo.fo_name} (${statusLabel} - ${fo.reason_type || 'Casual'}${fo.remark ? `: ${fo.remark}` : ''})\n`;
+      });
+      msg += `\n`;
+    }
+
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(msg);
+      setCopiedAttendance(true);
+      showToast("✓ Leave list copied for WhatsApp!", "success");
+      setTimeout(() => setCopiedAttendance(false), 3000);
+    }
+  };
+
   const copyMissingReminder = () => {
     if (!attendance || !attendance.missing_fos) return;
+    const onLeaveSet = new Set(
+      (attendance.on_leave_fos || []).map(l => `${canonicalizeDistrict(l.district || '').toLowerCase()}_${(l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`)
+    );
     const byDistrict = {};
     attendance.missing_fos.forEach(fo => {
+      const key = `${canonicalizeDistrict(fo.district || '').toLowerCase()}_${(fo.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+      if (onLeaveSet.has(key)) return; // Strictly exclude staff on leave
       if (!byDistrict[fo.district]) byDistrict[fo.district] = [];
       byDistrict[fo.district].push(fo.fo_name);
     });
@@ -1070,11 +1390,17 @@ export default function AdminDashboard() {
       });
       msg += `\n`;
     }
+
+    if (attendance?.on_leave_count > 0) {
+      msg += `ℹ️ (${attendance.on_leave_count} staff on approved leave/absent today)\n\n`;
+    }
+
     msg += `Kripya sabhi sadasya turant apni field report submit karein!`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
       setCopiedAttendance(true);
+      showToast("✓ Pending reminder copied for WhatsApp!", "success");
       setTimeout(() => setCopiedAttendance(false), 3000);
     }
   };
@@ -1190,6 +1516,21 @@ export default function AdminDashboard() {
       checkDates.push(d.toISOString().slice(0, 10));
     }
 
+    // Set of officers currently on leave or absent today
+    const onLeaveSet = new Set(
+      (attendance?.on_leave_fos || []).map(l => `${canonicalizeDistrict(l.district || '').toLowerCase()}_${(l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`)
+    );
+
+    // Inactive cutoff lookup from staffList
+    const inactiveCutoffMap = {};
+    (staffList || []).forEach(s => {
+      const d = canonicalizeDistrict(s.district || '').toLowerCase();
+      const n = (s.name || s.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (s.is_active === false || s.status === 'inactive' || s.inactive_since) {
+        inactiveCutoffMap[`${d}_${n}`] = (s.inactive_since || '').slice(0, 10);
+      }
+    });
+
     const defaulters = [];
     const allowedDistSet = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
       ? new Set(currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase()))
@@ -1204,6 +1545,16 @@ export default function AdminDashboard() {
         if (!cleanName) return;
         const cleanFo = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
         const distKey = cDist.toLowerCase();
+        const foKey = `${distKey}_${cleanFo}`;
+
+        // Exclude staff on leave/absent today
+        if (onLeaveSet.has(foKey)) return;
+
+        // Exclude deactivated staff whose cutoff date is on or before attendanceDate
+        if (inactiveCutoffMap[foKey] !== undefined) {
+          const cutoff = inactiveCutoffMap[foKey];
+          if (!cutoff || attendanceDate >= cutoff) return;
+        }
 
         let consecutiveMissed = 0;
         const missedDates = [];
@@ -1234,7 +1585,7 @@ export default function AdminDashboard() {
     });
 
     return defaulters.sort((a, b) => b.consecutiveDays - a.consecutiveDays || a.district.localeCompare(b.district));
-  }, [staffDirectory, rawRecords, attendanceDate, currentUser]);
+  }, [staffDirectory, rawRecords, attendanceDate, currentUser, attendance, staffList]);
 
   // District-wise attendance scorecard rollup
   const districtAttendanceRollup = useMemo(() => {
@@ -1260,9 +1611,19 @@ export default function AdminDashboard() {
 
     missingList.forEach(fo => {
       const d = canonicalizeDistrict(fo.district);
-      if (!map[d]) map[d] = { district: d, total: 0, submitted: 0, missing: 0 };
+      if (!map[d]) map[d] = { district: d, total: 0, submitted: 0, missing: 0, on_leave: 0 };
       map[d].missing++;
       if (map[d].total < (map[d].submitted + map[d].missing)) map[d].total = map[d].submitted + map[d].missing;
+    });
+
+    const onLeaveList = attendance.on_leave_fos || [];
+    onLeaveList.forEach(fo => {
+      const d = canonicalizeDistrict(fo.district);
+      if (!map[d]) map[d] = { district: d, total: 0, submitted: 0, missing: 0, on_leave: 0 };
+      map[d].on_leave = (map[d].on_leave || 0) + 1;
+      if (map[d].total < (map[d].submitted + map[d].missing + (map[d].on_leave || 0))) {
+        map[d].total = map[d].submitted + map[d].missing + (map[d].on_leave || 0);
+      }
     });
 
     return Object.values(map).map(item => ({
@@ -1306,13 +1667,16 @@ export default function AdminDashboard() {
       .filter(fo => canonicalizeDistrict(fo.district) === distName);
     const missingList = (attendance.missing_fos || [])
       .filter(fo => canonicalizeDistrict(fo.district) === distName);
+    const onLeaveList = (attendance.on_leave_fos || [])
+      .filter(fo => canonicalizeDistrict(fo.district) === distName);
 
-    const total = submittedList.length + missingList.length;
-    const pct = total > 0 ? Math.round((submittedList.length / total) * 100) : 0;
+    const total = submittedList.length + missingList.length + onLeaveList.length;
+    const activeTotal = submittedList.length + missingList.length;
+    const pct = activeTotal > 0 ? Math.round((submittedList.length / activeTotal) * 100) : 0;
 
     let msg = `*📊 DFY MIS — ${distName} Attendance Update*\n`;
     msg += `Date: ${attendance.date || attendanceDate}\n`;
-    msg += `Status: ${submittedList.length} of ${total} FOs Submitted (${pct}%)\n\n`;
+    msg += `Status: ${submittedList.length} of ${activeTotal} Active FOs Submitted (${pct}%)${onLeaveList.length > 0 ? ` • ${onLeaveList.length} On Leave` : ''}\n\n`;
 
     if (submittedList.length > 0) {
       msg += `*✅ Submitted (${submittedList.length}):*\n`;
@@ -1327,6 +1691,15 @@ export default function AdminDashboard() {
       msg += `*⚠️ Pending / Not Submitted (${missingList.length}):*\n`;
       missingList.forEach(fo => {
         msg += `  - ${fo.fo_name}\n`;
+      });
+      msg += `\n`;
+    }
+
+    if (onLeaveList.length > 0) {
+      msg += `*🏖️ On Leave / Absent (${onLeaveList.length}):*\n`;
+      onLeaveList.forEach(fo => {
+        const statusLabel = fo.status === 'absent' ? '⚠️ Absent' : fo.status === 'weekly_off' ? '📅 Weekly Off' : '🏖️ Leave';
+        msg += `  - ${fo.fo_name} (${statusLabel} - ${fo.reason_type || 'Casual'}${fo.remark ? `: ${fo.remark}` : ''})\n`;
       });
       msg += `\n`;
     }
@@ -2304,8 +2677,9 @@ Keep this file safe in your Google Drive or personal diary.
       loadTargets('All'); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
+      fetchPacingSettings(month, selectedDistrict);
     }
-  }, [month, isAuthenticated]);
+  }, [month, selectedDistrict, isAuthenticated]);
 
   // Lazy Tab Loading: Fetch Duplicate Audit & Duplicate Scan when modal is opened
   useEffect(() => {
@@ -4410,6 +4784,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
                   <span>| Submitted: <strong className="text-emerald-600">{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)}</strong></span>
                   <span>| Pending: <strong className="text-red-500">{attendance.missing_count}</strong></span>
+                  <span>| On Leave: <strong className="text-amber-600">{attendance.on_leave_count || 0}</strong></span>
                   {chronicDefaulters.length > 0 && (
                     <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
                       <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
@@ -4422,7 +4797,7 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
               <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
                 <button
-                  onClick={() => { setAttendanceActiveTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  onClick={() => { setActiveAttendanceTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
                   className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
                   title="Click to view submitted officers with time"
                 >
@@ -4430,17 +4805,25 @@ const availableDistrictsForFeed = useMemo(() => {
                   <span>{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)} Submitted</span>
                 </button>
                 <button
-                  onClick={() => { setAttendanceActiveTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  onClick={() => { setActiveAttendanceTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
                   className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
                   title="Click to view pending officers"
                 >
                   <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
                   <span>{attendance.missing_count} Missing</span>
                 </button>
+                <button
+                  onClick={() => { setActiveAttendanceTab('on_leave'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3.5 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                  title="Click to view officers on leave or absent"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                  <span>{attendance.on_leave_count || 0} On Leave / Absent</span>
+                </button>
                 {chronicDefaulters.length > 0 && (
                   <button
-                    onClick={() => { setAttendanceActiveTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                    className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3 py-1.5 rounded-xl border border-amber-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                    onClick={() => { setActiveAttendanceTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                    className="bg-purple-50 hover:bg-purple-100 text-purple-800 px-3 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
                     title="View chronic defaulters (2+ consecutive days missed)"
                   >
                     <span>⚠️</span>
@@ -5707,8 +6090,8 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="inline-flex items-center bg-white rounded-lg border border-slate-200 shadow-2xs">
                 <button
                   type="button"
-                  onClick={() => setPacingHolidaysCount(prev => Math.max(0, prev - 1))}
-                  className="px-2 py-0.5 text-slate-500 hover:text-indigo-600 font-black text-xs transition-colors"
+                  onClick={() => handleUpdatePacingHolidays(-1)}
+                  className="px-2 py-0.5 text-slate-500 hover:text-indigo-600 font-black text-xs transition-colors cursor-pointer"
                   title="Decrease holiday buffer"
                 >
                   -
@@ -5716,8 +6099,8 @@ const availableDistrictsForFeed = useMemo(() => {
                 <span className="px-2 text-indigo-700 font-black text-xs font-mono">{pacingHolidaysCount}</span>
                 <button
                   type="button"
-                  onClick={() => setPacingHolidaysCount(prev => Math.min(10, prev + 1))}
-                  className="px-2 py-0.5 text-slate-500 hover:text-indigo-600 font-black text-xs transition-colors"
+                  onClick={() => handleUpdatePacingHolidays(1)}
+                  className="px-2 py-0.5 text-slate-500 hover:text-indigo-600 font-black text-xs transition-colors cursor-pointer"
                   title="Increase holiday buffer"
                 >
                   +
@@ -8998,6 +9381,7 @@ const availableDistrictsForFeed = useMemo(() => {
       {showAttendanceModal && attendance && (() => {
         const submittedList = attendance.submitted_fos || [...(attendance.submitted_full || []), ...(attendance.submitted_partial || [])];
         const missingList = attendance.missing_fos || [];
+        const onLeaveList = attendance.on_leave_fos || [];
 
         // Fast lookup map for chronic defaulters
         const defaulterMap = {};
@@ -9014,6 +9398,10 @@ const availableDistrictsForFeed = useMemo(() => {
         const districtMatchedSubmitted = attendanceDistrictFilter === 'All'
           ? submittedList
           : submittedList.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
+
+        const districtMatchedOnLeave = attendanceDistrictFilter === 'All'
+          ? onLeaveList
+          : onLeaveList.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
 
         const districtMatchedDefaulters = attendanceDistrictFilter === 'All'
           ? chronicDefaulters
@@ -9047,6 +9435,16 @@ const availableDistrictsForFeed = useMemo(() => {
           return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
         });
 
+        const filteredOnLeave = districtMatchedOnLeave.filter(fo => {
+          if (!attendanceSearchQuery) return true;
+          const q = attendanceSearchQuery.toLowerCase();
+          return (fo.fo_name || '').toLowerCase().includes(q) || 
+                 (fo.district || '').toLowerCase().includes(q) || 
+                 (fo.status || '').toLowerCase().includes(q) ||
+                 (fo.reason_type || '').toLowerCase().includes(q) ||
+                 (fo.remark || '').toLowerCase().includes(q);
+        });
+
         const filteredDefaulters = districtMatchedDefaulters.filter(fo => {
           if (!attendanceSearchQuery) return true;
           const q = attendanceSearchQuery.toLowerCase();
@@ -9054,6 +9452,7 @@ const availableDistrictsForFeed = useMemo(() => {
         });
 
         const totalSubmitted = attendance.submitted_count || submittedList.length;
+        const totalOnLeave = attendance.on_leave_count || onLeaveList.length;
 
         return (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
@@ -9069,6 +9468,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     <span>Total Active Staff: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
                     <span>| Submitted: <strong className="text-emerald-600">{totalSubmitted}</strong></span>
                     <span>| Pending: <strong className="text-rose-500">{attendance.missing_count}</strong></span>
+                    <span>| On Leave: <strong className="text-amber-600">{totalOnLeave}</strong></span>
                     {chronicDefaulters.length > 0 && (
                       <span className="font-bold text-amber-700 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1">
                         <span>⚠️</span> {chronicDefaulters.length} Defaulters (2+ Days)
@@ -9242,12 +9642,13 @@ const availableDistrictsForFeed = useMemo(() => {
                 )}
               </div>
 
-              {/* Navigation Tabs (3 Tabs: Missing, Submitted, Defaulters) */}
-              <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5">
+              {/* Navigation Tabs (4 Tabs: Missing, Submitted, On Leave, Defaulters) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5">
                 <button
-                  onClick={() => setAttendanceActiveTab('missing')}
+                  type="button"
+                  onClick={() => setActiveAttendanceTab('missing')}
                   className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    attendanceActiveTab === 'missing'
+                    activeAttendanceTab === 'missing'
                       ? 'bg-white text-rose-600 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
@@ -9257,9 +9658,10 @@ const availableDistrictsForFeed = useMemo(() => {
                 </button>
 
                 <button
-                  onClick={() => setAttendanceActiveTab('submitted')}
+                  type="button"
+                  onClick={() => setActiveAttendanceTab('submitted')}
                   className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    attendanceActiveTab === 'submitted'
+                    activeAttendanceTab === 'submitted'
                       ? 'bg-white text-emerald-600 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
@@ -9269,14 +9671,28 @@ const availableDistrictsForFeed = useMemo(() => {
                 </button>
 
                 <button
-                  onClick={() => setAttendanceActiveTab('defaulters')}
+                  type="button"
+                  onClick={() => setActiveAttendanceTab('on_leave')}
                   className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    attendanceActiveTab === 'defaulters'
+                    activeAttendanceTab === 'on_leave'
                       ? 'bg-white text-amber-700 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
                 >
                   <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0"></span>
+                  <span className="truncate">🏖️ On Leave ({filteredOnLeave.length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setActiveAttendanceTab('defaulters')}
+                  className={`py-2 px-2 sm:px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                    activeAttendanceTab === 'defaulters'
+                      ? 'bg-white text-purple-700 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-purple-500 shrink-0"></span>
                   <span className="truncate flex items-center gap-1">
                     Defaulters ({filteredDefaulters.length})
                     {filteredDefaulters.length > 0 && (
@@ -9287,7 +9703,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* ⏰ Time Filter Chips (Rendered under Submitted Tab) */}
-              {attendanceActiveTab === 'submitted' && (
+              {activeAttendanceTab === 'submitted' && (
                 <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-2 custom-scrollbar text-[11px] font-bold">
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 shrink-0 mr-1">Time:</span>
                   <button
@@ -9350,7 +9766,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     type="text"
                     value={attendanceSearchQuery}
                     onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                    placeholder={`Search ${attendanceActiveTab === 'missing' ? 'pending' : attendanceActiveTab === 'submitted' ? 'submitted' : 'defaulters'} by name or district...`}
+                    placeholder={`Search ${activeAttendanceTab === 'missing' ? 'pending' : activeAttendanceTab === 'submitted' ? 'submitted' : activeAttendanceTab === 'on_leave' ? 'on leave / absent' : 'defaulters'} by name or district...`}
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all pl-9"
                   />
                   <span className="absolute left-3 top-2.5 text-slate-400 text-xs">🔍</span>
@@ -9367,13 +9783,13 @@ const availableDistrictsForFeed = useMemo(() => {
 
               {/* List Container */}
               <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-[220px]">
-                {attendanceActiveTab === 'missing' ? (
+                {activeAttendanceTab === 'missing' ? (
                   filteredMissing.length > 0 ? (
                     filteredMissing.map((fo, idx) => {
                       const defKey = `${(fo.district || '').toLowerCase()}_${(fo.fo_name || '').toLowerCase()}`;
                       const defInfo = defaulterMap[defKey];
                       return (
-                        <div key={idx} className="flex justify-between items-center p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors">
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors gap-2 sm:gap-0">
                           <div>
                             <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                               <span>{fo.fo_name}</span>
@@ -9385,9 +9801,27 @@ const availableDistrictsForFeed = useMemo(() => {
                             </p>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{fo.district} &bull; {fo.designation || 'Field Officer'}</p>
                           </div>
-                          <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
-                            Not Submitted
-                          </span>
+                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
+                              Not Submitted
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setLeaveActionModal({
+                                district: fo.district,
+                                fo_name: fo.fo_name,
+                                date: attendance.date || attendanceDate,
+                                status: 'leave',
+                                reason_type: 'Casual',
+                                remark: ''
+                              })}
+                              className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold px-2.5 py-1 rounded-xl transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                              title="Mark Officer as On Leave or Absent"
+                            >
+                              <span>🏖️</span>
+                              <span>Mark Leave</span>
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -9396,7 +9830,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       {attendanceSearchQuery ? 'Koi missing officer match nahi hua.' : '🎉 Sabhi Field Officers ne report submit kar di hai!'}
                     </div>
                   )
-                ) : attendanceActiveTab === 'submitted' ? (
+                ) : activeAttendanceTab === 'submitted' ? (
                   filteredSubmitted.length > 0 ? (
                     filteredSubmitted.map((fo, idx) => {
                       const timeClassification = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
@@ -9440,6 +9874,74 @@ const availableDistrictsForFeed = useMemo(() => {
                   ) : (
                     <div className="text-center py-12 text-slate-400 font-semibold text-xs">
                       {attendanceSearchQuery ? 'Koi submitted officer match nahi hua.' : 'Is filter category mein koi officer nahi mila.'}
+                    </div>
+                  )
+                ) : activeAttendanceTab === 'on_leave' ? (
+                  filteredOnLeave.length > 0 ? (
+                    filteredOnLeave.map((fo, idx) => {
+                      const isAbsent = fo.status === 'absent';
+                      const isWeeklyOff = fo.status === 'weekly_off';
+                      const statusLabel = isAbsent ? '⚠️ Absent' : isWeeklyOff ? '📅 Weekly Off' : '🏖️ On Leave';
+                      const badgeStyle = isAbsent
+                        ? 'bg-rose-100 text-rose-800 border-rose-200'
+                        : isWeeklyOff
+                        ? 'bg-blue-100 text-blue-800 border-blue-200'
+                        : 'bg-amber-100 text-amber-800 border-amber-200';
+
+                      return (
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-50 hover:bg-amber-50/30 rounded-xl border border-slate-200 hover:border-amber-300 transition-colors gap-3">
+                          <div className="flex items-start gap-3">
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-base shrink-0 mt-0.5 ${
+                              isAbsent ? 'bg-rose-100 text-rose-700' : isWeeklyOff ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {isAbsent ? '⚠️' : isWeeklyOff ? '📅' : '🏖️'}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-black text-slate-800">{fo.fo_name}</span>
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wider border ${badgeStyle}`}>
+                                  {statusLabel}
+                                </span>
+                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">
+                                  {fo.reason_type || 'Casual'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-0.5">
+                                {fo.district} &bull; {fo.designation || 'Field Officer'}
+                              </p>
+                              {fo.remark && (
+                                <p className="text-xs text-slate-600 mt-1 italic bg-white/80 px-2.5 py-1 rounded-lg border border-slate-200/60 inline-block">
+                                  "{fo.remark}"
+                                </p>
+                              )}
+                              {fo.marked_by_name && (
+                                <p className="text-[10px] text-slate-400 font-medium mt-1">
+                                  Marked by <strong className="text-slate-600">{fo.marked_by_name}</strong> {fo.marked_at ? `on ${String(fo.marked_at).slice(0, 16)}` : ''}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleExecuteUnmarkLeave(fo.district, fo.fo_name, attendance.date || attendanceDate)}
+                              disabled={isSavingLeave}
+                              className="bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 text-xs font-bold px-3 py-1.5 rounded-xl border border-rose-200 hover:border-rose-300 transition-all shadow-2xs flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Revert leave status and move back to Pending"
+                            >
+                              <span>🔄</span>
+                              <span>Revert Leave</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-12 text-slate-400 font-semibold text-xs space-y-1">
+                      <div className="text-2xl">🏖️</div>
+                      <p className="font-bold text-slate-700">Koi officer leave par nahi hai.</p>
+                      <p className="text-slate-400">Sabhi officers active duty ya pending status mein hain.</p>
                     </div>
                   )
                 ) : (
@@ -9487,7 +9989,7 @@ const availableDistrictsForFeed = useMemo(() => {
               {/* Action Footer */}
               <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 mt-auto">
                 <div className="flex items-center gap-2 flex-wrap">
-                  {attendanceActiveTab === 'missing' ? (
+                  {activeAttendanceTab === 'missing' ? (
                     <button 
                       onClick={copyMissingReminder}
                       disabled={attendance.missing_count === 0}
@@ -9496,7 +9998,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                       <span>{copiedAttendance ? 'Reminder Copied!' : 'Copy WhatsApp Reminder'}</span>
                     </button>
-                  ) : attendanceActiveTab === 'submitted' ? (
+                  ) : activeAttendanceTab === 'submitted' ? (
                     <button 
                       onClick={copySubmittedSummary}
                       disabled={totalSubmitted === 0}
@@ -9504,6 +10006,16 @@ const availableDistrictsForFeed = useMemo(() => {
                     >
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
                       <span>{copiedAttendance ? 'Submitted List Copied!' : 'Copy Submitted List (WhatsApp)'}</span>
+                    </button>
+                  ) : activeAttendanceTab === 'on_leave' ? (
+                    <button 
+                      type="button"
+                      onClick={copyOnLeaveSummary}
+                      disabled={totalOnLeave === 0}
+                      className={`flex items-center gap-2 font-bold text-xs py-2.5 px-4 sm:px-5 rounded-xl transition-all ${totalOnLeave > 0 ? 'bg-amber-600 hover:bg-amber-700 text-white shadow-md shadow-amber-600/20 active:scale-95 cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+                    >
+                      <span>🏖️</span>
+                      <span>{copiedAttendance ? 'Leave List Copied!' : 'Copy Leave List (WhatsApp)'}</span>
                     </button>
                   ) : (
                     <button 
@@ -9534,6 +10046,118 @@ const availableDistrictsForFeed = useMemo(() => {
           </div>
         );
       })()}
+
+      {/* 🏖️ Mark Leave / Absent Modal */}
+      {leaveActionModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4 animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 flex flex-col gap-4">
+            {/* Header */}
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-black text-lg shrink-0">
+                  🏖️
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">Mark Leave / Absent</h3>
+                  <p className="text-xs text-slate-500 font-semibold">
+                    {leaveActionModal.fo_name} &bull; <span className="font-bold text-indigo-600">{leaveActionModal.district}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingLeave && setLeaveActionModal(null)}
+                disabled={isSavingLeave}
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Form Fields */}
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Date</label>
+                <input
+                  type="date"
+                  value={leaveActionModal.date || attendanceDate}
+                  onChange={(e) => setLeaveActionModal(prev => ({ ...prev, date: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Status</label>
+                <select
+                  value={leaveActionModal.status || 'leave'}
+                  onChange={(e) => setLeaveActionModal(prev => ({ ...prev, status: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                >
+                  <option value="leave">🏖️ On Leave</option>
+                  <option value="absent">⚠️ Absent / Uninformed</option>
+                  <option value="weekly_off">📅 Weekly Off</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Reason Type</label>
+                <select
+                  value={leaveActionModal.reason_type || 'Casual'}
+                  onChange={(e) => setLeaveActionModal(prev => ({ ...prev, reason_type: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                >
+                  <option value="Medical">Medical (Health / Illness)</option>
+                  <option value="Casual">Casual (Emergency / Family)</option>
+                  <option value="Official Work">Official Work / Field Training</option>
+                  <option value="Personal">Personal Work</option>
+                  <option value="Uninformed">Uninformed Absence</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Remark / Notes (Optional)</label>
+                <textarea
+                  rows="2"
+                  value={leaveActionModal.remark || ''}
+                  onChange={(e) => setLeaveActionModal(prev => ({ ...prev, remark: e.target.value }))}
+                  placeholder="e.g. Fever, informed over call in morning"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setLeaveActionModal(null)}
+                disabled={isSavingLeave}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteMarkLeave}
+                disabled={isSavingLeave}
+                className="px-5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs shadow-md shadow-amber-600/20 transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSavingLeave ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" strokeDasharray="32" strokeLinecap="round"/></svg>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✓</span>
+                    <span>Confirm Leave</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 📝 Admin & Sub-Admin Backdated Data Feeding Modal */}
       {showAdminFeedModal && (
