@@ -485,16 +485,36 @@ class DashboardRequest(BaseModel):
 LAST_REPORTS_MODIFIED_TS: float = time.time()
 DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
 
-def upsert_in_memory_report(month_prefix: str, report_data: dict, action: str = "submit"):
-    """
-    In-place upsert/deletion of a single report within the shared monthly cache.
-    Prevents cache eviction cascades on daily report submissions and edits.
-    """
-    if not month_prefix or not report_data or not isinstance(report_data, dict):
-        return
-    cache_key = f"shared_raw_month_{month_prefix}"
+def _upsert_into_cached_list(cache_key: str, target_id: str, report_data: dict, action: str):
     cached_list = cache.get(cache_key)
     if not isinstance(cached_list, list):
+        return
+    idx = -1
+    for i, item in enumerate(cached_list):
+        if (item.get("id") or item.get("doc_id")) == target_id:
+            idx = i
+            break
+    if action == "delete":
+        if idx != -1:
+            cached_list.pop(idx)
+    elif idx != -1:
+        cached_list[idx] = report_data
+    else:
+        cached_list.append(report_data)
+    cache.set(cache_key, cached_list, ttl=3600)
+
+def upsert_in_memory_report(
+    month_prefix: str, 
+    report_data: dict, 
+    action: str = "submit",
+    old_district: str = ""
+):
+    """
+    In-place upsert/deletion of a single report within shared monthly caches.
+    Prevents cache eviction cascades on daily report submissions and edits.
+    Synchronizes both statewide cache and district-partitioned caches (for Sub-Admins).
+    """
+    if not month_prefix or not report_data or not isinstance(report_data, dict):
         return
 
     target_id = report_data.get("id") or report_data.get("doc_id")
@@ -514,21 +534,23 @@ def upsert_in_memory_report(month_prefix: str, report_data: dict, action: str = 
     if "doc_id" not in report_data:
         report_data["doc_id"] = target_id
 
-    idx = -1
-    for i, item in enumerate(cached_list):
-        if (item.get("id") or item.get("doc_id")) == target_id:
-            idx = i
-            break
+    # 1. Update statewide shared monthly cache
+    _upsert_into_cached_list(f"shared_raw_month_{month_prefix}", target_id, report_data, action)
 
-    if action == "delete":
-        if idx != -1:
-            cached_list.pop(idx)
-    elif idx != -1:
-        cached_list[idx] = report_data
-    else:
-        cached_list.append(report_data)
+    # 2. Update any district-partitioned shared monthly caches (for Sub-Admins)
+    c_wp = canonicalize_district(report_data.get("working_place", "") or report_data.get("district", ""))
+    wp_tag = c_wp.replace(" ", "_").lower() if c_wp else ""
+    old_wp = canonicalize_district(old_district) if old_district else ""
+    old_wp_tag = old_wp.replace(" ", "_").lower() if old_wp else ""
 
-    cache.set(cache_key, cached_list, ttl=3600)
+    with cache._lock:
+        dist_cache_keys = [k for k in cache._cache.keys() if k.startswith(f"shared_raw_month_{month_prefix}_")]
+
+    for k in dist_cache_keys:
+        if wp_tag and wp_tag in k:
+            _upsert_into_cached_list(k, target_id, report_data, action)
+        elif old_wp_tag and old_wp_tag in k and old_wp_tag != wp_tag:
+            _upsert_into_cached_list(k, target_id, report_data, action="delete")
 
 def record_report_mutation(
     action: str = "submit", 
@@ -567,11 +589,11 @@ def record_report_mutation(
             month_prefix = str(date).strip()[:7]
             
         if month_prefix and report_data and isinstance(report_data, dict):
-            upsert_in_memory_report(month_prefix, report_data, action=action)
+            upsert_in_memory_report(month_prefix, report_data, action=action, old_district=clean_old_dist)
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
         elif month_prefix and action == "delete" and doc_id:
-            upsert_in_memory_report(month_prefix, {"id": doc_id}, action="delete")
+            upsert_in_memory_report(month_prefix, {"id": doc_id, "district": clean_dist}, action="delete")
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
         elif month_prefix:
@@ -608,6 +630,7 @@ def record_report_mutation(
     if action == "delete" and doc_id:
         DELETED_REPORTS_TOMBSTONES.append({
             "doc_id": str(doc_id).strip(),
+            "district": clean_dist,
             "deleted_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
         })
         if len(DELETED_REPORTS_TOMBSTONES) > 500:
@@ -775,6 +798,13 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
         "is_override": data.get("is_override_used", False)
     }
 
+def normalize_timestamp_str(val: Any) -> str:
+    if not val:
+        return ""
+    if hasattr(val, "isoformat"):
+        val = val.isoformat()
+    return str(val).strip().replace("T", " ")[:19]
+
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_current_admin)):
     try:
@@ -798,8 +828,12 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 
         # Delta Sync Guard: Check if client has existing valid cache
         if req.since and req.cached_count and not req.force_refresh:
-            since_str = str(req.since).strip()
-            recent_deletions = [t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES if t.get("deleted_at", "") > since_str]
+            since_str = normalize_timestamp_str(req.since)
+            recent_deletions = [
+                t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES 
+                if normalize_timestamp_str(t.get("deleted_at", "")) > since_str
+                and (not allowed_dist_set or not t.get("district") or t.get("district") in allowed_dist_set)
+            ]
 
             if since_str >= last_mut_str:
                 # 0 Firestore reads!
@@ -813,10 +847,10 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 
             # Mutations occurred since timestamp: Try serving DELTA from in-memory raw reports
             raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False, district_filter=allowed_dist_set)
-            if raw_docs:
+            if raw_docs is not None:
                 delta_records = []
                 for d in raw_docs:
-                    mod_ts = str(d.get("last_edited_at") or d.get("timestamp_completed") or d.get("submitted_at") or d.get("timestamp") or "")
+                    mod_ts = normalize_timestamp_str(d.get("last_edited_at") or d.get("timestamp_completed") or d.get("submitted_at") or d.get("timestamp") or "")
                     if mod_ts > since_str:
                         formatted = format_dashboard_record(d, allowed_dist_set)
                         if formatted:
@@ -1322,7 +1356,13 @@ async def submit_daily_report(report: DailyActivityReport):
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
-        record_report_mutation("submit", doc_id, district=report.working_place, date=report.date_of_reporting)
+        cached_payload = dict(payload)
+        cached_payload["id"] = doc_id
+        cached_payload["doc_id"] = doc_id
+        cached_payload["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        cached_payload["submitted_at"] = cached_payload["timestamp_completed"]
+
+        record_report_mutation("submit", doc_id, district=report.working_place, date=report.date_of_reporting, report_data=cached_payload)
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
         return {
@@ -3507,8 +3547,10 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             role=actor_role,
             diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
         )
-        
-        record_report_mutation("edit", doc_id, district=c_wp, date=req.date)
+        data["id"] = doc_id
+        data["doc_id"] = doc_id
+        data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        record_report_mutation("edit", doc_id, district=c_wp, date=req.date, report_data=data)
         cache.delete(f"status_{doc_id}")
         cache.delete_prefix("profile_")
 
@@ -3811,8 +3853,11 @@ async def admin_feed_officer_data(
             diff={"date": clean_date, "created_new_report": new_report_created, "summary": summary_str}
         )
 
-        # 7. Invalidate caches for immediate live reflection (Scoped)
-        record_report_mutation("feed", doc_id, district=clean_wp, date=clean_date)
+        feed_cached = dict(cleaned_payload)
+        feed_cached["id"] = doc_id
+        feed_cached["doc_id"] = doc_id
+        feed_cached["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        record_report_mutation("feed", doc_id, district=clean_wp, date=clean_date, report_data=feed_cached)
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
@@ -4186,7 +4231,12 @@ async def admin_edit_day_report(
         # 6. Invalidate caches and record tombstones (Scoped)
         old_wp = canonicalize_district(old_data.get("working_place", ""))
         for d in matching_docs:
-            record_report_mutation("edit", d.id, district=clean_wp, date=clean_date, old_district=old_wp)
+            updated_report = dict(old_data)
+            updated_report.update(doc_update)
+            updated_report["id"] = d.id
+            updated_report["doc_id"] = d.id
+            updated_report["last_edited_at"] = now_str
+            record_report_mutation("edit", d.id, district=clean_wp, date=clean_date, old_district=old_wp, report_data=updated_report)
             cache.delete(f"status_{d.id}")
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
@@ -7861,7 +7911,10 @@ async def repair_duplicate_notifications(
             )
 
             # 8. Invalidate caches (Scoped)
-            record_report_mutation("repair", clean_doc_id, district=doc_district, date=report_date)
+            report_data["id"] = clean_doc_id
+            report_data["doc_id"] = clean_doc_id
+            report_data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+            record_report_mutation("repair", clean_doc_id, district=doc_district, date=report_date, report_data=report_data)
             cache.delete(f"status_{clean_doc_id}")
             cache.delete_prefix("profile_")
 

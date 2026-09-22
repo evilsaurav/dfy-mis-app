@@ -157,4 +157,78 @@ async def test_subadmin_cold_query_scoped_to_district():
     finally:
         main.db = original_db
 
+def test_upsert_synchronizes_statewide_and_district_partitioned_caches():
+    month_prefix = "2026-09"
+    state_key = f"shared_raw_month_{month_prefix}"
+    dist_key = f"shared_raw_month_{month_prefix}_gaya"
+    
+    main.cache.delete(state_key)
+    main.cache.delete(dist_key)
+    
+    # Pre-populate both caches
+    main.cache.set(state_key, [{"id": "gaya_fo1", "working_place": "Gaya", "notifications": [1]}], ttl=3600)
+    main.cache.set(dist_key, [{"id": "gaya_fo1", "working_place": "Gaya", "notifications": [1]}], ttl=3600)
+    
+    # 1. Update report
+    new_report = {"id": "gaya_fo1", "working_place": "Gaya", "notifications": [1, 2], "date": "2026-09-01"}
+    main.upsert_in_memory_report(month_prefix, new_report, action="submit")
+    
+    cached_state = main.cache.get(state_key)
+    cached_dist = main.cache.get(dist_key)
+    assert cached_state[0]["notifications"] == [1, 2]
+    assert cached_dist[0]["notifications"] == [1, 2]
+    
+    # 2. Append new report in Gaya
+    fo2_report = {"id": "gaya_fo2", "working_place": "Gaya", "notifications": [3], "date": "2026-09-02"}
+    main.upsert_in_memory_report(month_prefix, fo2_report, action="submit")
+    
+    assert len(main.cache.get(state_key)) == 2
+    assert len(main.cache.get(dist_key)) == 2
+
+def test_record_report_mutation_preserves_cache_when_report_data_provided():
+    month_prefix = "2026-09"
+    state_key = f"shared_raw_month_{month_prefix}"
+    
+    main.cache.delete(state_key)
+    main.cache.set(state_key, [{"id": "existing_doc", "working_place": "Patna"}], ttl=3600)
+    
+    # Calling mutation with report_data should NOT wipe the cache!
+    new_data = {"id": "new_doc", "working_place": "Patna", "date_of_reporting": "2026-09-15"}
+    main.record_report_mutation("submit", "new_doc", district="Patna", date="2026-09-15", report_data=new_data)
+    
+    cached = main.cache.get(state_key)
+    assert cached is not None
+    assert len(cached) == 2
+    assert any(r["id"] == "new_doc" for r in cached)
+
+@pytest.mark.asyncio
+async def test_subadmin_tombstone_isolation():
+    month_prefix = "2026-09"
+    main.DELETED_REPORTS_TOMBSTONES.clear()
+    
+    # Add a deletion in Gaya and a deletion in Buxar
+    main.record_report_mutation("delete", "gaya_doc_del", district="Gaya", date="2026-09-01")
+    main.record_report_mutation("delete", "buxar_doc_del", district="Buxar", date="2026-09-01")
+    
+    # Sub-Admin for Gaya queries delta
+    req = main.DashboardRequest(
+        month_prefix=month_prefix,
+        since="2026-09-01 00:00:00",
+        cached_count=1,
+        districts="Gaya",
+        force_refresh=False
+    )
+    subadmin_ctx = {
+        "role": "SUB_ADMIN",
+        "allowed_districts": ["Gaya"],
+        "user_id": "sub_gaya"
+    }
+    
+    res = await main.get_dashboard_data(req, admin=subadmin_ctx)
+    assert res["status"] == "success"
+    # Sub-Admin must ONLY see their district's tombstone!
+    assert "gaya_doc_del" in res["deleted_ids"]
+    assert "buxar_doc_del" not in res["deleted_ids"]
+
+
 

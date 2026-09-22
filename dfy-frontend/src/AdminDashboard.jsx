@@ -2695,9 +2695,11 @@ Keep this file safe in your Google Drive or personal diary.
             });
           }
           const updated = Array.from(map.values());
+          const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+          const syncStamp = data.synced_at || fallbackStamp;
           try {
             localStorage.setItem(cacheKey, JSON.stringify({
-              synced_at: data.synced_at || new Date().toLocaleString(),
+              synced_at: syncStamp,
               records: updated
             }));
           } catch (storageErr) {
@@ -2705,14 +2707,16 @@ Keep this file safe in your Google Drive or personal diary.
           }
           return updated;
         });
-        const syncStamp = data.synced_at || new Date().toLocaleString();
+        const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        const syncStamp = data.synced_at || fallbackStamp;
         setLastSyncedTime(syncStamp);
         setSyncStatus('LIVE');
       } else {
         // Mode FULL
         const newRecords = Array.isArray(data.records) ? data.records : [];
         setRawRecords(newRecords);
-        const syncStamp = data.synced_at || new Date().toLocaleString();
+        const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+        const syncStamp = data.synced_at || fallbackStamp;
         setLastSyncedTime(syncStamp);
         setSyncStatus('LIVE');
         try {
