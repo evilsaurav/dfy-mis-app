@@ -3300,10 +3300,23 @@ function App() {
     }
   };
 
-  const fetchAndStoreDistrictRegistry = useCallback(async (district) => {
+  const fetchAndStoreDistrictRegistry = useCallback(async (district, force = false) => {
     const targetDist = district || workingPlaceRef.current || formData.working_place;
     if (!targetDist) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+    // Freshness guard: If cached within the last 2 hours (7,200,000 ms), skip network fetch to save Firestore reads
+    if (!force) {
+      try {
+        const cached = await getDistrictRegistry(targetDist);
+        if (cached && cached.updated_at && (Date.now() - cached.updated_at < 2 * 60 * 60 * 1000) && cached.registry) {
+          return;
+        }
+      } catch (e) {
+        // Continue to network fetch if check fails
+      }
+    }
+
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await fetch(`${API_BASE_URL}/api/district-notification-registry?district=${encodeURIComponent(targetDist)}&months=3`);
@@ -3326,7 +3339,7 @@ function App() {
         fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
       }
     }
-  }, [isLoggedIn, formData.working_place, formData.fo_name, formData.pin, fetchAndStoreDistrictRegistry]);
+  }, [isLoggedIn, formData.working_place, formData.fo_name, fetchAndStoreDistrictRegistry]);
 
   const fetchFoBroadcasts = async (district) => {
     if (!district) return;

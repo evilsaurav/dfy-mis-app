@@ -103,37 +103,114 @@ import time
 import asyncio
 from typing import Dict, Any, Tuple
 
+import threading
+
 class SimpleTTLCache:
-    def __init__(self, default_ttl: int = 30):
+    def __init__(self, default_ttl: int = 300, disk_persist_dir: Optional[str] = None):
         self._cache: Dict[str, Tuple[float, Any]] = {}
         self.default_ttl = default_ttl
+        self._disk_dir = disk_persist_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+        self._disk_path = os.path.join(self._disk_dir, "l2_persistent_cache.json")
+        self._lock = threading.Lock()
+        self._disk_lock = threading.Lock()
+        self._hydrate_from_disk()
+
+    def _hydrate_from_disk(self):
+        try:
+            if os.path.exists(self._disk_path):
+                with open(self._disk_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                now = time.time()
+                loaded = 0
+                for k, v in data.items():
+                    exp = v.get("exp", 0)
+                    if exp > now:
+                        self._cache[k] = (exp, v.get("val"))
+                        loaded += 1
+                if loaded:
+                    print(f"[L2 Cache Engine] Hydrated {loaded} unexpired cache entries from disk (0 cold-start Firestore reads).")
+        except Exception as e:
+            print(f"[L2 Cache Engine Notice] Disk hydration notice: {e}")
+
+    def _flush_to_disk_sync(self):
+        if not hasattr(self, "_disk_lock") or not self._disk_lock.acquire(blocking=False):
+            return
+        try:
+            os.makedirs(self._disk_dir, exist_ok=True)
+            now = time.time()
+            data_to_save = {}
+            with self._lock:
+                for k, (exp, val) in self._cache.items():
+                    if exp > now:
+                        # Only persist key collections to keep disk cache small and fast
+                        if any(k.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_", "shared_raw_month_"]):
+                            try:
+                                json.dumps(val, default=str)
+                                data_to_save[k] = {"exp": exp, "val": val}
+                            except Exception:
+                                pass
+            if data_to_save:
+                import uuid
+                tmp_file = os.path.join(self._disk_dir, f"l2_cache_{uuid.uuid4().hex[:8]}.tmp")
+                with open(tmp_file, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, default=str)
+                try:
+                    os.replace(tmp_file, self._disk_path)
+                except Exception:
+                    if os.path.exists(tmp_file):
+                        try:
+                            os.remove(tmp_file)
+                        except Exception:
+                            pass
+        except Exception as e:
+            print(f"[L2 Cache Engine Notice] Disk flush notice: {e}")
+        finally:
+            try:
+                self._disk_lock.release()
+            except Exception:
+                pass
 
     def get(self, key: str):
-        if key in self._cache:
-            exp, val = self._cache[key]
-            if time.time() < exp:
-                return val
-            else:
-                del self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                exp, val = self._cache[key]
+                if time.time() < exp:
+                    return val
+                else:
+                    del self._cache[key]
         return None
 
-    def set(self, key: str, val: Any, ttl: Optional[int] = None):
+    def set(self, key: str, val: Any, ttl: Optional[int] = None, persist: bool = False):
         t = ttl if ttl is not None else self.default_ttl
-        self._cache[key] = (time.time() + t, val)
+        with self._lock:
+            self._cache[key] = (time.time() + t, val)
+        if persist or any(key.startswith(p) for p in ["staff_directory", "dist_notif_registry_", "shared_raw_month_"]):
+            try:
+                threading.Thread(target=self._flush_to_disk_sync, daemon=True).start()
+            except Exception:
+                pass
 
     def delete(self, key: str):
-        if key in self._cache:
-            del self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                del self._cache[key]
 
     def delete_prefix(self, prefix: str):
-        keys_to_del = [k for k in self._cache if k.startswith(prefix)]
-        for k in keys_to_del:
-            del self._cache[k]
+        with self._lock:
+            keys_to_del = [k for k in self._cache if k.startswith(prefix)]
+            for k in keys_to_del:
+                del self._cache[k]
 
     def clear(self):
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
+        try:
+            if os.path.exists(self._disk_path):
+                os.remove(self._disk_path)
+        except Exception:
+            pass
 
-cache = SimpleTTLCache(default_ttl=30)
+cache = SimpleTTLCache(default_ttl=300)
 
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
@@ -406,19 +483,71 @@ class DashboardRequest(BaseModel):
 LAST_REPORTS_MODIFIED_TS: float = time.time()
 DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
 
-def record_report_mutation(action: str = "submit", doc_id: str = ""):
+def record_report_mutation(
+    action: str = "submit", 
+    doc_id: str = "", 
+    district: str = "", 
+    date: str = "", 
+    old_district: str = ""
+):
     global LAST_REPORTS_MODIFIED_TS
     LAST_REPORTS_MODIFIED_TS = time.time()
     try:
-        cache.delete_prefix("dist_notif_registry_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
-        cache.delete_prefix("dupe_scan_")
-    except Exception:
-        pass
+        clean_dist = canonicalize_district(district) if district else ""
+        clean_old_dist = canonicalize_district(old_district) if old_district else ""
+        
+        target_districts = set()
+        if clean_dist:
+            target_districts.add(clean_dist)
+            target_districts.add(clean_dist.lower())
+            target_districts.add(clean_dist.title())
+        if clean_old_dist:
+            target_districts.add(clean_old_dist)
+            target_districts.add(clean_old_dist.lower())
+            target_districts.add(clean_old_dist.title())
+
+        # 1. District Notification Registry (Scoped by District)
+        if target_districts:
+            for td in target_districts:
+                cache.delete_prefix(f"dist_notif_registry_{td}_")
+        else:
+            cache.delete_prefix("dist_notif_registry_")
+
+        # 2. Monthly Shared Cache (Scoped by Month)
+        month_prefix = ""
+        if date and len(str(date).strip()) >= 7:
+            month_prefix = str(date).strip()[:7]
+        if month_prefix:
+            cache.delete_prefix(f"shared_raw_month_{month_prefix}")
+            cache.delete_prefix(f"dash_{month_prefix}_")
+            cache.delete_prefix(f"dupe_scan_{month_prefix}")
+        else:
+            cache.delete_prefix("shared_raw_month_")
+            cache.delete_prefix("dash_")
+            cache.delete_prefix("dupe_scan_")
+
+        # 3. Attendance Cache (Scoped by Date)
+        if date and len(str(date).strip()) >= 10:
+            clean_date = str(date).strip()[:10]
+            cache.delete_prefix(f"attendance_{clean_date}")
+        else:
+            cache.delete_prefix("attendance_")
+
+        # 4. Cascade Alerts (Scoped by District)
+        if target_districts:
+            for td in target_districts:
+                cache.delete_prefix(f"cascade_alerts_{td}_")
+        else:
+            cache.delete_prefix("cascade_alerts_")
+
+        # 5. Duplicate Audit Cache (Scoped by Month)
+        if month_prefix:
+            cache.delete_prefix(f"dupe_audit_{month_prefix}")
+        else:
+            cache.delete_prefix("dupe_audit_")
+
+    except Exception as e:
+        print(f"[Mutation Invalidation Notice] {e}")
     if action == "delete" and doc_id:
         DELETED_REPORTS_TOMBSTONES.append({
             "doc_id": str(doc_id).strip(),
@@ -1048,15 +1177,9 @@ async def submit_daily_report(report: DailyActivityReport):
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
-        record_report_mutation("submit", doc_id)
+        record_report_mutation("submit", doc_id, district=report.working_place, date=report.date_of_reporting)
         cache.delete(f"status_{doc_id}")
-        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
         return {
             "message": "Daily report submitted successfully",
             "pruned_duplicate_notifications": pruned_duplicates,
@@ -1217,35 +1340,31 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                     "month": month
                 }
 
-        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+        dir_dict = await get_directory()
         targets = []
         
-        for s in staff_docs:
-            sd = s.to_dict()
-            s_dist = sd.get("district")
-            s_name = sd.get("name")
-            if not s_dist or not s_name:
-                continue
+        for s_dist, names in dir_dict.items():
             if allowed_dist_set and s_dist not in allowed_dist_set:
                 continue
             if district and district != "All" and s_dist != district:
                 continue
-                
-            key = f"{s_dist}_{s_name}".lower()
-            if key in month_targets:
-                t_val = month_targets[key]["target"]
-            elif key in default_targets:
-                t_val = default_targets[key]["target"]
-            else:
-                t_val = 50
-                
-            targets.append({
-                "fo_name": s_name,
-                "district": s_dist,
-                "designation": sd.get("designation", "FC"),
-                "target": t_val,
-                "month": month
-            })
+            for s_name in names:
+                if not s_name:
+                    continue
+                key = f"{s_dist}_{s_name}".lower()
+                if key in month_targets:
+                    t_val = month_targets[key]["target"]
+                elif key in default_targets:
+                    t_val = default_targets[key]["target"]
+                else:
+                    t_val = 50
+                    
+                targets.append({
+                    "fo_name": s_name,
+                    "district": s_dist,
+                    "target": t_val,
+                    "month": month
+                })
             
         targets.sort(key=lambda x: (x["district"], x["fo_name"]))
         res = {"success": True, "month": month, "targets": targets}
@@ -2065,13 +2184,31 @@ async def my_profile_stats(req: ProfileStatsRequest):
 
         # Fallback if direct query was empty due to casing or punctuation differences in Firestore
         if not reports:
-            raw_monthly = await get_raw_monthly_reports(req_month)
+            cached_monthly = cache.get(f"shared_raw_month_{req_month}")
             fallback_matches = []
-            for r in raw_monthly:
-                r_wp = canonicalize_district(r.get("working_place", "")).lower()
-                r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
-                if (r_wp == clean_target_wp or r.get("id", "").lower().startswith(f"{clean_target_wp}_")) and r_fo == clean_target_fo:
-                    fallback_matches.append(r)
+            if cached_monthly and isinstance(cached_monthly, list):
+                for r in cached_monthly:
+                    r_wp = canonicalize_district(r.get("working_place", "")).lower()
+                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                    if (r_wp == clean_target_wp or r.get("id", "").lower().startswith(f"{clean_target_wp}_")) and r_fo == clean_target_fo:
+                        fallback_matches.append(r)
+            else:
+                # Targeted district query only (avoids full state scan)
+                target_places = list(dict.fromkeys([
+                    c_wp, c_wp.title(), c_wp.lower(), c_wp.upper()
+                ]))[:10]
+                dist_reports = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_field_reports")
+                    .where("working_place", "in", target_places)
+                    .where("date_of_reporting", ">=", start_date)
+                    .where("date_of_reporting", "<=", end_date)
+                    .stream()
+                ))
+                for r_doc in dist_reports:
+                    r = r_doc.to_dict() if hasattr(r_doc, "to_dict") else r_doc
+                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                    if r_fo == clean_target_fo:
+                        fallback_matches.append(r)
             if fallback_matches:
                 reports = fallback_matches
         
@@ -2236,9 +2373,9 @@ async def get_today_attendance(
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
 
-        # 1. Fetch all active staff (from memory cache/baseline to save 22 reads)
+        # 1. Fetch all active staff (using cached directory with L2 persistence)
         staff_list = []
-        cached_dir = cache.get("staff_directory_list") or load_baseline_staff_directory()
+        cached_dir = cache.get("staff_directory_dict") or await get_directory()
         if cached_dir and isinstance(cached_dir, dict):
             for dist, names in cached_dir.items():
                 c_dist = canonicalize_district(dist)
@@ -2252,26 +2389,18 @@ async def get_today_attendance(
                             "designation": "Field Officer"
                         })
         else:
-            staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
-            for doc in staff_docs:
-                d = doc.to_dict()
-                if d.get("is_active") is False or d.get("status") == "inactive":
-                    deleted_at = d.get("deleted_at")
-                    if deleted_at and date > deleted_at:
-                        continue
-                    elif not deleted_at:
-                        continue
-                raw_dist = d.get("district")
-                dist = canonicalize_district(raw_dist) if raw_dist else ""
-                clean_fo = d.get("name", "").strip()
-                if dist and clean_fo:
-                    if allowed_dist_set and dist.lower() not in allowed_dist_set:
-                        continue
-                    staff_list.append({
-                        "district": dist,
-                        "fo_name": clean_fo,
-                        "designation": d.get("designation", "Field Officer")
-                    })
+            cached_dir = load_baseline_staff_directory()
+            for dist, names in (cached_dir or {}).items():
+                c_dist = canonicalize_district(dist)
+                if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                    continue
+                for clean_fo in names:
+                    if clean_fo and str(clean_fo).strip():
+                        staff_list.append({
+                            "district": c_dist,
+                            "fo_name": str(clean_fo).strip(),
+                            "designation": "Field Officer"
+                        })
                 
         # 2. Fetch daily field reports for this date
         report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", date).stream()))
@@ -3062,15 +3191,9 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             diff={"category": cat_key, "action": req.action, "old_id": req.old_id, "new_id": req.new_id}
         )
         
-        record_report_mutation("edit", doc_id)
+        record_report_mutation("edit", doc_id, district=c_wp, date=req.date)
         cache.delete(f"status_{doc_id}")
-        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
 
         try:
             month_pfx = req.date[:7]
@@ -3371,18 +3494,12 @@ async def admin_feed_officer_data(
             diff={"date": clean_date, "created_new_report": new_report_created, "summary": summary_str}
         )
 
-        # 7. Invalidate caches for immediate live reflection
-        record_report_mutation("feed", doc_id)
+        # 7. Invalidate caches for immediate live reflection (Scoped)
+        record_report_mutation("feed", doc_id, district=clean_wp, date=clean_date)
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
 
         return {
             "success": True,
@@ -3503,22 +3620,15 @@ async def admin_delete_day_report(
         except Exception as r_err:
             print(f"[Delete Day Rollup Notice] {r_err}")
 
-        # 5. Invalidate caches and record tombstones
-        # Invalidate ACTUAL deleted document IDs (from matching_docs — may differ from candidate aliases)
+        # 5. Invalidate caches and record tombstones (Scoped)
         for doc_snap in matching_docs:
-            record_report_mutation("delete", doc_snap.id)
+            record_report_mutation("delete", doc_snap.id, district=clean_wp, date=clean_date)
             cache.delete(f"status_{doc_snap.id}")
         # Also invalidate all candidate alias IDs (covers fallback-found docs)
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
 
         month_pfx = clean_date[:7]
         try:
@@ -3756,20 +3866,15 @@ async def admin_edit_day_report(
             except Exception as r_err:
                 print(f"[Edit Day Rollup Notice] {r_err}")
 
-        # 6. Invalidate caches and record tombstones
+        # 6. Invalidate caches and record tombstones (Scoped)
+        old_wp = canonicalize_district(old_data.get("working_place", ""))
         for d in matching_docs:
-            record_report_mutation("edit", d.id)
+            record_report_mutation("edit", d.id, district=clean_wp, date=clean_date, old_district=old_wp)
             cache.delete(f"status_{d.id}")
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("dist_notif_registry_")
         cache.delete_prefix("profile_")
-        cache.delete_prefix("dash_")
-        cache.delete_prefix("shared_raw_month_")
-        cache.delete_prefix("attendance_")
-        cache.delete_prefix("dupe_audit_")
-        cache.delete_prefix("cascade_alerts_")
         cache.delete_prefix("recent_id_edits_")
 
         month_pfx = clean_date[:7]
@@ -6873,10 +6978,78 @@ async def get_patient_journey(patient_id: str):
         if cached is not None:
             return cached
 
-        docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").stream()))
+        # Step 1: Check Permanent Nikshay Cumulative Ledger first to discover district
+        ledger_doc_id = clean_id.replace("/", "_").replace(".", "_")
+        known_district = ""
+        ledger_data = None
+        try:
+            ledger_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(ledger_doc_id).get())
+            if ledger_doc.exists:
+                ledger_data = ledger_doc.to_dict()
+                known_district = canonicalize_district(ledger_data.get("district", ""))
+        except Exception:
+            pass
+
+        # Step 2: Search in-memory cached reports for recent months first (0 Firestore reads)
+        now = get_ist_now()
+        cur_m = now.strftime("%Y-%m")
+        prev_m = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        docs = []
+        for m in [cur_m, prev_m]:
+            c_reports = cache.get(f"shared_raw_month_{m}")
+            if c_reports and isinstance(c_reports, list):
+                docs.extend(c_reports)
+
+        found_in_cache = False
+        for d in docs:
+            item = d if isinstance(d, dict) else (d.to_dict() if hasattr(d, "to_dict") else {})
+            for field_key in ["notification_ids", "sample_tested_ids", "dbt_ids", "hiv_dm_ids", "contact_tracing_ids"]:
+                if clean_id in (item.get(field_key) or []):
+                    found_in_cache = True
+                    break
+            if found_in_cache:
+                break
+
+        # Step 3: Targeted Firestore query if not resolved from in-memory cache
+        if not found_in_cache:
+            start_date = (now - timedelta(days=180)).strftime("%Y-%m-01")
+            if known_district:
+                target_places = list(dict.fromkeys([known_district, known_district.title(), known_district.lower()]))[:10]
+                docs = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_field_reports")
+                    .where("working_place", "in", target_places)
+                    .where("date_of_reporting", ">=", start_date)
+                    .stream()
+                ))
+            else:
+                notif_docs = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_field_reports")
+                    .where("notification_ids", "array_contains", clean_id)
+                    .stream()
+                ))
+                if notif_docs:
+                    first_d = notif_docs[0].to_dict() if hasattr(notif_docs[0], "to_dict") else notif_docs[0]
+                    found_wp = canonicalize_district(first_d.get("working_place", ""))
+                    if found_wp:
+                        target_places = list(dict.fromkeys([found_wp, found_wp.title(), found_wp.lower()]))[:10]
+                        docs = await asyncio.to_thread(lambda: list(
+                            db.collection("daily_field_reports")
+                            .where("working_place", "in", target_places)
+                            .where("date_of_reporting", ">=", start_date)
+                            .stream()
+                        ))
+                    else:
+                        docs = notif_docs
+                else:
+                    docs = []
         
         milestones = []
-        patient_meta = {"id": clean_id, "district": "", "primary_fo": "", "first_reported": ""}
+        patient_meta = {
+            "id": clean_id, 
+            "district": known_district, 
+            "primary_fo": "", 
+            "first_reported": ""
+        }
         
         category_labels = {
             "notification_ids": ("TB Notification Recorded", "📋", 1),
@@ -6893,17 +7066,19 @@ async def get_patient_journey(patient_id: str):
         }
         
         for doc in docs:
-            d = doc.to_dict() if hasattr(doc, "to_dict") else doc
+            d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
             dt = d.get("date_of_reporting", "")
             fo = d.get("fo_name", "")
             dist = d.get("working_place", "")
             
             for field_key, (label, icon, order) in category_labels.items():
-                ids = d.get(field_key, [])
+                ids = d.get(field_key, []) or []
                 if clean_id in ids:
                     if not patient_meta["district"]:
                         patient_meta["district"] = dist
+                    if not patient_meta["primary_fo"]:
                         patient_meta["primary_fo"] = fo
+                    if not patient_meta["first_reported"] or dt < patient_meta["first_reported"]:
                         patient_meta["first_reported"] = dt
                         
                     milestones.append({
@@ -6916,36 +7091,30 @@ async def get_patient_journey(patient_id: str):
                         "order": order
                     })
 
-        # Check Permanent Nikshay Cumulative Ledger
-        ledger_doc_id = clean_id.replace("/", "_").replace(".", "_")
-        try:
-            ledger_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(ledger_doc_id).get())
-            if ledger_doc.exists:
-                ld = ledger_doc.to_dict()
-                if not patient_meta["district"] and ld.get("district"):
-                    patient_meta["district"] = ld.get("district")
-                if not patient_meta.get("patient_name") and ld.get("patient_name"):
-                    patient_meta["patient_name"] = ld.get("patient_name")
+        # Apply Permanent Nikshay Cumulative Ledger Metadata
+        if ledger_data:
+            if not patient_meta["district"] and ledger_data.get("district"):
+                patient_meta["district"] = ledger_data.get("district")
+            if not patient_meta.get("patient_name") and ledger_data.get("patient_name"):
+                patient_meta["patient_name"] = ledger_data.get("patient_name")
                     
-                active_nikshay_indicators = []
-                if ld.get("bank_validated"): active_nikshay_indicators.append("💳 DBT Bank Validated")
-                if ld.get("hiv_dm_tested") or ld.get("hiv_tested") or ld.get("dm_tested"): active_nikshay_indicators.append("🩺 HIV/DM Screened")
-                if ld.get("udst_done"): active_nikshay_indicators.append("🔬 UDST Tested")
-                if ld.get("contact_tracing_done"): active_nikshay_indicators.append("👥 Contact Traced")
-                
-                milestones.append({
-                    "date": str(ld.get("last_reconciled_at") or ld.get("first_verified_at") or "Permanent")[:10],
-                    "action": f"Nikshay Official Ledger Verified: {', '.join(active_nikshay_indicators) if active_nikshay_indicators else 'Enrolled & Monitored'}",
-                    "icon": "🔒",
-                    "category": "nikshay_verified",
-                    "fo_name": f"Nikshay Ledger ({ld.get('reconciled_by', 'Admin')})",
-                    "district": ld.get("district", patient_meta["district"]),
-                    "order": 0
-                })
-                patient_meta["nikshay_verified"] = True
-                patient_meta["nikshay_indicators"] = active_nikshay_indicators
-        except Exception as l_err:
-            print(f"[Patient Journey] Ledger lookup note: {l_err}")
+            active_nikshay_indicators = []
+            if ledger_data.get("bank_validated"): active_nikshay_indicators.append("💳 DBT Bank Validated")
+            if ledger_data.get("hiv_dm_tested") or ledger_data.get("hiv_tested") or ledger_data.get("dm_tested"): active_nikshay_indicators.append("🩺 HIV/DM Screened")
+            if ledger_data.get("udst_done"): active_nikshay_indicators.append("🔬 UDST Tested")
+            if ledger_data.get("contact_tracing_done"): active_nikshay_indicators.append("👥 Contact Traced")
+            
+            milestones.append({
+                "date": str(ledger_data.get("last_reconciled_at") or ledger_data.get("first_verified_at") or "Permanent")[:10],
+                "action": f"Nikshay Official Ledger Verified: {', '.join(active_nikshay_indicators) if active_nikshay_indicators else 'Enrolled & Monitored'}",
+                "icon": "🔒",
+                "category": "nikshay_verified",
+                "fo_name": f"Nikshay Ledger ({ledger_data.get('reconciled_by', 'Admin')})",
+                "district": ledger_data.get("district", patient_meta["district"]),
+                "order": 0
+            })
+            patient_meta["nikshay_verified"] = True
+            patient_meta["nikshay_indicators"] = active_nikshay_indicators
                     
         milestones.sort(key=lambda m: (m["date"], m["order"]))
         
@@ -7222,16 +7391,10 @@ async def repair_duplicate_notifications(
                 }
             )
 
-            # 8. Invalidate caches: dash_, shared_raw_month_, dupe_audit_, dist_notif_registry_
-            record_report_mutation("repair", clean_doc_id)
+            # 8. Invalidate caches (Scoped)
+            record_report_mutation("repair", clean_doc_id, district=doc_district, date=report_date)
             cache.delete(f"status_{clean_doc_id}")
-            cache.delete_prefix("dash_")
-            cache.delete_prefix("shared_raw_month_")
-            cache.delete_prefix("dupe_audit_")
-            cache.delete_prefix("dist_notif_registry_")
-            cache.delete_prefix("dupe_scan_")
             cache.delete_prefix("profile_")
-            cache.delete_prefix("attendance_")
 
         # 9. Return response
         return {
