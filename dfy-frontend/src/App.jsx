@@ -3301,6 +3301,7 @@ function App() {
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [showPostSubmitSuccess, setShowPostSubmitSuccess] = useState(false);
   const [submittedReportSummary, setSubmittedReportSummary] = useState(null);
+  const [todaySubmittedReport, setTodaySubmittedReport] = useState(null);
   const [copiedPostSubmit, setCopiedPostSubmit] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
@@ -3648,6 +3649,43 @@ function App() {
             fetchFoBroadcasts(canonicalWp);
             fetchFoCascadeAlerts(canonicalWp, session.fo_name);
             fetchAndStoreDistrictRegistry(canonicalWp);
+
+            // Check if today's report was already submitted to keep form inputs blank & show banner
+            const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+            fetch(`${API_BASE_URL}/check-today-status`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ working_place: canonicalWp, fo_name: session.fo_name, date: today })
+            })
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+              if (data && data.data && Object.keys(data.data).length > 0) {
+                setTodaySubmittedReport(data.data);
+                try {
+                  localStorage.removeItem(draftKey);
+                  localStorage.removeItem(`dfy_draft_${session.working_place}_${session.fo_name}`);
+                } catch (e) {}
+                setFormData(prev => ({
+                  ...prev,
+                  working_place: canonicalWp,
+                  fo_name: session.fo_name,
+                  pin: session.pin,
+                  date_of_reporting: today,
+                  notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
+                  sample_collection_ids: [], sample_tested_ids: [], 
+                  outcome_assigned_ids: [], home_visit_ids: [], 
+                  contact_tracing_ids: [], follow_up_ids: [], 
+                  face_to_face_ids: [], presumptive_ids: [], 
+                  documents_ids: [], fdc_provided_ids: [], fdc_details: [],
+                  kit_consumption_ids: [], differentiated_tb_ids: [],
+                  tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
+                  adhar_face_authentication_ids: [], consent_with_id_ids: [],
+                  culture_dst_ids: [],
+                  remark: "", visited_names: []
+                }));
+              }
+            })
+            .catch(() => {});
           }
         }
       }
@@ -3834,11 +3872,13 @@ function App() {
   const handleDistrictChange = (e) => {
     setFormData({ ...formData, working_place: (e.target.value || "").trim(), fo_name: "", pin: "" });
     setPinStatus(null);
+    setTodaySubmittedReport(null);
   }
 
   const handleNameChange = (e) => {
     setFormData({ ...formData, fo_name: (e.target.value || "").trim(), pin: "" });
     setPinStatus(null);
+    setTodaySubmittedReport(null);
   }
 
   const morningQuotes = [
@@ -3862,6 +3902,7 @@ function App() {
       localStorage.removeItem('dfy_user_session');
     } catch (e) {}
     setIsLoggedIn(false);
+    setTodaySubmittedReport(null);
     setFormData({
       working_place: "", fo_name: "", pin: "",
       notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
@@ -3901,14 +3942,33 @@ function App() {
             const data = await res.json();
             if (data && data.data && Object.keys(data.data).length > 0) {
               const d = data.data;
-              setFormData(prev => sanitizeIncomingFormData(d, {
+              setTodaySubmittedReport(d);
+              setFormData(prev => ({
                 ...prev,
-                date_of_reporting: d.date_of_reporting || today
+                date_of_reporting: d.date_of_reporting || today,
+                notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
+                sample_collection_ids: [], sample_tested_ids: [], 
+                outcome_assigned_ids: [], home_visit_ids: [], 
+                contact_tracing_ids: [], follow_up_ids: [], 
+                face_to_face_ids: [], presumptive_ids: [], 
+                documents_ids: [], fdc_provided_ids: [], fdc_details: [],
+                kit_consumption_ids: [], differentiated_tb_ids: [],
+                tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
+                adhar_face_authentication_ids: [], consent_with_id_ids: [],
+                culture_dst_ids: [],
+                remark: "", visited_names: []
               }));
+              try {
+                const canonicalWp = canonicalizeDistrict(formData.working_place);
+                localStorage.removeItem(`dfy_draft_${canonicalWp}_${formData.fo_name}`);
+                localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`);
+              } catch (e) {}
             } else {
+              setTodaySubmittedReport(null);
               setFormData(prev => ({ ...prev, date_of_reporting: today }));
             }
           } else {
+            setTodaySubmittedReport(null);
             setFormData(prev => ({ ...prev, date_of_reporting: today }));
           }
         } else {
@@ -4381,8 +4441,36 @@ function App() {
       try {
         await saveOfflineReport(payload);
         setShowReviewModal(false);
-        try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
+        try {
+          const canonicalWp = canonicalizeDistrict(formData.working_place);
+          localStorage.removeItem(`dfy_draft_${canonicalWp}_${formData.fo_name}`);
+          localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`);
+        } catch (e) {}
         await updateOfflineCount();
+
+        // Reset form inputs to blank for fresh additions
+        setFormData(prev => ({
+          ...prev,
+          notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
+          sample_collection_ids: [], sample_tested_ids: [], 
+          outcome_assigned_ids: [], home_visit_ids: [], 
+          contact_tracing_ids: [], follow_up_ids: [], 
+          face_to_face_ids: [], presumptive_ids: [], 
+          documents_ids: [], fdc_provided_ids: [], fdc_details: [],
+          kit_consumption_ids: [], differentiated_tb_ids: [],
+          tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
+          adhar_face_authentication_ids: [], consent_with_id_ids: [],
+          culture_dst_ids: [],
+          remark: "", visited_names: []
+        }));
+
+        setTodaySubmittedReport({
+          date_of_reporting: payload.date_of_reporting || payload.date,
+          working_place: formData.working_place,
+          fo_name: formData.fo_name,
+          timestamp_completed: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          totalCount: totalCount
+        });
 
         setSubmittedReportSummary({
           text: summaryText,
@@ -4410,8 +4498,36 @@ function App() {
       
       if(response.ok) {
         setShowReviewModal(false);
-        try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
+        try {
+          const canonicalWp = canonicalizeDistrict(formData.working_place);
+          localStorage.removeItem(`dfy_draft_${canonicalWp}_${formData.fo_name}`);
+          localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`);
+        } catch (e) {}
         showToast("✓ Final Report Submitted Successfully!", "success");
+
+        // Reset form inputs to blank for fresh additions
+        setFormData(prev => ({
+          ...prev,
+          notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
+          sample_collection_ids: [], sample_tested_ids: [], 
+          outcome_assigned_ids: [], home_visit_ids: [], 
+          contact_tracing_ids: [], follow_up_ids: [], 
+          face_to_face_ids: [], presumptive_ids: [], 
+          documents_ids: [], fdc_provided_ids: [], fdc_details: [],
+          kit_consumption_ids: [], differentiated_tb_ids: [],
+          tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
+          adhar_face_authentication_ids: [], consent_with_id_ids: [],
+          culture_dst_ids: [],
+          remark: "", visited_names: []
+        }));
+
+        setTodaySubmittedReport({
+          date_of_reporting: payload.date_of_reporting || payload.date,
+          working_place: formData.working_place,
+          fo_name: formData.fo_name,
+          timestamp_completed: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+          totalCount: totalCount
+        });
 
         setSubmittedReportSummary({
           text: summaryText,
@@ -4777,6 +4893,41 @@ function App() {
                 </div>
               )}
 
+              {/* Today's Submission Status Banner */}
+              {todaySubmittedReport && (
+                <div className="mb-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-green-50 border border-emerald-200/90 rounded-2xl p-3.5 sm:p-4 shadow-xs animate-fade-in">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-base shadow-xs shrink-0">
+                        ✓
+                      </div>
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-black text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
+                          <span>Report Submitted Today</span>
+                          <span className="bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-2xs">
+                            Safe & Saved
+                          </span>
+                        </h4>
+                        <p className="text-[11px] text-emerald-800 font-bold mt-0.5">
+                          Aapki aaj ki report safaltapoorvak submit ho chuki hai.
+                        </p>
+                      </div>
+                    </div>
+                    {todaySubmittedReport.timestamp_completed && (
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-1 rounded-lg shrink-0">
+                        {String(todaySubmittedReport.timestamp_completed).substring(11, 16) || 'Done'}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-2.5 pt-2 border-t border-emerald-200/60 flex items-center gap-1.5 text-[11px] text-emerald-900/90">
+                    <span className="shrink-0 text-xs">💡</span>
+                    <p className="font-medium text-[11px] leading-tight">
+                      <span className="font-bold">Naya patient mila hai?</span> Form me enter karke submit karein. Sirf naye IDs database me judenge, purana data safe rahega.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Real-time Floating Mini-HUD for daily entries */}
               <div className="sticky top-16 z-30 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-3 shadow-sm mb-4 transition-all">
@@ -5067,7 +5218,11 @@ function App() {
                         <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                         <span>Submitting...</span>
                       </>
-                    ) : 'Review & Submit Daily Report →'}
+                    ) : todaySubmittedReport ? (
+                      'Update / Add to Daily Report →'
+                    ) : (
+                      'Review & Submit Daily Report →'
+                    )}
                   </button>
                 </div>
               </div>
@@ -5244,9 +5399,8 @@ function App() {
                   type="button"
                   onClick={() => {
                     setShowPostSubmitSuccess(false);
-                    window.location.reload();
                   }}
-                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl text-xs transition-colors"
+                  className="bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl text-xs transition-colors cursor-pointer"
                 >
                   Done / Close
                 </button>

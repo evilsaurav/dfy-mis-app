@@ -1329,6 +1329,18 @@ async def submit_daily_report(report: DailyActivityReport):
                             payload[k] = f"{old_remark} | {v}".strip(" |")
                         else:
                             payload[k] = old_remark
+
+                # Preserve preexisting KM readings if subsequent submission didn't provide new ones
+                if d.get("morning_km") and not payload.get("morning_km"):
+                    payload["morning_km"] = d["morning_km"]
+                if d.get("morning_km_photo_url") and not payload.get("morning_km_photo_url"):
+                    payload["morning_km_photo_url"] = d["morning_km_photo_url"]
+                if d.get("evening_km") and not payload.get("evening_km"):
+                    payload["evening_km"] = d["evening_km"]
+                if d.get("evening_km_photo_url") and not payload.get("evening_km_photo_url"):
+                    payload["evening_km_photo_url"] = d["evening_km_photo_url"]
+                if d.get("total_km") and not payload.get("total_km"):
+                    payload["total_km"] = d["total_km"]
         except Exception as read_err:
             print(f"[Submit Notice] Read existing report skipped (quota or offline): {read_err}")
                         
