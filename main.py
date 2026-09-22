@@ -485,12 +485,58 @@ class DashboardRequest(BaseModel):
 LAST_REPORTS_MODIFIED_TS: float = time.time()
 DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
 
+def upsert_in_memory_report(month_prefix: str, report_data: dict, action: str = "submit"):
+    """
+    In-place upsert/deletion of a single report within the shared monthly cache.
+    Prevents cache eviction cascades on daily report submissions and edits.
+    """
+    if not month_prefix or not report_data or not isinstance(report_data, dict):
+        return
+    cache_key = f"shared_raw_month_{month_prefix}"
+    cached_list = cache.get(cache_key)
+    if not isinstance(cached_list, list):
+        return
+
+    target_id = report_data.get("id") or report_data.get("doc_id")
+    if not target_id:
+        c_wp = canonicalize_district(report_data.get("working_place", "") or report_data.get("district", ""))
+        fo = str(report_data.get("fo_name", "")).strip()
+        dt = str(report_data.get("date_of_reporting", "") or report_data.get("date", "")).strip()
+        if c_wp and fo and dt:
+            target_id = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+
+    if not target_id:
+        return
+
+    # Ensure consistent keys
+    if "id" not in report_data:
+        report_data["id"] = target_id
+    if "doc_id" not in report_data:
+        report_data["doc_id"] = target_id
+
+    idx = -1
+    for i, item in enumerate(cached_list):
+        if (item.get("id") or item.get("doc_id")) == target_id:
+            idx = i
+            break
+
+    if action == "delete":
+        if idx != -1:
+            cached_list.pop(idx)
+    elif idx != -1:
+        cached_list[idx] = report_data
+    else:
+        cached_list.append(report_data)
+
+    cache.set(cache_key, cached_list, ttl=3600)
+
 def record_report_mutation(
     action: str = "submit", 
     doc_id: str = "", 
     district: str = "", 
     date: str = "", 
-    old_district: str = ""
+    old_district: str = "",
+    report_data: Optional[Dict[str, Any]] = None
 ):
     global LAST_REPORTS_MODIFIED_TS
     LAST_REPORTS_MODIFIED_TS = time.time()
@@ -515,11 +561,20 @@ def record_report_mutation(
         else:
             cache.delete_prefix("dist_notif_registry_")
 
-        # 2. Monthly Shared Cache (Scoped by Month)
+        # 2. Monthly Shared Cache (Anti-Wipe In-Place Upsert)
         month_prefix = ""
         if date and len(str(date).strip()) >= 7:
             month_prefix = str(date).strip()[:7]
-        if month_prefix:
+            
+        if month_prefix and report_data and isinstance(report_data, dict):
+            upsert_in_memory_report(month_prefix, report_data, action=action)
+            cache.delete_prefix(f"dash_{month_prefix}_")
+            cache.delete_prefix(f"dupe_scan_{month_prefix}")
+        elif month_prefix and action == "delete" and doc_id:
+            upsert_in_memory_report(month_prefix, {"id": doc_id}, action="delete")
+            cache.delete_prefix(f"dash_{month_prefix}_")
+            cache.delete_prefix(f"dupe_scan_{month_prefix}")
+        elif month_prefix:
             cache.delete_prefix(f"shared_raw_month_{month_prefix}")
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
