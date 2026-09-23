@@ -873,12 +873,13 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
             cache.delete_prefix("attendance_")
             cache.delete_prefix("dupe_audit_")
             cache.delete_prefix("cascade_alerts_")
-            try:
-                snap_path = f"cache/dash_{req.month_prefix}.json"
-                if os.path.exists(snap_path):
-                    os.remove(snap_path)
-            except Exception:
-                pass
+            if not allowed_dist_set:
+                try:
+                    snap_path = f"cache/dash_{req.month_prefix}.json"
+                    if os.path.exists(snap_path):
+                        os.remove(snap_path)
+                except Exception:
+                    pass
         else:
             cached = cache.get(cache_key)
             if cached is not None:
