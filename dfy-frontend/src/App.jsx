@@ -2516,6 +2516,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
   const [patientType, setPatientType] = useState("adult"); // "adult" | "pediatric"
   const [weightKg, setWeightKg] = useState("");
   const [phase, setPhase] = useState("IP"); // "IP" | "CP"
+  const [customStrips, setCustomStrips] = useState(null);
 
   const safeIds = Array.isArray(ids) ? ids : [];
   const cleanFdcDetails = Array.isArray(fdcDetails) ? fdcDetails : [];
@@ -2526,6 +2527,14 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
   const dosage = useMemo(() => {
     if (!weightKg || isNaN(parseFloat(weightKg))) return null;
     return calculateFdcDosage(patientType, weightKg, phase);
+  }, [patientType, weightKg, phase]);
+
+  const recommendedStrips = dosage && dosage.isValid ? dosage.strips : 2;
+  const effectiveStrips = customStrips !== null ? customStrips : recommendedStrips;
+
+  // Reset custom strips when weight, phase or patient type changes
+  useEffect(() => {
+    setCustomStrips(null);
   }, [patientType, weightKg, phase]);
 
   const handleAddSmart = () => {
@@ -2548,9 +2557,10 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
       ? (patientType === 'adult' ? '4 FDC (HRZE)' : '3 FDC Paed (HRZ)') 
       : (patientType === 'adult' ? '3 FDC (HRE)' : '2 FDC Paed (HR)');
     const defaultFdcType = phase === 'IP' ? 'FDC 4' : 'FDC 3';
-    const defaultStrips = 2;
 
-    const stripsCount = dosage && dosage.isValid ? dosage.strips : defaultStrips;
+    const stripsCount = effectiveStrips;
+    const isRationed = dosage && dosage.isValid && stripsCount < dosage.strips;
+    const supplyText = `${stripsCount} strips${isRationed ? ' (Stock Rationed)' : ''}`;
     const regimenName = dosage && dosage.isValid ? dosage.regimenName : defaultRegimen;
 
     const enrichedDetail = {
@@ -2562,9 +2572,10 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
       phase: phase,
       regimen_name: regimenName,
       daily_dose_text: dosage && dosage.isValid ? dosage.dailyDoseText : `${regimenName} daily`,
-      supply_issued: dosage && dosage.isValid ? dosage.supplyIssued : `${stripsCount} strips`,
+      supply_issued: supplyText,
       daily_tablets: dosage && dosage.isValid ? dosage.dailyTablets : 0,
       strips: stripsCount,
+      recommended_strips: dosage?.strips || stripsCount,
       fdc_type: defaultFdcType
     };
 
@@ -2572,6 +2583,7 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
     setCurrentId("");
     setPatientName("");
     setWeightKg("");
+    setCustomStrips(null);
     showToast(`✓ #${rawId} FDC successfully added!`, "success");
   };
 
@@ -2821,10 +2833,53 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                   </div>
                   <div className="bg-white/90 p-2 rounded-lg border border-emerald-100">
                     <span className="text-[9px] font-black uppercase text-emerald-600 block">Supply Allocation</span>
-                    <span className="font-black text-emerald-900">{dosage.supplyIssued}</span>
-                    <span className="text-[10px] text-emerald-700 block font-bold mt-0.5">
-                      📦 {dosage.strips} Foil Strip{dosage.strips > 1 ? 's' : ''}
+                    <span className="font-black text-emerald-900">
+                      {effectiveStrips < dosage.strips ? `${effectiveStrips} strips (Stock Rationed)` : dosage.supplyIssued}
                     </span>
+                    <span className="text-[10px] text-emerald-700 block font-bold mt-0.5">
+                      📦 {effectiveStrips} Foil Strip{effectiveStrips > 1 ? 's' : ''}
+                      {effectiveStrips < dosage.strips && (
+                        <span className="text-amber-600 font-bold ml-1 text-[9px]">(Rationed)</span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Interactive Stock Rationing Stepper */}
+                <div className="mt-2 p-2.5 bg-emerald-50/90 rounded-xl border border-emerald-200 flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-emerald-800 block">Strips Provided (Stock Allocation)</span>
+                    <span className="text-[10px] text-slate-500 font-semibold">
+                      Min: 1 | Max Guideline: {dosage.strips}
+                      {effectiveStrips < dosage.strips && (
+                        <span className="text-amber-700 font-bold ml-1">
+                          ({dosage.strips - effectiveStrips} strips short / rationed)
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setCustomStrips(Math.max(1, effectiveStrips - 1))}
+                      disabled={effectiveStrips <= 1}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-emerald-300 font-black text-sm text-emerald-900 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-100 active:scale-95 transition-all shadow-2xs cursor-pointer"
+                      title="Decrease strips (Rationing)"
+                    >
+                      -
+                    </button>
+                    <span className="font-mono font-black text-sm text-emerald-950 px-2 min-w-[28px] text-center">
+                      {effectiveStrips}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setCustomStrips(Math.min(dosage.strips, effectiveStrips + 1))}
+                      disabled={effectiveStrips >= dosage.strips}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-white border border-emerald-300 font-black text-sm text-emerald-900 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-emerald-100 active:scale-95 transition-all shadow-2xs cursor-pointer"
+                      title="Increase strips"
+                    >
+                      +
+                    </button>
                   </div>
                 </div>
               </div>
@@ -2860,18 +2915,66 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
             const displayName = detail.patient_name || 'Patient';
             const displayRegimen = detail.regimen_name || detail.fdc_type || 'FDC';
             const displayStrips = detail.strips || 1;
+            const maxStrips = detail.recommended_strips || 12;
+            const isRationed = displayStrips < maxStrips;
 
             return (
               <li key={index} className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-slate-50/90 border border-slate-200/80 p-3 rounded-xl shadow-2xs hover:bg-white hover:border-slate-300 transition-all">
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="font-mono font-bold text-slate-800 tracking-wider text-xs sm:text-sm">#{id}</span>
                     <span className="text-xs font-bold text-slate-700 truncate max-w-[150px] sm:max-w-xs">{displayName}</span>
-                    <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2 py-0.5 rounded-md">
-                      📦 {displayStrips} Strip{displayStrips > 1 ? 's' : ''}
-                    </span>
+                    
+                    {/* Interactive Inline Strip Stepper Badge */}
+                    <div className="inline-flex items-center gap-1 bg-emerald-50 border border-emerald-200 rounded-lg p-0.5 shadow-2xs">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newStrips = Math.max(1, displayStrips - 1);
+                          const isShort = newStrips < maxStrips;
+                          if (onUpdateFdc) {
+                            onUpdateFdc(id, {
+                              strips: newStrips,
+                              supply_issued: `${newStrips} strips${isShort ? ' (Stock Rationed)' : ''}`
+                            });
+                          }
+                        }}
+                        disabled={displayStrips <= 1}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white text-emerald-800 text-xs font-black border border-emerald-200 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-emerald-100 active:scale-95 transition-all cursor-pointer"
+                        title="Decrease strips (Rationing)"
+                      >
+                        -
+                      </button>
+                      <span className="text-[10px] font-black text-emerald-900 px-1 whitespace-nowrap">
+                        📦 {displayStrips} Strip{displayStrips > 1 ? 's' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newStrips = Math.min(maxStrips, displayStrips + 1);
+                          const isShort = newStrips < maxStrips;
+                          if (onUpdateFdc) {
+                            onUpdateFdc(id, {
+                              strips: newStrips,
+                              supply_issued: `${newStrips} strips${isShort ? ' (Stock Rationed)' : ''}`
+                            });
+                          }
+                        }}
+                        disabled={displayStrips >= maxStrips}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white text-emerald-800 text-xs font-black border border-emerald-200 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-emerald-100 active:scale-95 transition-all cursor-pointer"
+                        title={`Increase strips (Max guideline: ${maxStrips})`}
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    {isRationed && (
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-200" title={`Rationed: guideline is ${maxStrips} strips`}>
+                        Rationed ({displayStrips}/{maxStrips})
+                      </span>
+                    )}
                   </div>
-                  <div className="text-[10px] text-slate-500 font-semibold mt-0.5 flex flex-wrap items-center gap-1.5">
+                  <div className="text-[10px] text-slate-500 font-semibold mt-1 flex flex-wrap items-center gap-1.5">
                     <span className="text-indigo-600 font-bold">{displayRegimen}</span>
                     <span>•</span>
                     <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
@@ -2893,10 +2996,18 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
                         <span>{detail.daily_dose_text}</span>
                       </>
                     )}
+                    {detail.supply_issued && (
+                      <>
+                        <span>•</span>
+                        <span className={isRationed ? "text-amber-700 font-bold" : "text-emerald-700 font-medium"}>
+                          {detail.supply_issued}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 self-end sm:self-auto">
+                <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                   {/* Remove button */}
                   <button
                     type="button"
@@ -4233,7 +4344,8 @@ function App() {
           regimen_name: enrichedOrRegimen || '4 FDC (HRZE)', 
           daily_dose_text: `${enrichedOrRegimen || 'FDC 4'} daily`,
           supply_issued: `${strips || 1} strips`,
-          strips: strips || 1 
+          strips: strips || 1,
+          recommended_strips: strips || 1
         };
 
     const prevReport = checkMonthlyDuplicate('fdc_provided_ids', id);
