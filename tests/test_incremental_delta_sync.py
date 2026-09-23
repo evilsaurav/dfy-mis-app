@@ -151,10 +151,12 @@ async def test_subadmin_cold_query_scoped_to_district():
         assert len(res["records"]) == 1
         assert res["records"][0]["working_place"] == "Sitamarhi"
 
-        # Verify that mock_coll.where was invoked with working_place
+        # Verify that mock_coll.where queries by date range and NOT exact working_place (avoiding dropped variant records and missing composite indexes)
         where_calls = [call[0] for call in mock_coll.where.call_args_list] + [call[0] for call in mock_query.where.call_args_list]
-        has_district_filter = any(len(c) >= 3 and c[0] in ["working_place", "district"] and c[2] == "Sitamarhi" for c in where_calls)
-        assert has_district_filter is True
+        has_district_filter = any(len(c) >= 3 and c[0] in ["working_place", "district"] for c in where_calls)
+        assert has_district_filter is False
+        has_date_filter = any(len(c) >= 3 and c[0] == "date_of_reporting" for c in where_calls)
+        assert has_date_filter is True
     finally:
         main.db = original_db
 

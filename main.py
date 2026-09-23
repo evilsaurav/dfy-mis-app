@@ -653,14 +653,18 @@ async def get_raw_monthly_reports(
     Shared in-memory cache for monthly daily_field_reports.
     Avoids redundant 2,000-read collection streams when /admin/dashboard-data,
     /admin/duplicate-audit, and pacing queries run concurrently.
-    When district_filter is provided (Sub-Admin), queries only those districts from Firestore.
+    Queries Firestore by monthly date range and performs in-memory canonical district filtering.
     """
     clean_dists = set()
     if district_filter:
         clean_dists = {canonicalize_district(d) for d in district_filter if d and str(d).strip().lower() != "all"}
 
-    # 1. Check if statewide full cache is in memory
     full_cache_key = f"shared_raw_month_{month_prefix}"
+    dist_cache_key = full_cache_key
+    if clean_dists:
+        dist_cache_key = f"{full_cache_key}_{'_'.join(sorted(clean_dists)).replace(' ', '_').lower()}"
+
+    # 1. Check if statewide full cache is in memory
     if not force:
         cached_full = cache.get(full_cache_key)
         if cached_full is not None and isinstance(cached_full, list):
@@ -668,11 +672,8 @@ async def get_raw_monthly_reports(
                 return [d for d in cached_full if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
             return cached_full
 
-    # 2. Check if district-scoped cache is in memory
-    dist_cache_key = full_cache_key
-    if clean_dists:
-        dist_cache_key = f"{full_cache_key}_{'_'.join(sorted(clean_dists)).replace(' ', '_').lower()}"
-        if not force:
+        # 2. Check if district-scoped cache is in memory
+        if clean_dists:
             cached_dist = cache.get(dist_cache_key)
             if cached_dist is not None and isinstance(cached_dist, list):
                 return cached_dist
@@ -680,25 +681,13 @@ async def get_raw_monthly_reports(
     start_date = f"{month_prefix}-01"
     end_date = f"{month_prefix}-31"
 
-    # 3. Stream from Firestore (scoped by district if clean_dists specified)
-    docs = []
-    if clean_dists:
-        for c_dist in clean_dists:
-            sub_docs = await asyncio.to_thread(lambda d_name=c_dist: list(
-                db.collection("daily_field_reports")
-                .where("working_place", "==", d_name)
-                .where("date_of_reporting", ">=", start_date)
-                .where("date_of_reporting", "<=", end_date)
-                .stream()
-            ))
-            docs.extend(sub_docs)
-    else:
-        docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
+    # 3. Always stream from Firestore by date range to prevent exact-string match drops
+    docs = await asyncio.to_thread(lambda: list(
+        db.collection("daily_field_reports")
+        .where("date_of_reporting", ">=", start_date)
+        .where("date_of_reporting", "<=", end_date)
+        .stream()
+    ))
 
     raw_list = []
     for d in docs:
@@ -715,7 +704,15 @@ async def get_raw_monthly_reports(
             item["doc_id"] = did
         raw_list.append(item)
 
-    cache.set(dist_cache_key, raw_list, ttl=3600) # 1-hour shared cache
+    # Save statewide monthly cache
+    cache.set(full_cache_key, raw_list, ttl=3600) # 1-hour shared cache
+
+    if clean_dists:
+        filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
+        if dist_cache_key != full_cache_key:
+            cache.set(dist_cache_key, filtered_list, ttl=3600)
+        return filtered_list
+
     return raw_list
 
 def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) -> Optional[dict]:
@@ -899,7 +896,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                 if rec:
                     records.append(rec)
             
-            if records:
+            if not allowed_dist_set and records:
                 try:
                     os.makedirs("cache", exist_ok=True)
                     with open(f"cache/dash_{req.month_prefix}.json", "w", encoding="utf-8") as f:
@@ -914,7 +911,7 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
                     with open(snap_path, "r", encoding="utf-8") as f:
                         records = json.load(f)
                         if allowed_dist_set:
-                            records = [r for r in records if r.get("working_place") in allowed_dist_set]
+                            records = [r for r in records if canonicalize_district(r.get("working_place") or r.get("district", "")) in allowed_dist_set]
                 except Exception:
                     pass
 
@@ -931,6 +928,10 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
         raise
     except Exception as e:
         return {"records": [], "notice": "Firestore quota fallback"}
+
+@app.get("/api/system-version")
+async def get_system_version():
+    return {"status": "success", "version": "2.8.1", "min_supported_version": "2.8.0"}
 
 @app.get("/get-directory")
 async def get_directory():
