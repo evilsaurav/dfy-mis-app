@@ -34,17 +34,17 @@
           navigator.serviceWorker.register('/sw.js')
             .then(reg => {
               console.log('PWA ServiceWorker registered:', reg.scope);
-              reg.update();
+              reg.update().catch(() => {});
 
               // Check for SW updates on tab visibility change or window focus
               document.addEventListener('visibilitychange', () => {
                 if (document.visibilityState === 'visible') {
-                  reg.update();
+                  reg.update().catch(() => {});
                 }
               });
 
               window.addEventListener('focus', () => {
-                reg.update();
+                reg.update().catch(() => {});
               });
             })
             .catch(err => console.log('PWA ServiceWorker registration failed:', err));
