@@ -2746,6 +2746,7 @@ Keep this file safe in your Google Drive or personal diary.
         }
         setSelectedFO('All');
       }
+      return true;
     } catch (err) {
       console.error("Dashboard fetch error:", err);
       if (!silent) {
@@ -2757,6 +2758,7 @@ Keep this file safe in your Google Drive or personal diary.
           setError(err.message || 'Failed to load dashboard data. Ensure backend is running.');
         }
       }
+      return false;
     } finally {
       if (coldTimer) clearTimeout(coldTimer);
       setIsColdStarting(false);
@@ -4406,14 +4408,14 @@ const availableDistrictsForFeed = useMemo(() => {
                 <button
                   type="button"
                   onClick={async () => {
-                    await fetchData(true);
-                    fetchAttendance(true);
+                    const ok = await fetchData(true);
+                    await fetchAttendance(true);
                     fetchDirectory();
                     loadTargets('All');
                     fetchStaffList();
                     fetchActiveBroadcasts();
                     if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
-                    showToast("✓ Live database refresh complete.", "success");
+                    if (ok) showToast("✓ Live database refresh complete.", "success");
                   }}
                   disabled={isLoading}
                   className={`bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
