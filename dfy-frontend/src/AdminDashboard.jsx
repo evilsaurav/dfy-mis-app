@@ -9848,10 +9848,10 @@ const availableDistrictsForFeed = useMemo(() => {
         const totalOnLeave = attendance.on_leave_count || onLeaveList.length;
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
-            <div className="bg-white rounded-3xl p-5 sm:p-7 w-full max-w-3xl sm:max-w-4xl shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in my-auto font-sans">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-3 sm:p-6 w-full max-w-3xl sm:max-w-4xl shadow-2xl border border-slate-100 h-[94vh] sm:h-auto sm:max-h-[90vh] flex flex-col animate-fade-in my-auto font-sans">
               {/* Header */}
-              <div className="flex justify-between items-start pb-3 border-b border-slate-100 mb-3 shrink-0">
+              <div className="flex justify-between items-start pb-2 mb-2 sm:pb-3 sm:mb-3 border-b border-slate-100 shrink-0">
                 <div>
                   <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                     <span>Field Officer Attendance Radar</span>
@@ -9883,7 +9883,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* 📅 Date Navigation Bar (Instant In-Memory Derivation) */}
-              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 mb-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-1.5 sm:p-2.5 mb-2 sm:mb-2.5 flex flex-wrap items-center justify-between gap-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-1">
                     <span>📅</span> Date:
@@ -9963,7 +9963,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* 📊 District Attendance Rollup Scorecard Pills */}
-              <div className="mb-2.5 space-y-1.5 shrink-0">
+              <div className="mb-2 sm:mb-2.5 space-y-1.5 shrink-0">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                     District Rollup Radar ({districtAttendanceRollup.length} Districts)
@@ -10036,7 +10036,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* Navigation Tabs (4 Tabs: Missing, Submitted, On Leave, Defaulters) */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2.5 shrink-0">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1 rounded-2xl mb-2 sm:mb-2.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => setActiveAttendanceTab('missing')}
@@ -10097,7 +10097,7 @@ const availableDistrictsForFeed = useMemo(() => {
 
               {/* ⏰ Time Filter Chips (Rendered under Submitted Tab) */}
               {activeAttendanceTab === 'submitted' && (
-                <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl px-3 py-2 mb-2.5 shrink-0">
+                <div className="bg-slate-50/90 border border-slate-200/80 rounded-2xl px-2.5 sm:px-3 py-1.5 sm:py-2 mb-2 sm:mb-2.5 shrink-0">
                   <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar py-0.5">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 shrink-0 flex items-center gap-1">
                       <span>⏰</span> Time:
@@ -10166,7 +10166,7 @@ const availableDistrictsForFeed = useMemo(() => {
               )}
 
               {/* Quick Search */}
-              <div className="mb-2.5 shrink-0">
+              <div className="mb-2 sm:mb-2.5 shrink-0">
                 <div className="relative">
                   <input
                     type="text"
@@ -10188,14 +10188,14 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
 
               {/* List Container */}
-              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-0">
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2 custom-scrollbar my-1 min-h-[300px] sm:min-h-[320px]">
                 {activeAttendanceTab === 'missing' ? (
                   filteredMissing.length > 0 ? (
                     filteredMissing.map((fo, idx) => {
                       const defKey = `${(fo.district || '').toLowerCase()}_${(fo.fo_name || '').toLowerCase()}`;
                       const defInfo = defaulterMap[defKey];
                       return (
-                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors gap-2 sm:gap-0">
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3 bg-slate-50 hover:bg-rose-50/30 rounded-xl border border-slate-100 hover:border-rose-200 transition-colors gap-2 sm:gap-0">
                           <div>
                             <p className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
                               <span>{fo.fo_name}</span>
@@ -10207,7 +10207,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             </p>
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{fo.district} &bull; {fo.designation || 'Field Officer'}</p>
                           </div>
-                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          <div className="flex items-center flex-wrap gap-1.5 self-end sm:self-center shrink-0">
                             <span className="text-[10px] font-black uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-100 px-2.5 py-1 rounded-full">
                               Not Submitted
                             </span>
@@ -10241,7 +10241,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     filteredSubmitted.map((fo, idx) => {
                       const timeClassification = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
                       return (
-                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
                           <div className="flex items-center gap-2.5">
                             <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs shrink-0">
                               ✓
@@ -10261,7 +10261,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                          <div className="flex items-center flex-wrap gap-1.5 sm:gap-2 self-end sm:self-center">
                             {fo.total_ids !== undefined && (
                               <span className="text-[10px] font-bold text-slate-600 bg-white border border-slate-200 px-2.5 py-1 rounded-lg shadow-2xs">
                                 {fo.total_ids} IDs
@@ -10295,7 +10295,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         : 'bg-amber-100 text-amber-800 border-amber-200';
 
                       return (
-                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-slate-50 hover:bg-amber-50/30 rounded-xl border border-slate-200 hover:border-amber-300 transition-colors gap-3">
+                        <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3.5 bg-slate-50 hover:bg-amber-50/30 rounded-xl border border-slate-200 hover:border-amber-300 transition-colors gap-3">
                           <div className="flex items-start gap-3">
                             <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-base shrink-0 mt-0.5 ${
                               isAbsent ? 'bg-rose-100 text-rose-700' : isWeeklyOff ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
@@ -10328,7 +10328,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+                          <div className="flex items-center flex-wrap gap-1.5 self-end sm:self-center shrink-0">
                             <button
                               type="button"
                               onClick={() => handleExecuteUnmarkLeave(fo.district, fo.fo_name, attendance.date || attendanceDate)}
@@ -10354,7 +10354,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   /* Defaulters / Absence Streak Tab */
                   filteredDefaulters.length > 0 ? (
                     filteredDefaulters.map((fo, idx) => (
-                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200 transition-colors gap-2 sm:gap-0">
+                      <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3.5 bg-amber-50/50 hover:bg-amber-50 rounded-xl border border-amber-200 transition-colors gap-2 sm:gap-0">
                         <div className="flex items-start gap-3">
                           <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center font-black text-sm shrink-0 mt-0.5">
                             ⚠️
