@@ -116,6 +116,7 @@ export default function AdminDashboard() {
   const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
   const [rawRecords, setRawRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isColdStarting, setIsColdStarting] = useState(false);
   const [error, setError] = useState('');
 
   // Filters
@@ -2630,11 +2631,13 @@ Keep this file safe in your Google Drive or personal diary.
   const fetchData = async (forceRefresh = false, silent = false) => {
     const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
     let cachedData = null;
-    try {
-      const rawCache = localStorage.getItem(cacheKey);
-      if (rawCache) cachedData = JSON.parse(rawCache);
-    } catch (e) {
-      cachedData = null;
+    if (!forceRefresh) {
+      try {
+        const rawCache = localStorage.getItem(cacheKey);
+        if (rawCache) cachedData = JSON.parse(rawCache);
+      } catch (e) {
+        cachedData = null;
+      }
     }
 
     // Zero-lag instant render: show cached records immediately if available
@@ -2648,6 +2651,14 @@ Keep this file safe in your Google Drive or personal diary.
     }
 
     if (!silent) setError('');
+
+    let coldTimer = null;
+    if (!silent) {
+      coldTimer = setTimeout(() => {
+        setIsColdStarting(true);
+      }, 5000);
+    }
+
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
@@ -2747,6 +2758,8 @@ Keep this file safe in your Google Drive or personal diary.
         }
       }
     } finally {
+      if (coldTimer) clearTimeout(coldTimer);
+      setIsColdStarting(false);
       if (!silent) setIsLoading(false);
     }
   };
@@ -4116,6 +4129,25 @@ const availableDistrictsForFeed = useMemo(() => {
     window.open(shareUrl, '_blank');
   };
 
+  const handleHardAppReset = async () => {
+    if (!window.confirm("App cache clear karke fresh version reload karein?")) return;
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const r of regs) await r.unregister();
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        for (const k of keys) await caches.delete(k);
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {
+      console.warn("Reset error:", e);
+    }
+    window.location.reload();
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
@@ -4246,6 +4278,11 @@ const availableDistrictsForFeed = useMemo(() => {
   return (
     <div className="min-h-screen bg-slate-50/50 p-2 sm:p-4 md:p-6 font-sans text-slate-800">
       <div className="max-w-[1720px] w-full mx-auto space-y-4">
+        {isColdStarting && (
+          <div className="bg-amber-500 text-white px-4 py-3 rounded-2xl font-bold text-xs sm:text-sm text-center shadow-md animate-pulse flex items-center justify-center gap-2">
+            <span>⚡ Server wake-up ho raha hai (Render spin-up), kripya thoda intezar karein...</span>
+          </div>
+        )}
         
         {/* ========================================================================= */}
         {/* --- EXECUTIVE TOP STICKY COMMAND BAR (FULL-WIDTH BRAND, FILTERS & UTILITIES) --- */}
@@ -4368,31 +4405,21 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 <button
                   type="button"
-                  onClick={(e) => {
-                    if (e.shiftKey) {
-                      // Hard refresh / diagnostic bypass
-                      fetchData(true);
-                      fetchAttendance(true);
-                      fetchDirectory();
-                      loadTargets('All');
-                      fetchDuplicateAudit();
-                      fetchDuplicateScan(true);
-                      fetchStaffList();
-                      fetchActiveBroadcasts();
-                      if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
-                      showToast("✓ Full database refresh complete (forced reload).", "info");
-                    } else {
-                      // Smart Delta Refresh: 0-read / minimal read overhead
-                      fetchData(false);
-                      fetchAttendance(false);
-                      showToast("✓ Synced with database (delta check complete).", "success");
-                    }
+                  onClick={async () => {
+                    await fetchData(true);
+                    fetchAttendance(true);
+                    fetchDirectory();
+                    loadTargets('All');
+                    fetchStaffList();
+                    fetchActiveBroadcasts();
+                    if (typeof fetchCascadeAlerts === 'function') fetchCascadeAlerts();
+                    showToast("✓ Live database refresh complete.", "success");
                   }}
                   disabled={isLoading}
                   className={`bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                     isLoading ? 'cursor-wait animate-pulse' : ''
                   }`}
-                  title="Click to sync latest updates (Delta Mode). Shift+Click for full database reload."
+                  title="Click for guaranteed live database refresh."
                 >
                   <svg className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
@@ -4400,6 +4427,16 @@ const availableDistrictsForFeed = useMemo(() => {
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
                   </svg>
                   <span className="hidden sm:inline">{isLoading ? "Syncing..." : "Refresh"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleHardAppReset}
+                  className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/90 px-3 py-2 rounded-xl text-xs font-black transition-all shadow-2xs flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+                  title="App cache clear karke fresh version reload karein"
+                >
+                  <span>🔄</span>
+                  <span className="hidden sm:inline">Reset Cache</span>
                 </button>
 
                 <button
@@ -5068,7 +5105,7 @@ const availableDistrictsForFeed = useMemo(() => {
             <p className="text-xs font-semibold text-rose-600">{error}</p>
             <div className="pt-2 flex justify-center gap-3">
               <button 
-                onClick={fetchData} 
+                onClick={() => fetchData(true)} 
                 className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition-all shadow active:scale-95 flex items-center gap-1.5"
               >
                 <span>🔄</span> Retry Loading
@@ -5117,7 +5154,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 </button>
               )}
               <button 
-                onClick={fetchData}
+                onClick={() => fetchData(true)}
                 className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-4 py-2.5 rounded-xl border border-slate-200 transition-all active:scale-95 flex items-center gap-1.5"
               >
                 <span>🔄</span> Refresh

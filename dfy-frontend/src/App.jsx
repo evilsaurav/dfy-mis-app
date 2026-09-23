@@ -4608,6 +4608,25 @@ function App() {
     }
   };
 
+  const handleHardAppReset = async () => {
+    if (!window.confirm("App cache clear karke fresh version reload karein?")) return;
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        for (const r of regs) await r.unregister();
+      }
+      if ('caches' in window) {
+        const keys = await caches.keys();
+        for (const k of keys) await caches.delete(k);
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (e) {
+      console.warn("Reset error:", e);
+    }
+    window.location.reload();
+  };
+
   return (
     <div className="min-h-screen bg-slate-50/50 font-sans pb-40 text-slate-800 flex flex-col">
       <Toast message={toast.message} type={toast.type} onClose={closeToast} />
@@ -4633,6 +4652,15 @@ function App() {
               <span className="hidden xs:inline">Install</span>
             </button>
             <div className="bg-teal-50/90 text-teal-800 px-2.5 sm:px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black border border-teal-200 shadow-2xs tracking-wider">v{APP_VERSION}</div>
+            <button
+              type="button"
+              onClick={handleHardAppReset}
+              className="flex items-center gap-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-black transition-all active:scale-[0.98] cursor-pointer shadow-2xs"
+              title="Purge app cache and update to latest version"
+            >
+              <span>🔄</span>
+              <span>Update</span>
+            </button>
             {(!isOnline || offlineQueueCount > 0) && (
               <button
                 onClick={triggerOfflineSync}
