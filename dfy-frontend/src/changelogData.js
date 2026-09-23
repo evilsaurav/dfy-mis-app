@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.0";
-export const LAST_UPDATED_DATE = "22 Sep 2026";
+export const APP_VERSION = "2.8.1";
+export const LAST_UPDATED_DATE = "23 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.1",
+    date: "23 Sep 2026",
+    title: "Sub-Admin Sync Accuracy, PWA Cache Purge, Mobile Attendance Radar & FDC Medicine Rationing",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🔄 Bulletproof Sub-Admin Monthly Sync: Eliminated exact working_place Firestore index constraints in favor of date-range queries and in-memory canonical district resolution, guaranteeing zero dropped records across district spelling variations.",
+      "🛡️ Guarded Statewide Disk Snapshots: Prevented Sub-Admin single-district queries from overwriting statewide disk backup caches, isolating district scopes completely.",
+      "⚡ Zero-Stale PWA Cache Invalidation: Configured strict no-cache/no-store Cache-Control headers on Vercel for sw.js and index.html, with automatic registration update polling on load and visibilitychange.",
+      "📱 Attendance Radar Mobile Ergonomics: Overhauled mobile radar modal with flex-col constraints, dynamic max-h-[85vh] viewport scaling, and touch-optimized tab scrolling, eliminating viewport clipping on Android/iOS.",
+      "💊 FDC Medicine Rationing & Custom Strips: Added granular strip rationing controls and partial strip distribution support to accurately track TB blister packs down to individual tablets."
+    ],
+    details: [
+      {
+        tag: "Data Integrity",
+        color: "teal",
+        text: "Canonical district matching prevents record dropping and disk snapshot pollution for Sub-Admin district scopes."
+      },
+      {
+        tag: "PWA Deployment",
+        color: "emerald",
+        text: "Direct cache bypassing and aggressive service worker update triggers ensure field workers instantly run the latest app code."
+      },
+      {
+        tag: "Mobile UX",
+        color: "purple",
+        text: "Constrained layout structures prevent Attendance Radar modals from being pushed offscreen on smaller mobile viewports."
+      },
+      {
+        tag: "Logistics",
+        color: "indigo",
+        text: "Enhanced FDC allocation mechanics support weight-banded and partial strip distribution without data loss."
+      }
+    ]
+  },
   {
     version: "v2.8.0",
     date: "22 Sep 2026",
     title: "Attendance Radar Leaves, Staff Active/Inactive Lifecycle, FO Target Pacing Command Card & Declared Holidays Engine",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🌴 Attendance Radar 1-Click Leave Management: Added instant leave marking and restoration modal in Attendance Radar. Staff on leave are moved to a dedicated 'On Leave (N)' tab with purple badging and custom absence remarks.",
       "📱 WhatsApp Summary Leave Exclusion: Daily Attendance WhatsApp digest generator now excludes staff marked on leave from the 'Missing' section and categorizes them under a dedicated '🌴 Chhuti Par (On Leave)' block.",
