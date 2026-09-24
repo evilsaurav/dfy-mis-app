@@ -2567,6 +2567,60 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 }
                         
         total_achieved = sum(stats.values())
+
+        # Hydrate leave records from daily_staff_leaves
+        try:
+            leave_docs = await asyncio.to_thread(lambda: list(
+                db.collection("daily_staff_leaves")
+                .where("district", "==", c_wp)
+                .where("date", ">=", start_date)
+                .where("date", "<=", end_date)
+                .stream()
+            ))
+        except Exception as l_err:
+            print(f"Notice: Failed to query daily_staff_leaves by range: {l_err}")
+            try:
+                leave_docs = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_staff_leaves")
+                    .where("district", "==", c_wp)
+                    .stream()
+                ))
+            except Exception as l_err2:
+                print(f"Notice: Fallback daily_staff_leaves query failed: {l_err2}")
+                leave_docs = []
+
+        for l_doc in leave_docs:
+            l_data = l_doc.to_dict() if hasattr(l_doc, "to_dict") else l_doc
+            if not isinstance(l_data, dict):
+                continue
+            l_fo = re.sub(r'[^a-zA-Z0-9]', '', l_data.get("fo_name", "")).lower()
+            doc_id = getattr(l_doc, "id", "")
+            if l_fo != clean_fo and not (doc_id and doc_id.endswith(f"_{clean_fo}")):
+                continue
+
+            l_date = l_data.get("date", "")
+            if l_date and (l_date.startswith(req.month) if req.month else l_date.startswith(req_month)):
+                if l_date not in daily_history:
+                    daily_history[l_date] = {
+                        "submitted": False,
+                        "count": 0,
+                        "total_ids": 0,
+                        "categories": {},
+                        "is_leave": True,
+                        "status": l_data.get("status", "leave"),
+                        "reason_type": l_data.get("reason_type", "Casual"),
+                        "remark": l_data.get("remark", ""),
+                        "marked_by": l_data.get("marked_by_name", "Admin"),
+                        "marked_at": l_data.get("marked_at", "")
+                    }
+                else:
+                    daily_history[l_date]["is_leave"] = True
+                    daily_history[l_date]["leave_info"] = {
+                        "status": l_data.get("status", "leave"),
+                        "reason_type": l_data.get("reason_type", "Casual"),
+                        "remark": l_data.get("remark", ""),
+                        "marked_by": l_data.get("marked_by_name", "Admin")
+                    }
         
         # Calculate Reporting Streak
         sorted_dates = sorted(daily_history.keys(), reverse=True)
@@ -2575,7 +2629,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
         
         # Check streak starting from today or yesterday
         check_date = today
-        if today.strftime("%Y-%m-%d") not in daily_history:
+        if today.strftime("%Y-%m-%d") not in daily_history or not daily_history.get(today.strftime("%Y-%m-%d"), {}).get("submitted"):
             # Maybe today is not yet reported, check from yesterday
             from datetime import timedelta
             check_date = today - timedelta(days=1)
@@ -8119,6 +8173,7 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
         await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
 
         cache.delete_prefix(f"attendance_{clean_date}")
+        cache.delete_prefix("profile_")
 
         await log_admin_activity(
             action_type="LEAVE_MARKED",
@@ -8166,6 +8221,7 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
         await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).delete())
 
         cache.delete_prefix(f"attendance_{clean_date}")
+        cache.delete_prefix("profile_")
 
         actor_name = admin.get("name") or admin.get("username") or "Admin"
         actor_id = admin.get("user_id") or admin.get("username") or "admin"
