@@ -1047,6 +1047,59 @@ async def verify_pin(data: PinCheck):
             return {"valid": True, "fallback": True}
         return {"valid": False}
 
+async def resolve_effective_reporting_date(
+    fo_name: str, 
+    working_place: str, 
+    requested_date: Optional[str] = None
+) -> str:
+    """
+    Stealth 10:00 AM Reporting Cutoff Engine (Approach B):
+    If a field officer submits before 10:00 AM IST and yesterday's report is missing,
+    silently credit the submission to yesterday to prevent attendance defaulter penalties.
+    Submissions at or after 10:00 AM IST strictly map to today.
+    Explicit historical edits older than yesterday are always respected.
+    """
+    now_ist = get_ist_now()
+    today_str = now_ist.strftime("%Y-%m-%d")
+    yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Respect explicit historical edits older than yesterday
+    if requested_date and requested_date < yesterday_str:
+        return requested_date
+
+    if now_ist.hour < 10:
+        c_wp = canonicalize_district(working_place) if working_place else ""
+        c_fo = canonicalize_fo_name(fo_name, c_wp) if (fo_name and c_wp) else (fo_name or "")
+        candidate_ids = [
+            f"{c_wp}_{c_fo}_{yesterday_str}".replace(" ", "_").lower(),
+            f"{c_wp}_{fo_name}_{yesterday_str}".replace(" ", "_").lower(),
+            f"{working_place}_{fo_name}_{yesterday_str}".replace(" ", "_").lower(),
+        ]
+        if "aurangabad" in c_wp.lower():
+            candidate_ids.append(f"aurangabad-bi_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
+            candidate_ids.append(f"aurangabad_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
+        if "champaran" in c_wp.lower():
+            candidate_ids.append(f"purba champaran_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
+            candidate_ids.append(f"east champaran_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
+        if "bhojpur" in c_wp.lower():
+            candidate_ids.append(f"bhojpur_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+
+        try:
+            exists = False
+            for cid in candidate_ids:
+                doc_ref = db.collection("daily_field_reports").document(cid)
+                doc = await asyncio.to_thread(doc_ref.get)
+                if doc.exists:
+                    exists = True
+                    break
+            if not exists:
+                return yesterday_str
+        except Exception:
+            pass
+
+    return requested_date or today_str
+
 class CheckStatusRequest(BaseModel):
     working_place: str
     fo_name: str
@@ -1087,6 +1140,46 @@ async def check_today_status(req: CheckStatusRequest):
                     break
         except Exception as fe:
             print(f"Check status read notice (quota/network): {fe}")
+
+        now_ist = get_ist_now()
+        today_str = now_ist.strftime("%Y-%m-%d")
+        if res.get("status") != "completed" and now_ist.hour < 10 and req.date == today_str:
+            yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+            yesterday_candidate_ids = [
+                f"{c_wp}_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower(),
+                f"{req.working_place}_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower(),
+            ]
+            if "aurangabad" in c_wp.lower():
+                yesterday_candidate_ids.append(f"aurangabad-bi_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower())
+                yesterday_candidate_ids.append(f"aurangabad_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower())
+            if "champaran" in c_wp.lower():
+                yesterday_candidate_ids.append(f"purba champaran_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower())
+                yesterday_candidate_ids.append(f"east champaran_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower())
+            if "bhojpur" in c_wp.lower():
+                yesterday_candidate_ids.append(f"bhojpur_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower())
+            yesterday_candidate_ids = list(dict.fromkeys(yesterday_candidate_ids))
+
+            try:
+                for ycid in yesterday_candidate_ids:
+                    ydoc_ref = db.collection("daily_field_reports").document(ycid)
+                    ydoc = await asyncio.to_thread(ydoc_ref.get)
+                    if ydoc.exists:
+                        yd = ydoc.to_dict()
+                        created_today = False
+                        for field in ("timestamp_completed", "submitted_at", "created_at", "updated_at"):
+                            val = yd.get(field)
+                            if val is not None:
+                                if hasattr(val, "strftime") and val.strftime("%Y-%m-%d") == today_str:
+                                    created_today = True
+                                    break
+                                elif today_str in str(val):
+                                    created_today = True
+                                    break
+                        if created_today:
+                            res = {"status": "completed", "submission_count": 1, "data": yd}
+                            break
+            except Exception as yfe:
+                print(f"Check yesterday status notice: {yfe}")
                 
         cache.set(cache_key, res, ttl=60)
         return res
@@ -1206,12 +1299,17 @@ async def get_district_90day_notified_ids(
 async def submit_daily_report(report: DailyActivityReport):
     try:
         ensure_daily_backup_scheduled()
-        if not report.date_of_reporting:
-            report.date_of_reporting = get_ist_now().strftime("%Y-%m-%d")
         if report.working_place:
             report.working_place = canonicalize_district(report.working_place.strip())
         if report.fo_name:
             report.fo_name = canonicalize_fo_name(report.fo_name, report.working_place)
+
+        original_requested_date = report.date_of_reporting
+        report.date_of_reporting = await resolve_effective_reporting_date(
+            fo_name=report.fo_name,
+            working_place=report.working_place,
+            requested_date=report.date_of_reporting
+        )
             
         # Validation Guard: Prevent accidental empty report submissions
         total_ids_count = sum(len(getattr(report, cat, []) or []) for cat in [
@@ -1382,6 +1480,9 @@ async def submit_daily_report(report: DailyActivityReport):
 
         record_report_mutation("submit", doc_id, district=report.working_place, date=report.date_of_reporting, report_data=cached_payload)
         cache.delete(f"status_{doc_id}")
+        if original_requested_date and original_requested_date != report.date_of_reporting:
+            req_doc_id = f"{report.working_place}_{report.fo_name}_{original_requested_date}".replace(" ", "_").lower()
+            cache.delete(f"status_{req_doc_id}")
         cache.delete_prefix("profile_")
         return {
             "message": "Daily report submitted successfully",
