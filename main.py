@@ -73,6 +73,7 @@ import openpyxl
 import jwt
 import bcrypt
 import calendar
+import gc
 
 firebase_creds_env = os.environ.get("FIREBASE_CREDENTIALS")
 if firebase_creds_env:
@@ -2096,6 +2097,14 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
 
 # Concurrency Semaphore to protect Render memory/CPU from multi-tap or parallel heavy Excel exports
 KPI_EXCEL_SEMAPHORE = asyncio.Semaphore(1)
+attendance_excel_semaphore = asyncio.Semaphore(1)
+ATTENDANCE_EXCEL_SEMAPHORE = attendance_excel_semaphore
+
+class ExcelStreamingResponse(StreamingResponse):
+    """StreamingResponse subclass that retains body bytes for testability, background streaming, and caching."""
+    def __init__(self, content_bytes: bytes, *args, **kwargs):
+        self.body = content_bytes
+        super().__init__(io.BytesIO(content_bytes), *args, **kwargs)
 
 @app.get("/download-kpi-workbook")
 async def download_kpi_workbook(district: str, month: Optional[str] = None, admin: dict = Depends(get_current_admin)):
@@ -3402,98 +3411,507 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/admin/export-summary-metrics")
-async def export_summary_metrics(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+@app.get("/admin/export-staff-attendance")
+async def export_staff_attendance(
+    month: Optional[str] = None,
+    district: Optional[str] = None,
+    districts: Optional[str] = None,
+    admin: dict = Depends(get_current_admin)
+):
     try:
-        if not month:
-            month = datetime.now().strftime("%Y-%m")
-            
-        start_date = f"{month}-01"
-        end_date = f"{month}-31"
-        
-        allowed_dist_set = None
-        if districts and districts.strip() and districts.strip() != "All":
-            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+        # 1. Month validation and normalization
+        if not month or not month.strip():
+            target_month = get_ist_now().strftime("%Y-%m")
+        else:
+            target_month = month.strip()
 
-        report_docs = await get_raw_monthly_reports(month)
+        try:
+            year_val, month_val = map(int, target_month.split("-"))
+            num_days = calendar.monthrange(year_val, month_val)[1]
+        except Exception:
+            now_ist = get_ist_now()
+            year_val, month_val = now_ist.year, now_ist.month
+            target_month = now_ist.strftime("%Y-%m")
+            num_days = calendar.monthrange(year_val, month_val)[1]
+
+        start_date = f"{target_month}-01"
+        end_date = f"{target_month}-{num_days:02d}"
+        today_ist = get_ist_now().date()
+
+        # 2. RBAC & District Isolation
+        admin_role = admin.get("role", "SUB_ADMIN")
+        is_subadmin = (admin_role == "SUB_ADMIN")
+        allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+        allowed_c = {canonicalize_district(d).lower() for d in allowed if d}
+        has_all_access = not is_subadmin or ("all" in allowed_c)
+
+        target_dist_set: Optional[Set[str]] = None
+
+        if district and district.strip() and district.strip().lower() != "all":
+            c_dist = canonicalize_district(district.strip())
+            if not has_all_access and c_dist.lower() not in allowed_c:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district: {district}")
+            target_dist_set = {c_dist.lower()}
+        elif districts and districts.strip() and districts.strip().lower() != "all":
+            req_dists = [canonicalize_district(d.strip()) for d in districts.split(",") if d.strip()]
+            if not has_all_access:
+                filtered = [d for d in req_dists if d.lower() in allowed_c]
+                if not filtered:
+                    raise HTTPException(status_code=403, detail="Permission denied for requested districts.")
+                target_dist_set = {d.lower() for d in filtered}
+            else:
+                target_dist_set = {d.lower() for d in req_dists}
+        elif not has_all_access:
+            target_dist_set = set(allowed_c)
+
+        async with attendance_excel_semaphore:
+            # 3. Data fetching
+            report_docs = await get_raw_monthly_reports(target_month)
+            staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
             
-        staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
-        staff_map = {}
-        for sd in staff_docs:
-            d = sd.to_dict()
-            dist = d.get("district", "")
-            if allowed_dist_set and dist not in allowed_dist_set:
-                continue
-            key = (dist, d.get("name", ""))
-            staff_map[key] = {
-                "District": dist,
-                "Officer Name": d.get("name", ""),
-                "Designation": d.get("designation", "Field Officer"),
-                "Active Reporting Days": 0,
-                "Total Travel KM": 0,
-                "Notifications": 0,
-                "Samples Tested": 0,
-                "Presumptive": 0,
-                "DBT": 0,
-                "TPT Start": 0,
-                "Doctor Visits": 0,
-                "Total All IDs": 0
-            }
-            
-        for doc in report_docs:
-            d = doc if isinstance(doc, dict) else doc.to_dict()
-            dist = d.get("working_place", "")
-            fo = d.get("fo_name", "")
-            if allowed_dist_set and dist not in allowed_dist_set:
-                continue
-            key = (dist, fo)
-            if key not in staff_map:
-                staff_map[key] = {
-                    "District": dist,
-                    "Officer Name": fo,
-                    "Designation": "Field Officer",
-                    "Active Reporting Days": 0,
-                    "Total Travel KM": 0,
-                    "Notifications": 0,
-                    "Samples Tested": 0,
-                    "Presumptive": 0,
-                    "DBT": 0,
-                    "TPT Start": 0,
-                    "Doctor Visits": 0,
-                    "Total All IDs": 0
+            try:
+                leave_docs = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_staff_leaves")
+                    .where("date", ">=", start_date)
+                    .where("date", "<=", end_date)
+                    .stream()
+                ))
+            except Exception as le:
+                try:
+                    leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").stream()))
+                except Exception:
+                    leave_docs = []
+
+            # 4. Normalize & Index Officers
+            def norm_fo_name(name: str) -> str:
+                clean = re.sub(r'[^a-zA-Z0-9]', '', str(name or "")).lower()
+                if "ashwanikrkeshri" in clean:
+                    return "ashwanikumar"
+                return clean
+
+            officers_map = {}
+            for sd in staff_docs:
+                d = sd.to_dict() if hasattr(sd, "to_dict") else sd
+                if not isinstance(d, dict):
+                    continue
+                c_dist = canonicalize_district(d.get("district", ""))
+                if not c_dist:
+                    continue
+                if target_dist_set and c_dist.lower() not in target_dist_set:
+                    continue
+                raw_name = (d.get("name") or d.get("fo_name") or "").strip()
+                c_name = norm_fo_name(raw_name)
+                if not c_name:
+                    continue
+                key = (c_dist.lower(), c_name)
+                if key not in officers_map:
+                    officers_map[key] = {
+                        "district": c_dist,
+                        "name": raw_name,
+                        "designation": d.get("designation") or "Field Officer",
+                        "clean_name": c_name
+                    }
+
+            for doc in report_docs:
+                d = doc if isinstance(doc, dict) else doc.to_dict()
+                if not isinstance(d, dict):
+                    continue
+                c_dist = canonicalize_district(d.get("working_place") or d.get("district") or "")
+                if not c_dist:
+                    continue
+                if target_dist_set and c_dist.lower() not in target_dist_set:
+                    continue
+                raw_name = (d.get("fo_name") or "").strip()
+                c_name = norm_fo_name(raw_name)
+                if not c_name:
+                    continue
+                key = (c_dist.lower(), c_name)
+                if key not in officers_map:
+                    officers_map[key] = {
+                        "district": c_dist,
+                        "name": raw_name,
+                        "designation": "Field Officer",
+                        "clean_name": c_name
+                    }
+
+            for ldoc in leave_docs:
+                ld = ldoc.to_dict() if hasattr(ldoc, "to_dict") else ldoc
+                if not isinstance(ld, dict):
+                    continue
+                c_dist = canonicalize_district(ld.get("district", ""))
+                if not c_dist:
+                    continue
+                if target_dist_set and c_dist.lower() not in target_dist_set:
+                    continue
+                raw_name = (ld.get("fo_name") or "").strip()
+                c_name = norm_fo_name(raw_name)
+                if not c_name:
+                    continue
+                key = (c_dist.lower(), c_name)
+                if key not in officers_map:
+                    officers_map[key] = {
+                        "district": c_dist,
+                        "name": raw_name,
+                        "designation": "Field Officer",
+                        "clean_name": c_name
+                    }
+
+            # 5. Index leaves & daily reports
+            leaves_by_key = {}
+            for ldoc in leave_docs:
+                ld = ldoc.to_dict() if hasattr(ldoc, "to_dict") else ldoc
+                if not isinstance(ld, dict):
+                    continue
+                ld_date = ld.get("date", "")
+                if not (start_date <= ld_date <= end_date):
+                    continue
+                c_dist = canonicalize_district(ld.get("district", ""))
+                if target_dist_set and c_dist.lower() not in target_dist_set:
+                    continue
+                c_name = norm_fo_name(ld.get("fo_name", ""))
+                leaves_by_key[(c_dist.lower(), c_name, ld_date)] = ld
+
+            reports_by_key = {}
+            for doc in report_docs:
+                d = doc if isinstance(doc, dict) else doc.to_dict()
+                if not isinstance(d, dict):
+                    continue
+                rep_date = d.get("date_of_reporting") or d.get("date") or ""
+                if not (start_date <= rep_date <= end_date):
+                    continue
+                c_dist = canonicalize_district(d.get("working_place") or d.get("district") or "")
+                if target_dist_set and c_dist.lower() not in target_dist_set:
+                    continue
+                c_name = norm_fo_name(d.get("fo_name", ""))
+                key = (c_dist.lower(), c_name, rep_date)
+
+                n_count = len(d.get("notification_ids", []))
+                st_count = len(d.get("sample_tested_ids", []))
+                dbt_count = len(d.get("dbt_ids", []))
+                day_total_ids = sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+                try:
+                    km = int(float(d.get("total_km", 0) or 0))
+                except Exception:
+                    km = 0
+                raw_v = d.get("visited_names") or d.get("doctor_names") or []
+                if isinstance(raw_v, list):
+                    v_names = [str(x).strip() for x in raw_v if str(x).strip()]
+                elif isinstance(raw_v, str) and raw_v.strip():
+                    v_names = [x.strip() for x in raw_v.split(",") if x.strip()]
+                else:
+                    v_names = []
+                raw_rem = (d.get("admin_remark") or d.get("remark") or "").strip()
+
+                if key not in reports_by_key:
+                    reports_by_key[key] = {
+                        "total_ids": day_total_ids,
+                        "notifications": n_count,
+                        "samples_tested": st_count,
+                        "dbt_seeded": dbt_count,
+                        "total_km": km,
+                        "visited_names": list(v_names),
+                        "admin_remarks": [raw_rem] if raw_rem else [],
+                        "submission_count": d.get("submission_count", 1)
+                    }
+                else:
+                    existing = reports_by_key[key]
+                    existing["total_ids"] += day_total_ids
+                    existing["notifications"] += n_count
+                    existing["samples_tested"] += st_count
+                    existing["dbt_seeded"] += dbt_count
+                    existing["total_km"] = max(existing["total_km"], km)
+                    for vn in v_names:
+                        if vn and vn not in existing["visited_names"]:
+                            existing["visited_names"].append(vn)
+                    if raw_rem and raw_rem not in existing["admin_remarks"]:
+                        existing["admin_remarks"].append(raw_rem)
+                    existing["submission_count"] += d.get("submission_count", 1)
+
+            # Sort officers by District, Name
+            sorted_officers = sorted(officers_map.values(), key=lambda x: (x["district"], x["name"]))
+
+            # 6. Build Workbook
+            wb = openpyxl.Workbook()
+            ws1 = wb.active
+            ws1.title = "Attendance Matrix"
+            ws1.freeze_panes = "E2"
+
+            ws2 = wb.create_sheet(title="Daily Activity Log")
+            ws2.freeze_panes = "A2"
+
+            # Color Palettes & Styles
+            header_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+            header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+
+            status_styles = {
+                "P": {
+                    "fill": PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, bold=True, color="065F46")
+                },
+                "ML": {
+                    "fill": PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, bold=True, color="92400E")
+                },
+                "CL": {
+                    "fill": PatternFill(start_color="E0F2FE", end_color="E0F2FE", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, bold=True, color="0369A1")
+                },
+                "OD": {
+                    "fill": PatternFill(start_color="E0E7FF", end_color="E0E7FF", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, bold=True, color="3730A3")
+                },
+                "A": {
+                    "fill": PatternFill(start_color="FFE4E6", end_color="FFE4E6", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, bold=True, color="9F1239")
+                },
+                "WO": {
+                    "fill": PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, color="64748B")
+                },
+                "H": {
+                    "fill": PatternFill(start_color="F3E8FF", end_color="F3E8FF", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, color="6B21A8")
+                },
+                "-": {
+                    "fill": PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid"),
+                    "font": Font(name="Calibri", size=10, color="94A3B8")
                 }
+            }
+
+            headers_sheet1 = ["SL", "District", "Officer Name", "Designation"] + [str(d) for d in range(1, num_days + 1)] + ["Total Days", "Present", "Leaves", "Absent", "Travel KM", "Remarks"]
+            ws1.append(headers_sheet1)
+            for col_idx, cell in enumerate(ws1[1], start=1):
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                cell.border = EXCEL_HEADER_BORDER
+
+            headers_sheet2 = ["Date", "District", "Officer Name", "Status", "Total IDs", "Notifications", "Samples Tested", "DBT Seeded", "Travel KM", "Visited Doctors / Facilities", "Admin Remark"]
+            ws2.append(headers_sheet2)
+            for col_idx, cell in enumerate(ws2[1], start=1):
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = EXCEL_HEADER_BORDER
+
+            rows_sheet2 = []
+
+            for sl_num, officer in enumerate(sorted_officers, start=1):
+                c_dist_lower = officer["district"].lower()
+                c_name = officer["clean_name"]
                 
-            entry = staff_map[key]
-            entry["Active Reporting Days"] += 1
-            entry["Total Travel KM"] += int(d.get("total_km", 0) or 0)
-            entry["Notifications"] += len(d.get("notification_ids", []))
-            entry["Samples Tested"] += len(d.get("sample_tested_ids", []))
-            entry["Presumptive"] += len(d.get("presumptive_ids", []))
-            entry["DBT"] += len(d.get("dbt_ids", []))
-            entry["TPT Start"] += len(d.get("tpt_treatment_start_ids", []))
-            entry["Doctor Visits"] += len(d.get("visited_names", []))
-            
-            day_total_ids = sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
-            entry["Total All IDs"] += day_total_ids
-            
-        df = pd.DataFrame(list(staff_map.values()))
-        if not df.empty:
-            df.sort_values(by=["District", "Officer Name"], inplace=True)
-        
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name="FO Performance Dossier")
-            ws = writer.sheets["FO Performance Dossier"]
-            # Formatting
-            style_excel_worksheet(ws, header_fill_color="047857")
-                
-        output.seek(0)
-        filename = f"DFY_FO_Performance_Dossier_{month}.xlsx"
-        return StreamingResponse(output, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename={filename}"})
+                day_codes = []
+                present_count = 0
+                leaves_count = 0
+                absent_count = 0
+                travel_km_sum = 0
+                officer_remarks = []
+
+                for d in range(1, num_days + 1):
+                    day_str = f"{year_val:04d}-{month_val:02d}-{d:02d}"
+                    cur_dt = datetime(year_val, month_val, d).date()
+                    is_future = (cur_dt > today_ist)
+                    is_sunday = (cur_dt.weekday() == 6)
+
+                    rep = reports_by_key.get((c_dist_lower, c_name, day_str))
+                    l_doc = leaves_by_key.get((c_dist_lower, c_name, day_str))
+
+                    if rep:
+                        code = "P"
+                        status_label = "Present"
+                    elif l_doc:
+                        l_status = str(l_doc.get("status", "")).strip().lower()
+                        r_type = str(l_doc.get("reason_type", "")).strip().lower()
+                        if "absent" in l_status or "absent" in r_type:
+                            code = "A"
+                            status_label = "Absent"
+                        elif "medical" in r_type or "sick" in r_type:
+                            code = "ML"
+                            status_label = "Medical Leave"
+                        elif "official" in r_type or "duty" in r_type or "training" in r_type or "official_duty" in l_status:
+                            code = "OD"
+                            status_label = "Official Duty"
+                        elif "holiday" in r_type:
+                            code = "H"
+                            status_label = "Declared Holiday"
+                        else:
+                            code = "CL"
+                            status_label = "Casual Leave"
+                    elif is_future:
+                        code = "-"
+                        status_label = "-"
+                    elif is_sunday:
+                        code = "WO"
+                        status_label = "Weekly Off"
+                    else:
+                        code = "A"
+                        status_label = "Absent"
+
+                    day_codes.append(code)
+
+                    if code == "P":
+                        present_count += 1
+                        if rep:
+                            travel_km_sum += rep.get("total_km", 0)
+                            if rep.get("admin_remarks"):
+                                officer_remarks.append(f"Day {d}: {', '.join(rep['admin_remarks'])}")
+                    elif code in ("ML", "CL", "OD", "H"):
+                        leaves_count += 1
+                        if l_doc and l_doc.get("remark"):
+                            officer_remarks.append(f"Day {d} ({l_doc.get('reason_type', 'Leave')}): {l_doc.get('remark')}")
+                    elif code == "A":
+                        absent_count += 1
+
+                    # Sheet 2 row (log elapsed days or any day with report/leave)
+                    if not is_future or rep or l_doc:
+                        v_str = ", ".join(rep["visited_names"]) if (rep and rep.get("visited_names")) else "-"
+                        rem_str = "-"
+                        if rep and rep.get("admin_remarks"):
+                            rem_str = ", ".join(rep["admin_remarks"])
+                        elif l_doc and l_doc.get("remark"):
+                            rem_str = f"{l_doc.get('reason_type', 'Leave')}: {l_doc.get('remark')}"
+
+                        rows_sheet2.append([
+                            day_str,
+                            officer["district"],
+                            officer["name"],
+                            status_label,
+                            rep.get("total_ids", 0) if rep else 0,
+                            rep.get("notifications", 0) if rep else 0,
+                            rep.get("samples_tested", 0) if rep else 0,
+                            rep.get("dbt_seeded", 0) if rep else 0,
+                            rep.get("total_km", 0) if rep else 0,
+                            v_str,
+                            rem_str
+                        ])
+
+                rem_summary = "; ".join(officer_remarks) if officer_remarks else "-"
+                row_data = [
+                    sl_num,
+                    officer["district"],
+                    officer["name"],
+                    officer["designation"]
+                ] + day_codes + [
+                    num_days,
+                    present_count,
+                    leaves_count,
+                    absent_count,
+                    travel_km_sum,
+                    rem_summary
+                ]
+                ws1.append(row_data)
+
+                curr_row = ws1.max_row
+                for col_idx in range(1, len(row_data) + 1):
+                    c = ws1.cell(row=curr_row, column=col_idx)
+                    c.border = EXCEL_THIN_BORDER
+                    c.font = Font(name="Calibri", size=10)
+                    if col_idx == 1:
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    elif 2 <= col_idx <= 4:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+                    elif 5 <= col_idx <= (4 + num_days):
+                        code_val = str(c.value or "").strip()
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                        if code_val in status_styles:
+                            c.fill = status_styles[code_val]["fill"]
+                            c.font = status_styles[code_val]["font"]
+                    elif (4 + num_days) < col_idx < len(row_data):
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                        c.font = Font(name="Calibri", size=10, bold=True)
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Column dimensions for Sheet 1
+            ws1.column_dimensions["A"].width = 6
+            ws1.column_dimensions["B"].width = 16
+            ws1.column_dimensions["C"].width = 22
+            ws1.column_dimensions["D"].width = 18
+            for d in range(1, num_days + 1):
+                col_letter = get_column_letter(4 + d)
+                ws1.column_dimensions[col_letter].width = 4.5
+
+            c_tot_days = get_column_letter(5 + num_days)
+            c_pres = get_column_letter(6 + num_days)
+            c_leaves = get_column_letter(7 + num_days)
+            c_abs = get_column_letter(8 + num_days)
+            c_km = get_column_letter(9 + num_days)
+            c_rem = get_column_letter(10 + num_days)
+
+            ws1.column_dimensions[c_tot_days].width = 12
+            ws1.column_dimensions[c_pres].width = 10
+            ws1.column_dimensions[c_leaves].width = 10
+            ws1.column_dimensions[c_abs].width = 10
+            ws1.column_dimensions[c_km].width = 12
+            ws1.column_dimensions[c_rem].width = 35
+
+            # Populate Sheet 2: Daily Activity Log
+            rows_sheet2.sort(key=lambda r: (r[0], r[1], r[2]))
+            for r_data in rows_sheet2:
+                ws2.append(r_data)
+                curr_row = ws2.max_row
+                for col_idx in range(1, len(r_data) + 1):
+                    c = ws2.cell(row=curr_row, column=col_idx)
+                    c.border = EXCEL_THIN_BORDER
+                    c.font = Font(name="Calibri", size=10)
+                    if col_idx in (1, 2, 4):
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    elif col_idx == 3:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+                    elif 5 <= col_idx <= 9:
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+
+            ws2.auto_filter.ref = ws2.dimensions
+            ws2.column_dimensions["A"].width = 13
+            ws2.column_dimensions["B"].width = 16
+            ws2.column_dimensions["C"].width = 22
+            ws2.column_dimensions["D"].width = 16
+            ws2.column_dimensions["E"].width = 11
+            ws2.column_dimensions["F"].width = 13
+            ws2.column_dimensions["G"].width = 15
+            ws2.column_dimensions["H"].width = 13
+            ws2.column_dimensions["I"].width = 12
+            ws2.column_dimensions["J"].width = 32
+            ws2.column_dimensions["K"].width = 32
+
+            output = io.BytesIO()
+            wb.save(output)
+            content_bytes = output.getvalue()
+            del wb
+            gc.collect()
+
+            if district and district.strip() and district.strip().lower() != "all":
+                c_fn_dist = canonicalize_district(district.strip())
+            elif districts and len(districts.split(",")) == 1 and districts.strip().lower() != "all":
+                c_fn_dist = canonicalize_district(districts.strip())
+            else:
+                c_fn_dist = "All"
+
+            safe_fn_dist = safe_filename(c_fn_dist)
+            filename = f"DFY_Staff_Attendance_{safe_fn_dist}_{target_month}.xlsx"
+            headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+            return ExcelStreamingResponse(
+                content_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers=headers
+            )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/admin/export-summary-metrics")
+@app.get("/admin/export-fo-dossier")
+async def export_summary_metrics(
+    month: Optional[str] = None,
+    district: Optional[str] = None,
+    districts: Optional[str] = None,
+    admin: dict = Depends(get_current_admin)
+):
+    return await export_staff_attendance(month=month, district=district, districts=districts, admin=admin)
 
 # --- Patient ID Correction & Editing Suite ---
 class EditIdRequest(BaseModel):
