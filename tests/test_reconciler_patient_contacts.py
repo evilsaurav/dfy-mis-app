@@ -294,3 +294,69 @@ async def test_get_patient_journey_empty_when_no_ledger_record():
             assert "phone" in meta
             assert meta["patient_name"] == ""
             assert meta["phone"] == ""
+
+
+@pytest.mark.asyncio
+async def test_reconcile_nikshay_human_readable_headers_with_spaces_and_dots():
+    """Verify reconcile_nikshay correctly matches 'Patient Name' and 'Contact No.' with spaces and punctuation."""
+    token = make_admin_token()
+
+    data = {
+        "Episode ID": ["PT123456"],
+        "Patient Name": ["Suresh Sharma"],
+        "Contact No.": ["+91 9876543210.0"],
+        "District": ["Patna"],
+        "Date": ["2026-09-01"],
+        "HIV Tested": ["Yes"],
+        "Bank Validated": ["Yes"],
+    }
+    df = pd.DataFrame(data)
+    excel_buffer = io.BytesIO()
+    df.to_excel(excel_buffer, index=False)
+    excel_buffer.seek(0)
+
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+        files = {"file": ("test_nikshay_human_readable.xlsx", excel_buffer.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        with patch("main.sync_nikshay_cumulative_ledger_sync") as mock_sync:
+            mock_sync.return_value = {"total_processed": 1, "written": 1, "unchanged": 0}
+            with patch("main.db.collection") as mock_col:
+                mock_col.return_value.where.return_value.where.return_value.stream.return_value = []
+                res = await ac.post("/admin/reconcile-nikshay", files=files, headers=headers)
+                assert res.status_code == 200, f"Request failed: {res.text}"
+                
+                assert mock_sync.called
+                call_args = mock_sync.call_args[0]
+                patients_to_sync = call_args[0]
+                assert "PT123456" in patients_to_sync
+                assert patients_to_sync["PT123456"]["name"] == "Suresh Sharma"
+                assert patients_to_sync["PT123456"]["phone"] == "9876543210"
+
+
+def test_sync_ledger_invalidates_journey_cache_on_write():
+    """Verify sync_nikshay_cumulative_ledger_sync invalidates journey_ and ledger_ cache keys on write."""
+    mock_db = MagicMock()
+    mock_db.get_all.return_value = []  # new document
+    batch_mock = MagicMock()
+    mock_db.batch.return_value = batch_mock
+
+    with patch("main.db", mock_db):
+        with patch("main.cache.delete_prefix") as mock_cache_del:
+            patients_to_sync = {
+                "PT2001": {
+                    "name": "New Patient",
+                    "phone": "9876543210",
+                    "district": "Patna",
+                    "notification_verified": True,
+                    "outcome": ""
+                }
+            }
+            res = sync_nikshay_cumulative_ledger_sync(patients_to_sync, "admin_test")
+            assert res["written"] == 1
+            assert mock_cache_del.called
+            deleted_prefixes = [call[0][0] for call in mock_cache_del.call_args_list]
+            assert "ledger_" in deleted_prefixes
+            assert "journey_" in deleted_prefixes
+

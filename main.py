@@ -6813,6 +6813,7 @@ def sync_nikshay_cumulative_ledger_sync(
 
     if total_written > 0:
         cache.delete_prefix("ledger_")
+        cache.delete_prefix("journey_")
 
     return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
 
@@ -6871,9 +6872,10 @@ async def reconcile_nikshay(
             id_col = df.columns[0]
 
         # 3. Detect demographics, district & date columns
-        phone_col = cols_lower.get("primaryphone") or cols_lower.get("phone") or cols_lower.get("mobile") or next((c for c in df.columns if any(p in str(c).lower() for p in ["primaryphone", "phone", "mobile", "contact_no", "contact_number", "beneficiary_mobile", "patient_mobile", "cell"])), None)
-        name_col = cols_lower.get("patient_name") or next((c for c in df.columns if any(n in str(c).lower() for n in ["patient_name", "patientname", "beneficiary_name", "case_name"]) or (str(c).lower().strip() == "name") or (str(c).lower().strip() == "patient")), None)
-        address_col = cols_lower.get("address") or next((c for c in df.columns if "address" in str(c).lower()), None)
+        clean_hdr = lambda c: str(c).strip().lower().replace(" ", "_").replace(".", "")
+        phone_col = cols_lower.get("primaryphone") or cols_lower.get("phone") or cols_lower.get("mobile") or next((c for c in df.columns if any(p in clean_hdr(c) for p in ["primaryphone", "phone", "mobile", "contact_no", "contact_number", "beneficiary_mobile", "patient_mobile", "cell"])), None)
+        name_col = cols_lower.get("patient_name") or next((c for c in df.columns if any(n in clean_hdr(c) for n in ["patient_name", "patientname", "beneficiary_name", "case_name"]) or (clean_hdr(c) in ["name", "patient"])), None)
+        address_col = cols_lower.get("address") or next((c for c in df.columns if "address" in clean_hdr(c)), None)
 
         district_col = None
         for candidate in ["spectrum_enrolment_district", "spectrum_diagnosing_district", "district", "district_name"]:
