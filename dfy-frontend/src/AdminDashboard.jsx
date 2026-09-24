@@ -3353,44 +3353,6 @@ Keep this file safe in your Google Drive or personal diary.
     }, 2500);
   };
 
-  const copyWhatsAppBulletin = () => {
-    const totalStateNotif = totals.notifications || 0;
-    const permittedTargets = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
-      ? targetsData.filter(t => currentUser.allowed_districts.includes(t.district))
-      : targetsData;
-    const totalStateTarget = permittedTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
-    const overallPct = totalStateTarget > 0 ? Math.round((totalStateNotif / totalStateTarget) * 100) : 0;
-    const sortedDistricts = [...districts.filter(d => d !== 'All')].map(dist => {
-      const recs = rawRecords.filter(r => r.working_place === dist);
-      const notif = recs.reduce((sum, r) => sum + (r.notifications || 0), 0);
-      const tgt = targetsData.filter(t => t.district === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
-      const pct = tgt > 0 ? Math.round((notif / tgt) * 100) : 0;
-      return { dist, notif, tgt, pct };
-    }).sort((a, b) => b.pct - a.pct);
-
-    const isSubAdmin = currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All');
-    let msg = `🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n`;
-    msg += `📅 *Month:* ${month} | *Generated:* ${new Date().toLocaleDateString()}\n\n`;
-    msg += `📊 *${isSubAdmin ? 'ASSIGNED DISTRICTS SUMMARY' : 'STATE SUMMARY'}:*\n`;
-    msg += `• Total Notifications: *${totalStateNotif}* / ${totalStateTarget} (*${overallPct}%*)\n`;
-    msg += `• Total Samples Tested: *${totals.tests || 0}*\n`;
-    msg += `• Total DBT Seeded: *${totals.dbt || 0}*\n`;
-    msg += `• Total Field KM: *${totals.total_km || 0} KM*\n\n`;
-    msg += `🏆 *DISTRICT LEADERBOARD:*\n`;
-
-    sortedDistricts.forEach((d, idx) => {
-      const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '•';
-      msg += `${medal} *${d.dist}:* ${d.notif}/${d.tgt} (${d.pct}%)\n`;
-    });
-
-    msg += `\n_DFY Bihar State Health Monitoring Cell_`;
-
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(msg);
-      setCopiedBulletin(true);
-      setTimeout(() => setCopiedBulletin(false), 2500);
-    }
-  };
 
   const fos = useMemo(() => {
     let filtered = rawRecords;
@@ -3588,6 +3550,91 @@ const availableDistrictsForFeed = useMemo(() => {
   };
 
   const totals = useMemo(() => aggregate(filteredRecords), [filteredRecords]);
+
+  const liveWhatsAppBulletin = useMemo(() => {
+    const isSubAdmin = currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All');
+    const permittedDistricts = isSubAdmin
+      ? (currentUser.allowed_districts || []).map(canonicalizeDistrict)
+      : (districts || []).filter(d => d !== 'All').map(canonicalizeDistrict);
+
+    const permittedTargets = targetsData.filter(t => {
+      const cDist = canonicalizeDistrict(t.district);
+      return permittedDistricts.includes(cDist);
+    });
+
+    const totalStateTarget = permittedTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    
+    const distStats = {};
+    permittedDistricts.forEach(d => {
+      distStats[d] = { dist: d, notif: 0, tests: 0, dbt: 0, km: 0, tgt: 0, pct: 0 };
+    });
+
+    permittedTargets.forEach(t => {
+      const cDist = canonicalizeDistrict(t.district);
+      if (distStats[cDist]) {
+        distStats[cDist].tgt += (Number(t.target) || 0);
+      }
+    });
+
+    (rawRecords || []).forEach(r => {
+      const cDist = canonicalizeDistrict(r.working_place || r.district || '');
+      if (distStats[cDist]) {
+        distStats[cDist].notif += (r.notifications || (r.notification_ids ? r.notification_ids.length : 0) || 0);
+        distStats[cDist].tests += (r.tests || (r.sample_tested_ids ? r.sample_tested_ids.length : 0) || 0);
+        distStats[cDist].dbt += (r.dbt || (r.dbt_ids ? r.dbt_ids.length : 0) || 0);
+        distStats[cDist].km += (Number(r.total_km) || 0);
+      }
+    });
+
+    const totalStateNotif = Object.values(distStats).reduce((sum, d) => sum + d.notif, 0);
+    const totalStateTests = Object.values(distStats).reduce((sum, d) => sum + d.tests, 0);
+    const totalStateDbt = Object.values(distStats).reduce((sum, d) => sum + d.dbt, 0);
+    const totalStateKm = Object.values(distStats).reduce((sum, d) => sum + d.km, 0);
+    const overallPct = totalStateTarget > 0 ? Math.round((totalStateNotif / totalStateTarget) * 100) : 0;
+
+    const sortedDistricts = Object.values(distStats).map(d => {
+      const pct = d.tgt > 0 ? Math.round((d.notif / d.tgt) * 100) : 0;
+      return { ...d, pct };
+    }).sort((a, b) => b.pct - a.pct || b.notif - a.notif);
+
+    let msg = `🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n`;
+    msg += `📅 *Month:* ${month} | *Generated:* ${new Date().toLocaleDateString()}\n\n`;
+    msg += `📊 *${isSubAdmin ? 'ASSIGNED DISTRICTS SUMMARY' : 'STATE SUMMARY'}:*\n`;
+    msg += `• Total Notifications: *${totalStateNotif}* / ${totalStateTarget} (*${overallPct}%*)\n`;
+    msg += `• Total Samples Tested: *${totalStateTests}*\n`;
+    msg += `• Total DBT Seeded: *${totalStateDbt}*\n`;
+    msg += `• Total Field KM: *${totalStateKm} KM*\n\n`;
+    msg += `🏆 *DISTRICT LEADERBOARD:*\n`;
+
+    sortedDistricts.forEach((d, idx) => {
+      const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : '•';
+      msg += `${medal} *${d.dist}:* ${d.notif}/${d.tgt} (${d.pct}%)\n`;
+    });
+
+    msg += `\n_DFY Bihar State Health Monitoring Cell_`;
+    return msg;
+  }, [month, totals, rawRecords, targetsData, districts, currentUser]);
+
+  const copyWhatsAppBulletin = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(liveWhatsAppBulletin);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = liveWhatsAppBulletin;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand("copy");
+        textArea.remove();
+      }
+      setCopiedBulletin(true);
+      showToast('✓ WhatsApp Bulletin copied to clipboard!', 'success');
+      setTimeout(() => setCopiedBulletin(false), 2500);
+    } catch (err) {
+      console.error('Failed to copy WhatsApp bulletin:', err);
+      showToast('Failed to copy bulletin to clipboard', 'error');
+    }
+  };
 
   // Option A: Daily Timeline Trend Data (Dynamic calendar days, peak day, daily average)
   const dailyTrendStats = useMemo(() => {
@@ -9547,17 +9594,30 @@ const availableDistrictsForFeed = useMemo(() => {
                       <h4 className="text-sm font-black text-emerald-950 mb-1">WhatsApp Executive State Bulletin</h4>
                       <p className="text-xs text-emerald-800 font-medium">Ready-to-broadcast summary formatted with emojis, state totals &amp; district rankings.</p>
                     </div>
-                    <button
-                      onClick={copyWhatsAppBulletin}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 active:scale-95 transition-all shrink-0"
-                    >
-                      {copiedBulletin ? '✓ Copied Bulletin!' : 'Copy WhatsApp Bulletin'}
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={copyWhatsAppBulletin}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-2.5 rounded-xl text-xs shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5 shrink-0 cursor-pointer"
+                      >
+                        <span>📋</span>
+                        <span>{copiedBulletin ? '✓ Copied Bulletin!' : 'Copy WhatsApp Bulletin'}</span>
+                      </button>
+                      <a
+                        href={`https://api.whatsapp.com/send?text=${encodeURIComponent(liveWhatsAppBulletin)}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-4 py-2.5 rounded-xl text-xs shadow-md shadow-emerald-700/20 active:scale-95 transition-all flex items-center gap-1.5 shrink-0"
+                      >
+                        <span>📱</span>
+                        <span>Open in WhatsApp Web</span>
+                      </a>
+                    </div>
                   </div>
 
-                  <div className="bg-slate-900 text-emerald-400 font-mono text-xs p-4 rounded-2xl border border-slate-800 overflow-x-auto whitespace-pre-wrap">
-                    {`🏥 *DOCTORS FOR YOU (DFY) - BIHAR TB MIS BULLETIN*\n📅 Month: ${month}\n\n• Notifications: ${totals.notifications || 0}\n• Samples Tested: ${totals.tests || 0}\n• Travel KM: ${totals.total_km || 0} KM\n\n🏆 Top Districts ranked by Notification Target %`}
-                  </div>
+                  <pre className="bg-slate-900 text-emerald-400 font-mono text-xs p-4 rounded-2xl border border-slate-800 overflow-x-auto whitespace-pre-wrap select-all">
+                    {liveWhatsAppBulletin}
+                  </pre>
                 </div>
               )}
 
