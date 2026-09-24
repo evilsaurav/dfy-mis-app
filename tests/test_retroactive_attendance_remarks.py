@@ -286,3 +286,91 @@ async def test_profile_stats_hydrates_admin_remark():
             assert day_18.get("status") == "leave"
             assert day_18.get("reason_type") == "Medical"
             assert day_18.get("admin_remark") == "Approved medical leave by admin"
+
+
+@pytest.mark.asyncio
+async def test_toggle_override_to_inspection_remark_clears_override():
+    mock_db = MockFirestore()
+    mock_admin = {"username": "admin", "name": "Admin Saurav", "role": "SUPER_ADMIN", "user_id": "admin_1"}
+
+    # 1. First mark an override leave
+    req1 = main.AttendanceRemarkReq(
+        district="Muzaffarpur",
+        fo_name="Rahul Kumar",
+        date="2026-09-21",
+        action="override_leave",
+        remark="Mistakenly marked as sick",
+        status="leave",
+        reason_type="Medical"
+    )
+    with patch("main.db", mock_db):
+        res1 = await main.add_attendance_remark(req1, admin=mock_admin)
+        assert res1.get("success") is True
+        leave_doc_id = "2026-09-21_Muzaffarpur_rahulkumar"
+        assert mock_db.store["daily_staff_leaves"][leave_doc_id]["is_override"] is True
+
+        # 2. Switch back to an inspection remark
+        req2 = main.AttendanceRemarkReq(
+            district="Muzaffarpur",
+            fo_name="Rahul Kumar",
+            date="2026-09-21",
+            action="remark",
+            remark="Field inspection verified, officer was present."
+        )
+        res2 = await main.add_attendance_remark(req2, admin=mock_admin)
+        assert res2.get("success") is True
+
+        # 3. Check that is_override is now False and is_inspection_remark is True
+        doc = mock_db.store["daily_staff_leaves"][leave_doc_id]
+        assert doc.get("is_override") is False
+        assert doc.get("is_inspection_remark") is True
+        assert doc.get("admin_remark") == "Field inspection verified, officer was present."
+
+
+@pytest.mark.asyncio
+async def test_unsubmitted_day_inspection_remark_not_leave():
+    mock_db = MockFirestore()
+
+    # Seed staff directory
+    mock_db.store["staff_directory"] = {
+        "muzaffarpur_rahulkumar": {
+            "name": "Rahul Kumar",
+            "district": "Muzaffarpur",
+            "pin": "1234"
+        }
+    }
+
+    # Seed an inspection note on an unsubmitted date
+    leave_doc_id = "2026-09-22_Muzaffarpur_rahulkumar"
+    mock_db.store["daily_staff_leaves"] = {
+        leave_doc_id: {
+            "date": "2026-09-22",
+            "district": "Muzaffarpur",
+            "fo_name": "Rahul Kumar",
+            "remark": "Defaulter followed up by phone",
+            "admin_remark": "Defaulter followed up by phone",
+            "marked_by_name": "Admin Saurav",
+            "marked_at": "2026-09-22 18:00:00",
+            "is_inspection_remark": True,
+            "is_override": False
+        }
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post("/my-profile-stats", json={
+                "working_place": "Muzaffarpur",
+                "fo_name": "Rahul Kumar",
+                "pin": "1234",
+                "month": "2026-09"
+            })
+            assert res.status_code == 200
+            data = res.json()
+            daily_history = data.get("daily_history", {})
+            assert "2026-09-22" in daily_history
+            day_22 = daily_history["2026-09-22"]
+            assert day_22.get("is_leave") is False
+            assert day_22.get("status") == "unsubmitted"
+            assert day_22.get("admin_remark") == "Defaulter followed up by phone"
+

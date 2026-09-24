@@ -2613,15 +2613,16 @@ async def my_profile_stats(req: ProfileStatsRequest):
             if l_date and (l_date.startswith(req.month) if req.month else l_date.startswith(req_month)):
                 leave_remark = l_data.get("remark") or l_data.get("admin_remark") or ""
                 leave_marked_by = l_data.get("marked_by_name") or "Admin"
+                is_actual_leave = bool(l_data.get("is_override") or not l_data.get("is_inspection_remark"))
                 if l_date not in daily_history:
                     daily_history[l_date] = {
                         "submitted": False,
                         "count": 0,
                         "total_ids": 0,
                         "categories": {},
-                        "is_leave": True,
-                        "status": l_data.get("status", "leave"),
-                        "reason_type": l_data.get("reason_type", "Casual"),
+                        "is_leave": is_actual_leave,
+                        "status": l_data.get("status", "leave") if is_actual_leave else "unsubmitted",
+                        "reason_type": l_data.get("reason_type", "Casual") if is_actual_leave else "",
                         "remark": l_data.get("remark", ""),
                         "admin_remark": leave_remark,
                         "marked_by": leave_marked_by,
@@ -2633,7 +2634,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
                         daily_history[l_date]["admin_remark"] = leave_remark
                     if leave_marked_by:
                         daily_history[l_date]["admin_remark_by"] = leave_marked_by
-                    if l_data.get("is_override"):
+                    if l_data.get("is_override") and not l_data.get("is_inspection_remark"):
                         daily_history[l_date]["is_leave"] = True
                         daily_history[l_date]["status"] = l_data.get("status", "leave")
                         daily_history[l_date]["reason_type"] = l_data.get("reason_type", "Casual")
@@ -2643,6 +2644,10 @@ async def my_profile_stats(req: ProfileStatsRequest):
                             "remark": l_data.get("remark", ""),
                             "marked_by": leave_marked_by
                         }
+                    elif l_data.get("is_inspection_remark"):
+                        daily_history[l_date]["is_leave"] = False
+                        if "leave_info" in daily_history[l_date]:
+                            del daily_history[l_date]["leave_info"]
                     elif not l_data.get("is_inspection_remark"):
                         daily_history[l_date]["is_leave"] = True
                         daily_history[l_date]["leave_info"] = {
@@ -8768,8 +8773,9 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                             if hasattr(d, "reference"):
                                 matching_reports.append(d.reference)
                             else:
-                                cand_ref = db.collection("daily_field_reports").document(getattr(d, "id", cid))
-                                matching_reports.append(cand_ref)
+                                doc_id_target = getattr(d, "id", None)
+                                if doc_id_target:
+                                    matching_reports.append(db.collection("daily_field_reports").document(doc_id_target))
                 except Exception as q_err:
                     print(f"Notice: daily_field_reports search failed: {q_err}")
 
@@ -8794,7 +8800,8 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "marked_by_id": actor_id,
                 "marked_by_role": actor_role,
                 "marked_at": marked_at,
-                "is_inspection_remark": True
+                "is_inspection_remark": True,
+                "is_override": False
             }
             await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_remark_data, merge=True))
 
@@ -8813,7 +8820,8 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "marked_by_id": actor_id,
                 "marked_by_role": actor_role,
                 "marked_at": marked_at,
-                "is_override": True
+                "is_override": True,
+                "is_inspection_remark": False
             }
             await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
             details = f"Overrode attendance to {req.status or 'leave'} ({req.reason_type or 'Casual'}) for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
@@ -8837,7 +8845,7 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                         r["admin_remark"] = req.remark.strip()
                         r["admin_remark_by"] = actor_name
                         r["admin_remark_at"] = marked_at
-                    found_and_updated = True
+                        found_and_updated = True
             if found_and_updated:
                 cache.set(f"shared_raw_month_{month_prefix}", cached_monthly, ttl=3600)
             else:
