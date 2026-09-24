@@ -1592,6 +1592,40 @@ const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
               </span>
             </div>
 
+            {(result.metadata?.patient_name || result.metadata?.phone) && (
+              <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-slate-100">
+                {result.metadata?.patient_name && (
+                  <span className="text-xs font-black text-slate-800 flex items-center gap-1 bg-slate-100 px-2.5 py-1 rounded-lg">
+                    <span>👤</span> {result.metadata.patient_name}
+                  </span>
+                )}
+                {result.metadata?.phone && (
+                  <div className="flex items-center gap-1.5">
+                    <a 
+                      href={`tel:${result.metadata.phone}`}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer"
+                    >
+                      <span>📞 Call</span>
+                      <span className="font-mono">{result.metadata.phone}</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (navigator.clipboard) {
+                          navigator.clipboard.writeText(result.metadata.phone);
+                          showToast("Phone number copied!", "info");
+                        }
+                      }}
+                      className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer transition-colors"
+                      title="Copy Phone"
+                    >
+                      📋
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Nikshay Reconciler Sync Status Banner */}
             <div className="mt-4">
               {isNikshayVerified ? (

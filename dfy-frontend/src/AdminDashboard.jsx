@@ -13922,16 +13922,52 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* Journey Timeline Content */}
             {journeyResult && (
               <div className="space-y-4">
-                <div className="bg-sky-50/70 border border-sky-100 p-3 rounded-2xl flex justify-between items-center">
-                  <div>
-                    <span className="font-mono font-black text-sm text-sky-900">Patient #{journeyResult.patient_id}</span>
-                    <p className="text-[11px] text-slate-500">
-                      {journeyResult.metadata?.district} | Officer: {journeyResult.metadata?.primary_fo || 'Field Officer'}
-                    </p>
+                <div className="bg-sky-50/70 border border-sky-100 p-3 rounded-2xl">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="font-mono font-black text-sm text-sky-900">Patient #{journeyResult.patient_id}</span>
+                      <p className="text-[11px] text-slate-500">
+                        {journeyResult.metadata?.district} | Officer: {journeyResult.metadata?.primary_fo || 'Field Officer'}
+                      </p>
+                    </div>
+                    <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${journeyResult.is_complete ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}`}>
+                      {journeyResult.is_complete ? '✓ Treatment Completed' : '⚡ Active In Care'}
+                    </span>
                   </div>
-                  <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-full border ${journeyResult.is_complete ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'}`}>
-                    {journeyResult.is_complete ? '✓ Treatment Completed' : '⚡ Active In Care'}
-                  </span>
+
+                  {(journeyResult.metadata?.patient_name || journeyResult.metadata?.phone) && (
+                    <div className="flex flex-wrap items-center gap-2 mt-2 pt-2 border-t border-sky-200/50">
+                      {journeyResult.metadata?.patient_name && (
+                        <span className="text-xs font-black text-slate-800 flex items-center gap-1 bg-white/80 px-2.5 py-1 rounded-lg border border-sky-200/60">
+                          <span>👤</span> {journeyResult.metadata.patient_name}
+                        </span>
+                      )}
+                      {journeyResult.metadata?.phone && (
+                        <div className="flex items-center gap-1.5">
+                          <a 
+                            href={`tel:${journeyResult.metadata.phone}`}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer"
+                          >
+                            <span>📞 Call</span>
+                            <span className="font-mono">{journeyResult.metadata.phone}</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (navigator.clipboard) {
+                                navigator.clipboard.writeText(journeyResult.metadata.phone);
+                                showToast("Phone number copied!", "info");
+                              }
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-700 rounded cursor-pointer transition-colors"
+                            title="Copy Phone"
+                          >
+                            📋
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <div className="relative pl-6 border-l-2 border-indigo-200 space-y-4 my-2">
