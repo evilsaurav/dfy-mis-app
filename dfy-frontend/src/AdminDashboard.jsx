@@ -210,6 +210,8 @@ export default function AdminDashboard() {
   const [activeAttendanceTab, setActiveAttendanceTab] = useState('missing'); // 'missing' | 'submitted' | 'on_leave' | 'defaulters'
   const [leaveActionModal, setLeaveActionModal] = useState(null); // { district, fo_name, date, status: 'leave', reason_type: 'Casual', remark: '' }
   const [isSavingLeave, setIsSavingLeave] = useState(false);
+  const [attendanceRemarkModal, setAttendanceRemarkModal] = useState(null); // { district, fo_name, date, action: 'remark' | 'override_leave', remark: '', status: 'leave', reason_type: 'Casual' }
+  const [isSavingAttendanceRemark, setIsSavingAttendanceRemark] = useState(false);
   const attendanceActiveTab = activeAttendanceTab;
   const setAttendanceActiveTab = setActiveAttendanceTab;
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState('');
@@ -1282,6 +1284,55 @@ export default function AdminDashboard() {
       showToast(`⚠️ ${err.message}`, "error");
     } finally {
       setIsSavingLeave(false);
+    }
+  };
+
+  const handleExecuteAttendanceRemark = async () => {
+    if (!attendanceRemarkModal || isSavingAttendanceRemark) return;
+    const { district, fo_name, date, action, remark, status, reason_type } = attendanceRemarkModal;
+    if (!district || !fo_name) {
+      showToast("⚠️ District and Field Officer name are required.", "error");
+      return;
+    }
+    if (!remark || !remark.trim()) {
+      showToast("⚠️ Please enter a remark.", "error");
+      return;
+    }
+    if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowed = currentUser.allowed_districts.map(canonicalizeDistrict).map(d => d.toLowerCase());
+      if (!allowed.includes(canonicalizeDistrict(district).toLowerCase())) {
+        showToast("⚠️ Permission denied for this district.", "error");
+        return;
+      }
+    }
+
+    setIsSavingAttendanceRemark(true);
+    const targetDate = date || attendanceDate;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/attendance/add-remark`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district,
+          fo_name,
+          date: targetDate,
+          action: action || 'remark',
+          remark: remark.trim(),
+          status: status || 'leave',
+          reason_type: reason_type || 'Casual'
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to record remark");
+
+      showToast(action === 'remark' ? "✓ Attendance inspection remark recorded successfully!" : "✓ Leave status overridden successfully!", "success");
+      setAttendanceRemarkModal(null);
+      fetchAttendance(true, targetDate);
+    } catch (err) {
+      showToast(`❌ ${err.message}`, "error");
+    } finally {
+      setIsSavingAttendanceRemark(false);
     }
   };
 
@@ -10534,6 +10585,12 @@ const availableDistrictsForFeed = useMemo(() => {
                               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                 {fo.district} &bull; {fo.designation || 'Field Officer'}
                               </p>
+                              {fo.admin_remark && (
+                                <p className="text-[11px] text-amber-900 bg-amber-50/80 border border-amber-200/80 px-2 py-0.5 rounded-lg mt-1 inline-flex items-center gap-1">
+                                  <span>📋</span>
+                                  <span>Remark: <strong>{fo.admin_remark}</strong></span>
+                                </p>
+                              )}
                             </div>
                           </div>
 
@@ -10549,6 +10606,23 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span className={`text-[10px] px-2 py-0.5 rounded-lg border shadow-2xs ${timeClassification.badgeClass}`}>
                               {timeClassification.shortLabel}
                             </span>
+                            <button
+                              type="button"
+                              onClick={() => setAttendanceRemarkModal({
+                                district: fo.district,
+                                fo_name: fo.fo_name,
+                                date: attendance?.date || attendanceDate,
+                                action: 'remark',
+                                remark: fo.admin_remark || '',
+                                status: 'leave',
+                                reason_type: 'Casual'
+                              })}
+                              className="bg-white hover:bg-indigo-50 text-indigo-700 text-xs font-bold px-2.5 py-1 rounded-xl border border-indigo-200 transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                              title="Add Inspection Remark or Override Leave"
+                            >
+                              <span>📝</span>
+                              <span>Remark / Leave</span>
+                            </button>
                           </div>
                         </div>
                       );
@@ -10651,7 +10725,24 @@ const availableDistrictsForFeed = useMemo(() => {
                           </div>
                         </div>
 
-                        <div className="self-end sm:self-center">
+                        <div className="self-end sm:self-center flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setAttendanceRemarkModal({
+                              district: fo.district,
+                              fo_name: fo.fo_name,
+                              date: attendance?.date || attendanceDate,
+                              action: 'override_leave',
+                              remark: '',
+                              status: 'absent',
+                              reason_type: 'Uninformed'
+                            })}
+                            className="bg-white hover:bg-amber-50 text-amber-800 text-xs font-bold px-2.5 py-1 rounded-xl border border-amber-200 transition-all shadow-2xs flex items-center gap-1 cursor-pointer active:scale-95"
+                            title="Add Remark or Mark Absent"
+                          >
+                            <span>📝</span>
+                            <span>Remark / Leave</span>
+                          </button>
                           <span className={`text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full border shadow-2xs ${fo.severity === 'CRITICAL' ? 'bg-rose-600 text-white border-rose-700' : 'bg-amber-500 text-white border-amber-600'}`}>
                             {fo.severity === 'CRITICAL' ? 'Critical Action' : 'Pending Follow-up'}
                           </span>
@@ -10833,6 +10924,179 @@ const availableDistrictsForFeed = useMemo(() => {
                   <>
                     <span>✓</span>
                     <span>Confirm Leave</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 📝 Unified Attendance Remark / Leave Override Modal */}
+      {attendanceRemarkModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[115] flex items-center justify-center p-3 sm:p-4 animate-fade-in font-sans">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 flex flex-col gap-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            {/* Header */}
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-black text-lg shrink-0">
+                  📝
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-800">
+                    Attendance Remark &amp; Leave
+                  </h3>
+                  <p className="text-xs text-slate-500 font-semibold">
+                    {attendanceRemarkModal.fo_name} &bull; <span className="font-bold text-indigo-600">{attendanceRemarkModal.district}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSavingAttendanceRemark && setAttendanceRemarkModal(null)}
+                disabled={isSavingAttendanceRemark}
+                className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Segmented Action Toggle */}
+            <div className="bg-slate-100 p-1 rounded-2xl flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setAttendanceRemarkModal(prev => ({ ...prev, action: 'remark' }))}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  attendanceRemarkModal.action === 'remark'
+                    ? 'bg-white text-indigo-700 shadow-sm border border-slate-200/60'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>📋</span>
+                <span>Inspection Remark</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAttendanceRemarkModal(prev => ({ ...prev, action: 'override_leave' }))}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                  attendanceRemarkModal.action === 'override_leave'
+                    ? 'bg-white text-amber-700 shadow-sm border border-slate-200/60'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>⚠️</span>
+                <span>Override to Leave</span>
+              </button>
+            </div>
+
+            {/* Context Notice */}
+            {attendanceRemarkModal.action === 'remark' ? (
+              <div className="bg-indigo-50/80 border border-indigo-100 rounded-2xl p-3 text-xs text-indigo-900 flex items-start gap-2">
+                <span className="text-sm shrink-0">ℹ️</span>
+                <p className="text-[11px] leading-relaxed">
+                  Keeps report submitted. Records official inspection note on this day's attendance without voiding submission.
+                </p>
+              </div>
+            ) : (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900 flex items-start gap-2">
+                <span className="text-sm shrink-0">⚠️</span>
+                <p className="text-[11px] leading-relaxed">
+                  Overrides this day's attendance status to Leave or Absent in official records and FO calendar.
+                </p>
+              </div>
+            )}
+
+            {/* Form Fields */}
+            <div className="space-y-3.5 text-xs">
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">Date</label>
+                <input
+                  type="date"
+                  value={attendanceRemarkModal.date || attendanceDate}
+                  onChange={(e) => setAttendanceRemarkModal(prev => ({ ...prev, date: e.target.value }))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-mono font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              {attendanceRemarkModal.action === 'override_leave' && (
+                <>
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">Status</label>
+                    <select
+                      value={attendanceRemarkModal.status || 'leave'}
+                      onChange={(e) => setAttendanceRemarkModal(prev => ({ ...prev, status: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="leave">🏖️ On Leave</option>
+                      <option value="absent">⚠️ Absent / Uninformed</option>
+                      <option value="weekly_off">📅 Weekly Off</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-700 font-bold mb-1">Reason Type</label>
+                    <select
+                      value={attendanceRemarkModal.reason_type || 'Casual'}
+                      onChange={(e) => setAttendanceRemarkModal(prev => ({ ...prev, reason_type: e.target.value }))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
+                    >
+                      <option value="Medical">Medical (Health / Illness)</option>
+                      <option value="Casual">Casual (Emergency / Family)</option>
+                      <option value="Official Work">Official Work / Field Training</option>
+                      <option value="Personal">Personal Work</option>
+                      <option value="Uninformed">Uninformed Absence</option>
+                    </select>
+                  </div>
+                </>
+              )}
+
+              <div>
+                <label className="block text-slate-700 font-bold mb-1">
+                  Remark / Note <span className="text-rose-500">*</span>
+                </label>
+                <textarea
+                  rows="3"
+                  value={attendanceRemarkModal.remark || ''}
+                  onChange={(e) => setAttendanceRemarkModal(prev => ({ ...prev, remark: e.target.value }))}
+                  placeholder={
+                    attendanceRemarkModal.action === 'remark'
+                      ? "e.g. Verified with Dr. Sharma / 3 IDs confirmed on spot"
+                      : "e.g. Staff called in sick / Family emergency"
+                  }
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-medium text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setAttendanceRemarkModal(null)}
+                disabled={isSavingAttendanceRemark}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 font-bold text-xs transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteAttendanceRemark}
+                disabled={isSavingAttendanceRemark}
+                className={`px-5 py-2 rounded-xl text-white font-black text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                  attendanceRemarkModal.action === 'remark'
+                    ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-600/20'
+                    : 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                }`}
+              >
+                {isSavingAttendanceRemark ? (
+                  <>
+                    <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10" strokeDasharray="32" strokeLinecap="round"/></svg>
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✓</span>
+                    <span>{attendanceRemarkModal.action === 'remark' ? 'Save Remark' : 'Override Attendance'}</span>
                   </>
                 )}
               </button>
