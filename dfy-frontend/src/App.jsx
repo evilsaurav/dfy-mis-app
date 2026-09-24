@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import INITIAL_STAFF_DIRECTORY from './staff_directory.json'
 import { calculateFdcDosage } from './utils/fdcCalculator'
+import { formatIstTime } from './utils/timeFormat'
 import { APP_VERSION } from './changelogData'
 import { 
   saveOfflineReport, 
@@ -5055,7 +5056,7 @@ function App() {
                     </div>
                     {todaySubmittedReport.timestamp_completed && (
                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-1 rounded-lg shrink-0">
-                        {String(todaySubmittedReport.timestamp_completed).substring(11, 16) || 'Done'}
+                        {formatIstTime(todaySubmittedReport.timestamp_completed)}
                       </span>
                     )}
                   </div>
