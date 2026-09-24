@@ -1,16 +1,53 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.1";
-export const LAST_UPDATED_DATE = "23 Sep 2026";
+export const APP_VERSION = "2.8.2";
+export const LAST_UPDATED_DATE = "25 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.2",
+    date: "25 Sep 2026",
+    title: "Dual-Sheet Staff Attendance Export, Retroactive Admin Remarks, Direct Patient 1-Tap Calling & Visual Bento SOPs",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📊 Dual-Sheet Staff Attendance (.xlsx) Workbook: Added executive attendance export featuring Sheet 1 (Consolidated Monthly Matrix with color-coded Present/Leave/Absent cells, totals & percentages) and Sheet 2 (Detailed Activity Log with doctor visits, patient interventions & travel KM), backed by a 1-second sequential queue preventing Render server spikes.",
+      "✏️ Retroactive Admin Inspection Remarks & Overrides: State & Sub-Admins can now add supervisor remarks and modify attendance status (Present, Medical Leave, Casual Leave, Official Duty, Absent) for any past or current day directly from Attendance Radar, syncing instantly to Field Officer calendars.",
+      "📞 Direct Patient Contact Integration & 1-Tap Calling: Enriched Nikshay Reconciler and Patient Journey Tracker with patient name, phone number, direct 1-tap dialer (tel: link), and copy-to-clipboard button across FO mobile and Admin dashboard views.",
+      "📢 WhatsApp Bulletin Aggregation Hardening: Rebuilt daily attendance broadcast generator with canonical district matching and reactive preview, ensuring accurate district grouping and zero missing staff across spelling variations.",
+      "🧩 Native Bento Visual Flowcharts: Integrated modern responsive Bento diagrams into FO Guide and Admin SOP illustrating the daily reporting lifecycle, patient calling journey, attendance color codes, and reconciler workflows.",
+      "⏰ Form Submission Time IST Formatter: Fixed 12-hour AM/PM formatting for accurate duty timestamps."
+    ],
+    details: [
+      {
+        tag: "Staff Attendance Export",
+        color: "emerald",
+        text: "Dual-sheet Excel generation delivers a complete monthly matrix and granular activity audit with sequential queue pacing and zero memory spikes."
+      },
+      {
+        tag: "Retroactive Remarks",
+        color: "indigo",
+        text: "Admins can attach inspection remarks and status overrides to past dates with live reflection in FO Profile calendar rosters."
+      },
+      {
+        tag: "Direct Patient Connect",
+        color: "teal",
+        text: "1-tap phone dialer and quick-copy phone cards accelerate field follow-up calls and DBT bank account resolution."
+      },
+      {
+        tag: "Visual Bento SOPs",
+        color: "purple",
+        text: "Interactive bento flowcharts provide clear visual operating procedures for field officers and administrative coordinators."
+      }
+    ]
+  },
   {
     version: "v2.8.1",
     date: "23 Sep 2026",
     title: "Sub-Admin Sync Accuracy, PWA Cache Purge, Mobile Attendance Radar & FDC Medicine Rationing",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🔄 Bulletproof Sub-Admin Monthly Sync: Eliminated exact working_place Firestore index constraints in favor of date-range queries and in-memory canonical district resolution, guaranteeing zero dropped records across district spelling variations.",
       "🛡️ Guarded Statewide Disk Snapshots: Prevented Sub-Admin single-district queries from overwriting statewide disk backup caches, isolating district scopes completely.",

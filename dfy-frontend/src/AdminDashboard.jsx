@@ -13089,6 +13089,7 @@ const availableDistrictsForFeed = useMemo(() => {
               {/* Left Navigation Sidebar */}
               <div className="md:col-span-4 bg-slate-50 border border-slate-200/80 rounded-2xl p-2.5 space-y-1.5 overflow-y-auto max-h-[500px]">
                 {[
+                  { key: 'visual_sops', label: 'Visual Bento SOP Workflows', icon: '🧩', desc: 'Attendance, Reconciler & Excel Workflows' },
                   { key: 'notif_tray', label: 'Daily Notification Tray', icon: '📋', desc: 'Nikshay cross-check & 24-col copy' },
                   { key: 'reconciler', label: 'Nikshay Reconciler & Ledger', icon: '⚖️', desc: 'State dumps & 72h truth engine' },
                   { key: 'daily_reports', label: 'FO Daily Reports & Edits', icon: '🔍', desc: 'Attendance, 24h edit window' },
@@ -13129,6 +13130,208 @@ const availableDistrictsForFeed = useMemo(() => {
               {/* Right Content Panel */}
               <div className="md:col-span-8 bg-white border border-slate-200 rounded-2xl p-5 overflow-y-auto max-h-[500px] space-y-4 text-slate-700 text-xs leading-relaxed">
                 
+                {/* TOPIC 0: Visual Bento SOP Workflows */}
+                {appGuideActiveTopic === 'visual_sops' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                      <span className="text-xl">🧩</span>
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">DFY TB MIS &mdash; Visual Bento SOP Workflows</h4>
+                        <p className="text-[11px] text-slate-500 font-medium">Standard Operating Procedures for Attendance, Reconciler &amp; Excel Reports</p>
+                      </div>
+                    </div>
+
+                    {/* FLOWCHART 1: Attendance Monitoring & Retroactive Remarks */}
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base p-1.5 bg-indigo-50 text-indigo-700 rounded-xl">⚡</span>
+                          <div>
+                            <h5 className="text-xs font-black text-slate-900">Attendance Monitoring Workflow</h5>
+                            <p className="text-[10px] text-slate-500 font-medium">Morning &amp; Evening Attendance Monitoring, Bulletins &amp; Overrides</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                          Live Radar &amp; Remarks
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">1</span>
+                            <span className="text-sm">📡</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Open Attendance Radar</strong>
+                          <p className="text-[10px] text-slate-600">Assigned canonical districts ka live attendance view.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
+                            <span className="text-sm">⏱️</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Inspect On-Time / Late Chips</strong>
+                          <p className="text-[10px] text-slate-600">Subah se submit huye reports aur IST duty timestamps.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">3</span>
+                            <span className="text-sm">⚠️</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Review Defaulters</strong>
+                          <p className="text-[10px] text-slate-600">Missing staff aur 3+ din ke chronic absent streak filter.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">4</span>
+                            <span className="text-sm">📢</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">1-Click WhatsApp Reminder</strong>
+                          <p className="text-[10px] text-slate-600">District-wise formatted bulletin WhatsApp par copy &amp; send.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">5</span>
+                            <span className="text-sm">✏️</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Add Remark / Mark Leave</strong>
+                          <p className="text-[10px] text-slate-600">Past ya current date par remark aur status override with live FO sync.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FLOWCHART 2: Nikshay Reconciler & Direct Patient Contact */}
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base p-1.5 bg-emerald-50 text-emerald-700 rounded-xl">⚖️</span>
+                          <div>
+                            <h5 className="text-xs font-black text-slate-900">Nikshay Reconciler Workflow</h5>
+                            <p className="text-[10px] text-slate-500 font-medium">Nikshay Reconciler &amp; Direct Patient Contact Engine</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
+                          Monotonic Ledger
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">1</span>
+                            <span className="text-sm">📤</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Upload Nikshay Excel</strong>
+                          <p className="text-[10px] text-slate-600">State dump (.xlsx / .csv) portal upload by Super Admin.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
+                            <span className="text-sm">🔍</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Automatic Header Match</strong>
+                          <p className="text-[10px] text-slate-600">24+ NTEP headers auto-mapped without schema errors.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">3</span>
+                            <span className="text-sm">🔒</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Monotonic Ledger Sync</strong>
+                          <p className="text-[10px] text-slate-600">Verified DBT &amp; tests permanently locked in Firestore.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">4</span>
+                            <span className="text-sm">📋</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Actionable Pending Lists</strong>
+                          <p className="text-[10px] text-slate-600">Unresolved patients pushed to FO Pending Hub.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">5</span>
+                            <span className="text-sm">📞</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">1-Tap Call Patient from Drawer</strong>
+                          <p className="text-[10px] text-slate-600">Direct dialer link &amp; clipboard phone copy inside drawer.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FLOWCHART 3: Dual-Sheet Staff Attendance Export Workflow */}
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base p-1.5 bg-teal-50 text-teal-700 rounded-xl">📊</span>
+                          <div>
+                            <h5 className="text-xs font-black text-slate-900">Dual-Sheet Staff Attendance Export Workflow</h5>
+                            <p className="text-[10px] text-slate-500 font-medium">Historical Attendance Corrections &amp; Monthly Export</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full">
+                          1s Sequential Queue
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">1</span>
+                            <span className="text-sm">📅</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Select Past Date in Radar</strong>
+                          <p className="text-[10px] text-slate-600">Past dates inspect karein, staff ka submitted data review karein.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
+                            <span className="text-sm">📝</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Attach Remark / Leave</strong>
+                          <p className="text-[10px] text-slate-600">P, ML, CL, OD, A status override aur supervisor remarks save karein.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">3</span>
+                            <span className="text-sm">🔄</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">FO Calendar Live Sync</strong>
+                          <p className="text-[10px] text-slate-600">Field officer ke profile calendar me turant status update ho jata hai.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">4</span>
+                            <span className="text-sm">🎯</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Report Studio: Multi-District Queue</strong>
+                          <p className="text-[10px] text-slate-600">Target districts select karein, 1000ms cooldown queue ke saath.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-teal-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">5</span>
+                            <span className="text-sm">📑</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Dual-Sheet Attendance Workbook (.xlsx)</strong>
+                          <p className="text-[10px] text-slate-600">Sheet 1: Monthly Matrix; Sheet 2: Granular Activity Log.</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* TOPIC 1: Daily Notification Tray */}
                 {appGuideActiveTopic === 'notif_tray' && (
                   <div className="space-y-4">

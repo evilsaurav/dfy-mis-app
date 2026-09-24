@@ -1726,6 +1726,7 @@ const PatientJourneyTracker = ({ formData, showToast, suggestedIds = [] }) => {
 // --- Field Officer Help, Guidelines & Visual System Workflow Guide ---
 const FoHelpGuide = () => {
   const [activeStage, setActiveStage] = useState(1);
+  const [bentoTab, setBentoTab] = useState("reporting"); // "reporting" | "calling" | "attendance" | "stages"
   const [searchQuery, setSearchQuery] = useState("");
   const [openTopic, setOpenTopic] = useState("daily_reporting");
 
@@ -1797,7 +1798,7 @@ const FoHelpGuide = () => {
               <span>Daily Target &amp; Timing:</span>
             </span>
             <p className="text-teal-800 text-[11px]">
-              Field Officer ko rozana field visit complete karne ke baad sham <strong>7:00 PM</strong> se pehle apni daily report submit karni hoti hai.
+              Rozana sham <strong>7:00 PM</strong> tak daily report submit karni hoti hai. Field Officer ko rozana field visit complete karne ke baad sham 7:00 PM se pehle apni daily report submit karni hoti hai.
             </p>
           </div>
 
@@ -2051,6 +2052,13 @@ const FoHelpGuide = () => {
                 <li><span className="font-bold text-sky-700">🔵 DBT Validated:</span> Patient ka bank khata Poshan sahayata ke liye verified hai.</li>
               </ul>
             </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 space-y-1">
+              <strong className="text-emerald-950 block font-bold">3. Direct 1-Tap 📞 Call &amp; Quick Copy:</strong>
+              <p className="text-emerald-900 text-[11px]">
+                Patient card par phone number ke bagal me <strong>&ldquo;📞 Call&rdquo;</strong> button diya gaya hai jisse seedhe phone dialer khul jata hai taaki aap follow-up call turant kar sakein. Bagal me bane copy icon se number 1-tap me clipboard par copy ho jata hai.
+              </p>
+            </div>
           </div>
         </div>
       )
@@ -2250,6 +2258,79 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "attendance_and_remarks",
+      icon: "🗓️",
+      badge: "Roster & Calendar Guide",
+      badgeColor: "bg-purple-100 text-purple-800 border-purple-200",
+      title: "9. Attendance Status, Leave Badges & Supervisor Remarks",
+      subtitle: "Calendar colors (P, ML, CL, OD, A, WO) aur supervisor feedback samajhein",
+      keywords: "attendance leave present medical casual official duty absent weekly off remarks supervisor inspection calendar roster",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          <p>
+            Field Officers ke daily attendance roster aur calendar me alag-alag status ke liye visual color badges nirdharit kiye gaye hain:
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-2.5">
+              <span className="font-bold text-emerald-950 flex items-center gap-1.5 mb-1">
+                <span>🟢</span>
+                <span>P &mdash; Present (Submitted):</span>
+              </span>
+              <p className="text-emerald-900">Rozana sham 7:00 PM tak field report safalta-poorvak submit hone par green badge lagta hai.</p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5">
+              <span className="font-bold text-amber-950 flex items-center gap-1.5 mb-1">
+                <span>🟡</span>
+                <span>ML &mdash; Medical Leave:</span>
+              </span>
+              <p className="text-amber-900">Swasthya kharab hone ya medical emergency par coordinator dwara approve ki gayi chhutti.</p>
+            </div>
+
+            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-2.5">
+              <span className="font-bold text-sky-950 flex items-center gap-1.5 mb-1">
+                <span>🔵</span>
+                <span>CL &mdash; Casual Leave:</span>
+              </span>
+              <p className="text-sky-900">Niji zaroori kaam ke liye purva-soochit aakasmik avakash.</p>
+            </div>
+
+            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-2.5">
+              <span className="font-bold text-indigo-950 flex items-center gap-1.5 mb-1">
+                <span>🟣</span>
+                <span>OD &mdash; Official Duty:</span>
+              </span>
+              <p className="text-indigo-900">District / State review meeting, special training, ya health camp duty me upasthiti.</p>
+            </div>
+
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-2.5">
+              <span className="font-bold text-rose-950 flex items-center gap-1.5 mb-1">
+                <span>🔴</span>
+                <span>A &mdash; Absent:</span>
+              </span>
+              <p className="text-rose-900">Bina kisi soochana ke report darj na hone par anupasthiti mark hoti hai.</p>
+            </div>
+
+            <div className="bg-slate-100 border border-slate-200 rounded-2xl p-2.5">
+              <span className="font-bold text-slate-900 flex items-center gap-1.5 mb-1">
+                <span>⚪</span>
+                <span>WO &mdash; Weekly Off:</span>
+              </span>
+              <p className="text-slate-700">Nirdharit Ravivar (Sunday) ya sarkar dwara ghoshit chhutti.</p>
+            </div>
+          </div>
+
+          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-3 text-[11px] text-purple-950 space-y-1">
+            <strong>📝 Supervisor Inspection Remarks:</strong>
+            <p>
+              District Coordinator ya State Admin kisi bhi tarikh par inspection remark ya leave reason add kar sakte hain. Aap apne <strong>Profile</strong> tab me jaakar kisi bhi tarikh par tap karenge toh supervisor ka likha gaya remark turant dikhayi dega.
+            </p>
+          </div>
+        </div>
+      )
     }
   ];
 
@@ -2301,73 +2382,380 @@ const FoHelpGuide = () => {
         </div>
       </div>
 
-      {/* Visual Workflow Graph (Flowchart) */}
-      <div className="bg-white rounded-3xl p-5 border border-slate-200/90 shadow-sm space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-          <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-            <span>📊</span>
-            <span>App Kaise Kaam Karta Hai (System Flowchart)</span>
-          </h3>
-          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
-            Tap stage to learn
-          </span>
+      {/* Visual Bento Flowcharts & System Guide */}
+      <div className="bg-white rounded-3xl p-4 sm:p-5 border border-slate-200/90 shadow-sm space-y-4">
+        {/* Navigation Selector for Bento Flowcharts */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-2.5">
+          <div className="flex items-center gap-2">
+            <span className="text-xl p-1.5 bg-indigo-50 rounded-xl text-indigo-700 font-bold shrink-0">🧩</span>
+            <div>
+              <h3 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                Visual SOP &amp; Bento Flowcharts
+              </h3>
+              <p className="text-[10px] text-slate-500 font-medium">Bento diagram view of field operations</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl overflow-x-auto no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setBentoTab("reporting")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "reporting" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Reporting Workflow
+            </button>
+            <button
+              type="button"
+              onClick={() => setBentoTab("calling")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "calling" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Patient Calling
+            </button>
+            <button
+              type="button"
+              onClick={() => setBentoTab("attendance")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "attendance" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Attendance Colors
+            </button>
+            <button
+              type="button"
+              onClick={() => setBentoTab("stages")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "stages" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              System Stages
+            </button>
+          </div>
         </div>
 
-        {/* 4 Connected Graph Nodes */}
-        <div className="grid grid-cols-4 gap-1.5 relative pt-1">
-          {stages.map((stage, idx) => {
-            const isSelected = activeStage === stage.id;
-            return (
-              <button
-                key={stage.id}
-                type="button"
-                onClick={() => setActiveStage(stage.id)}
-                className={`flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer relative z-10 ${
-                  isSelected 
-                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/25 scale-105' 
-                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
-                }`}
-              >
-                <span className="text-xl mb-1">{stage.icon}</span>
-                <span className="text-[10px] font-black text-center leading-tight">{stage.title.split('. ')[1]}</span>
-                <span className={`text-[8px] font-bold uppercase mt-1 px-1.5 py-0.2 rounded-full ${
-                  isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
-                }`}>
-                  Step {idx + 1}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+        {/* 1. Daily Reporting Lifecycle (Reporting Workflow) Bento Flowchart */}
+        {bentoTab === "reporting" && (
+          <div className="space-y-3.5 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>📝</span>
+                  <span>Daily Reporting Lifecycle (Reporting Workflow)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">Subah se sham tak 5-step sequential field reporting SOP</p>
+              </div>
+              <span className="text-[10px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full shrink-0">
+                Sham 7:00 PM Tak
+              </span>
+            </div>
 
-        {/* Selected Stage Detail Card */}
-        {(() => {
-          const currentStage = stages.find(s => s.id === activeStage) || stages[0];
-          return (
-            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 animate-fade-in">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl">{currentStage.icon}</span>
-                <div>
-                  <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wider">
-                    {currentStage.title}: {currentStage.subtitle}
-                  </h4>
-                  <p className="text-[11px] text-indigo-800 font-medium">
-                    {currentStage.desc}
-                  </p>
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+              {/* Step 1 */}
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50/40 border border-emerald-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                  <span className="text-base">🌅</span>
                 </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Morning Field Visit</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Gaon, ward, ya clinic me jakar suspect identification aur counseling.</p>
+                </div>
+                <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-full self-start">Field Outreach</span>
               </div>
 
-              <div className="pt-2 border-t border-indigo-100/80 space-y-1.5">
-                {currentStage.points.map((pt, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[11px] text-slate-700">
-                    <span className="text-emerald-600 font-black mt-0.5">✓</span>
-                    <span>{pt}</span>
-                  </div>
-                ))}
+              {/* Step 2 */}
+              <div className="bg-gradient-to-br from-teal-50 to-cyan-50/40 border border-teal-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                  <span className="text-base">📱</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Data Entry &amp; Patient IDs</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">9-digit Nikshay ID, auto FDC dosage strips, aur doctor visits form me enter karein.</p>
+                </div>
+                <span className="text-[9px] font-bold text-teal-800 bg-teal-100/70 px-2 py-0.5 rounded-full self-start">Mobile Capture</span>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-gradient-to-br from-amber-50 to-yellow-50/40 border border-amber-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                  <span className="text-base">🛡️</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Duplicate Check Guard</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">90-din notification block alert surakshit rakhta hai; repeat visits peela modal se confirm hoti hain.</p>
+                </div>
+                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/70 px-2 py-0.5 rounded-full self-start">Integrity Check</span>
+              </div>
+
+              {/* Step 4 */}
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50/40 border border-indigo-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                  <span className="text-base">🚀</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Review &amp; Submission</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Travel KM aur brief remarks likhkar rozana sham 7:00 PM tak &ldquo;Submit Daily Report&rdquo; karein.</p>
+                </div>
+                <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100/70 px-2 py-0.5 rounded-full self-start">7:00 PM Goal</span>
+              </div>
+
+              {/* Step 5 */}
+              <div className="bg-gradient-to-br from-purple-50 to-violet-50/40 border border-purple-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">5</span>
+                  <span className="text-base">📅</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Calendar Confirmation</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Profile calendar me turant green badge (Present &bull; P) activate hota hai aur streak judti hai.</p>
+                </div>
+                <span className="text-[9px] font-bold text-purple-800 bg-purple-100/70 px-2 py-0.5 rounded-full self-start">Instant Verified</span>
               </div>
             </div>
-          );
-        })()}
+
+            <div className="bg-teal-50/80 border border-teal-200 rounded-2xl p-3 text-[11px] text-teal-900 flex items-center gap-2">
+              <span className="text-base">💡</span>
+              <span><strong>Reporting Niyam:</strong> Rozana sham 7:00 PM tak daily report submit karni hoti hai taaki attendance roster me green badge lag sake.</span>
+            </div>
+          </div>
+        )}
+
+        {/* 2. Patient Journey & Direct 1-Tap Calling Bento Flowchart */}
+        {bentoTab === "calling" && (
+          <div className="space-y-3.5 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>📞</span>
+                  <span>Patient Journey &amp; Direct 1-Tap Calling</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">Nikshay ID Search ➔ Reconciler Lock ➔ 1-Tap Direct Call &amp; Milestones</p>
+              </div>
+              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full shrink-0">
+                1-Tap Call Feature
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50/40 border border-indigo-200 rounded-2xl p-3 space-y-2 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-indigo-900">Step 01</span>
+                  <span className="text-lg">🔍</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Nikshay ID Search</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Tracker tab me 8 ya 9-digit Nikshay ID enter karke instant lookup karein.</p>
+                </div>
+                <span className="text-[9px] font-bold text-indigo-700 bg-indigo-100/70 px-2 py-0.5 rounded-full self-start">Instant Query</span>
+              </div>
+
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50/40 border border-emerald-200 rounded-2xl p-3 space-y-2 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-emerald-900">Step 02</span>
+                  <span className="text-lg">🔒</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Verification Shield</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Green Shield ka matlab official Nikshay portal ke state dump se verified match ho gaya hai.</p>
+                </div>
+                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded-full self-start">Reconciled Lock</span>
+              </div>
+
+              <div className="bg-gradient-to-br from-teal-50 to-cyan-50/40 border border-teal-200 rounded-2xl p-3 space-y-2 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-teal-900">Step 03</span>
+                  <span className="text-lg">📞</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Direct 1-Tap 📞 Call</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Patient card par 📞 Call button tap karte hi phone dialer khulta hai; copy button se number clipboard me copy hota hai.</p>
+                </div>
+                <span className="text-[9px] font-bold text-teal-700 bg-teal-100/70 px-2 py-0.5 rounded-full self-start">Field Dialer</span>
+              </div>
+
+              <div className="bg-gradient-to-br from-purple-50 to-pink-50/40 border border-purple-200 rounded-2xl p-3 space-y-2 flex flex-col justify-between">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-purple-900">Step 04</span>
+                  <span className="text-lg">💊</span>
+                </div>
+                <div>
+                  <h5 className="text-[11px] font-black text-slate-900 leading-snug">Milestones &amp; Poshan DBT</h5>
+                  <p className="text-[10px] text-slate-600 leading-relaxed mt-0.5">Home visits, FDC medicine strip consumption, aur DBT bank verification single timeline me track hota hai.</p>
+                </div>
+                <span className="text-[9px] font-bold text-purple-700 bg-purple-100/70 px-2 py-0.5 rounded-full self-start">Poshan Sahayata</span>
+              </div>
+            </div>
+
+            <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-3 text-[11px] text-indigo-900 flex items-center gap-2">
+              <span className="text-base">✨</span>
+              <span><strong>Direct Patient Call:</strong> FO field me patient ko follow-up dawa ya DBT verification ke liye direct 1-tap me call kar sakte hain.</span>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Attendance Status & Leave Color Legend Bento Flowchart */}
+        {bentoTab === "attendance" && (
+          <div className="space-y-3.5 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>🗓️</span>
+                  <span>Attendance Status &amp; Leave Color Legend</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">Calendar color codes, leave types aur supervisor inspection remarks</p>
+              </div>
+              <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-full shrink-0">
+                6 Status Codes
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+              <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono font-black text-[10px]">P</span>
+                  <span className="text-xs font-bold text-emerald-800">🟢 Present</span>
+                </div>
+                <h5 className="text-[11px] font-black text-emerald-950">Submitted / Present</h5>
+                <p className="text-[10px] text-emerald-800 leading-snug">Rozana report sham 7:00 PM tak safal submit hui.</p>
+              </div>
+
+              <div className="bg-amber-50 border border-amber-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-amber-600 text-white font-mono font-black text-[10px]">ML</span>
+                  <span className="text-xs font-bold text-amber-800">🟡 Medical</span>
+                </div>
+                <h5 className="text-[11px] font-black text-amber-950">Medical Leave</h5>
+                <p className="text-[10px] text-amber-800 leading-snug">Bimari ya emergency par supervisor approved avakash.</p>
+              </div>
+
+              <div className="bg-sky-50 border border-sky-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-sky-600 text-white font-mono font-black text-[10px]">CL</span>
+                  <span className="text-xs font-bold text-sky-800">🔵 Casual</span>
+                </div>
+                <h5 className="text-[11px] font-black text-sky-950">Casual Leave</h5>
+                <p className="text-[10px] text-sky-800 leading-snug">Niji zaroori kaam hetu authorized aakasmik chhutti.</p>
+              </div>
+
+              <div className="bg-indigo-50 border border-indigo-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-indigo-600 text-white font-mono font-black text-[10px]">OD</span>
+                  <span className="text-xs font-bold text-indigo-800">🟣 Official</span>
+                </div>
+                <h5 className="text-[11px] font-black text-indigo-950">Official Duty</h5>
+                <p className="text-[10px] text-indigo-800 leading-snug">State meeting, workshop, ya camp duty upasthiti.</p>
+              </div>
+
+              <div className="bg-rose-50 border border-rose-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-mono font-black text-[10px]">A</span>
+                  <span className="text-xs font-bold text-rose-800">🔴 Absent</span>
+                </div>
+                <h5 className="text-[11px] font-black text-rose-950">Absent</h5>
+                <p className="text-[10px] text-rose-800 leading-snug">Bina purva soochana report na aane par darj.</p>
+              </div>
+
+              <div className="bg-slate-100 border border-slate-300 rounded-2xl p-3 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-slate-600 text-white font-mono font-black text-[10px]">WO</span>
+                  <span className="text-xs font-bold text-slate-800">⚪ Off</span>
+                </div>
+                <h5 className="text-[11px] font-black text-slate-900">Weekly Off</h5>
+                <p className="text-[10px] text-slate-600 leading-snug">Nirdharit Ravivar (Sunday) ya sarkar ghoshit chhutti.</p>
+              </div>
+            </div>
+
+            <div className="bg-purple-50 border border-purple-200 rounded-2xl p-3 text-[11px] text-purple-950 space-y-1">
+              <strong className="flex items-center gap-1.5 font-black">
+                <span>📝</span>
+                <span>Supervisor Inspection Remarks:</span>
+              </strong>
+              <p className="text-purple-900 text-[10px] leading-relaxed">
+                District Coordinator ya State Admin kisi bhi date par inspection remarks ya approved leave status attach kar sakte hain. Aap apne <strong>Profile</strong> tab ke calendar me us date par tap karke supervisor ka feedback padh sakte hain.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 4. System Stages (Architecture Flow) */}
+        {bentoTab === "stages" && (
+          <div className="space-y-3.5 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>⚙️</span>
+                  <span>System Architecture (4 Stages)</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">Field Entry se Nikshay Reconciler tak data flow</p>
+              </div>
+              <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                Tap stage to learn
+              </span>
+            </div>
+
+            {/* 4 Connected Graph Nodes */}
+            <div className="grid grid-cols-4 gap-1.5 relative pt-1">
+              {stages.map((stage, idx) => {
+                const isSelected = activeStage === stage.id;
+                return (
+                  <button
+                    key={stage.id}
+                    type="button"
+                    onClick={() => setActiveStage(stage.id)}
+                    className={`flex flex-col items-center p-2 rounded-2xl border transition-all cursor-pointer relative z-10 ${
+                      isSelected 
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-600/25 scale-105' 
+                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200'
+                    }`}
+                  >
+                    <span className="text-xl mb-1">{stage.icon}</span>
+                    <span className="text-[10px] font-black text-center leading-tight">{stage.title.split('. ')[1]}</span>
+                    <span className={`text-[8px] font-bold uppercase mt-1 px-1.5 py-0.2 rounded-full ${
+                      isSelected ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      Step {idx + 1}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selected Stage Detail Card */}
+            {(() => {
+              const currentStage = stages.find(s => s.id === activeStage) || stages[0];
+              return (
+                <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 space-y-2 animate-fade-in">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl">{currentStage.icon}</span>
+                    <div>
+                      <h5 className="text-xs font-black text-indigo-950 uppercase tracking-wider">
+                        {currentStage.title}: {currentStage.subtitle}
+                      </h5>
+                      <p className="text-[11px] text-indigo-800 font-medium">
+                        {currentStage.desc}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-indigo-100/80 space-y-1.5">
+                    {currentStage.points.map((pt, i) => (
+                      <div key={i} className="flex items-start gap-2 text-[11px] text-slate-700">
+                        <span className="text-emerald-600 font-black mt-0.5">✓</span>
+                        <span>{pt}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        )}
       </div>
 
       {/* 7 Accordion Topic Cards */}
