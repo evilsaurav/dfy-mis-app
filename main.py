@@ -2572,7 +2572,9 @@ async def my_profile_stats(req: ProfileStatsRequest):
                     "visited_names": data.get("visited_names", []),
                     "total_km": data.get("total_km", 0),
                     "remark": data.get("remark", ""),
-                    "fdc_details": data.get("fdc_details", [])
+                    "fdc_details": data.get("fdc_details", []),
+                    "admin_remark": data.get("admin_remark") or "",
+                    "admin_remark_by": data.get("admin_remark_by") or ""
                 }
                         
         total_achieved = sum(stats.values())
@@ -2609,6 +2611,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
 
             l_date = l_data.get("date", "")
             if l_date and (l_date.startswith(req.month) if req.month else l_date.startswith(req_month)):
+                leave_remark = l_data.get("remark") or l_data.get("admin_remark") or ""
+                leave_marked_by = l_data.get("marked_by_name") or "Admin"
                 if l_date not in daily_history:
                     daily_history[l_date] = {
                         "submitted": False,
@@ -2619,17 +2623,34 @@ async def my_profile_stats(req: ProfileStatsRequest):
                         "status": l_data.get("status", "leave"),
                         "reason_type": l_data.get("reason_type", "Casual"),
                         "remark": l_data.get("remark", ""),
-                        "marked_by": l_data.get("marked_by_name", "Admin"),
+                        "admin_remark": leave_remark,
+                        "marked_by": leave_marked_by,
+                        "admin_remark_by": leave_marked_by,
                         "marked_at": l_data.get("marked_at", "")
                     }
                 else:
-                    daily_history[l_date]["is_leave"] = True
-                    daily_history[l_date]["leave_info"] = {
-                        "status": l_data.get("status", "leave"),
-                        "reason_type": l_data.get("reason_type", "Casual"),
-                        "remark": l_data.get("remark", ""),
-                        "marked_by": l_data.get("marked_by_name", "Admin")
-                    }
+                    if leave_remark:
+                        daily_history[l_date]["admin_remark"] = leave_remark
+                    if leave_marked_by:
+                        daily_history[l_date]["admin_remark_by"] = leave_marked_by
+                    if l_data.get("is_override"):
+                        daily_history[l_date]["is_leave"] = True
+                        daily_history[l_date]["status"] = l_data.get("status", "leave")
+                        daily_history[l_date]["reason_type"] = l_data.get("reason_type", "Casual")
+                        daily_history[l_date]["leave_info"] = {
+                            "status": l_data.get("status", "leave"),
+                            "reason_type": l_data.get("reason_type", "Casual"),
+                            "remark": l_data.get("remark", ""),
+                            "marked_by": leave_marked_by
+                        }
+                    elif not l_data.get("is_inspection_remark"):
+                        daily_history[l_date]["is_leave"] = True
+                        daily_history[l_date]["leave_info"] = {
+                            "status": l_data.get("status", "leave"),
+                            "reason_type": l_data.get("reason_type", "Casual"),
+                            "remark": l_data.get("remark", ""),
+                            "marked_by": leave_marked_by
+                        }
         
         # Calculate Reporting Streak
         sorted_dates = sorted(daily_history.keys(), reverse=True)
@@ -8669,6 +8690,181 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
         )
 
         return {"success": True, "message": "Leave removed successfully."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AttendanceRemarkReq(BaseModel):
+    district: str
+    fo_name: str
+    date: str  # YYYY-MM-DD
+    action: str = "remark"  # "remark" | "override_leave"
+    remark: str
+    status: Optional[str] = "leave"  # "leave" | "absent" | "present"
+    reason_type: Optional[str] = "Casual"  # "Casual", "Medical", "Official Duty", etc.
+
+
+@app.post("/admin/attendance/add-remark")
+async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(get_current_admin)):
+    try:
+        clean_dist = canonicalize_district(req.district.strip()) if req.district else ""
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower() if req.fo_name else ""
+        if not clean_fo:
+            raise HTTPException(status_code=400, detail="Valid Field Officer name is required.")
+        clean_date = req.date.strip() if req.date else ""
+        if not clean_date:
+            raise HTTPException(status_code=400, detail="Valid date is required.")
+        if not req.remark or not req.remark.strip():
+            raise HTTPException(status_code=400, detail="Remark text is required.")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in allowed if d]
+            if "All" not in allowed and "all" not in allowed_c and clean_dist.lower() not in allowed_c and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
+
+        actor_name = admin.get("name") or admin.get("username") or "Admin"
+        actor_id = admin.get("user_id") or admin.get("username") or "admin"
+        actor_role = admin.get("role", "SUB_ADMIN")
+        marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+
+        doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
+
+        action_type = "ATTENDANCE_REMARK_ADDED" if req.action == "remark" else "ATTENDANCE_LEAVE_OVERRIDDEN"
+
+        if req.action == "remark":
+            # Attach remark to daily report if exists
+            candidate_doc_ids = [
+                f"{clean_dist}_{req.fo_name.strip()}_{clean_date}".replace(" ", "_").lower(),
+                f"{clean_dist}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+                f"{clean_dist}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
+            ]
+            matching_reports = []
+            seen_cand_ids = set()
+            for cid in candidate_doc_ids:
+                cand_ref = db.collection("daily_field_reports").document(cid)
+                snap = await asyncio.to_thread(cand_ref.get)
+                if snap.exists and cid not in seen_cand_ids:
+                    matching_reports.append(cand_ref)
+                    seen_cand_ids.add(cid)
+
+            if not matching_reports:
+                try:
+                    query_docs = await asyncio.to_thread(lambda: list(
+                        db.collection("daily_field_reports")
+                        .where("date_of_reporting", "==", clean_date)
+                        .stream()
+                    ))
+                    for d in query_docs:
+                        d_dict = d.to_dict() if hasattr(d, "to_dict") else {}
+                        d_fo = re.sub(r'[^a-zA-Z0-9]', '', d_dict.get("fo_name", "")).lower()
+                        d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
+                        if d_fo == clean_fo and d_wp == clean_dist.lower():
+                            if hasattr(d, "reference"):
+                                matching_reports.append(d.reference)
+                            else:
+                                cand_ref = db.collection("daily_field_reports").document(getattr(d, "id", cid))
+                                matching_reports.append(cand_ref)
+                except Exception as q_err:
+                    print(f"Notice: daily_field_reports search failed: {q_err}")
+
+            for r_ref in matching_reports:
+                try:
+                    await asyncio.to_thread(lambda ref=r_ref: ref.update({
+                        "admin_remark": req.remark.strip(),
+                        "admin_remark_by": actor_name,
+                        "admin_remark_at": marked_at
+                    }))
+                except Exception as upd_err:
+                    print(f"Notice: Failed to update admin_remark on report doc: {upd_err}")
+
+            # Also store/merge in daily_staff_leaves so remark is preserved across views
+            leave_remark_data = {
+                "date": clean_date,
+                "district": clean_dist,
+                "fo_name": req.fo_name.strip(),
+                "remark": req.remark.strip(),
+                "admin_remark": req.remark.strip(),
+                "marked_by_name": actor_name,
+                "marked_by_id": actor_id,
+                "marked_by_role": actor_role,
+                "marked_at": marked_at,
+                "is_inspection_remark": True
+            }
+            await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_remark_data, merge=True))
+
+            details = f"Added admin inspection remark for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
+            msg = "Attendance remark recorded successfully."
+        else:
+            # req.action == "override_leave"
+            leave_data = {
+                "date": clean_date,
+                "district": clean_dist,
+                "fo_name": req.fo_name.strip(),
+                "status": req.status or "leave",
+                "reason_type": req.reason_type or "Casual",
+                "remark": req.remark.strip(),
+                "marked_by_name": actor_name,
+                "marked_by_id": actor_id,
+                "marked_by_role": actor_role,
+                "marked_at": marked_at,
+                "is_override": True
+            }
+            await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
+            details = f"Overrode attendance to {req.status or 'leave'} ({req.reason_type or 'Casual'}) for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
+            msg = "Leave status overridden successfully."
+
+        # Cache Eviction
+        cache.delete_prefix(f"attendance_{clean_date}")
+        cache.delete_prefix("profile_")
+
+        # Update in-memory shared raw month cache if present
+        month_prefix = clean_date[:7]
+        cached_monthly = cache.get(f"shared_raw_month_{month_prefix}")
+        if cached_monthly and isinstance(cached_monthly, list):
+            found_and_updated = False
+            for r in cached_monthly:
+                r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                r_wp = canonicalize_district(r.get("working_place", "")).lower()
+                r_dt = str(r.get("date_of_reporting", "") or r.get("date", "")).strip()
+                if r_fo == clean_fo and r_wp == clean_dist.lower() and r_dt == clean_date:
+                    if req.action == "remark":
+                        r["admin_remark"] = req.remark.strip()
+                        r["admin_remark_by"] = actor_name
+                        r["admin_remark_at"] = marked_at
+                    found_and_updated = True
+            if found_and_updated:
+                cache.set(f"shared_raw_month_{month_prefix}", cached_monthly, ttl=3600)
+            else:
+                cache.delete_prefix(f"shared_raw_month_{month_prefix}")
+        else:
+            cache.delete_prefix(f"shared_raw_month_{month_prefix}")
+
+        cache.delete_prefix(f"shared_raw_month_{month_prefix}_")
+
+        await log_admin_activity(
+            action_type=action_type,
+            details=details,
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            target_officer=req.fo_name.strip(),
+            diff={
+                "date": clean_date,
+                "action": req.action,
+                "remark": req.remark.strip(),
+                "status": req.status if req.action != "remark" else None,
+                "reason_type": req.reason_type if req.action != "remark" else None
+            }
+        )
+
+        return {"success": True, "message": msg}
     except HTTPException:
         raise
     except Exception as e:
