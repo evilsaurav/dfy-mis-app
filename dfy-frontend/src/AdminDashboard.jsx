@@ -157,16 +157,19 @@ export default function AdminDashboard() {
   const [securityStatusMsg, setSecurityStatusMsg] = useState("");
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [showReportsStudio, setShowReportsStudio] = useState(false);
-  const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, fo_dossier, cascade_funnel, whatsapp_bulletin
+  const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, staff_attendance, cascade_funnel, whatsapp_bulletin
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("");
   const [selectedKpiDistricts, setSelectedKpiDistricts] = useState([]);
   const [selectedMedDistricts, setSelectedMedDistricts] = useState([]);
+  const [selectedAttendanceDistricts, setSelectedAttendanceDistricts] = useState([]);
   const [isDownloadingKpi, setIsDownloadingKpi] = useState(false);
   const [isDownloadingMedicineReport, setIsDownloadingMedicineReport] = useState(false);
+  const [isDownloadingAttendance, setIsDownloadingAttendance] = useState(false);
   const [kpiQueueProgress, setKpiQueueProgress] = useState(null); // { current, total, district, percent, status }
   const [medQueueProgress, setMedQueueProgress] = useState(null); // { current, total, district, percent, status }
+  const [attendanceQueueProgress, setAttendanceQueueProgress] = useState(null); // { current, total, district, percent, status }
   const [adminEditModal, setAdminEditModal] = useState(null);
   const [deleteDayModal, setDeleteDayModal] = useState(null); // { isOpen, district, fo_name, date, dayIdsCount, km, loading, error }
   const [editDayModal, setEditDayModal] = useState(null); // { isOpen, district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs, loading, error }
@@ -2963,6 +2966,26 @@ Keep this file safe in your Google Drive or personal diary.
     setSelectedMedDistricts([]);
   };
 
+  const availableAttendanceDistricts = availableKpiDistricts;
+
+  const handleToggleAttendanceDistrict = (dist) => {
+    setSelectedAttendanceDistricts(prev => {
+      if (prev.includes(dist)) {
+        return prev.filter(d => d !== dist);
+      } else {
+        return [...prev, dist];
+      }
+    });
+  };
+
+  const handleSelectAllAttendanceDistricts = () => {
+    setSelectedAttendanceDistricts([...availableAttendanceDistricts]);
+  };
+
+  const handleClearAttendanceDistricts = () => {
+    setSelectedAttendanceDistricts([]);
+  };
+
   const handleToggleNotifDistrict = (dist) => {
     setNotifTrayDistricts(prev => {
       const clean = prev.filter(d => d !== 'All');
@@ -3170,6 +3193,112 @@ Keep this file safe in your Google Drive or personal diary.
     setTimeout(() => {
       setKpiQueueProgress(null);
       setIsDownloadingKpi(false);
+    }, 2500);
+  };
+
+  const handleDownloadAttendanceSingleOrScoped = () => {
+    if (isDownloadingAttendance) return;
+    const targetList = selectedAttendanceDistricts.length > 0 ? selectedAttendanceDistricts : availableAttendanceDistricts;
+    if (!targetList || targetList.length === 0) {
+      showToast("Please select at least one district to download.", "error");
+      return;
+    }
+
+    setIsDownloadingAttendance(true);
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+
+    if (targetList.length === 1) {
+      const dist = targetList[0];
+      showToast(`📋 Preparing Staff Attendance workbook for ${dist}...`, "info");
+      window.open(`${API_BASE_URL}/admin/export-staff-attendance?month=${month}&district=${encodeURIComponent(dist)}&token=${getAdminToken()}`, "_blank");
+    } else {
+      showToast(`📋 Preparing Scoped Staff Attendance workbook for ${targetList.length} district(s)...`, "info");
+      const distParam = `&districts=${encodeURIComponent(targetList.join(','))}`;
+      window.open(`${API_BASE_URL}/admin/export-staff-attendance?month=${month}${distParam}&token=${getAdminToken()}`, "_blank");
+    }
+
+    setTimeout(() => {
+      setIsDownloadingAttendance(false);
+    }, 4000);
+  };
+
+  const handleDownloadAttendanceScopedZip = handleDownloadAttendanceSingleOrScoped;
+
+  const handleDownloadStaffAttendanceQueue = async () => {
+    if (isDownloadingAttendance) return;
+    const targetList = selectedAttendanceDistricts.length > 0 ? selectedAttendanceDistricts : availableAttendanceDistricts;
+    if (!targetList || targetList.length === 0) {
+      showToast("Please select at least one district to download.", "error");
+      return;
+    }
+
+    setIsDownloadingAttendance(true);
+    const total = targetList.length;
+    setAttendanceQueueProgress({
+      current: 0,
+      total,
+      district: '',
+      percent: 0,
+      status: `Initializing staff attendance queue for ${total} district(s)...`
+    });
+
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+
+    for (let i = 0; i < total; i++) {
+      const dist = targetList[i];
+      setAttendanceQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i) / total) * 100),
+        status: `Generating Attendance Excel for ${dist} (${i + 1}/${total})...`
+      });
+
+      try {
+        const res = await authFetch(`${API_BASE_URL}/admin/export-staff-attendance?month=${month}&district=${encodeURIComponent(dist)}`);
+        if (res.ok) {
+          const blob = await res.blob();
+          const downloadUrl = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = downloadUrl;
+          link.download = `DFY_Staff_Attendance_${dist}_${month}.xlsx`;
+          document.body.appendChild(link);
+          link.click();
+          window.URL.revokeObjectURL(downloadUrl);
+          link.remove();
+        } else {
+          console.error(`Failed to download staff attendance for ${dist}`);
+        }
+      } catch (err) {
+        console.error(`Error downloading staff attendance for ${dist}:`, err);
+      }
+
+      setAttendanceQueueProgress({
+        current: i + 1,
+        total,
+        district: dist,
+        percent: Math.round(((i + 1) / total) * 100),
+        status: `Completed ${dist} (${i + 1}/${total}) ✓`
+      });
+
+      // Intentional 1000ms pause between district files: Render CPU/RAM cooldown
+      if (i < total - 1) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    showToast(`✓ All ${total} district attendance workbooks downloaded successfully!`, "success");
+    setAttendanceQueueProgress({
+      current: total,
+      total,
+      district: '',
+      percent: 100,
+      status: `All ${total} district attendance workbooks downloaded successfully!`
+    });
+
+    setTimeout(() => {
+      setAttendanceQueueProgress(null);
+      setIsDownloadingAttendance(false);
     }, 2500);
   };
 
@@ -8599,7 +8728,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
                 { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
                 { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
-                { id: "fo_dossier", label: "👤 FO Dossier / TA-DA (.xlsx)", icon: "👤" },
+                { id: "staff_attendance", label: "📋 Staff Attendance (.xlsx)", icon: "📋" },
                 { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
                 { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
               ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
@@ -9151,21 +9280,168 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               )}
 
-              {/* Tab 3: FO Monthly Dossier & Allowance Sheet */}
-              {reportsStudioTab === "fo_dossier" && (
+              {/* Tab 3: Monthly Staff Attendance Dual-Sheet Workbook */}
+              {reportsStudioTab === "staff_attendance" && (
                 <div className="space-y-4">
-                  <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                    <h4 className="text-sm font-black text-slate-800 mb-1">Field Officer Monthly Appraisal &amp; TA/DA Dossier</h4>
-                    <p className="text-xs text-slate-500 font-medium mb-4">Detailed staff breakdown containing active reporting days, total travel KM (for fuel reimbursement), and categorized ID achievements.</p>
-                    
-                    <a
-                      href={`${import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com"}/admin/export-fo-dossier?month=${month}&token=${getAdminToken()}${currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}` : ''}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-5 py-3 rounded-xl text-xs shadow-md shadow-emerald-600/20 transition-all"
-                    >
-                      <span>📥</span> Download FO Performance Dossier (.xlsx)
-                    </a>
+                  <div className="bg-emerald-50/70 p-4 sm:p-5 rounded-2xl border border-emerald-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-emerald-950 mb-0.5">Staff Attendance (.xlsx) — Dual-Sheet Matrix &amp; Activity Log</h4>
+                      <p className="text-xs text-emerald-700 font-medium">Sheet 1: Monthly Attendance Matrix (P, ML, CL, OD, A, WO, H). Sheet 2: Day-by-Day Activity Log with facility visits and travel KM.</p>
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-200/80 text-emerald-900 px-3 py-1 rounded-full shrink-0 self-start sm:self-auto">
+                      Month: {month}
+                    </span>
+                  </div>
+
+                  {/* Multi-District Selection Deck */}
+                  <div className="bg-slate-50/90 p-4 sm:p-5 rounded-2xl border border-slate-200/80 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/60">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-black text-slate-800">
+                          🎯 Choose Districts to Export
+                        </span>
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${selectedAttendanceDistricts.length > 0 ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                          {selectedAttendanceDistricts.length} of {availableAttendanceDistricts.length} Selected
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleSelectAllAttendanceDistricts}
+                          disabled={isDownloadingAttendance}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-emerald-100 hover:bg-emerald-200 text-emerald-800 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleClearAttendanceDistricts}
+                          disabled={isDownloadingAttendance}
+                          className="px-2.5 py-1 rounded-lg text-[10px] font-black bg-slate-200 hover:bg-slate-300 text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* District Chips */}
+                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                      {availableAttendanceDistricts.map(dist => {
+                        const isSelected = selectedAttendanceDistricts.includes(dist);
+                        return (
+                          <button
+                            key={dist}
+                            type="button"
+                            disabled={isDownloadingAttendance}
+                            onClick={() => handleToggleAttendanceDistrict(dist)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border active:scale-95 cursor-pointer disabled:opacity-50 ${
+                              isSelected
+                                ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 shadow-xs shadow-emerald-600/20'
+                                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200 shadow-2xs'
+                            }`}
+                          >
+                            <span>{isSelected ? '✓' : '+'}</span>
+                            <span>{dist}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Live Queue Progress Banner */}
+                    {attendanceQueueProgress && (
+                      <div className="bg-slate-900 text-white p-4 rounded-2xl border border-emerald-800 shadow-lg space-y-2 animate-fade-in">
+                        <div className="flex justify-between items-center text-xs font-bold">
+                          <span className="flex items-center gap-2">
+                            <span className="animate-spin text-sm">⏳</span>
+                            <span>{attendanceQueueProgress.status}</span>
+                          </span>
+                          <span className="font-mono text-emerald-300">{attendanceQueueProgress.percent}%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-400 to-teal-400 transition-all duration-300 rounded-full"
+                            style={{ width: `${attendanceQueueProgress.percent}%` }}
+                          ></div>
+                        </div>
+                        <p className="text-[10px] text-emerald-300 font-medium">
+                          Render memory protection active: generating one file at a time with 1-second server cooldown between requests.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Multi-District Download Action Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      {/* Option A: Scoped .xlsx Download */}
+                      <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-2xs">
+                        <div>
+                          <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1">
+                            <span>📊</span>
+                            <span>Download Scoped (.xlsx)</span>
+                          </span>
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Downloads a dual-sheet workbook for <strong>{selectedAttendanceDistricts.length > 0 ? `${selectedAttendanceDistricts.length} selected` : 'all'} district(s)</strong> with attendance matrix and activity logs.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isDownloadingAttendance || (selectedAttendanceDistricts.length === 0 && availableAttendanceDistricts.length === 0)}
+                          onClick={handleDownloadAttendanceSingleOrScoped}
+                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                            isDownloadingAttendance
+                              ? 'bg-emerald-400 text-white cursor-wait animate-pulse'
+                              : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white shadow-emerald-600/20 cursor-pointer'
+                          }`}
+                        >
+                          {isDownloadingAttendance ? (
+                            <>
+                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              <span>Generating Staff Attendance...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>📥</span>
+                              <span>Download Selected ({selectedAttendanceDistricts.length > 0 ? selectedAttendanceDistricts.length : 'All'})</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Option B: Sequential Queue */}
+                      <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/80 flex flex-col justify-between shadow-2xs">
+                        <div>
+                          <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5 mb-1">
+                            <span>📑</span>
+                            <span>Sequential Download Queue</span>
+                          </span>
+                          <p className="text-[11px] text-emerald-800 font-medium">
+                            Downloads individual district `.xlsx` files with a 1-second pause between each file (guarantees zero memory spikes on Render).
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isDownloadingAttendance || (selectedAttendanceDistricts.length === 0 && availableAttendanceDistricts.length === 0)}
+                          onClick={handleDownloadStaffAttendanceQueue}
+                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                            isDownloadingAttendance
+                              ? 'bg-emerald-400 text-white cursor-wait animate-pulse'
+                              : 'bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white shadow-emerald-700/20 cursor-pointer'
+                          }`}
+                        >
+                          {isDownloadingAttendance ? (
+                            <>
+                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                              <span>Queue Running Safely...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>📑</span>
+                              <span>Start Download Queue ({selectedAttendanceDistricts.length > 0 ? selectedAttendanceDistricts.length : availableAttendanceDistricts.length} Files)</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
