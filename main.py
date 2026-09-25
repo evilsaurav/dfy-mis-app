@@ -257,6 +257,38 @@ def format_to_ist_time(raw_ts) -> str:
     except Exception:
         return str(raw_ts)[:16]
 
+def parse_to_ist_datetime(raw_ts) -> Optional[datetime]:
+    """Converts Firestore timestamp, datetime, or ISO string to an IST datetime object."""
+    if not raw_ts:
+        return None
+    try:
+        ist_offset = timezone(timedelta(hours=5, minutes=30))
+        if isinstance(raw_ts, datetime):
+            if raw_ts.tzinfo is None:
+                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
+            else:
+                dt_utc = raw_ts
+            return dt_utc.astimezone(ist_offset)
+        str_ts = str(raw_ts).strip()
+        clean_str = str_ts.replace("Z", "+00:00")
+        if "T" in clean_str or "+" in clean_str or (clean_str.count("-") >= 3):
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(ist_offset)
+        else:
+            try:
+                dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
+                dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(ist_offset)
+            except ValueError:
+                dt = datetime.fromisoformat(clean_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(ist_offset)
+    except Exception:
+        return None
+
 # --- Security, Cryptography & Access Control ---
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dfy-tb-mis-bihar-secret-key-2026-supersecure")
 JWT_ALGORITHM = "HS256"
@@ -2915,23 +2947,75 @@ async def get_today_attendance(
                                 "designation": "Field Officer"
                             })
 
-        # 2. Fetch daily field reports for this date
+        # 2. Fetch daily field reports for this date applying 10:00 AM Cutoff Segregation
+        try:
+            target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
+            next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            next_date = ""
+
         report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
         if not report_docs:
             report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
-        reports_map = {}
+
+        all_candidate_docs = list(report_docs)
+        seen_doc_ids = set()
         for doc in report_docs:
+            doc_id = getattr(doc, "id", None)
+            if doc_id:
+                seen_doc_ids.add(doc_id)
+
+        if next_date:
+            try:
+                next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", next_date).stream()))
+                if not next_day_docs:
+                    next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", next_date).stream()))
+                for ndoc in next_day_docs:
+                    ndoc_id = getattr(ndoc, "id", None)
+                    if not ndoc_id or ndoc_id not in seen_doc_ids:
+                        all_candidate_docs.append(ndoc)
+            except Exception as e:
+                print(f"Notice fetching next_day_docs in today-attendance: {e}")
+
+        reports_map = {}
+        for doc in all_candidate_docs:
             d = doc.to_dict() if hasattr(doc, "to_dict") else {}
+            if not d:
+                continue
             dist = canonicalize_district(d.get('working_place', ''))
             if allowed_dist_set and dist.lower() not in allowed_dist_set:
                 continue
-            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', d.get('fo_name', '')).lower()
+            fo_raw_name = d.get('fo_name', '').strip()
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', fo_raw_name).lower()
+            if not clean_fo:
+                continue
             key = f"{dist}_{clean_fo}".replace(" ", "").lower()
             
             raw_ts = d.get("timestamp_completed") or d.get("timestamp") or d.get("submitted_at")
             submitted_time = format_to_ist_time(raw_ts)
+            dt_ist = parse_to_ist_datetime(raw_ts)
             iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
             
+            rep_date = d.get("date_of_reporting") or d.get("date") or ""
+            is_next_day_flag = bool(d.get("is_next_day_submission"))
+
+            # Stealth 10 AM Cutoff Segregation Rules:
+            # Rule 1: Submissions on target_date before 10:00 AM IST strictly belong to target_date - 1.
+            # Exclude from target_date's submitted list.
+            if dt_ist and dt_ist.date().strftime("%Y-%m-%d") == target_date and dt_ist.hour < 10:
+                continue
+
+            # Rule 2: Submissions on next_date (target_date + 1) before 10:00 AM IST,
+            # or reports with is_next_day_submission == True and date_of_reporting == target_date,
+            # strictly belong to target_date as next-day morning submissions.
+            is_next_day = False
+            if is_next_day_flag and rep_date == target_date:
+                is_next_day = True
+            elif dt_ist and next_date and dt_ist.date().strftime("%Y-%m-%d") == next_date and dt_ist.hour < 10:
+                is_next_day = True
+            elif rep_date != target_date:
+                continue
+
             total_km = 0
             if d.get("total_km"):
                 try: total_km = int(d.get("total_km"))
@@ -2940,15 +3024,46 @@ async def get_today_attendance(
                 try: total_km = max(0, int(d.get("evening_km")) - int(d.get("morning_km")))
                 except: pass
 
-            reports_map[key] = {
-                "district": dist,
-                "fo_name": d.get('fo_name', '').strip(),
-                "submission_count": d.get("submission_count", 1),
-                "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
-                "submitted_time": submitted_time or "Submitted",
-                "timestamp_raw": iso_ts,
-                "total_km": total_km
-            }
+            morning_time = d.get("submitted_morning_time") or submitted_time
+            if is_next_day:
+                submitted_time = morning_time or submitted_time
+                submitted_label = d.get("morning_submission_label") or f"Next day morning {submitted_time}"
+                time_classification = "Next Day Morning (< 10 AM)"
+            else:
+                submitted_label = submitted_time or "Submitted"
+                if dt_ist:
+                    if dt_ist.hour < 17:
+                        time_classification = "Mid-Day (< 5 PM)"
+                    elif dt_ist.hour < 20:
+                        time_classification = "Evening (< 8 PM)"
+                    else:
+                        time_classification = "Night (8 PM+)"
+                else:
+                    time_classification = "On Time"
+
+            if key in reports_map:
+                existing = reports_map[key]
+                existing["submission_count"] = max(existing.get("submission_count", 1), d.get("submission_count", 1))
+                existing["total_ids"] += sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+                existing["total_km"] = max(existing.get("total_km", 0), total_km)
+                if is_next_day:
+                    existing["is_next_day"] = True
+                    existing["submitted_time"] = submitted_time
+                    existing["submitted_label"] = submitted_label
+                    existing["time_classification"] = time_classification
+            else:
+                reports_map[key] = {
+                    "district": dist,
+                    "fo_name": fo_raw_name,
+                    "submission_count": d.get("submission_count", 1),
+                    "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
+                    "submitted_time": submitted_time or "Submitted",
+                    "timestamp_raw": iso_ts,
+                    "total_km": total_km,
+                    "is_next_day": is_next_day,
+                    "submitted_label": submitted_label,
+                    "time_classification": time_classification
+                }
 
         # 3. Query daily_staff_leaves for target_date
         leave_docs = []
@@ -3616,6 +3731,8 @@ async def export_staff_attendance(
                 else:
                     v_names = []
                 raw_rem = (d.get("admin_remark") or d.get("remark") or "").strip()
+                is_next_day = bool(d.get("is_next_day_submission"))
+                m_time = d.get("submitted_morning_time") or format_to_ist_time(d.get("timestamp_completed") or d.get("timestamp")) or ""
 
                 if key not in reports_by_key:
                     reports_by_key[key] = {
@@ -3626,7 +3743,9 @@ async def export_staff_attendance(
                         "total_km": km,
                         "visited_names": list(v_names),
                         "admin_remarks": [raw_rem] if raw_rem else [],
-                        "submission_count": d.get("submission_count", 1)
+                        "submission_count": d.get("submission_count", 1),
+                        "is_next_day": is_next_day,
+                        "morning_time": m_time
                     }
                 else:
                     existing = reports_by_key[key]
@@ -3641,6 +3760,10 @@ async def export_staff_attendance(
                     if raw_rem and raw_rem not in existing["admin_remarks"]:
                         existing["admin_remarks"].append(raw_rem)
                     existing["submission_count"] += d.get("submission_count", 1)
+                    if is_next_day:
+                        existing["is_next_day"] = True
+                        if m_time:
+                            existing["morning_time"] = m_time
 
             # Sort officers by District, Name
             sorted_officers = sorted(officers_map.values(), key=lambda x: (x["district"], x["name"]))
@@ -3768,8 +3891,17 @@ async def export_staff_attendance(
                         present_count += 1
                         if rep:
                             travel_km_sum += rep.get("total_km", 0)
+                            day_notes = []
                             if rep.get("admin_remarks"):
-                                officer_remarks.append(f"Day {d}: {', '.join(rep['admin_remarks'])}")
+                                day_notes.append(', '.join(rep['admin_remarks']))
+                            if rep.get("is_next_day"):
+                                m_time = rep.get("morning_time")
+                                if m_time:
+                                    day_notes.append(f"Submitted next morning ({m_time})")
+                                else:
+                                    day_notes.append("Submitted next morning")
+                            if day_notes:
+                                officer_remarks.append(f"Day {d}: {', '.join(day_notes)}")
                     elif code in ("ML", "CL", "OD", "H"):
                         leaves_count += 1
                         if l_doc and l_doc.get("remark"):
@@ -3780,11 +3912,18 @@ async def export_staff_attendance(
                     # Sheet 2 row (log elapsed days or any day with report/leave)
                     if not is_future or rep or l_doc:
                         v_str = ", ".join(rep["visited_names"]) if (rep and rep.get("visited_names")) else "-"
-                        rem_str = "-"
+                        rem_parts = []
                         if rep and rep.get("admin_remarks"):
-                            rem_str = ", ".join(rep["admin_remarks"])
-                        elif l_doc and l_doc.get("remark"):
-                            rem_str = f"{l_doc.get('reason_type', 'Leave')}: {l_doc.get('remark')}"
+                            rem_parts.append(", ".join(rep["admin_remarks"]))
+                        if rep and rep.get("is_next_day"):
+                            m_time = rep.get("morning_time")
+                            if m_time:
+                                rem_parts.append(f"Submitted next morning ({m_time})")
+                            else:
+                                rem_parts.append("Submitted next morning")
+                        if l_doc and l_doc.get("remark"):
+                            rem_parts.append(f"{l_doc.get('reason_type', 'Leave')}: {l_doc.get('remark')}")
+                        rem_str = ", ".join(rem_parts) if rem_parts else "-"
 
                         rows_sheet2.append([
                             day_str,

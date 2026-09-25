@@ -220,3 +220,61 @@ async def test_legacy_aliases_call_export_staff_attendance():
         assert mock_export.called
         mock_export.assert_called_with(month="2026-09", district="Patna", districts=None, admin=mock_admin)
 
+
+@pytest.mark.asyncio
+async def test_staff_attendance_export_next_day_morning_remarks():
+    mock_admin = {"username": "admin", "role": "SUPER_ADMIN"}
+    
+    with patch("main.get_raw_monthly_reports") as mock_reports, \
+         patch("main.db.collection") as mock_coll:
+        
+        staff_doc = MagicMock()
+        staff_doc.to_dict.return_value = {
+            "name": "Shashi Ranjan",
+            "district": "Patna",
+            "designation": "Field Officer"
+        }
+        
+        def collection_side_effect(coll_name):
+            mock_inst = MagicMock()
+            if coll_name == "staff_directory":
+                mock_inst.stream.return_value = [staff_doc]
+            elif coll_name == "daily_staff_leaves":
+                mock_inst.where.return_value.where.return_value.stream.return_value = []
+                mock_inst.stream.return_value = []
+            return mock_inst
+
+        mock_coll.side_effect = collection_side_effect
+        
+        mock_reports.return_value = [{
+            "working_place": "Patna",
+            "fo_name": "Shashi Ranjan",
+            "date_of_reporting": "2026-09-24",
+            "submission_count": 1,
+            "total_km": 15,
+            "notification_ids": ["987654321"],
+            "sample_tested_ids": [],
+            "dbt_ids": [],
+            "visited_names": [],
+            "is_next_day_submission": True,
+            "submitted_morning_time": "09:26 AM",
+            "morning_submission_label": "Next day morning 09:26 AM"
+        }]
+        
+        response = await main.export_staff_attendance(
+            month="2026-09",
+            district="Patna",
+            admin=mock_admin
+        )
+        
+        assert response.status_code == 200
+        excel_file = io.BytesIO(response.body)
+        xls = pd.ExcelFile(excel_file)
+        
+        df_matrix = pd.read_excel(xls, sheet_name="Attendance Matrix")
+        shashi_row = df_matrix[df_matrix["Officer Name"] == "Shashi Ranjan"].iloc[0]
+        remarks_val = str(shashi_row["Remarks"])
+        assert "Submitted next morning" in remarks_val
+        assert "09:26 AM" in remarks_val
+
+
