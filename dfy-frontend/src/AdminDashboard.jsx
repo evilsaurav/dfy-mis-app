@@ -3861,6 +3861,8 @@ const availableDistrictsForFeed = useMemo(() => {
           tests_prev: 0,
           contact_tracing_cur: 0,
           contact_tracing_prev: 0,
+          documents_cur: 0,
+          documents_prev: 0,
         };
       }
       for (let k in map[key]) {
@@ -3892,6 +3894,13 @@ const availableDistrictsForFeed = useMemo(() => {
           else map[key].contact_tracing_prev += 1;
         }
       });
+      (r.documents_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].documents_cur += 1;
+          else map[key].documents_prev += 1;
+        }
+      });
     });
 
     // Populate target for each row (district or officer)
@@ -3921,10 +3930,12 @@ const availableDistrictsForFeed = useMemo(() => {
           if (sortKey === 'hiv_dm') return row.hiv_dm_cur;
           if (sortKey === 'tests') return row.tests_cur;
           if (sortKey === 'contact_tracing') return row.contact_tracing_cur;
+          if (sortKey === 'documents') return row.documents_cur;
         } else if (masterTableCohortFilter === 'backlog') {
           if (sortKey === 'hiv_dm') return row.hiv_dm_prev;
           if (sortKey === 'tests') return row.tests_prev;
           if (sortKey === 'contact_tracing') return row.contact_tracing_prev;
+          if (sortKey === 'documents') return row.documents_prev;
         }
         return row[sortKey] ?? 0;
       };
@@ -6466,8 +6477,21 @@ const availableDistrictsForFeed = useMemo(() => {
                         <td className="p-3 tabular-num font-medium">
                           {row.face_to_face > 0 ? row.face_to_face : <span className="text-slate-300 font-normal">—</span>}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.documents > 0 ? row.documents : <span className="text-slate-300 font-normal">—</span>}
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? (row.documents_cur > 0 ? row.documents_cur : <span className="text-slate-300 font-normal">—</span>)
+                            : masterTableCohortFilter === 'backlog'
+                            ? (row.documents_prev > 0 ? row.documents_prev : <span className="text-slate-300 font-normal">—</span>)
+                            : (
+                              <span>
+                                {row.documents > 0 ? row.documents : <span className="text-slate-300 font-normal">—</span>}
+                                {row.documents > 0 && (row.documents_cur > 0 || row.documents_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.documents_cur} | P:{row.documents_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                         </td>
                         <td className="p-3 tabular-num font-medium">
                           {row.fdc_provided > 0 ? row.fdc_provided : <span className="text-slate-300 font-normal">—</span>}
