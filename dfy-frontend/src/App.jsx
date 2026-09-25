@@ -1787,64 +1787,114 @@ const FoHelpGuide = () => {
       icon: "📝",
       badge: "SOP Step-by-Step",
       badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
-      title: "1. Rozana Daily Report Kaise Bharein",
-      subtitle: "Field se report submit karne ka aasan niyam",
-      keywords: "report bharna submit daily notification visit dbt fdc remarks travel",
+      title: "1. Rozana Daily Field Reporting Workflow",
+      subtitle: "Field se report submit karne ka 4-card sequential SOP",
+      keywords: "report bharna submit daily notification visit dbt fdc remarks travel pin",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3.5 space-y-1.5">
-            <span className="font-black text-teal-900 flex items-center gap-1.5">
-              <span>🎯</span>
-              <span>Daily Target &amp; Timing:</span>
+          {/* Target & Timing Bento Header */}
+          <div className="bg-gradient-to-r from-teal-50 to-emerald-50/60 border border-teal-200/90 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center text-sm font-bold shadow-2xs shrink-0">🎯</span>
+              <div>
+                <strong className="text-teal-950 font-black block text-xs">Daily Reporting Window:</strong>
+                <span className="text-teal-800 text-[11px]">Field visit poora karke rozana sham <strong>7:00 PM</strong> tak report submit karna anivarya hai.</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-black text-teal-800 bg-white/80 border border-teal-300 px-2.5 py-1 rounded-xl shadow-2xs shrink-0">
+              Sham 7:00 PM
             </span>
-            <p className="text-teal-800 text-[11px]">
-              Rozana sham <strong>7:00 PM</strong> tak daily report submit karni hoti hai. Field Officer ko rozana field visit complete karne ke baad sham 7:00 PM se pehle apni daily report submit karni hoti hai.
-            </p>
           </div>
 
-          <div className="space-y-2.5">
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+          {/* 4-Card Sequential Bento Flowchart Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Step 1: District & PIN Selection */}
+            <div className="bg-gradient-to-br from-teal-50/60 to-slate-50 border border-teal-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">1</span>
+                <span className="text-[9px] font-bold text-teal-800 bg-teal-100/80 px-2 py-0.5 rounded-full border border-teal-200/60">Step 01</span>
+              </div>
               <div>
-                <strong className="text-slate-900 block font-bold">District aur Apna Naam Chunein:</strong>
-                <span className="text-slate-600 text-[11px]">App kholte hi apna assigned District aur Dropdown se apna Naam select karein. Duty PIN enter karein.</span>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>📍</span>
+                  <span>District &amp; PIN Selection</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  <strong>District aur Apna Naam Chunein:</strong> App kholte hi assigned District aur Dropdown se apna Naam select karein. 4-digit Duty PIN enter karke form unlock karein.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-teal-100 flex items-center justify-between text-[10px] text-teal-800 font-semibold">
+                <span>Identity Gate</span>
+                <span className="text-teal-600 font-black">➔ Agla Step</span>
               </div>
             </div>
 
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+            {/* Step 2: TB Notification Box */}
+            <div className="bg-gradient-to-br from-indigo-50/60 to-slate-50 border border-indigo-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">2</span>
+                <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100/80 px-2 py-0.5 rounded-full border border-indigo-200/60">Step 02</span>
+              </div>
               <div>
-                <strong className="text-slate-900 block font-bold">TB Notification Box (Naye Patients):</strong>
-                <span className="text-slate-600 text-[11px]">
-                  Jo naye TB confirm patient aaj notify huye hain, unki 9-digit Nikshay ID yahan enter karein. Ek ID likhkar Enter dabayein ya Add karein.
-                </span>
-                <div className="mt-1.5 bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 text-[11px] text-indigo-900">
-                  <strong>💡 WhatsApp Paste Trick:</strong> Agar aapke WhatsApp group ya register me 5-10 IDs ek sath likhi hain, toh poora message copy karke yahan input box me paste kar dein! App automatically saari valid IDs ko extract karke add kar lega.
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🫁</span>
+                  <span>TB Notification Box (Naye Patients)</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Aaj confirm huye naye TB patients ki 9-digit Nikshay ID enter karein. Ek ID type karke Enter dabayein ya Add karein.
+                </p>
+                <div className="mt-2 bg-indigo-100/60 border border-indigo-200 rounded-xl p-2 text-[10px] text-indigo-900 leading-normal">
+                  <strong>💡 WhatsApp Paste Trick:</strong> Register ya WhatsApp se 5-10 IDs copy karke input box me paste kar dein; app auto-extract kar lega.
                 </div>
               </div>
-            </div>
-
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
-              <div>
-                <strong className="text-slate-900 block font-bold">Other Interventions (Alag-Alag Box):</strong>
-                <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-slate-600 mt-1">
-                  <li><strong>Home Visit:</strong> Jin patients ke ghar jakar physical counseling ki unki IDs.</li>
-                  <li><strong>FDC Dawai:</strong> Jinhe mahine ki dawa strip handover ki unki IDs.</li>
-                  <li><strong>DBT Bank Details:</strong> Jinka bank khata / Aadhaar seed kiya.</li>
-                  <li><strong>UDST Test:</strong> Jinka Drug Susceptibility sample bheja.</li>
-                  <li><strong>Follow-up:</strong> Regular 2/4/6 mahine ki follow-up visit.</li>
-                </ul>
+              <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                <span>9-Digit Filter</span>
+                <span className="text-indigo-600 font-black">➔ Agla Step</span>
               </div>
             </div>
 
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">4</span>
+            {/* Step 3: Clinical Interventions & FDC */}
+            <div className="bg-gradient-to-br from-amber-50/60 to-slate-50 border border-amber-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">3</span>
+                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200/60">Step 03</span>
+              </div>
               <div>
-                <strong className="text-slate-900 block font-bold">Travel KM &amp; Remarks (Zaroori):</strong>
-                <span className="text-slate-600 text-[11px]">
-                  Field me chala gaya total kilometer aur aaj ki field activity ka brief remark (jaise gaon ka naam ya camp) darj karke <strong>&ldquo;Submit Daily Report&rdquo;</strong> button dabayein.
-                </span>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>💊</span>
+                  <span>Clinical Interventions &amp; FDC (Other Interventions)</span>
+                </h5>
+                <ul className="text-[11px] text-slate-600 space-y-1 mt-1 pl-1">
+                  <li><strong>🏠 Home Visit:</strong> Counseling kiye gaye patients.</li>
+                  <li><strong>💊 FDC Dawai:</strong> Dawa strip handover kiye gaye patients.</li>
+                  <li><strong>💳 DBT Bank Details:</strong> Passbook / Aadhaar seed IDs.</li>
+                  <li><strong>🧪 UDST &amp; HIV/DM:</strong> Sample collection &amp; tests.</li>
+                </ul>
+              </div>
+              <div className="pt-1.5 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                <span>Multi-Bucket Care</span>
+                <span className="text-amber-600 font-black">➔ Agla Step</span>
+              </div>
+            </div>
+
+            {/* Step 4: Travel KM & Remarks */}
+            <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 border border-emerald-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">4</span>
+                <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200/60">Step 04</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🚗</span>
+                  <span>Travel KM &amp; Remarks (Final Submit)</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Field me chala gaya total kilometer aur aaj ki field activity ka brief summary remark darj karke <strong>&ldquo;Submit Daily Report&rdquo;</strong> button dabayein.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                <span>Cloud + Local Sync</span>
+                <span className="text-emerald-700 font-black">✓ Complete</span>
               </div>
             </div>
           </div>
@@ -1858,43 +1908,76 @@ const FoHelpGuide = () => {
       badgeColor: "bg-rose-100 text-rose-800 border-rose-200",
       title: "2. Duplicate Notification vs Repeat Visit (Lal vs Peela Modal)",
       subtitle: "Galat ID submit hone se bachane wale naye rules",
-      keywords: "duplicate notification block repeat visit modal amber red lal peela 90 din",
+      keywords: "duplicate notification block repeat visit modal amber red lal peela 90 din ntep",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3.5 space-y-2">
-            <span className="font-black text-rose-900 flex items-center gap-1.5">
-              <span>🛑</span>
-              <span>Lal Modal: Strict Duplicate Notification Block</span>
-            </span>
-            <p className="text-rose-950 text-[11px]">
-              NTEP niyam ke anusar TB patient ka Notification uske pure treatment cycle (90 din) me <strong>sirf 1 baar</strong> hi darj hota hai.
-            </p>
-            <div className="bg-white/80 border border-rose-200 rounded-xl p-2.5 text-[11px] text-rose-900 space-y-1">
-              <strong>🔴 Agar Lal Alert Modal aaye to kya hoga?</strong>
-              <p>
-                Agar aapne aisi Patient ID Notification box me daali jo pichle 90 dino me aapne ya kisi doosre FO ne pehle se report kar rakhi hai, toh app use <strong>Hard Block</strong> kar dega. Wo ID submit nahi ho sakti. Modal me dikhega ki kis date ko kis officer ne pehle report kiya tha.
-              </p>
+          {/* Dual-Card Side-by-Side Bento Comparison */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Card 1: Red Hard Block Modal */}
+            <div className="bg-rose-50/90 border border-rose-200 rounded-2xl p-3.5 space-y-2 flex flex-col justify-between shadow-2xs">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-rose-600 text-white font-black text-[10px] uppercase tracking-wider">
+                    Lal Modal
+                  </span>
+                  <span className="text-[9px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full border border-rose-200">
+                    Hard Block 🛑
+                  </span>
+                </div>
+                <h5 className="font-black text-rose-950 text-xs">
+                  Strict Duplicate Notification Block
+                </h5>
+                <p className="text-rose-900 text-[11px] leading-relaxed">
+                  NTEP niyam ke anusar TB patient ka Notification uske pure treatment cycle (90 din / 90 Days) me <strong>sirf 1 baar</strong> hi darj hota hai.
+                </p>
+                <div className="bg-white/90 border border-rose-200 rounded-xl p-2.5 text-[10.5px] text-rose-950 space-y-1">
+                  <strong>🔴 Lal Alert Modal aane par:</strong>
+                  <p>
+                    Agar pichle 90 dino me aapne ya kisi doosre FO ne yeh ID pehle se report kar rakhi hai, toh app ise <strong>Hard Block</strong> kar dega. Wo ID dubara notify nahi ho sakti. Modal me pichli date aur officer ka naam dikhega.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-rose-200/80 flex items-center justify-between text-[10px] text-rose-900 font-bold">
+                <span>Result: Submission Blocked</span>
+                <span className="text-rose-700 font-black">NTEP Rule</span>
+              </div>
+            </div>
+
+            {/* Card 2: Amber Repeat Visit Confirmation */}
+            <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-3.5 space-y-2 flex flex-col justify-between shadow-2xs">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 rounded-md bg-amber-600 text-white font-black text-[10px] uppercase tracking-wider">
+                    Peela Modal
+                  </span>
+                  <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                    Allowable Care 🟡
+                  </span>
+                </div>
+                <h5 className="font-black text-amber-950 text-xs">
+                  Repeat Legitimate Visit Confirmation
+                </h5>
+                <p className="text-amber-900 text-[11px] leading-relaxed">
+                  Purane TB patient ke ghar <strong>dobara Home Visit</strong>, <strong>agli FDC dawai</strong> strip, ya <strong>DBT bank details</strong> lene jana legitimate field activity hai!
+                </p>
+                <div className="bg-white/90 border border-amber-200 rounded-xl p-2.5 text-[10.5px] text-amber-950 space-y-1">
+                  <strong>🟡 Peela Alert Modal aane par:</strong>
+                  <p>
+                    Home Visit ya FDC box me purani ID daalne par Peela Modal aayega: <em>&ldquo;Yeh patient pehle notify ho chuka hai. Kya aap dobara visit/dawai confirm karte hain?&rdquo;</em>. Bas <strong>&ldquo;Haan, Confirm Karein&rdquo;</strong> dabayein aur entry jud jayegi.
+                  </p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-[10px] text-amber-900 font-bold">
+                <span>Result: Repeat Visit Counted</span>
+                <span className="text-amber-700 font-black">1-Tap Confirm</span>
+              </div>
             </div>
           </div>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2">
-            <span className="font-black text-amber-900 flex items-center gap-1.5">
-              <span>⚠️</span>
-              <span>Peela Modal: Repeat Visit Confirmation (Allowable)</span>
-            </span>
-            <p className="text-amber-950 text-[11px]">
-              Agar koi purana TB patient hai aur aap uske ghar <strong>dobara Home Visit</strong> karne gaye hain, ya <strong>agli FDC dawai</strong> dene gaye hain, ya <strong>DBT bank passbook</strong> lene gaye hain, toh yeh legitimate care activity hai!
-            </p>
-            <div className="bg-white/80 border border-amber-200 rounded-xl p-2.5 text-[11px] text-amber-900 space-y-1">
-              <strong>🟡 Agar Peela Alert Modal aaye to kya karein?</strong>
-              <p>
-                Home Visit ya FDC box me purani ID daalne par Peela Warning Modal aayega: <em>&ldquo;Yeh patient pehle notify ho chuka hai. Kya aap dobara visit/dawai confirm karte hain?&rdquo;</em>. Bas <strong>&ldquo;Haan, Confirm Karein&rdquo;</strong> dabayein aur entry jud jayegi.
-              </p>
-            </div>
-          </div>
-
-          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] text-slate-700">
-            <strong>📌 Rule of Thumb:</strong> Notification box me sirf naya patient aayega. Repeat visit ke liye Home Visit / FDC box use karein.
+          {/* Golden Rule of Thumb Callout */}
+          <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-[11px] text-slate-700 flex items-center gap-2">
+            <span className="text-base shrink-0">📌</span>
+            <span><strong>Rule of Thumb:</strong> Notification box me sirf naya patient aayega. Repeat visit ke liye hamesha Home Visit / FDC box use karein.</span>
           </div>
         </div>
       )
@@ -1906,38 +1989,67 @@ const FoHelpGuide = () => {
       badgeColor: "bg-sky-100 text-sky-800 border-sky-200",
       title: "3. Offline Mode & Zero-Loss Sync",
       subtitle: "Gaon me bina internet ke report submit karna",
-      keywords: "offline sync bina network internet zero loss pending queue vault indexeddb",
+      keywords: "offline sync bina network internet zero loss pending queue vault indexeddb phone storage cloud",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <p>
+          <p className="text-slate-600 text-[11px]">
             Remote dehat ya jungle area me jahan bilkul internet nahi hota, wahan app bina kisi rukawat ke 100% smooth chalta hai.
           </p>
 
-          <div className="space-y-2">
-            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-sky-950 block font-bold">1. Bina Network Report Submit Karein:</strong>
-              <span className="text-sky-900 text-[11px]">
-                Jab network nahi hoga, toh &ldquo;Submit Daily Report&rdquo; dabane par data fail nahi hota. Wo aapke phone ki encrypted internal memory (IndexedDB) me surakshit save ho jata hai.
-              </span>
+          {/* 3-Card Architecture Bento Diagram */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Stage 1: Phone Storage Vault */}
+            <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-sky-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                <span className="text-base">🗄️</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-sky-950">1. Phone Storage (Encrypted IndexedDB)</h5>
+                <p className="text-[10px] text-sky-900 leading-relaxed mt-1">
+                  Jab network nahi hota, toh &ldquo;Submit Daily Report&rdquo; dabane par data fail nahi hota. Wo aapke phone ki encrypted internal storage (IndexedDB) me surakshit save ho jata hai.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full self-start">Encrypted Vault</span>
             </div>
 
-            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-sky-950 block font-bold">2. Top Header me Status Dekhein:</strong>
-              <span className="text-sky-900 text-[11px]">
-                Offline report submit hote hi screen ke upar peele rang ka badge dikhega: <strong>&ldquo;Offline Queued (1 report)&rdquo;</strong>.
-              </span>
+            {/* Stage 2: Network Detection */}
+            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                <span className="text-base">📶</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-amber-950">2. Network Detection &amp; Queue</h5>
+                <p className="text-[10px] text-amber-900 leading-relaxed mt-1">
+                  Offline report submit hote hi screen ke top header me status dikhega: <strong>&ldquo;Offline Queued (1 report)&rdquo;</strong>. App continuous internet availability detect karta hai.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full self-start">Auto Queued</span>
             </div>
 
-            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-sky-950 block font-bold">3. Internet Aane Par Auto-Sync:</strong>
-              <span className="text-sky-900 text-[11px]">
-                Jaise hi aap bazaar ya sadak par aayenge jahan network aayega, app background me cloud par report sync kar dega. Ya aap chahein toh top bar ke <strong>&ldquo;Sync Now&rdquo;</strong> button ko tap karke turant bhej sakte hain.
-              </span>
+            {/* Stage 3: Cloud Upload */}
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                <span className="text-base">☁️</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-emerald-950">3. Cloud Upload &amp; Auto-Sync</h5>
+                <p className="text-[10px] text-emerald-900 leading-relaxed mt-1">
+                  Internet aate hi app background me cloud par report sync kar deta hai. Ya top bar ke <strong>&ldquo;Sync Now&rdquo;</strong> button ko tap karke turant cloud upload kar sakte hain.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full self-start">Cloud Upload</span>
             </div>
           </div>
 
-          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-900 font-medium">
-            🛡️ <strong>Zero Data Loss Guarantee:</strong> Phone band ho jaye, battery khatam ho jaye, ya phone restart ho jaye — aapki offline report phone se kabhi delete nahi hoti jab tak wo cloud par upload na ho jaye.
+          {/* Zero Data Loss Guarantee Badge */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-900 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">🛡️</span>
+            <div>
+              <strong>Zero Data Loss Guarantee:</strong> Phone band ho jaye, battery khatam ho jaye, ya phone restart ho jaye — aapki offline report phone se kabhi delete nahi hoti jab tak wo cloud par upload na ho jaye.
+            </div>
           </div>
         </div>
       )
@@ -1949,43 +2061,66 @@ const FoHelpGuide = () => {
       badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
       title: "4. Pending Interventions Action Center (Follow-up Tasks)",
       subtitle: "Bache hue HIV/DM, DBT aur FDC tasks 1-tap me poore karein",
-      keywords: "pending tab interventions follow-up cascade action center dbt fdc hiv dm autofill whatsapp",
+      keywords: "pending tab interventions follow-up cascade action center dbt fdc hiv dm autofill whatsapp export",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <p>
-            Field me notify kiye gaye TB patients ke zaroori follow-up clinical interventions (HIV/DM screening, DBT bank details, FDC medicine) track aur regularise karne ke liye:
+          <p className="text-slate-600 text-[11px]">
+            Field me notify kiye gaye TB patients ke zaroori follow-up clinical interventions (HIV/DM screening, DBT bank details, FDC medicine) track aur regularise karne ke liye 3-stage visual sequence:
           </p>
 
-          <div className="space-y-2.5">
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
-              <div>
-                <strong className="text-slate-900 block font-bold">Pending Tab Kholein:</strong>
-                <span className="text-slate-600 text-[11px]">Bottom dock me <strong>&ldquo;Pending&rdquo;</strong> icon par tap karein. Yahan aapke district ke pending clinical interventions ki live priority list dikhegi.</span>
+          {/* 3-Stage Visual Sequence Bento */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Stage 1: Open Pending Tab */}
+            <div className="bg-teal-50/80 border border-teal-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                <span className="text-base">📋</span>
               </div>
+              <div>
+                <h5 className="text-[11px] font-black text-teal-950">1. Pending Tab Kholein</h5>
+                <p className="text-[10px] text-teal-900 leading-relaxed mt-1">
+                  Bottom dock me <strong>&ldquo;Pending&rdquo;</strong> icon par tap karein. Yahan aapke district ke pending clinical interventions ki live priority list dikhegi.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full self-start">Open Pending Tab</span>
             </div>
 
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
-              <div>
-                <strong className="text-slate-900 block font-bold">1-Tap Quick Autofill:</strong>
-                <span className="text-slate-600 text-[11px]">Kisi bhi pending patient card par tap karein ya <strong>&ldquo;+ Form me Bharein&rdquo;</strong> dabayein. Patient ID automatically aaj ke relevant form bucket me add ho jayegi bina dubara type kiye.</span>
+            {/* Stage 2: 1-Tap Quick Autofill */}
+            <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                <span className="text-base">⚡</span>
               </div>
+              <div>
+                <h5 className="text-[11px] font-black text-indigo-950">2. 1-Tap Quick Autofill</h5>
+                <p className="text-[10px] text-indigo-900 leading-relaxed mt-1">
+                  Pending patient card par tap karein ya <strong>&ldquo;+ Form me Bharein&rdquo;</strong> dabayein. Patient ID automatically aaj ke form bucket me add ho jayegi bina dubara type kiye.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full self-start">1-Tap Autofill</span>
             </div>
 
-            <div className="flex items-start gap-2.5">
-              <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">3</span>
+            {/* Stage 3: WhatsApp Export */}
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                <span className="text-base">📤</span>
+              </div>
               <div>
-                <strong className="text-slate-900 block font-bold">1-Tap WhatsApp Follow-up Export:</strong>
-                <span className="text-slate-600 text-[11px]">
+                <h5 className="text-[11px] font-black text-emerald-950">3. WhatsApp Follow-up Export</h5>
+                <p className="text-[10px] text-emerald-900 leading-relaxed mt-1">
                   <strong>&ldquo;Share WhatsApp List&rdquo;</strong> button dabakar aap poori pending list Coordinator ya Field Team ke sath share kar sakte hain taaki field visit plan asani se ban sake.
-                </span>
+                </p>
               </div>
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full self-start">WhatsApp Follow-up Export</span>
             </div>
           </div>
 
-          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3 text-[11px] text-teal-900 font-medium">
-            💡 <strong>Smart Efficiency:</strong> Jab aap pending patient ka intervention form me submit karte hain, toh wo pending list se automatically update ho jata hai.
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3 text-[11px] text-teal-900 font-medium flex items-center gap-2">
+            <span className="text-base shrink-0">💡</span>
+            <div>
+              <strong>Smart Efficiency:</strong> Jab aap pending patient ka intervention form me submit karte hain, toh wo pending list se automatically update ho jata hai.
+            </div>
           </div>
         </div>
       )
@@ -1997,27 +2132,67 @@ const FoHelpGuide = () => {
       badgeColor: "bg-amber-100 text-amber-800 border-amber-200",
       title: "5. 24-Ghante ke Andar Galat ID Theek Karna",
       subtitle: "Clerical galti bina Admin ke khud edit karne ka tarika",
-      keywords: "edit id correction 24 ghante galti typo pencil delete profile tab",
+      keywords: "edit id correction 24 ghante galti typo pencil delete profile tab calendar ladder",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <p>
+          <p className="text-slate-600 text-[11px]">
             Agar report submit karne ke baad kisi Nikshay ID me koi typo ya galti ho gayi ho, toh aapko District Coordinator ya Admin ko phone karne ki zaroorat nahi hai:
           </p>
 
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3.5 space-y-2">
-            <span className="font-black text-amber-900 flex items-center gap-1.5">
-              <span>✏️</span>
-              <span>Self-Correction Steps (24 Hours):</span>
-            </span>
-            <ol className="list-decimal list-inside space-y-1 text-[11px] text-amber-950 pl-1">
-              <li>Niche diye gaye <strong>Profile</strong> tab par tap karein.</li>
-              <li>Calendar me us tareekh par click karein jis din ki report me galti hui thi.</li>
-              <li>ID ke bagal me bane pencil <strong>✏️</strong> icon par tap karke nayi correct ID save karein, ya <strong>❌</strong> se galat ID delete karein.</li>
-            </ol>
+          {/* 3-Step Visual Ladder Bento Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {/* Step 1: Profile Tab & Calendar Date */}
+            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                <span className="text-base">📅</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-amber-950">1. Profile Tab &amp; Select Date</h5>
+                <p className="text-[10px] text-amber-900 leading-relaxed mt-1">
+                  Niche diye gaye <strong>Profile</strong> tab par tap karein aur Calendar me us tareekh par click karein jis din ki report me galti hui thi.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full self-start">Select Date</span>
+            </div>
+
+            {/* Step 2: Locate ID */}
+            <div className="bg-sky-50/80 border border-sky-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-sky-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                <span className="text-base">🔍</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-sky-950">2. Locate Wrong ID</h5>
+                <p className="text-[10px] text-sky-900 leading-relaxed mt-1">
+                  Us date ki report me darj patient IDs ki list khulegi. Galat ID ko Bucket list me search karein.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-sky-800 bg-sky-100 px-2 py-0.5 rounded-full self-start">ID Inspector</span>
+            </div>
+
+            {/* Step 3: Pencil Edit / Cross Delete */}
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                <span className="text-base">✏️</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-emerald-950">3. Pencil Edit / Cross Delete</h5>
+                <p className="text-[10px] text-emerald-900 leading-relaxed mt-1">
+                  ID ke bagal me bane pencil <strong>✏️</strong> icon par tap karke nayi correct ID save karein, ya <strong>❌</strong> se galat ID delete karein.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full self-start">Instant Update</span>
+            </div>
           </div>
 
-          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-[11px] text-rose-900 font-medium">
-            ⚠️ <strong>Important Constraint:</strong> Yeh self-service edit window submission ke <strong>24 ghante</strong> tak hi open rehti hai. 24 ghante beetne ke baad security lock lag jata hai taaki data tamper na ho sake. Uske baad sirf State Admin hi badlav kar sakte hain.
+          {/* 24-Hour Security Lock Card */}
+          <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 text-[11px] text-rose-900 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">⏱️</span>
+            <div>
+              <strong>24-Ghante Security Lock Window:</strong> Yeh self-service edit window submission ke <strong>24 ghante</strong> (24 Hours) tak hi open rehti hai. 24 ghante beetne ke baad security lock lag jata hai taaki data tamper na ho sake. Uske baad badlav ke liye Coordinator se sampark karein.
+            </div>
           </div>
         </div>
       )
@@ -2029,36 +2204,72 @@ const FoHelpGuide = () => {
       badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200",
       title: "6. Patient Tracker (Nikshay Verification Status)",
       subtitle: "Apne patient ka government verification status check karein",
-      keywords: "patient tracker nikshay status verification green shield search 9 digit journey",
+      keywords: "patient tracker nikshay status verification green shield search 9 digit journey dbt call",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <p>
+          <p className="text-slate-600 text-[11px]">
             Aapne jo patients report kiye hain, unka Nikshay Portal par verification aur DBT status check karne ke liye:
           </p>
 
-          <div className="space-y-2">
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-indigo-950 block font-bold">1. Tracker Tab Kholein:</strong>
-              <span className="text-indigo-900 text-[11px]">
-                Bottom dock me <strong>&ldquo;Tracker&rdquo;</strong> icon par tap karein aur patient ki 9-digit Nikshay ID search bar me daalein.
-              </span>
+          {/* Visual Status Progression Ladder */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">✓</span>
+                <span className="text-base">🟢</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-emerald-950">Green Shield (Verified)</h5>
+                <p className="text-[10px] text-emerald-900 leading-relaxed mt-1">
+                  State Coordinator ne Nikshay dump se cross-match karke verify kar diya hai. Record permanent ledger me lock hai.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full self-start">State Verified</span>
             </div>
 
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-indigo-950 block font-bold">2. Status Badges ka Matlab:</strong>
-              <ul className="list-disc list-inside space-y-1 pl-1 text-[11px] text-indigo-900 mt-1">
-                <li><span className="font-bold text-emerald-700">🟢 Green Shield (Verified):</span> State Coordinator ne Nikshay dump se cross-match karke verify kar diya hai.</li>
-                <li><span className="font-bold text-amber-700">🟡 Amber Badge (Pending Sync):</span> Report darj hai, agle 24-72 ghante me official portal par reconcile hogi.</li>
-                <li><span className="font-bold text-sky-700">🔵 DBT Validated:</span> Patient ka bank khata Poshan sahayata ke liye verified hai.</li>
-              </ul>
+            <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">⏳</span>
+                <span className="text-base">🟡</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-amber-950">Amber Badge (Pending Sync)</h5>
+                <p className="text-[10px] text-amber-900 leading-relaxed mt-1">
+                  Report FO dwara darj ho chuki hai; agle 24-72 ghante me official portal par reconcile hogi.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full self-start">Under Review</span>
             </div>
 
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-emerald-950 block font-bold">3. Direct 1-Tap 📞 Call &amp; Quick Copy:</strong>
-              <p className="text-emerald-900 text-[11px]">
-                Patient card par phone number ke bagal me <strong>&ldquo;📞 Call&rdquo;</strong> button diya gaya hai jisse seedhe phone dialer khul jata hai taaki aap follow-up call turant kar sakein. Bagal me bane copy icon se number 1-tap me clipboard par copy ho jata hai.
+            <div className="bg-indigo-50/80 border border-indigo-200 rounded-2xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">₹</span>
+                <span className="text-base">🔵</span>
+              </div>
+              <div>
+                <h5 className="text-[11px] font-black text-indigo-950">Blue Badge (DBT Validated)</h5>
+                <p className="text-[10px] text-indigo-900 leading-relaxed mt-1">
+                  Patient ka bank khata / Aadhaar validated hai aur Poshan sahayata ke liye verified hai.
+                </p>
+              </div>
+              <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full self-start">DBT Validated</span>
+            </div>
+          </div>
+
+          {/* Direct 1-Tap Calling Bento Card */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+            <div className="space-y-1">
+              <div className="flex items-center gap-1.5 font-black text-slate-900 text-xs">
+                <span>📞</span>
+                <span>Direct 1-Tap Call &amp; Quick Copy:</span>
+              </div>
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Tracker me 9-digit Nikshay ID search karein. Patient card par phone number ke bagal me <strong>&ldquo;📞 Call&rdquo;</strong> button se dialer khulta hai, aur copy icon se number 1-tap me copy ho jata hai.
               </p>
             </div>
+            <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-xl shrink-0">
+              1-Tap Dialer
+            </span>
           </div>
         </div>
       )
@@ -2070,14 +2281,20 @@ const FoHelpGuide = () => {
       badgeColor: "bg-emerald-100 text-emerald-800 border-emerald-200",
       title: "7. FDC Dawa Dosage Chart & Field FAQs",
       subtitle: "Wazan ke anusar tablet niyam aur aam sawal",
-      keywords: "fdc medicine dosage tablet strip wazan band weight faqs dhyan dein adult pediatric",
+      keywords: "fdc medicine dosage tablet strip wazan band weight faqs dhyan dein adult pediatric hrz hren",
       content: (
         <div className="space-y-4 text-xs text-slate-700 leading-relaxed">
+          {/* Adult Regimen Bento Table */}
           <div className="space-y-2">
-            <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
-              <span>⚖️</span>
-              <span>Adult Regimen (≥ 18 Yrs) — IP: 4 FDC (HRZE) • CP: 3 FDC (HRE)</span>
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                <span>⚖️</span>
+                <span>Adult Regimen (≥ 18 Yrs) — IP: 4 FDC (HRZE) • CP: 3 FDC (HRE)</span>
+              </h4>
+              <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                Adult Dosage
+              </span>
+            </div>
             <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
               <table className="w-full text-[11px] text-left">
                 <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
@@ -2124,11 +2341,17 @@ const FoHelpGuide = () => {
             </div>
           </div>
 
+          {/* Pediatric Regimen Bento Table */}
           <div className="space-y-2">
-            <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
-              <span>🧒</span>
-              <span>Pediatric Regimen (&lt; 18 Yrs) — IP: 3 FDC-P + E • CP: 2 FDC-P + E</span>
-            </h4>
+            <div className="flex items-center justify-between">
+              <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
+                <span>🧒</span>
+                <span>Pediatric Regimen (&lt; 18 Yrs) — IP: 3 FDC-P + E • CP: 2 FDC-P + E</span>
+              </h4>
+              <span className="text-[9px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                Pediatric Dosage
+              </span>
+            </div>
             <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
               <table className="w-full text-[11px] text-left">
                 <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200">
@@ -2164,32 +2387,34 @@ const FoHelpGuide = () => {
             </div>
           </div>
 
-          {/* Quick FAQs */}
-          <div className="space-y-2.5 pt-2 border-t border-slate-100">
+          {/* Quick FAQs Bento Grid */}
+          <div className="space-y-2 pt-2 border-t border-slate-100">
             <h4 className="font-black text-slate-900 text-xs flex items-center gap-1.5">
               <span>❓</span>
               <span>Aam Field Sawal (Field FAQs)</span>
             </h4>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 font-bold block text-[11px]">Q: Agar patient ki ID 8-digit hai toh form lega?</strong>
-              <p className="text-slate-600 text-[11px]">
-                Haan, puraane NTEP legacy records ke liye form 8-digit aur naye patients ke liye 9-digit dono accept karta hai.
-              </p>
-            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1 shadow-2xs">
+                <strong className="text-slate-900 font-bold block text-[11px]">Q: 8-digit ID accept hoti hai?</strong>
+                <p className="text-slate-600 text-[10.5px]">
+                  Haan, puraane NTEP legacy records ke liye 8-digit aur naye patients ke liye 9-digit dono valid hain.
+                </p>
+              </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 font-bold block text-[11px]">Q: Duplicate Notification alert aane par kya patient ki visit bhi ruk jayegi?</strong>
-              <p className="text-slate-600 text-[11px]">
-                Bilkul nahi! Duplicate alert sirf TB Notification count par lagta hai. Patient ki Home Visit, FDC dawai aur DBT bante rahenge. Bas ID ko Home Visit ya FDC box me daalein.
-              </p>
-            </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1 shadow-2xs">
+                <strong className="text-slate-900 font-bold block text-[11px]">Q: Duplicate par visit rukegi?</strong>
+                <p className="text-slate-600 text-[10.5px]">
+                  Nahi! Duplicate alert sirf Notification par lagta hai. Home Visit, FDC dawai aur DBT bante rahenge.
+                </p>
+              </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 font-bold block text-[11px]">Q: Agar phone kho jaye ya kharab ho jaye?</strong>
-              <p className="text-slate-600 text-[11px]">
-                Aapki jo bhi reports submit ho chuki hain wo cloud database me 100% surakshit hain. Naye phone me apna District aur Naam chunein aur duty PIN daal kar turant apna kaam shuru karein.
-              </p>
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1 shadow-2xs">
+                <strong className="text-slate-900 font-bold block text-[11px]">Q: Phone kho jaye to data?</strong>
+                <p className="text-slate-600 text-[10.5px]">
+                  Aapka sara submitted data cloud database me 100% surakshit hai. Naye phone me PIN daal kar resume karein.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -2211,49 +2436,54 @@ const FoHelpGuide = () => {
               <span>Fast Field Entry &amp; Ergonomics:</span>
             </span>
             <p className="text-teal-800 text-[11px]">
-              Version 2.7.6 me field officers ki speed aur sahuliyat ke liye naaye features jode gaye hain taaki reporting me kam se kam samay lage aur typing ki galtiyan na hon.
+              Version 2.7.6 me field officers ki speed aur sahuliyat ke liye naye features jode gaye hain taaki reporting me kam se kam samay lage aur typing ki galtiyan na hon.
             </p>
           </div>
 
-          <div className="space-y-2.5">
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+          {/* 4-Tile Responsive Bento Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-1.5 shadow-2xs">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5 text-xs">
                 <span>🧭</span>
-                <span>1. Sticky Category Quick-Jump Pills:</span>
+                <span>1. Sticky Category Quick-Jump Pills</span>
               </strong>
-              <p className="text-slate-600 text-[11px]">
-                Form ke upar sticky horizontal bar me categories (👤 Patient, 🧪 Testing, 🏠 Visits, 💊 FDC, ⭐ Special, 🩺 Doctors, 📝 Remarks) diye gaye hain. Kisi bhi pill par tap karte hi form seedhe us section par chala jayega aur section automatically open ho jayega. Bar-bar lamba scroll karne ki zaroorat nahi hai.
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Form ke upar sticky bar me categories (👤 Patient, 🧪 Testing, 🏠 Visits, 💊 FDC, ⭐ Special, 🩺 Doctors, 📝 Remarks) diye gaye hain. Kisi bhi pill par tap karte hi form seedhe us section par chala jayega.
               </p>
+              <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full self-start">Instant Section Jump</span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-1.5 shadow-2xs">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5 text-xs">
                 <span>📱</span>
-                <span>2. Direct Number Dialpad (Numeric Keypad):</span>
+                <span>2. Direct Number Dialpad (Numeric Keypad)</span>
               </strong>
-              <p className="text-slate-600 text-[11px]">
-                Nikshay ID, Duty PIN aur Patient Weight fields me tap karte hi aapke mobile par seedhe <strong>0-9 Number Keypad</strong> khulega. Ab keyboard me baar-baar &ldquo;123&rdquo; button dabane ki jhanjhat khatam ho gayi hai.
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Nikshay ID, Duty PIN aur Patient Weight fields me tap karte hi aapke mobile par seedhe <strong>0-9 Number Keypad</strong> khulega. Baar-baar &ldquo;123&rdquo; button dabane ki jhanjhat khatam ho gayi hai.
               </p>
+              <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full self-start">Direct Numeric Dialpad</span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-1.5 shadow-2xs">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5 text-xs">
                 <span>🔢</span>
-                <span>3. Live 9-Digit Formatter &amp; Progress Badge:</span>
+                <span>3. Live 9-Digit Formatter &amp; Progress Badge</span>
               </strong>
-              <p className="text-slate-600 text-[11px]">
-                Nikshay ID type karte samay input box ke right corner me live counter dikhta hai (jaise <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px] font-mono">[ 7 / 9 digits ]</code>). Pure 9 digits hote hi green <code className="bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded text-[10px] font-mono font-bold">[ ✓ Ready ]</code> dikhega. Unglion se ginti karne ki zaroorat nahi padegi!
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Nikshay ID type karte samay input box ke right corner me live counter dikhta hai (jaise <code className="bg-slate-200 px-1 py-0.5 rounded text-[10px] font-mono">[ 7 / 9 digits ]</code>). Pure 9 digits hote hi green <code className="bg-emerald-100 text-emerald-800 px-1 py-0.5 rounded text-[10px] font-mono font-bold">[ ✓ Ready ]</code> dikhega.
               </p>
+              <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full self-start">Live Progress Badge</span>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 space-y-1">
-              <strong className="text-slate-900 block font-bold flex items-center gap-1.5">
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-1.5 shadow-2xs">
+              <strong className="text-slate-900 block font-bold flex items-center gap-1.5 text-xs">
                 <span>🏷️</span>
-                <span>4. Removable Patient Tag Chips:</span>
+                <span>4. Removable Patient Tag Chips</span>
               </strong>
-              <p className="text-slate-600 text-[11px]">
-                Report me add kiye gaye sabhi Patient IDs ab clean tags ke roop me dikhte hain. Agar galti se koi galat ID jud jaye, toh tag ke bagal me bane cross (✕) button par 1 tap karke use turant hata sakte hain.
+              <p className="text-slate-600 text-[11px] leading-relaxed">
+                Report me add kiye gaye sabhi Patient IDs clean tags ke roop me dikhte hain. Agar galti se koi galat ID jud jaye, toh tag ke bagal me bane cross (✕) button par 1 tap karke use turant hata sakte hain.
               </p>
+              <span className="text-[9px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full self-start">1-Tap ✕ Chip Removal</span>
             </div>
           </div>
         </div>
@@ -2269,64 +2499,69 @@ const FoHelpGuide = () => {
       keywords: "attendance leave present medical casual official duty absent weekly off remarks supervisor inspection calendar roster",
       content: (
         <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
-          <p>
+          <p className="text-slate-600 text-[11px]">
             Field Officers ke daily attendance roster aur calendar me alag-alag status ke liye visual color badges nirdharit kiye gaye hain:
           </p>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-2.5">
+          {/* 6-Tile Color Key Bento Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+            <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-emerald-950 flex items-center gap-1.5 mb-1">
-                <span>🟢</span>
-                <span>P &mdash; Present (Submitted):</span>
+                <span className="px-1.5 py-0.2 bg-emerald-600 text-white rounded text-[10px] font-mono">P</span>
+                <span>🟢 Present (Submitted)</span>
               </span>
-              <p className="text-emerald-900">Rozana sham 7:00 PM tak field report safalta-poorvak submit hone par green badge lagta hai.</p>
+              <p className="text-emerald-900 text-[10px] leading-snug">Rozana sham 7:00 PM tak field report safal submit hone par green badge lagta hai.</p>
             </div>
 
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5">
+            <div className="bg-amber-50 border border-amber-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-amber-950 flex items-center gap-1.5 mb-1">
-                <span>🟡</span>
-                <span>ML &mdash; Medical Leave:</span>
+                <span className="px-1.5 py-0.2 bg-amber-600 text-white rounded text-[10px] font-mono">ML</span>
+                <span>🟡 Medical Leave</span>
               </span>
-              <p className="text-amber-900">Swasthya kharab hone ya medical emergency par coordinator dwara approve ki gayi chhutti.</p>
+              <p className="text-amber-900 text-[10px] leading-snug">Swasthya kharab hone ya medical emergency par coordinator dwara approve ki gayi chhutti.</p>
             </div>
 
-            <div className="bg-sky-50 border border-sky-200 rounded-2xl p-2.5">
+            <div className="bg-sky-50 border border-sky-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-sky-950 flex items-center gap-1.5 mb-1">
-                <span>🔵</span>
-                <span>CL &mdash; Casual Leave:</span>
+                <span className="px-1.5 py-0.2 bg-sky-600 text-white rounded text-[10px] font-mono">CL</span>
+                <span>🔵 Casual Leave</span>
               </span>
-              <p className="text-sky-900">Niji zaroori kaam ke liye purva-soochit aakasmik avakash.</p>
+              <p className="text-sky-900 text-[10px] leading-snug">Niji zaroori kaam ke liye purva-soochit aakasmik avakash.</p>
             </div>
 
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-2.5">
+            <div className="bg-indigo-50 border border-indigo-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-indigo-950 flex items-center gap-1.5 mb-1">
-                <span>🟣</span>
-                <span>OD &mdash; Official Duty:</span>
+                <span className="px-1.5 py-0.2 bg-indigo-600 text-white rounded text-[10px] font-mono">OD</span>
+                <span>🟣 Official Duty</span>
               </span>
-              <p className="text-indigo-900">District / State review meeting, special training, ya health camp duty me upasthiti.</p>
+              <p className="text-indigo-900 text-[10px] leading-snug">District / State review meeting, special training, ya health camp duty me upasthiti.</p>
             </div>
 
-            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-2.5">
+            <div className="bg-rose-50 border border-rose-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-rose-950 flex items-center gap-1.5 mb-1">
-                <span>🔴</span>
-                <span>A &mdash; Absent:</span>
+                <span className="px-1.5 py-0.2 bg-rose-600 text-white rounded text-[10px] font-mono">A</span>
+                <span>🔴 Absent</span>
               </span>
-              <p className="text-rose-900">Bina kisi soochana ke report darj na hone par anupasthiti mark hoti hai.</p>
+              <p className="text-rose-900 text-[10px] leading-snug">Bina kisi soochana ke report darj na hone par anupasthiti mark hoti hai.</p>
             </div>
 
-            <div className="bg-slate-100 border border-slate-200 rounded-2xl p-2.5">
+            <div className="bg-slate-100 border border-slate-300 rounded-2xl p-2.5 shadow-2xs">
               <span className="font-bold text-slate-900 flex items-center gap-1.5 mb-1">
-                <span>⚪</span>
-                <span>WO &mdash; Weekly Off:</span>
+                <span className="px-1.5 py-0.2 bg-slate-600 text-white rounded text-[10px] font-mono">WO</span>
+                <span>⚪ Weekly Off</span>
               </span>
-              <p className="text-slate-700">Nirdharit Ravivar (Sunday) ya sarkar dwara ghoshit chhutti.</p>
+              <p className="text-slate-700 text-[10px] leading-snug">Nirdharit Ravivar (Sunday) ya sarkar dwara ghoshit chhutti.</p>
             </div>
           </div>
 
-          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-3 text-[11px] text-purple-950 space-y-1">
-            <strong>📝 Supervisor Inspection Remarks:</strong>
-            <p>
-              District Coordinator ya State Admin kisi bhi tarikh par inspection remark ya leave reason add kar sakte hain. Aap apne <strong>Profile</strong> tab me jaakar kisi bhi tarikh par tap karenge toh supervisor ka likha gaya remark turant dikhayi dega.
+          {/* Supervisor Remarks Bento Card */}
+          <div className="bg-purple-50 border border-purple-200 rounded-2xl p-3 text-[11px] text-purple-950 space-y-1 shadow-2xs">
+            <strong className="flex items-center gap-1.5 font-black">
+              <span>📝</span>
+              <span>Supervisor Inspection Remarks:</span>
+            </strong>
+            <p className="text-purple-900 text-[10px] leading-relaxed">
+              District Coordinator ya State Admin kisi bhi tarikh par inspection remark ya leave reason add kar sakte hain. Aap apne <strong>Profile</strong> tab ke calendar me jaakar kisi bhi tarikh par tap karenge toh supervisor ka likha gaya remark turant dikhayi dega.
             </p>
           </div>
         </div>
