@@ -415,6 +415,12 @@ def canonicalize_district(name: str) -> str:
     clean = str(name).strip()
     return DISTRICT_CANONICAL_MAP.get(clean.lower(), clean)
 
+def normalize_staff_key(dist_str: str, name_str: str) -> str:
+    d = re.sub(r'[^a-z0-9]', '', canonicalize_district(dist_str or '').lower())
+    n = re.sub(r'[^a-z0-9]', '', (name_str or '').lower())
+    collapsed = re.sub(r'(.)\1+', r'\1', n)
+    return f"{d}_{collapsed}"
+
 def load_baseline_staff_directory():
     directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
     if os.path.exists("staff_directory_snapshot.json"):
@@ -2875,7 +2881,7 @@ async def get_today_attendance(
             if cached is not None:
                 return cached
 
-        # 1. Fetch staff roster applying inactive_since cutoff
+        # 1. Fetch staff roster applying inactive_since cutoff and consonant-collapsed defense
         staff_list = []
         raw_staff_docs = []
         try:
@@ -2883,6 +2889,48 @@ async def get_today_attendance(
         except Exception as fe:
             print(f"Firestore staff_directory stream notice: {fe}")
             raw_staff_docs = []
+
+        inactive_staff_keys = set()
+        if raw_staff_docs:
+            for doc in raw_staff_docs:
+                d = doc.to_dict() if hasattr(doc, "to_dict") else {}
+                if not d:
+                    continue
+                raw_dist = d.get("district") or ""
+                dist = canonicalize_district(raw_dist)
+                fo_name = (d.get("name") or "").strip()
+                doc_id = getattr(doc, "id", "") or ""
+
+                is_active = d.get("is_active") is not False and d.get("status") != "inactive"
+                inactive_since = (d.get("inactive_since") or "").strip()[:10]
+
+                is_inactive = False
+                if not is_active:
+                    if not inactive_since or target_date >= inactive_since:
+                        is_inactive = True
+                elif inactive_since and target_date >= inactive_since:
+                    is_inactive = True
+
+                if is_inactive:
+                    if dist and fo_name:
+                        inactive_staff_keys.add(normalize_staff_key(dist, fo_name))
+                        clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
+                        clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
+                        inactive_staff_keys.add(f"{clean_d}_{clean_n}")
+                    if doc_id:
+                        clean_id = re.sub(r'[^a-z0-9_]', '', doc_id.lower())
+                        inactive_staff_keys.add(clean_id)
+                        inactive_staff_keys.add(re.sub(r'(.)\1+', r'\1', clean_id))
+                        if "_" in clean_id:
+                            p_dist, p_name = clean_id.split("_", 1)
+                            inactive_staff_keys.add(f"{p_dist}_{re.sub(r'(.)\1+', r'\1', p_name)}")
+
+            if inactive_staff_keys:
+                cache.set("inactive_staff_keys", list(inactive_staff_keys), ttl=3600)
+        else:
+            cached_inactive = cache.get("inactive_staff_keys")
+            if cached_inactive:
+                inactive_staff_keys.update(cached_inactive)
 
         if raw_staff_docs:
             for doc in raw_staff_docs:
@@ -2896,10 +2944,22 @@ async def get_today_attendance(
                     continue
                 if allowed_dist_set and dist.lower() not in allowed_dist_set:
                     continue
-                
+
+                norm_key = normalize_staff_key(dist, fo_name)
+                clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
+                clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
+                exact_key = f"{clean_d}_{clean_n}"
+                doc_id = getattr(doc, "id", "") or ""
+                doc_norm_key = re.sub(r'(.)\1+', r'\1', re.sub(r'[^a-z0-9_]', '', doc_id.lower())) if doc_id else ""
+
+                if norm_key in inactive_staff_keys or exact_key in inactive_staff_keys:
+                    continue
+                if doc_id and (doc_id.lower() in inactive_staff_keys or doc_norm_key in inactive_staff_keys):
+                    continue
+
                 is_active = d.get("is_active") is not False and d.get("status") != "inactive"
                 inactive_since = (d.get("inactive_since") or "").strip()[:10]
-                
+
                 is_included = False
                 if is_active:
                     if not inactive_since or target_date < inactive_since:
@@ -2907,10 +2967,10 @@ async def get_today_attendance(
                 else:
                     if inactive_since and target_date < inactive_since:
                         is_included = True
-                        
+
                 if not is_included:
                     continue
-                    
+
                 staff_list.append({
                     "district": dist,
                     "fo_name": fo_name,
@@ -2928,9 +2988,16 @@ async def get_today_attendance(
                         continue
                     for clean_fo in names:
                         if clean_fo and str(clean_fo).strip():
+                            fo_str = str(clean_fo).strip()
+                            norm_k = normalize_staff_key(c_dist, fo_str)
+                            clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
+                            clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
+                            exact_k = f"{clean_d}_{clean_n}"
+                            if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
+                                continue
                             staff_list.append({
                                 "district": c_dist,
-                                "fo_name": str(clean_fo).strip(),
+                                "fo_name": fo_str,
                                 "designation": "Field Officer"
                             })
             else:
@@ -2941,9 +3008,16 @@ async def get_today_attendance(
                         continue
                     for clean_fo in names:
                         if clean_fo and str(clean_fo).strip():
+                            fo_str = str(clean_fo).strip()
+                            norm_k = normalize_staff_key(c_dist, fo_str)
+                            clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
+                            clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
+                            exact_k = f"{clean_d}_{clean_n}"
+                            if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
+                                continue
                             staff_list.append({
                                 "district": c_dist,
-                                "fo_name": str(clean_fo).strip(),
+                                "fo_name": fo_str,
                                 "designation": "Field Officer"
                             })
 
@@ -3101,8 +3175,11 @@ async def get_today_attendance(
         matched_report_keys = set()
         
         for s in staff_list:
+            norm_s_key = normalize_staff_key(s['district'], s['fo_name'])
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
             key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
+            if norm_s_key in inactive_staff_keys or key in inactive_staff_keys:
+                continue
             
             # Helper for alias matching (e.g. Ashwani Kumar vs Ashwani Kr Keshri)
             alias_key = None

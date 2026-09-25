@@ -62,6 +62,12 @@ const canonicalizeFo = (foName, district = '', directory = null) => {
   return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
 };
 
+const normalizeStaffKey = (dist, name) => {
+  const d = canonicalizeDistrict(dist || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const n = (name || '').toLowerCase().replace(/[^a-z0-9]/g, '').replace(/(.)\1+/g, '$1');
+  return `${d}_${n}`;
+};
+
 const formatAuditTimestamp = (ts, tsFormatted) => {
   if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
     return tsFormatted;
@@ -1553,6 +1559,17 @@ export default function AdminDashboard() {
     };
   };
 
+  // Set of inactive staff normalized keys from staffList
+  const inactiveStaffNamesSet = useMemo(() => {
+    const sSet = new Set();
+    (staffList || []).forEach(s => {
+      if (s.is_active === false || s.status === 'inactive') {
+        sSet.add(normalizeStaffKey(s.district, s.name || s.fo_name));
+      }
+    });
+    return sSet;
+  }, [staffList]);
+
   // Chronic Non-Submitter / Absence Streaks (2+ consecutive days without report)
   const chronicDefaulters = useMemo(() => {
     if (!staffDirectory || Object.keys(staffDirectory).length === 0 || !rawRecords) return [];
@@ -1583,10 +1600,13 @@ export default function AdminDashboard() {
     // Inactive cutoff lookup from staffList
     const inactiveCutoffMap = {};
     (staffList || []).forEach(s => {
-      const d = canonicalizeDistrict(s.district || '').toLowerCase();
+      const d = canonicalizeDistrict(s.district || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const n = (s.name || s.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const normKey = normalizeStaffKey(s.district, s.name || s.fo_name);
       if (s.is_active === false || s.status === 'inactive' || s.inactive_since) {
-        inactiveCutoffMap[`${d}_${n}`] = (s.inactive_since || '').slice(0, 10);
+        const cutoff = (s.inactive_since || '').slice(0, 10);
+        inactiveCutoffMap[`${d}_${n}`] = cutoff;
+        inactiveCutoffMap[normKey] = cutoff;
       }
     });
 
@@ -1603,8 +1623,9 @@ export default function AdminDashboard() {
         const cleanName = String(name || '').trim();
         if (!cleanName) return;
         const cleanFo = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        const distKey = cDist.toLowerCase();
+        const distKey = cDist.toLowerCase().replace(/[^a-z0-9]/g, '');
         const foKey = `${distKey}_${cleanFo}`;
+        const normKey = normalizeStaffKey(cDist, cleanName);
 
         // Exclude staff on leave/absent today
         if (onLeaveSet.has(foKey)) return;
@@ -1614,6 +1635,11 @@ export default function AdminDashboard() {
           const cutoff = inactiveCutoffMap[foKey];
           if (!cutoff || attendanceDate >= cutoff) return;
         }
+        if (inactiveCutoffMap[normKey] !== undefined) {
+          const cutoff = inactiveCutoffMap[normKey];
+          if (!cutoff || attendanceDate >= cutoff) return;
+        }
+        if (inactiveStaffNamesSet.has(normKey)) return;
 
         let consecutiveMissed = 0;
         const missedDates = [];
@@ -1644,7 +1670,7 @@ export default function AdminDashboard() {
     });
 
     return defaulters.sort((a, b) => b.consecutiveDays - a.consecutiveDays || a.district.localeCompare(b.district));
-  }, [staffDirectory, rawRecords, attendanceDate, currentUser, attendance, staffList]);
+  }, [staffDirectory, rawRecords, attendanceDate, currentUser, attendance, staffList, inactiveStaffNamesSet]);
 
   // District-wise attendance scorecard rollup
   const districtAttendanceRollup = useMemo(() => {
@@ -10204,6 +10230,7 @@ const availableDistrictsForFeed = useMemo(() => {
 
         // 4. Quick Search Filter across tabs
         const filteredMissing = districtMatchedMissing.filter(fo => {
+          if (inactiveStaffNamesSet.has(normalizeStaffKey(fo.district, fo.fo_name))) return false;
           if (!attendanceSearchQuery) return true;
           const q = attendanceSearchQuery.toLowerCase();
           return (fo.fo_name || '').toLowerCase().includes(q) || (fo.district || '').toLowerCase().includes(q);
