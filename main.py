@@ -225,6 +225,38 @@ def get_ist_now() -> datetime:
     """Returns current datetime in Indian Standard Time (IST, UTC+5:30)."""
     return datetime.now(IST_TIMEZONE)
 
+def format_to_ist_time(raw_ts) -> str:
+    """Converts Firestore timestamp or ISO string to Indian Standard Time (IST - UTC+5:30) 12-hour format."""
+    if not raw_ts:
+        return ""
+    try:
+        ist_offset = timezone(timedelta(hours=5, minutes=30))
+        
+        # If Firestore DatetimeWithNanoseconds or Python datetime
+        if isinstance(raw_ts, datetime):
+            if raw_ts.tzinfo is None:
+                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
+            else:
+                dt_utc = raw_ts
+            dt_ist = dt_utc.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+            
+        str_ts = str(raw_ts).strip()
+        clean_str = str_ts.replace("Z", "+00:00")
+        if "T" in clean_str or "+" in clean_str or "-" in clean_str:
+            dt = datetime.fromisoformat(clean_str)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt_ist = dt.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+        else:
+            dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
+            dt = dt.replace(tzinfo=timezone.utc)
+            dt_ist = dt.astimezone(ist_offset)
+            return dt_ist.strftime("%I:%M %p")
+    except Exception:
+        return str(raw_ts)[:16]
+
 # --- Security, Cryptography & Access Control ---
 JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dfy-tb-mis-bihar-secret-key-2026-supersecure")
 JWT_ALGORITHM = "HS256"
@@ -1054,11 +1086,11 @@ async def resolve_effective_reporting_date(
     requested_date: Optional[str] = None
 ) -> str:
     """
-    Stealth 10:00 AM Reporting Cutoff Engine (Approach B):
-    If a field officer submits before 10:00 AM IST and yesterday's report is missing,
-    silently credit the submission to yesterday to prevent attendance defaulter penalties.
+    Stealth 10:00 AM Reporting Cutoff Engine:
+    Submissions before 10:00 AM IST unconditionally map to yesterday (D - 1),
+    regardless of whether yesterday's report already exists in daily_field_reports.
     Submissions at or after 10:00 AM IST strictly map to today.
-    Explicit historical edits older than yesterday are always respected.
+    Explicit historical edits older than yesterday (< yesterday_str) are strictly respected.
     """
     now_ist = get_ist_now()
     today_str = now_ist.strftime("%Y-%m-%d")
@@ -1068,36 +1100,9 @@ async def resolve_effective_reporting_date(
     if requested_date and requested_date < yesterday_str:
         return requested_date
 
+    # Unconditional cutoff: submissions before 10:00 AM IST strictly map to yesterday
     if now_ist.hour < 10:
-        c_wp = canonicalize_district(working_place) if working_place else ""
-        c_fo = canonicalize_fo_name(fo_name, c_wp) if (fo_name and c_wp) else (fo_name or "")
-        candidate_ids = [
-            f"{c_wp}_{c_fo}_{yesterday_str}".replace(" ", "_").lower(),
-            f"{c_wp}_{fo_name}_{yesterday_str}".replace(" ", "_").lower(),
-            f"{working_place}_{fo_name}_{yesterday_str}".replace(" ", "_").lower(),
-        ]
-        if "aurangabad" in c_wp.lower():
-            candidate_ids.append(f"aurangabad-bi_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
-            candidate_ids.append(f"aurangabad_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
-        if "champaran" in c_wp.lower():
-            candidate_ids.append(f"purba champaran_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
-            candidate_ids.append(f"east champaran_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
-        if "bhojpur" in c_wp.lower():
-            candidate_ids.append(f"bhojpur_{c_fo}_{yesterday_str}".replace(" ", "_").lower())
-        candidate_ids = list(dict.fromkeys(candidate_ids))
-
-        try:
-            exists = False
-            for cid in candidate_ids:
-                doc_ref = db.collection("daily_field_reports").document(cid)
-                doc = await asyncio.to_thread(doc_ref.get)
-                if doc.exists:
-                    exists = True
-                    break
-            if not exists:
-                return yesterday_str
-        except Exception:
-            pass
+        return yesterday_str
 
     return requested_date or today_str
 
@@ -1375,6 +1380,15 @@ async def submit_daily_report(report: DailyActivityReport):
         if report.evening_km_photo_url and len(report.evening_km_photo_url) > 1000:
             payload["evening_km_photo_url"] = ""
 
+        # Stealth 10 AM Cutoff: stamp next-day morning metadata if submitted before 10:00 AM IST for yesterday
+        now_ist = get_ist_now()
+        yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
+        if now_ist.hour < 10 and report.date_of_reporting == yesterday_str:
+            morning_time = format_to_ist_time(now_ist)
+            payload["is_next_day_submission"] = True
+            payload["submitted_morning_time"] = morning_time
+            payload["morning_submission_label"] = f"Next day morning {morning_time}"
+
         is_new_submission = True
         delta_counts = {
             "notifications": len(set(valid_new_notifs)),
@@ -1410,6 +1424,9 @@ async def submit_daily_report(report: DailyActivityReport):
                 old_diff = set(d.get("differentiated_tb_ids", []))
                 delta_counts["diff_tb"] = len(set(report.differentiated_tb_ids or []) - old_diff)
 
+                # Increment submission_count for subsequent submissions
+                payload["submission_count"] = (d.get("submission_count") or 1) + 1
+
                 for k, v in payload.items():
                     if isinstance(v, list) and k.endswith("_ids"):
                         combined = d.get(k, []) + v
@@ -1442,6 +1459,12 @@ async def submit_daily_report(report: DailyActivityReport):
                     payload["evening_km_photo_url"] = d["evening_km_photo_url"]
                 if d.get("total_km") and not payload.get("total_km"):
                     payload["total_km"] = d["total_km"]
+
+                # Preserve preexisting next-day metadata if present in existing document and not set in payload
+                if d.get("is_next_day_submission") and not payload.get("is_next_day_submission"):
+                    payload["is_next_day_submission"] = d["is_next_day_submission"]
+                    payload["submitted_morning_time"] = d.get("submitted_morning_time", "")
+                    payload["morning_submission_label"] = d.get("morning_submission_label", "")
         except Exception as read_err:
             print(f"[Submit Notice] Read existing report skipped (quota or offline): {read_err}")
                         
@@ -2780,40 +2803,6 @@ async def my_profile_stats(req: ProfileStatsRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def format_to_ist_time(raw_ts) -> str:
-    """Converts Firestore timestamp or ISO string to Indian Standard Time (IST - UTC+5:30) 12-hour format."""
-    if not raw_ts:
-        return ""
-    try:
-        from datetime import datetime, timezone, timedelta
-        ist_offset = timezone(timedelta(hours=5, minutes=30))
-        
-        # If Firestore DatetimeWithNanoseconds or Python datetime
-        if isinstance(raw_ts, datetime):
-            if raw_ts.tzinfo is None:
-                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
-            else:
-                dt_utc = raw_ts
-            dt_ist = dt_utc.astimezone(ist_offset)
-            return dt_ist.strftime("%I:%M %p")
-            
-        str_ts = str(raw_ts).strip()
-        clean_str = str_ts.replace("Z", "+00:00")
-        if "T" in clean_str or "+" in clean_str or "-" in clean_str:
-            dt = datetime.fromisoformat(clean_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            dt_ist = dt.astimezone(ist_offset)
-            return dt_ist.strftime("%I:%M %p")
-        else:
-            dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
-            dt = dt.replace(tzinfo=timezone.utc)
-            dt_ist = dt.astimezone(ist_offset)
-            return dt_ist.strftime("%I:%M %p")
-    except Exception:
-        return str(raw_ts)[:16]
 
 
 @app.get("/admin/today-attendance")

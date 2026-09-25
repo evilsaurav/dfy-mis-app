@@ -76,7 +76,7 @@ async def test_resolve_effective_reporting_date_before_10am_missing_yesterday():
         main.db = original_db
 
 @pytest.mark.asyncio
-async def test_resolve_effective_reporting_date_before_10am_existing_yesterday():
+async def test_resolve_effective_reporting_date_before_10am_unconditional_even_if_yesterday_exists():
     mock_db = MockDB()
     original_db = main.db
     main.db = mock_db
@@ -95,7 +95,8 @@ async def test_resolve_effective_reporting_date_before_10am_existing_yesterday()
                 working_place="Muzaffarpur",
                 requested_date="2026-09-25"
             )
-            assert resolved == "2026-09-25"
+            # Unconditional cutoff: must resolve to yesterday even if yesterday's report already exists
+            assert resolved == "2026-09-24"
     finally:
         main.db = original_db
 
@@ -162,10 +163,61 @@ async def test_submit_daily_report_stealth_cutoff_integration():
             saved = mock_db.reports[yesterday_doc_id]
             assert saved["date_of_reporting"] == "2026-09-24"
             assert saved["notification_ids"] == ["999888777"]
+            assert saved.get("is_next_day_submission") is True
+            assert saved.get("submitted_morning_time") == "08:30 AM"
+            assert saved.get("morning_submission_label") == "Next day morning 08:30 AM"
 
             # Rollup should also be mapped to yesterday
             rollup_id = "2026-09-24_muzaffarpur"
             assert rollup_id in mock_db.rollups
+    finally:
+        main.db = original_db
+
+@pytest.mark.asyncio
+async def test_submit_daily_report_stamps_next_day_morning_metadata():
+    mock_db = MockDB()
+    original_db = main.db
+    main.db = mock_db
+    try:
+        # Pre-existing yesterday document
+        yesterday_doc_id = "muzaffarpur_raja_kumar_2026-09-24"
+        mock_db.reports[yesterday_doc_id] = {
+            "working_place": "Muzaffarpur",
+            "fo_name": "Raja Kumar",
+            "date_of_reporting": "2026-09-24",
+            "notification_ids": ["111222"],
+            "visited_names": ["Dr. Sharma"],
+            "submission_count": 1,
+            "morning_km": 10,
+            "status": "completed"
+        }
+        mock_now = datetime(2026, 9, 25, 8, 25, tzinfo=main.IST_TIMEZONE)
+        with patch("main.get_ist_now", return_value=mock_now):
+            report = main.DailyActivityReport(
+                working_place="Muzaffarpur",
+                fo_name="Raja Kumar",
+                date_of_reporting="2026-09-25",
+                pin="1234",
+                notification_ids=["333444"],
+                visited_names=["Dr. Verma"],
+                evening_km=25
+            )
+            res = await main.submit_daily_report(report)
+            assert res["message"] == "Daily report submitted successfully"
+
+            # Should be mapped to yesterday (2026-09-24)
+            assert yesterday_doc_id in mock_db.reports
+            assert "muzaffarpur_raja_kumar_2026-09-25" not in mock_db.reports
+            saved = mock_db.reports[yesterday_doc_id]
+            assert saved["date_of_reporting"] == "2026-09-24"
+            assert saved.get("is_next_day_submission") is True
+            assert saved.get("submitted_morning_time") == "08:25 AM"
+            assert saved.get("morning_submission_label") == "Next day morning 08:25 AM"
+            assert saved.get("submission_count") == 2
+            assert set(saved["notification_ids"]) == {"111222", "333444"}
+            assert set(saved["visited_names"]) == {"Dr. Sharma", "Dr. Verma"}
+            assert saved["morning_km"] == 10
+            assert saved["evening_km"] == 25
     finally:
         main.db = original_db
 
