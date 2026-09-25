@@ -4,7 +4,8 @@
 > *Author:* Health Informatics & Analytics Engineering  
 > *Platform:* FastAPI Backend + Google Cloud Firestore + React 19 Engine  
 > *Coverage:* 22+ Districts in Bihar, India  
-> *Version:* 2.5.0 (Attendance Leaves, Lifecycle Cutoff & Duplicate Defense)
+> *Version:* 2.8.3 (Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet, Consonant Defense & Documents Cohort Partitioning)  
+> *Status:* Production Active
 
 ---
 
@@ -198,6 +199,102 @@ For every field staff member (ADC, TC, FO):
   - Auto-computed column widths: $\text{width} = \max(\text{cell length}) + 4$.
   - Number formatting: centered numbers, left-aligned officer names.
 - **District ZIP Streamer**: Streams all 22+ district `.xlsx` files compressed on-the-fly into a single `.zip` archive via `StreamingResponse(io.BytesIO(...))` with zero temporary disk file footprint on Render.
+
+---
+
+### 3.10 Stealth 10:00 AM Reporting Cutoff & Morning Metadata Processing
+- **Operational Logic**:
+  - Submissions received between midnight and 10:00:00 AM IST are attributed to the previous calendar day ($D_{\text{yesterday}}$).
+  - Formula:
+    $$D_{\text{target}} = \begin{cases}
+    D_{\text{today}} - 1\text{ day} & \text{if } T_{\text{submit}} < \text{10:00:00 AM IST} \\
+    D_{\text{today}} & \text{otherwise}
+    \end{cases}$$
+- **Document Routing & Key Formulation**:
+  $$\text{Doc ID} = \text{lowercase}(\text{sanitize}(\text{district} + \text{"\_"} + \text{fo\_name} + \text{"\_"} + D_{\text{target}}))$$
+- **Enriched Metadata Fields**:
+  - `is_next_day_submission`: `True`
+  - `submitted_morning_time`: Current time formatted as `HH:MM:SS` (IST).
+  - `morning_submission_label`: User-facing badge text `⏰ Next day morning HH:MM AM`.
+- **Idempotent Merge & Rollup Processing**:
+  - If a report already exists for $D_{\text{target}}$ (e.g. partial evening report), incoming arrays are merged uniquely:
+    $$\text{merged\_ids} = \text{list}(\text{dict.fromkeys}(\text{existing\_ids} + \text{incoming\_ids}))$$
+  - Daily district rollups (`daily_district_rollups`) are updated with the incremental difference:
+    $$\Delta \text{Rollup} = \text{len}(\text{merged\_ids}) - \text{len}(\text{existing\_ids})$$
+
+---
+
+### 3.11 Dual-Sheet Staff Attendance Data Aggregation Pipeline
+- **Endpoint**: `GET /admin/export-staff-attendance?month=YYYY-MM&district=XYZ`
+- **Data Gathering Pipeline**:
+  1. Retrieves all staff assigned to the district from `staff_directory`.
+  2. Filters out inactive staff whose `inactive_since` date is strictly before the queried month.
+  3. Queries `daily_field_reports` for all district documents within the month.
+  4. Queries `daily_staff_leaves` for all absence/remark documents within the month.
+- **Sheet 1: Monthly Attendance Matrix Construction**:
+  - Iterates through days $d \in [1 \dots \text{days\_in\_month}]$:
+    $$\text{Status}(d) = \begin{cases}
+    \text{"P"} & \text{if staff has submitted report for day } d \\
+    \text{"OD"} & \text{if leave record exists with category "Official Work"} \\
+    \text{"L"} & \text{if leave record exists with other category (Medical/Casual)} \\
+    \text{"A"} & \text{if } d \le \text{current\_day} \text{ and not a Sunday/Holiday} \\
+    \text{""} & \text{if future date or Sunday/Holiday}
+    \end{cases}$$
+  - Next-Day Morning Tagging: If `is_next_day_submission == True`, appends cell note and logs remarks as `Submitted next morning (HH:MM AM)`.
+  - Monthly Totals: Computes Total Present ($P$), Official Duty ($OD$), Leaves ($L$), Absences ($A$), and Attendance Percentage:
+    $$\text{Attendance } \% = \text{round}\left(\frac{P + OD}{\max(1, W_{\text{elapsed}})} \times 100\right)$$
+- **Sheet 2: Detailed Activity Ledger Construction**:
+  - Emits one row per daily report submitted:
+    - Date, District, Staff Name, Role / Designation.
+    - Clinical metrics: Doctor Visits, Samples Tested, Presumptive TB, HIV/DM Comorbidity Screenings, DBT Account Linkages.
+    - Field operations: Morning Odometer KM, Evening Odometer KM, Net Travel Distance (KM), Travel Reimbursement Expense, Supervisor Remarks.
+- **Resource Protection**:
+  - Serialized via `attendance_excel_semaphore = asyncio.Semaphore(1)`.
+  - Invokes `gc.collect()` immediately after workbook binary serialization.
+
+---
+
+### 3.12 Consonant-Collapsed Deactivated Staff Roster Defense
+- **Normalization Algorithm**:
+  - Standardizes staff matching across disparate datasets (Firestore documents, Excel rosters, directory snapshots):
+    $$\text{clean\_name} = \text{re.sub}(r'[^a-z0-9]', '', \text{name.lower()})$$
+    $$\text{collapsed\_name} = \text{re.sub}(r'(.)\1+', r'\1', \text{clean\_name})$$
+    $$\text{Normalized Key} = \text{canonicalizeDistrict}(D) + \text{"\_"} + \text{collapsed\_name}$$
+- **Roster Filtering Guard**:
+  - When compiling chronic defaulter lists or attendance rosters, both the canonical key and consonant-collapsed alias are checked against `inactiveStaffNamesSet` and `staffDirectory`.
+  - Completely blocks deactivated officers (e.g. Purushottam Kumar vs Purushotam Kumar in Sitamarhi) from falsely appearing in defaulter streaks.
+
+---
+
+### 3.13 Master Detailed Table Documents Cohort Partitioning
+- **Clinical Rationale**:
+  - In TB elimination programming, collecting patient documents (Aadhaar, Bank Passbook, Consent) for new monthly notifications is critical for rapid DBT disbursement, while collecting documents for older notifications addresses historical backlog.
+- **Cohort Classification**:
+  - Builds active month notification set: $S_{\text{current\_notifs}} = \bigcup \text{notification\_ids}_{\text{current\_month}}$.
+  - For each daily report document, partitions `documents_ids`:
+    $$D_{\text{cur}} = [id \text{ for } id \in \text{documents\_ids} \text{ if } id \in S_{\text{current\_notifs}}]$$
+    $$D_{\text{prev}} = [id \text{ for } id \in \text{documents\_ids} \text{ if } id \notin S_{\text{current\_notifs}}]$$
+- **UI Aggregation & Sorting**:
+  - Master table cell displays: `C:len(D_cur) | P:len(D_prev)`.
+  - Reacts dynamically to `masterTableCohortFilter`:
+    - `all`: displays combined format `C:X | P:Y`.
+    - `current_cohort`: evaluates metric purely on $D_{\text{cur}}$.
+    - `backlog`: evaluates metric purely on $D_{\text{prev}}$.
+
+---
+
+### 3.14 Retroactive Admin Inspection Remarks & Cross-Portal Sync
+- **Endpoint**: `POST /admin/attendance/add-remark`
+- **Payload Schema**:
+  - `date`: `YYYY-MM-DD`
+  - `district`: Canonical district string
+  - `fo_name`: Normalized officer name
+  - `remark`: Supervisor observation / inspection note
+  - `leave_type`: Optional status override (`Present`, `Medical`, `Casual`, `Official Work`, `Absent`)
+- **Persistence & Eviction**:
+  - Writes to Firestore collection `daily_staff_leaves` with document ID `{date}_{canonicalDistrict}_{fo_name_normalized}`.
+  - Invalidates in-memory attendance cache for the specified date: `cache.delete_prefix(f"attendance_{date}")`.
+  - Transmits updated status to Field Officer calendar view.
 
 ---
 

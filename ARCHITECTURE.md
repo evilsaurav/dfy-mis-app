@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Google Cloud Firestore & Firebase Cloud Storage  
-> *Version:* 3.3.0 (Attendance Leaves, Staff Lifecycle Cutoff, FO Pacing & Duplicate Prevention)  
+> *Version:* 3.5.0 (v2.8.3 - Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet, Consonant Defense & Native Bento SOPs)  
 > *Status:* Production Active
 
 ---
@@ -263,6 +263,79 @@ flowchart TD
         Repair --> AuditLog[Write admin_audit_logs]
     end
 ```
+
+### 6.8 Stealth 10:00 AM Reporting Cutoff Architecture
+- **Operational Challenge**: Ground health workers often encounter poor connectivity in the evening or travel late from remote health blocks, entering their daily reports the next morning between 6:00 AM and 9:30 AM. Under standard chronological ingestion, these early morning reports skew the new day's attendance radar while leaving the previous day recorded as "Absent" or "Missing".
+- **Deterministic Cutoff Ingestion Pipeline**:
+  - The ingestion endpoint (`POST /submit-daily-report`) evaluates the current Indian Standard Time (IST, UTC+05:30).
+  - If current time $T_{\text{submit}} < \text{10:00:00 AM}$, the report is deterministically and unconditionally routed to the previous calendar date ($D_{\text{target}} = D_{\text{today}} - 1$).
+  - Evaluates deterministic document ID: `{canonical_district}_{fo_name_normalized}_{yesterday}`.
+  - Automatically enriches the persisted document with morning metadata:
+    - `is_next_day_submission: True`
+    - `submitted_morning_time: "HH:MM:SS"`
+    - `morning_submission_label: "⏰ Next day morning HH:MM AM"`
+- **Zero-Leakage Privacy Boundary**:
+  - Field Officers maintain an uncompromised official deadline of **7:00 PM evening**.
+  - The 10:00 AM cutoff functions strictly as an administrative grace mechanism.
+  - The FO Mobile PWA (`App.jsx`) and Field Officer Help Guide contain **zero mention** of the 10:00 AM cutoff to maintain field reporting discipline.
+- **Safe Idempotent Migration Engine (`scripts/migrate_morning_reports.py`)**:
+  - Standalone migration utility safely merges historical morning reports into their corresponding previous-day documents.
+  - Dynamically merges all clinical ID arrays (`notification_ids`, `sample_tested_ids`, `presumptive_ids`, `hiv_dm_ids`, `dbt_ids`, etc.) and visitor logs (`visited_names`).
+  - Recalculates district rollups and purges in-memory caches safely.
+
+### 6.9 Dual-Sheet Staff Attendance Generator & Concurrency Semaphore
+- **Executive Reporting Architecture (`/admin/export-staff-attendance`)**:
+  - Completely replaces legacy single-officer dossier with a high-density, multi-officer attendance and duty analysis workbook generated via `openpyxl`.
+  - **Sheet 1 (Monthly Attendance Grid)**:
+    - Full calendar matrix mapping each day of the month ($1 \dots D_{\text{month}}$) against all active staff members.
+    - Color-coded cell formatting: `P` (Present - Green), `L` (Leave - Amber), `A` (Absent - Red), `OD` (Official Duty - Blue).
+    - Summary metrics: Total Present, Total Leave, Total Absent, Total Duty Days, Attendance Percentage ($P\% = \frac{\text{Present} + \text{OD}}{\text{Total Working Days}} \times 100$).
+    - Next-Day Morning notes attached to cell comments and remarks column: `Submitted next morning (HH:MM AM)`.
+  - **Sheet 2 (Detailed Activity Log)**:
+    - Comprehensive chronological duty log detailing every submitted report.
+    - Includes Doctor Visits, Sample Tests, Presumptive TB, HIV/DM Comorbidity Screenings, DBT Account Linkages, Vehicle Travel KM, and supervisor inspection notes.
+- **Render 512MB RAM Concurrency Semaphore & GC**:
+  - Guarded on the FastAPI backend by `attendance_excel_semaphore = asyncio.Semaphore(1)`.
+  - Guarantees that concurrent download requests from multiple state coordinators are queued sequentially rather than processed in parallel, preventing Render memory spikes.
+  - Explicit garbage collection (`gc.collect()`) triggers immediately after streaming the workbook.
+- **Client-Side Sequential Queue with 1-Second Cooldown**:
+  - Bulk multi-district downloads initiate a client-side sequential worker that pauses 1000ms between requests, packaging reports into scoped ZIP bundles.
+
+### 6.10 Consonant-Collapsed Deactivated Staff Roster Defense
+- **The Problem**: Spelling variations between Firestore user IDs and official directory records (e.g. `sitamarhi_purushottamkumar` vs `Purushotam Kumar`) caused deactivated staff to bypass status filters and appear as chronic defaulters.
+- **Phonetic Consonant-Collapsing Pipeline**:
+  - `normalizeStaffKey(district, name)`:
+    $$\text{Key} = \text{canonicalizeDistrict}(D) + \text{"\_"} + \text{clean}(N).\text{replace}(/(.)\1+/g, '\$1')$$
+  - Collapses repeated consonants (e.g. `tt` $\rightarrow$ `t`, `mm` $\rightarrow$ `m`, `ll` $\rightarrow$ `l`, `rr` $\rightarrow$ `r`).
+  - Dual-layer defense: Matches both exact keys and consonant-collapsed phonetic aliases against `inactiveStaffNamesSet` and `staffDirectory`.
+  - Guarantees 0 phantom defaulters across Sitamarhi and all 22+ project districts.
+
+### 6.11 Retroactive Admin Inspection Remarks & Cross-Portal Sync
+- **Retroactive Supervisor Annotations (`POST /admin/attendance/add-remark`)**:
+  - State and Sub-Admins can inspect attendance and duty submissions for any past or current calendar day and attach supervisor remarks or adjust leave statuses directly from the Attendance Radar.
+- **Cross-Portal Reflection**:
+  - Persisted in Firestore collection `daily_staff_leaves` with key `{date}_{district}_{fo_name}`.
+  - Instantly synchronizes with the Field Officer's mobile calendar view, displaying status chips in 5 distinct color tokens (Emerald, Blue, Amber, Indigo, Rose).
+- **Sub-Admin RBAC Validation**:
+  - Strict district scoping rejects status adjustments or remarks outside assigned districts with HTTP 403.
+
+### 6.12 Nikshay Reconciler Direct Patient Contacts & 1-Tap Calling
+- **Direct Patient Contact Integration**:
+  - Enriches Nikshay Reconciler, Clinical Dropout Radar, and Patient Journey Tracker with verified patient names and phone numbers.
+- **1-Tap Direct Dialing (`tel:`)**:
+  - Directly opens mobile dialer via `tel:` URI protocol for instant patient adherence follow-up and verification.
+- **Quick-Copy Clipboard Action**:
+  - Uses navigator Clipboard API with fallback for rapid phone number extraction.
+
+### 6.13 100% Native Bento Flowchart Visual SOP Architecture
+- **Responsive Bento Grid Framework**:
+  - Replaced dense, hard-to-read operational text walls with visual Bento Flowchart cards.
+  - Visual components: Step sequence badges (`1➔2➔3`), SVG flow connectors, colored tactical callouts, and status chips.
+- **Field Officer Help Guide (`App.jsx`)**:
+  - 9 visual modules: Registration & Setup, Daily Duty Flow, Reporting Standards, Clinical Cascade, WhatsApp Broadcasts, Offline Sync Engine, Direct Patient Calling, Calendar Status Codes, and Emergency Duty Mode.
+  - Strict compliance with Zero-Leakage Privacy Rule (7:00 PM evening deadline strictly enforced).
+- **Centralized Admin SOP (`AdminDashboard.jsx`)**:
+  - 10 operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, and Security Governance.
 
 ---
 

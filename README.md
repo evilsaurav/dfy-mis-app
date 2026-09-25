@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.8.0-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.8.3-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -38,6 +38,13 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [9. Staff Active/Inactive Lifecycle & Historical Retrospection](#9--staff-activeinactive-lifecycle--historical-retrospection)
   - [10. Field Officer Target Pacing Command Card & Dynamic Working Days](#10--field-officer-target-pacing-command-card--dynamic-working-days)
   - [11. Multi-Tier Duplicate Notification Prevention & 1-Click Auto-Repair Suite](#11--multi-tier-duplicate-notification-prevention--1-click-auto-repair-suite)
+  - [12. Stealth 10:00 AM Reporting Cutoff & Next-Day Radar Attribution](#12--stealth-1000-am-reporting-cutoff--next-day-radar-attribution)
+  - [13. Staff Attendance Dual-Sheet Excel Generator & Multi-District Queue](#13--staff-attendance-dual-sheet-excel-generator--multi-district-queue)
+  - [14. Retroactive Admin Inspection Remarks & Cross-Portal Leave Sync](#14--retroactive-admin-inspection-remarks--cross-portal-leave-sync)
+  - [15. Nikshay Reconciler Direct Patient Contacts & 1-Tap Calling](#15--nikshay-reconciler-direct-patient-contacts--1-tap-calling)
+  - [16. Consonant-Collapsed Deactivated Staff Roster Defense](#16--consonant-collapsed-deactivated-staff-roster-defense)
+  - [17. Master Detailed Table Documents Cohort Analytics (C:X | P:Y)](#17--master-detailed-table-documents-cohort-analytics-cx--py)
+  - [18. 100% Native Bento Visual Flowcharts in FO Guide & Centralized Admin SOP](#18--100-native-bento-visual-flowcharts-in-fo-guide--centralized-admin-sop)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -233,6 +240,92 @@ flowchart TD
 
 ---
 
+### 12. ⏰ Stealth 10:00 AM Reporting Cutoff & Next-Day Radar Attribution
+- **Unconditional 10:00 AM Cutoff Engine**:
+  - Daily reports submitted before **10:00:00 AM IST** are deterministically routed to the previous calendar day ($D-1$).
+  - Prevents late-night or early-morning catch-up submissions from corrupting current-day attendance or inflating daily metrics.
+- **Zero-Leakage Privacy Rule**:
+  - Field Officers maintain an uncompromised official reporting deadline of **7:00 PM evening**.
+  - The 10:00 AM cutoff functions strictly as an internal administrative grace mechanism and is **100% concealed** from the Field Officer PWA interface and FO documentation.
+- **Next-Day Morning Metadata Enrichment**:
+  - Ingested morning reports are flagged with `is_next_day_submission: true`, `submitted_morning_time: "HH:MM:SS"`, and `morning_submission_label: "⏰ Next day morning HH:MM AM"`.
+- **Attendance Radar Segregation**:
+  - The Attendance Radar displays a prominent amber badge `⏰ Next day morning HH:MM AM` on yesterday's attendance ledger and cleanly omits early-morning submissions from today's active submitted list.
+- **Safe Idempotent Migration Engine (`scripts/migrate_morning_reports.py`)**:
+  - Standalone utility safely migrates historical morning reports into their respective previous-day documents without data loss, merging ID arrays uniquely and re-aligning rollup counters.
+
+---
+
+### 13. 📊 Staff Attendance Dual-Sheet Excel Generator & Multi-District Queue
+- **Executive Dual-Sheet Attendance Workbook (`/admin/export-staff-attendance`)**:
+  - Completely replaces the legacy single-officer dossier with a high-density, multi-officer attendance and duty analysis workbook.
+  - **Sheet 1 (Monthly Attendance Grid)**: Color-coded calendar matrix displaying daily status codes (`P` - Present, `L` - Leave, `A` - Absent, `OD` - Official Duty), summary columns (Present Days, Leave Days, Absent Days, Total Duty Days, Attendance Rate %), and Next-Day Morning annotations (`Submitted next morning (HH:MM AM)`).
+  - **Sheet 2 (Detailed Activity Log)**: Chronological daily duty log listing each submitted report with Doctor Visits, Sample Tests, Presumptive TB, HIV/DM, DBT, Travel KM, and supervisor inspection remarks.
+- **Render 512MB RAM Concurrency Protection**:
+  - Generation is strictly serialized on the backend via `attendance_excel_semaphore = asyncio.Semaphore(1)`.
+  - Explicit garbage collection (`gc.collect()`) triggers immediately after workbook generation, preventing out-of-memory crashes on cloud free tiers.
+- **Client-Side Sequential Queue with 1-Second Cooldown**:
+  - Bulk district exports trigger a client-side sequential queue with a 1000ms delay between district requests, preventing API rate-limiting or server spikes.
+  - Provides scoped ZIP bundle downloads for multi-district selections.
+
+---
+
+### 14. ✏️ Retroactive Admin Inspection Remarks & Cross-Portal Leave Sync
+- **Retroactive Supervisor Annotations (`POST /admin/attendance/add-remark`)**:
+  - State and Sub-Admins can inspect attendance and duty submissions for any past or current calendar day and attach inspection notes or adjust leave statuses directly from the Attendance Radar.
+- **Immediate Cross-Portal Calendar Synchronization**:
+  - Remarks and status adjustments update Firestore collection `daily_staff_leaves` and instantly reflect on the Field Officer's mobile calendar view.
+- **5 Distinct Visual Status Tokens**:
+  - 🟢 **Present** (`#10B981`): Standard daily duty report submitted.
+  - 🔵 **Official Duty** (`#3B82F6`): Government review meeting, training, or state workshop.
+  - 🟡 **Casual Leave** (`#F59E0B`): Authorized personal leave.
+  - 🟣 **Medical Leave** (`#6366F1`): Authorized sick leave.
+  - 🔴 **Absent / Uninformed** (`#EF4444`): Unauthorized absence or unsubmitted duty.
+- **Sub-Admin RBAC Validation**:
+  - Strict district scoping rejects status adjustments or remarks outside assigned districts with HTTP 403.
+
+---
+
+### 15. 📞 Nikshay Reconciler Direct Patient Contacts & 1-Tap Calling
+- **Direct Patient Contact Integration**:
+  - Enriches Nikshay Reconciler, Clinical Dropout Radar, and Patient Journey Tracker with verified patient names and phone numbers.
+- **1-Tap Direct Dialing (`tel:`)**:
+  - Field Officers and Coordinators can dial patients directly from the app interface with a single tap, accelerating follow-up interventions and medication adherence counseling.
+- **Quick-Copy Clipboard Action**:
+  - Tap-to-copy button allows instant copying of patient contact numbers for SMS or WhatsApp outreach.
+
+---
+
+### 16. 🛡️ Consonant-Collapsed Deactivated Staff Roster Defense
+- **Phonetic Normalization Engine (`normalizeStaffKey`)**:
+  - Eliminates false-positive defaulter records caused by phonetic spelling discrepancies between Firestore IDs (`sitamarhi_purushottamkumar`) and directory snapshots (`Purushotam Kumar`).
+  - Consonant collapsing regex (`replace(/(.)\1+/g, '$1')`) normalizes repeated consonants (e.g. `tt` $\rightarrow$ `t`, `mm` $\rightarrow$ `m`, `ll` $\rightarrow$ `l`).
+- **Dual-Layer Deactivation Defense**:
+  - Combines canonical district mapping with collapsed phonetic keys and direct status checks against `staffDirectory`.
+  - Permanently prevents deactivated, resigned, or transferred personnel from ghosting into chronic defaulter streaks or missing staff rosters across all 22+ districts.
+
+---
+
+### 17. 📑 Master Detailed Table Documents Cohort Analytics (`C:X | P:Y`)
+- **Real-Time Cohort Partitioning**:
+  - Upgraded Documents Collected column in the Master Detailed Table to display real-time Current Month (`C:X`) vs Previous Backlog (`P:Y`) cohort split.
+  - Accurately tracks whether documents collected belong to new monthly notifications or historical backlog cases.
+- **Reactive 3-Way Cohort Filtering**:
+  - Seamlessly responds to the master cohort filter (`All`, `Current Month Cohort`, `Backlog Cohort`) and multi-column sorting engine.
+
+---
+
+### 18. 🧩 100% Native Bento Visual Flowcharts in FO Guide & Centralized Admin SOP
+- **Modern Bento Grid Architecture**:
+  - Replaced legacy text-heavy instructions with responsive, visual Bento Flowcharts featuring sequence badges (`1➔2➔3`), SVG connecting arrows, status chips, and tactical callouts.
+- **Field Officer Help Guide (`App.jsx`)**:
+  - 9 visual chapters covering App Registration, Daily Attendance, Reporting Formats, Clinical Cascade, WhatsApp Broadcasts, Offline Sync, Patient Calling, Calendar Codes, and Emergency Duty.
+  - Strict compliance with the Zero-Leakage Privacy Rule (7:00 PM evening deadline strictly enforced in all visual diagrams).
+- **Centralized Admin SOP (`AdminDashboard.jsx`)**:
+  - 10 comprehensive operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, and Security Governance.
+
+---
+
 ## 📍 Districts Covered
 
 The system supports active staff and reporting across **22+ Districts of Bihar**:
@@ -310,7 +403,7 @@ Mis field report/
 | Method | Endpoint | Description |
 |---|---|---|
 | `POST` | `/verify-pin` | Verify 4-digit staff PIN (blocks inactive staff accounts with HTTP 403) |
-| `POST` | `/submit-daily-report` | Submit daily clinical report & patient IDs (idempotent, rollups, duplicate notification auto-pruning) |
+| `POST` | `/submit-daily-report` | Submit daily clinical report & patient IDs (idempotent, rollups, duplicate notification auto-pruning, unconditional 10:00 AM cutoff routing to D-1) |
 | `POST` | `/check-today-status` | Check if officer has submitted a report today |
 | `POST` | `/my-profile-stats` | Fetch officer-specific monthly summary, dynamic working days & pacing velocity |
 | `GET` | `/api/district-notification-registry` | Fetch 90-day district notifications for offline IndexedDB duplicate prevention cache |
@@ -322,7 +415,7 @@ Mis field report/
 | `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing (`force_refresh` support) |
 | `POST` | `/admin/reports/delete-day` | Delete an officer's single-day report with atomic rollup rollback & RBAC |
 | `GET` | `/admin/attendance/live` | Live field staff attendance radar (submitted vs missing) |
-| `GET` | `/admin/today-attendance` | Live attendance radar with date cutoff (`inactive_since`), submitted vs missing vs on-leave resolution |
+| `GET` | `/admin/today-attendance` | Live attendance radar with date cutoff (`inactive_since`), 10 AM morning cutoff segregation, submitted vs missing vs on-leave resolution |
 | `GET` | `/admin/users/list` | Super Admin: List all Admin and Sub-Admin accounts |
 | `POST` | `/admin/users/create` | Super Admin: Provision new Sub-Admin user with permitted districts |
 | `POST` | `/admin/users/update` | Super Admin: Update user permissions and assigned districts |
@@ -333,6 +426,7 @@ Mis field report/
 |---|---|---|
 | `POST` | `/admin/attendance/mark-leave` | Mark staff as on-leave/absent with reason category, remark, and Sub-Admin RBAC |
 | `POST` | `/admin/attendance/unmark-leave` | Revert staff from leave back to active attendance tracking with Sub-Admin RBAC |
+| `POST` | `/admin/attendance/add-remark` | Retroactive supervisor remark & attendance status override (Present, Medical, Casual, Official Duty, Absent) with FO calendar sync |
 | `POST` | `/admin/staff/toggle-status` | Toggle staff `ACTIVE`/`INACTIVE` status with `inactive_since` cutoff date and Sub-Admin RBAC |
 | `GET` | `/admin/pacing/settings` | Fetch declared government holidays and calendar pacing settings for month/district |
 | `POST` | `/admin/pacing/settings` | Update declared government holidays per month (statewide default or district override) with RBAC |
@@ -370,7 +464,7 @@ Mis field report/
 |---|---|---|
 | `GET` | `/admin/export-state-summary` | Download Statewide Executive Consolidation (`.xlsx`) |
 | `GET` | `/download-district-kpi` | Download District-specific drilldown workbook (`.xlsx`) |
-| `GET` | `/admin/export-fo-dossier` | Download Single Officer Performance Dossier (`.xlsx`) |
+| `GET` | `/admin/export-staff-attendance` | Download Dual-Sheet Staff Attendance Workbook (`.xlsx`) with Sheet 1 Monthly Grid & Sheet 2 Activity Log (concurrency protected) |
 
 ### 8. Automated Cloud Backups & Disaster Recovery (Option A)
 | Method | Endpoint | Description |

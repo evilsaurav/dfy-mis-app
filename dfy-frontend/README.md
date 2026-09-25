@@ -1,5 +1,6 @@
 # 📱 Doctors For You (DFY) - React 19 Field PWA & Analytics Dashboard
 
+[![Version](https://img.shields.io/badge/Version-v2.8.3-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![React](https://img.shields.io/badge/React-19.2-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -44,15 +45,32 @@ flowchart TD
 - Dynamic calendar math deducting Sundays and declared government holidays synced from the backend (`GET /admin/pacing/settings`).
 - Computes real-time daily run-rate ($V_{\text{actual}}$) and required recovery velocity ($V_{\text{recovery}}$).
 
-### 5. 🌴 Real-Time Attendance Radar & Leave Tagging
+### 5. 🌴 Real-Time Attendance Radar, Next-Day Badges & Leave Tagging
 - Matches live daily submissions against master directory rosters.
+- Displays prominent `⏰ Next day morning HH:MM AM` amber badge on yesterday's attendance ledger for early-morning submissions (<10:00 AM IST).
 - 1-click **Mark Leave Modal** (`AttendanceLeaveModal`) with categories: `Medical`, `Casual`, `Official Work`, `Personal`, `Uninformed`.
 - Segregates staff on leave into a dedicated "On Leave" tab with purple badging.
 - Generates 1-click bilingual WhatsApp attendance digests that automatically exclude approved leaves from the missing roster.
 
 ### 6. 📜 In-App Release History & Changelog Modal (`changelogData.js`)
 - Client-side in-app changelog modal with zero Firestore read cost.
-- Automatically notifies users of new updates with version badges and highlights.
+- Automatically notifies users of new updates with version badges and highlights (v2.8.3).
+
+### 7. 📊 Dual-Sheet Staff Attendance Export & Multi-District Queue
+- Download high-density Excel workbooks (`/admin/export-staff-attendance`) featuring Sheet 1 (Monthly Attendance Matrix with Next-Day notes) and Sheet 2 (Detailed Activity Log).
+- Client-side sequential worker with 1000ms delay between district requests and scoped ZIP bundle downloads.
+
+### 8. ✏️ Retroactive Admin Inspection Remarks & Cross-Portal Leave Sync
+- Allows State and Sub-Admins to append supervisor notes or adjust leave statuses for any past/current day from Attendance Radar.
+- Immediately synchronizes with Field Officer mobile calendar across 5 status colors (Emerald, Blue, Amber, Indigo, Rose).
+
+### 9. 📞 Nikshay Reconciler Direct Patient Calling & Quick-Copy
+- Patient contacts (`patient_name`, `phone_number`) integrated into Nikshay Reconciler and Patient Journey Tracker.
+- 1-tap `tel:` dialing and quick-copy buttons in both FO mobile PWA and Admin inspection drawer.
+
+### 10. 🧩 100% Native Bento Visual Flowcharts in FO Guide & Centralized Admin SOP
+- Replaces legacy text blocks with modern, responsive Bento Flowcharts with sequence badges (`1➔2➔3`), SVG flow connectors, and tactical callouts.
+- FO Guide enforces strict 7:00 PM reporting deadline with zero leakage of the administrative 10:00 AM cutoff.
 
 ---
 

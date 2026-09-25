@@ -5,7 +5,7 @@
 > *Design Framework:* Tailwind CSS v4 + React 19 + Lucide Icons  
 > *Typography:* Plus Jakarta Sans  
 > *Target Form Factors:* Mobile PWA (Field Staff) & Responsive Desktop Studio (Administrators)  
-> *Version:* 3.2.0 (Dual-Persona Offline-First & Real-Time Operational UX)  
+> *Version:* 3.5.0 (v2.8.3 - Bento Visual Flowcharts, Next-Day Radar Badging, Cohort Notation & Direct Dialing)  
 > *Status:* Production Active
 
 ---
@@ -38,10 +38,11 @@ flowchart TD
 |---|---|---|---|
 | **Slate Command Base** | `#0F172A` | `bg-slate-900` | Command headers, live activity ticker background, high-contrast badges |
 | **Slate Surface Neutral**| `#F8FAFC` | `bg-slate-50` | Primary app canvas background, soft borders, muted cards |
-| **Indigo Master Accent** | `#4F46E5` | `bg-indigo-600` | Primary interactive buttons, state averages, active navigation tabs |
-| **Emerald Ahead / On Track**| `#10B981` | `bg-emerald-500` | Pacing ≥90%, successful submissions, online sync complete, verified PIN |
-| **Amber Watchlist / Warning**| `#F59E0B` | `bg-amber-500` | Pacing 70%-89%, needs pace boost, offline mode banner, queued reports |
-| **Rose Critical / At Risk**| `#F43F5E` | `bg-rose-500` | Pacing <70%, cascade dropouts, report delete modal, urgent login alerts |
+| **Indigo Master Accent** | `#4F46E5` | `bg-indigo-600` | Primary interactive buttons, state averages, active navigation tabs, Medical Leave |
+| **Emerald Ahead / On Track**| `#10B981` | `bg-emerald-500` | Pacing ≥90%, successful submissions, online sync complete, verified PIN, Present Duty |
+| **Amber Watchlist / Warning**| `#F59E0B` | `bg-amber-500` | Pacing 70%-89%, needs pace boost, offline banner, next-day morning badge, Casual Leave |
+| **Rose Critical / At Risk**| `#F43F5E` | `bg-rose-500` | Pacing <70%, cascade dropouts, report delete modal, urgent login alerts, Absent / Defaulter |
+| **Blue Official Duty** | `#3B82F6` | `bg-blue-500` | Official Duty (OD), government review meetings, training sessions |
 | **Cyan Clinical Accent** | `#06B6D4` | `bg-cyan-500` | Culture / DST specialized testing indicator, laboratory badges |
 
 ### 2.2 Typography Hierarchy (`Plus Jakarta Sans`)
@@ -141,6 +142,55 @@ The 4-digit PIN input features real-time dynamic micro-feedback directly beneath
   - **Direct 1-Click Download**: `📥 Download` button initiates direct browser stream of `.json.gz` archive.
   - **Emergency Disaster Recovery Drawer**: Safety-guarded restore interface requiring typed confirmation keyword `RESTORE-CONFIRM`.
 
+### 4.8 Attendance Radar Next-Day Morning Badge & 5-Status Leave Management
+- **Next-Day Morning Badge**:
+  - Rendered in Attendance Radar for submissions completed before 10:00 AM:
+    ```jsx
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/80 shadow-2xs">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+      <span>⏰ Next day morning {time}</span>
+    </span>
+    ```
+  - Includes descriptive tooltip explaining the grace period attribution to yesterday ($D-1$).
+- **Retroactive Remark & Leave Modal (`AttendanceLeaveModal`)**:
+  - Modal features 5 status chips with immediate visual preview:
+    - 🟢 Present (`bg-emerald-50 text-emerald-800 border-emerald-200`)
+    - 🔵 Official Duty (`bg-blue-50 text-blue-800 border-blue-200`)
+    - 🟡 Casual Leave (`bg-amber-50 text-amber-800 border-amber-200`)
+    - 🟣 Medical Leave (`bg-indigo-50 text-indigo-800 border-indigo-200`)
+    - 🔴 Absent / Uninformed (`bg-rose-50 text-rose-800 border-rose-200`)
+  - Real-time sync reflects immediately in Field Officer calendar with corresponding colored dot and supervisor inspection note.
+
+### 4.9 Master Detailed Table Documents Cohort Analytics (`C:X | P:Y`)
+- **Compact Cohort Notation**:
+  - High-density monospace split format inside Documents Collected column:
+    ```jsx
+    <div className="flex items-center gap-1.5 font-mono text-xs">
+      <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold border border-blue-200" title="Current Month Cohort">
+        C:{docCur}
+      </span>
+      <span className="text-slate-300">|</span>
+      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-bold border border-slate-200" title="Previous Month Backlog Cohort">
+        P:{docPrev}
+      </span>
+    </div>
+    ```
+  - Highlights active clinical priority: whether staff are gathering compliance papers for new enrollments or clearing historical backlog.
+  - Dynamically updates based on the 3-way cohort switch: `All`, `Current Month Cohort`, or `Backlog Cohort`.
+
+### 4.10 Nikshay Reconciler Direct Patient Contacts & 1-Tap Calling UX
+- **Card-Based Contact Drawer**:
+  - In Nikshay Reconciler, Clinical Dropout Radar, and Patient Journey Tracker, each patient row displays an accessible contact pill.
+- **1-Tap Direct Dial Action**:
+  ```jsx
+  <a href={`tel:${patientPhone}`} className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs active:scale-95">
+    <span>📞</span>
+    <span>Call</span>
+  </a>
+  ```
+- **Copy-to-Clipboard Feedback**:
+  - Micro-animation displaying `✓ Copied!` tooltip with 1.5s automatic reversion, preventing double-press confusion.
+
 ---
 
 ## 5. Mobile Ergonomics & Accessibility
@@ -151,3 +201,33 @@ The 4-digit PIN input features real-time dynamic micro-feedback directly beneath
    - Number inputs suppress native spinners (`::-webkit-inner-spin-button { display: none }`) to prevent accidental value alterations while scrolling on mobile touchscreens.
 3. **Contrast & Field Visibility**:
    - Uses high-contrast typography (`text-slate-800` on `bg-white`) optimized for bright outdoor daylight conditions encountered during two-wheeler field transit.
+
+---
+
+## 6. 100% Native Bento Visual Flowchart Design System
+
+The system transitions all operational guidelines and standard operating procedures (SOPs) away from dense, unreadable text walls into modern, high-contrast **Native Bento Visual Flowcharts**.
+
+### 6.1 Component Architecture & Layout Rules
+- **Container Structure**: Responsive CSS Grid (`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5`).
+- **Visual Flow Progression**:
+  - **Sequence Badges**: High-visibility numerical badges (`1➔2➔3`) indicating chronological step flow.
+  - **SVG Flow Connectors**: Curved or directional SVG arrows visually linking input actions to output states.
+  - **Tactical Micro-Cards**: Self-contained step cards with rounded corners (`rounded-2xl`), border highlights (`border border-slate-200/80`), and distinct background tints.
+  - **Pro-Tip Callout Banners**: Distinct bottom callout strips (`💡 Tip: ...`) with emerald or amber left borders.
+
+### 6.2 Bento Thematic Color Schemes
+
+| Theme | Border & Tint | Header & Badging | Context / Meaning |
+|---|---|---|---|
+| **Emerald (Success / Online)** | `border-emerald-200 bg-emerald-50/40` | `text-emerald-800 bg-emerald-100` | Verified registrations, on-time submissions, online auto-sync |
+| **Amber (Notice / Grace)** | `border-amber-200 bg-amber-50/40` | `text-amber-800 bg-amber-100` | Casual leave, pacing watchlists, pending sync queue |
+| **Indigo (Core Pipeline)** | `border-indigo-200 bg-indigo-50/40` | `text-indigo-800 bg-indigo-100` | Clinical cascade progression, doctor visits, master table drilldowns |
+| **Rose (Critical / Alert)** | `border-rose-200 bg-rose-50/40` | `text-rose-800 bg-rose-100` | Defaulter streaks, duplicate notification blocks, report deletions |
+| **Slate (Structural / Architecture)** | `border-slate-200 bg-slate-50/60` | `text-slate-800 bg-slate-200` | System setup, directory rosters, cloud backup archives |
+
+### 6.3 Zero-Leakage Privacy Design Rule
+- In the Field Officer Help Guide (`App.jsx`):
+  - Every visual diagram strictly illustrates the **7:00 PM evening reporting cutoff**.
+  - Visual timeline tracks: `Morning 9:00 AM (Duty Start) ➔ Afternoon 2:00 PM (Visits & Testing) ➔ Evening 7:00 PM (Submit Report)`.
+  - The 10:00 AM administrative grace cutoff is completely excluded from FO UI diagrams to preserve programmatic reporting discipline.
