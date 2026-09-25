@@ -13257,10 +13257,10 @@ const availableDistrictsForFeed = useMemo(() => {
                         <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
                           <div className="flex items-center justify-between">
                             <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
-                            <span className="text-sm">⏱️</span>
+                            <span className="text-sm">⏰</span>
                           </div>
-                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Inspect On-Time / Late Chips</strong>
-                          <p className="text-[10px] text-slate-600">Subah se submit huye reports aur IST duty timestamps.</p>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Stealth 10 AM Cutoff &amp; Timestamps</strong>
+                          <p className="text-[10px] text-slate-600">&lt;10 AM reports count for yesterday with Next Day Morning badge.</p>
                         </div>
 
                         <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
@@ -13423,53 +13423,155 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 1: Daily Notification Tray */}
                 {appGuideActiveTopic === 'notif_tray' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">📋</span>
-                      <h4 className="text-sm font-black text-slate-900">Daily Notification Tray &amp; Nikshay Cross-Verification</h4>
-                    </div>
-
-                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-900 font-medium">
-                      <strong>🎯 Purpose:</strong> Field Officers rozana MIS me jo TB Notification IDs report karte hain, unhe bina kisi heavy Excel sheet download ke turant copy karke Nikshay Portal par verify karne ke liye banaya gaya hai.
-                    </div>
-
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wide">1. Copy Last Day IDs (1-per-line) Ka Istemal:</h5>
-                      <p>
-                        Jab aapko kal ya aaj report hui nayi notification IDs ko Nikshay portal ke search bar me ek-ek karke check karna ho, ya Excel ke kisi column me row-by-row paste karna ho:
-                      </p>
-                      <ul className="list-disc list-inside space-y-1 pl-2 text-slate-600">
-                        <li><strong>Click:</strong> `📋 Copy Last Day IDs` dabayein.</li>
-                        <li><strong>Action:</strong> Saari unique IDs clipboard me `\n` (newline) ke saath copy ho jayengi.</li>
-                        <li><strong>Excel Paste:</strong> Excel ke kisi ek cell par `Ctrl + V` karein, har ID apni alag cell/row me niche baithegi.</li>
-                      </ul>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-slate-800 text-xs uppercase tracking-wide">2. Copy 24-Column Excel Format (Master Sheet):</h5>
-                      <p>
-                        Aapke standard 24-columns me master sheet record maintain karne ke liye:
-                      </p>
-                      <div className="bg-slate-900 text-slate-200 p-3 rounded-xl font-mono text-[10px] overflow-x-auto">
-                        Sl No | FO Name | Date of Reporting (DD-MM-YYYY) | District | TBU Name | Mapped PHI Name | Patient&apos;s Name | ID | Vill | Panchayat | Block | District | Land Mark | Mob No | X-ray Done | Sample Collection | Report Delivered | DM | HIV | Drug Source | Others | Address | Diagnosis Date | Enrollment Date
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">📋</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Daily Notification Tray &amp; Nikshay Cross-Verification</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Zero-RAM client-side verification engine with 1-click clipboard formats</p>
+                        </div>
                       </div>
-                      <ul className="list-disc list-inside space-y-1 pl-2 text-slate-600">
-                        <li><strong>Sl No, FO Name, Date (DD-MM-YYYY), District, aur ID</strong> automatically fill ho kar copy honge.</li>
-                        <li>Baaki 19 clinical columns blank tab stops rahenge taaki physical OPD ya Nikshay verification ke waqt aap unhe manually fill kar sakein.</li>
-                      </ul>
+                      <span className="text-[9px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200">
+                        24-Col Excel &bull; 0ms Filter
+                      </span>
                     </div>
 
-                    <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl text-rose-900 space-y-1">
-                      <div className="font-bold flex items-center gap-1.5">
+                    {/* 4-Stage Bento Flowchart */}
+                    <div className="bg-gradient-to-br from-amber-50/60 to-slate-50 border border-amber-200/80 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                          <span>⚡</span>
+                          <span>4-Stage Notification Verification Sequence</span>
+                        </h5>
+                        <span className="text-[10px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">
+                          SOP 1 ➔ 2 ➔ 3 ➔ 4
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        {/* Stage 1 */}
+                        <div className="bg-white border border-amber-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md">Stage 01</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">Open Notification Tray</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Dashboard top header se Notification Tray kholein. Live notification ID count aur date range preview check karein.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-amber-700">
+                            <span>➔ District Filter</span>
+                          </div>
+                        </div>
+
+                        {/* Stage 2 */}
+                        <div className="bg-white border border-amber-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md">Stage 02</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">Filter Canonical District</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Single ya multi-district chip deck se filter karein. Sub-Admins strictly assigned districts tak isolated rehte hain.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-amber-700">
+                            <span>➔ Quick Copy</span>
+                          </div>
+                        </div>
+
+                        {/* Stage 3 */}
+                        <div className="bg-white border border-amber-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md">Stage 03</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">1-Click 24-Col Excel Copy</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              24-Column Excel Copy dabayein. Sl No, FO Name, Date (DD-MM-YYYY), District, aur ID pre-filled copy honge.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-amber-700">
+                            <span>➔ Nikshay Portal</span>
+                          </div>
+                        </div>
+
+                        {/* Stage 4 */}
+                        <div className="bg-white border border-amber-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-md">Stage 04</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">Mark Done in Nikshay</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Nikshay Portal par IDs cross-verify karein. Verification complete hote hi status confirmed ho jata hai.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-emerald-700">
+                            <span>✔ Completed</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Dual Clipboard Format Comparison Bento */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>📋</span>
+                            <span>Copy Last Day IDs (1-per-line)</span>
+                          </strong>
+                          <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">Single Column</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                          Jab aapko kal ya aaj report hui nayi notification IDs ko Nikshay portal search bar me ek-ek karke check karna ho, ya Excel ke kisi column me row-by-row paste karna ho:
+                        </p>
+                        <div className="bg-white border border-slate-200 rounded-xl p-2 text-[10px] text-slate-700 space-y-0.5">
+                          <div>&bull; <strong>Action:</strong> IDs newline (`\n`) separated clipboard me save hoti hain.</div>
+                          <div>&bull; <strong>Excel Paste:</strong> Kisi ek cell par `Ctrl+V` karein, har ID alag row me baithegi.</div>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>📑</span>
+                            <span>24-Column Excel Format (Master Sheet)</span>
+                          </strong>
+                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Standardized Sheet</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 leading-relaxed">
+                          Official Nikshay register format me Sl No, FO Name, Date (DD-MM-YYYY), District, aur Episode ID ke saath 19 blank clinical columns tab-delimited copy hote hain.
+                        </p>
+                        <div className="bg-slate-900 text-slate-200 p-2 rounded-xl font-mono text-[9px] truncate">
+                          Sl No | FO Name | Date (DD-MM-YYYY) | District | TBU Name | ... | ID
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Bento Alert Card: 72h Grace Lag Rule */}
+                    <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl space-y-1.5 text-rose-950">
+                      <div className="font-black text-xs flex items-center gap-1.5">
                         <span>⚠️</span>
                         <span>Zaroori Nirdesh: 72-Hour Government Portal Sync Lag Rule</span>
                       </div>
-                      <p className="text-[11px]">
-                        Agar koi ID portal par search karne par nahi mil rahi hai, toh <strong>turant Field Officer ko fake ya fraud declare na karein</strong>. Government Nikshay portal me health center se server par data aane me <strong>24 se 72 ghante (3 din)</strong> ka lag hota hai.
+                      <p className="text-[11px] text-rose-900 leading-relaxed">
+                        Agar koi ID portal par search karne par nahi mil rahi hai, toh <strong>turant Field Officer ko fraud declare na karein</strong>. Government Nikshay portal me health center se server par data aane me <strong>24 se 72 ghante (3 din)</strong> ka lag hota hai.
                       </p>
-                      <p className="text-[11px] font-bold">
-                        &bull; Report age &le; 72 hours: Grace window me rakhein (Pending Sync).<br/>
-                        &bull; Report age &gt; 72 hours: Portal search bar me manual confirm karein, tabhi clarification maangein.
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px] font-bold">
+                        <span className="bg-amber-100 text-amber-900 border border-amber-300 px-2.5 py-0.5 rounded-lg">
+                          &le; 72h Grace: Pending Sync me rakhein
+                        </span>
+                        <span className="bg-rose-100 text-rose-900 border border-rose-300 px-2.5 py-0.5 rounded-lg">
+                          &gt; 72h Check: Portal search bar me manual confirm karein
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -13477,34 +13579,123 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 2: Nikshay Reconciler & Cumulative Ledger */}
                 {appGuideActiveTopic === 'reconciler' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">⚖️</span>
-                      <h4 className="text-sm font-black text-slate-900">Nikshay Reconciler &amp; Permanent Cumulative Ledger</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">⚖️</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Nikshay Reconciler &amp; Permanent Cumulative Ledger</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Cross-matching field reports with official government NTEP portal dumps</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                        Monotonic Truth Engine
+                      </span>
                     </div>
 
-                    <p>
-                      Nikshay Reconciler official government portal export (`.xlsx` ya `.csv`) aur DFY MIS ke field reports ke beech state-wide cross-matching karta hai.
-                    </p>
+                    {/* 4-Step Bento Data Pipeline */}
+                    <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 border border-emerald-200/80 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+                          <span>🔄</span>
+                          <span>4-Step Reconciler Pipeline &amp; Verification Flow</span>
+                        </h5>
+                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                          Pipeline 1 ➔ 2 ➔ 3 ➔ 4
+                        </span>
+                      </div>
 
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-slate-800 text-xs">Role-Based Privileges (RBAC):</h5>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                        <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-xl">
-                          <strong className="text-emerald-900 block font-bold">Super Admin:</strong>
-                          <span>Sirf Super Admin official Nikshay state dump upload karke pure Bihar ka reconciliation run kar sakta hai.</span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                        {/* Step 1 */}
+                        <div className="bg-white border border-emerald-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-md">Step 01</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">State Monthly Dump Upload</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Super Admin official Nikshay state dump (.xlsx / .csv) upload karte hain. 24+ NTEP headers auto-mapped.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-emerald-700">
+                            <span>➔ Cross-Check</span>
+                          </div>
                         </div>
-                        <div className="bg-sky-50 border border-sky-200 p-3 rounded-xl">
-                          <strong className="text-sky-900 block font-bold">District Sub-Admins:</strong>
-                          <span>Sub-Admins upload nahi kar sakte; wo apne-apne district ka <strong>11-Column Discrepancy Review Sheet (.xlsx)</strong> download kar sakte hain.</span>
+
+                        {/* Step 2 */}
+                        <div className="bg-white border border-emerald-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-md">Step 02</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">5-Indicator Reconciliation</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Multi-Indicator Cross-Check: Notification, HIV Screening, Diabetes, DBT Bank Linkage, aur UDST test verify hote hain.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-emerald-700">
+                            <span>➔ Lock Ledger</span>
+                          </div>
+                        </div>
+
+                        {/* Step 3 */}
+                        <div className="bg-white border border-emerald-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded-md">Step 03</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">Monotonic Ledger Sync</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Permanent Cumulative Ledger: Verified records permanently Firestore me lock ho jate hain aur future dumps me degrade nahi hote.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-emerald-700">
+                            <span>➔ Action Pending</span>
+                          </div>
+                        </div>
+
+                        {/* Step 4 */}
+                        <div className="bg-white border border-emerald-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                          <div className="flex items-center justify-between">
+                            <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-1.5 py-0.5 rounded-md">Step 04</span>
+                          </div>
+                          <div>
+                            <strong className="text-xs font-black text-slate-900 block">Actionable Pending &amp; 1-Tap Call</strong>
+                            <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                              Unresolved patients FO Pending Hub me sync hote hain; Direct Patient Contact drawer se 1-Tap Call aur copy uplabdh hai.
+                            </p>
+                          </div>
+                          <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-teal-700">
+                            <span>✔ Field Ready</span>
+                          </div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-slate-800 text-xs">Permanent Cumulative Ledger (🔒 Permanent Locked):</h5>
-                      <p>
-                        Jab bhi koi clinical service (HIV Screening, Diabetes, DBT Bank Validation, UDST, ya Contact Tracing) ek baar official dump se verify ho jati hai, wo <strong>hamesha ke liye Firestore database me lock ho jati hai</strong>. Future me naya dump aane par bhi purana verified data erase nahi hota.
-                      </p>
+                    {/* RBAC Boundary Cards */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm">👑</span>
+                          <strong className="text-xs font-black text-emerald-950">Super Admin Privileges</strong>
+                        </div>
+                        <p className="text-[11px] text-emerald-900 leading-relaxed">
+                          Pure Bihar ke sabhi 22+ districts ka official Nikshay state dump upload karke statewide reconciliation run karne ka adhikar sirf Super Admin ke paas hai.
+                        </p>
+                      </div>
+
+                      <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-3.5 space-y-1.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm">🛡️</span>
+                          <strong className="text-xs font-black text-sky-950">District Sub-Admin Privileges</strong>
+                        </div>
+                        <p className="text-[11px] text-sky-900 leading-relaxed">
+                          Sub-Admins dumps upload nahi kar sakte; wo apne-apne district ka <strong>11-Column Discrepancy Review Sheet (.xlsx)</strong> download karke field follow-up karwa sakte hain.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -13512,30 +13703,92 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 3: FO Daily Reports & Edit Window */}
                 {appGuideActiveTopic === 'daily_reports' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">🔍</span>
-                      <h4 className="text-sm font-black text-slate-900">FO Daily Reports, Inspection &amp; 24-Hour Edit Window</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🔍</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">FO Daily Reports, Inspection &amp; Stealth 10 AM Cutoff</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Operational mechanics of daily submission ingestion, morning grace &amp; historical editing</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-200">
+                        Stealth 10 AM Engine
+                      </span>
                     </div>
 
-                    <div className="space-y-2">
-                      <h5 className="font-bold text-slate-800 text-xs">1. Inspect All IDs Modal:</h5>
-                      <p>
-                        Kisi bhi Field Officer ke naam par click karne par unke dwara report kiye gaye saare din newest se oldest order me aate hain. Har category (Notification, HIV/DM, DBT, Doctor Visits, etc.) ke patient IDs ko copy ya inspect kiya ja sakta hai.
-                      </p>
+                    {/* 3-Card Bento Flowchart Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* Card 1: Stealth 10 AM Cutoff Engine */}
+                      <div className="bg-gradient-to-br from-amber-50/70 to-slate-50 border border-amber-200 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                          <span className="text-[9px] font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-full">Attendance Grace</span>
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>⏰</span>
+                            <span>Stealth 10:00 AM Reporting Cutoff Engine</span>
+                          </h5>
+                          <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                            Submissions completed before <strong>10:00 AM IST</strong> unconditionally map to <strong>Yesterday (D-1 / beete huye kal ki date)</strong> with prominent <code className="bg-amber-100 text-amber-900 px-1 rounded font-bold text-[10px]">⏰ Next day morning HH:MM AM</code> badge. Submissions &ge; 10:00 AM count for Today.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-amber-100 text-[10px] font-bold text-amber-800">
+                          <span>✔ Eliminates Morning Attendance Skew</span>
+                        </div>
+                      </div>
+
+                      {/* Card 2: 24-Hour Self-Correction Window */}
+                      <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 border border-indigo-200 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                          <span className="text-[9px] font-bold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded-full">FO Self-Correction</span>
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>⏱️</span>
+                            <span>24-Hour Edit Window &amp; Missing IDs</span>
+                          </h5>
+                          <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                            Field Officers ko report submit karne ke baad <strong>24 ghante</strong> tak profile calendar se corrections, remarks update, ya <strong>+ Add Missing Patient ID</strong> selector se IDs add karne ki anumati hoti hai. 24h baad form automatically lock ho jata hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-indigo-100 text-[10px] font-bold text-indigo-800">
+                          <span>✔ Strict Anti-Tampering Lock</span>
+                        </div>
+                      </div>
+
+                      {/* Card 3: Inspect All IDs & Full Day Report Editor */}
+                      <div className="bg-gradient-to-br from-teal-50/70 to-slate-50 border border-teal-200 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                          <span className="text-[9px] font-bold text-teal-900 bg-teal-100 px-2 py-0.5 rounded-full">Admin Audit Dossier</span>
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                            <span>✏️</span>
+                            <span>Inspect All IDs &amp; Full Day Report Editor</span>
+                          </h5>
+                          <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
+                            Master Table me kisi bhi officer par click karke chronological dossier kholein. Admin <strong>Edit Day</strong> se KM, doctor visits, remarks aur patient IDs modify kar sakte hain with atomic district rollup recalculation.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-teal-100 text-[10px] font-bold text-teal-800">
+                          <span>✔ Atomic Recalculation Guard</span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-amber-900 space-y-1">
-                      <div className="font-bold">⏰ 24-Hour Edit Window Rule:</div>
-                      <p className="text-[11px]">
-                        Field Officers ko apni daily report submit karne ke baad <strong>24 ghante</strong> tak correction ya nayi IDs add karne ki permission hoti hai. 24 ghante beetne ke baad unka form locked ho jata hai. Agar genuine clerical mistake hai, toh Sub-Admin Super Admin se contact karke ya Admin Feed tool se update karwa sakta hai.
-                      </p>
-                    </div>
-
-                    <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl space-y-1">
-                      <div className="font-bold text-slate-800">🛡️ Blank Report Prevention:</div>
-                      <p className="text-[11px] text-slate-600">
-                        Koi bhi officer 0 IDs ke saath blank form submit nahi kar sakta, jab tak ki unka camp duty/meeting ka Remark ya Doctor Visit darj na ho.
-                      </p>
+                    {/* Anti-Corruption Shield */}
+                    <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-2xl flex items-center justify-between gap-3 text-slate-700">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-base p-1.5 bg-slate-200 rounded-xl">🛡️</span>
+                        <div>
+                          <strong className="text-xs font-bold text-slate-900 block">Blank Report Prevention:</strong>
+                          <span className="text-[11px] text-slate-600">Koi bhi officer 0 IDs ke saath blank form submit nahi kar sakta, jab tak ki valid meeting/camp Remark ya Doctor Visit darj na ho.</span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold bg-slate-200 text-slate-800 px-2.5 py-1 rounded-xl shrink-0">Zero Ghost Entries</span>
                     </div>
                   </div>
                 )}
@@ -13543,35 +13796,196 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 4: Targets & Performance Analytics */}
                 {appGuideActiveTopic === 'targets' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">🎯</span>
-                      <h4 className="text-sm font-black text-slate-900">Monthly Targets &amp; Progression Trends</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🎯</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Monthly Targets &amp; Progression Trends</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Target allocation, run-rate velocity, Sunday buffers and month-end forecasting</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full border border-purple-200">
+                        Dynamic Pacing Studio
+                      </span>
                     </div>
 
-                    <ul className="list-disc list-inside space-y-2 text-slate-600">
-                      <li><strong>Target Allocation:</strong> Mahine ki shuruat me har officer ko notification target assign kiya jata hai. Super Admin ya authorized Sub-Admin target update kar sakte hain.</li>
-                      <li><strong>Daily Progression Trend (Day 1 se 30/31):</strong> Yeh chart dikhata hai ki pure mahine me kis din peak notification aayi aur daily progression kaisa raha.</li>
-                      <li><strong>Performance Chart vs Cards Switcher:</strong> Horizontal Bar Chart 22 districts ko top performers se lagging districts tak rank karta hai. Grid Cards view me aap drill-down karke officers dekh sakte hain.</li>
-                    </ul>
+                    {/* 4-Card Bento Flowchart Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      {/* Step 1 */}
+                      <div className="bg-white border border-purple-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                          <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-1.5 py-0.5 rounded-md">Stage 01</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Monthly Target Allocation</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Mahine ki shuruat me har district aur individual officer ko TB notification target assign kiya jata hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-purple-700">
+                          <span>➔ Daily Velocity</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2 */}
+                      <div className="bg-white border border-purple-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                          <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-1.5 py-0.5 rounded-md">Stage 02</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Daily Pace Calculation</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Run-Rate Velocity: Remaining target ko remaining working days se divide karke daily required pace auto-calculate hota hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-purple-700">
+                          <span>➔ Calendar Buffer</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3 */}
+                      <div className="bg-white border border-purple-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                          <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-1.5 py-0.5 rounded-md">Stage 03</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Sunday &amp; Holiday Buffer</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Calendar engine automatically sabhi Sundays aur declared government holidays ko filter karke realistic pace deta hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-purple-700">
+                          <span>➔ Studio Forecast</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4 */}
+                      <div className="bg-white border border-purple-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                          <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-1.5 py-0.5 rounded-md">Stage 04</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Forecast Model &amp; Studio</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Performance Studio ka Horizontal Bar Chart 22 districts ko top performers se lagging districts tak rank karta hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-indigo-700">
+                          <span>✔ Trajectory Ready</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Operational Tips Bento */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2">
+                      <strong className="text-xs font-black text-slate-900 block">Progression Trend Analytics (Day 1 se 30/31):</strong>
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Line chart pure mahine me daily progression dikhata hai ki kis din peak reporting aayi. Bar Chart view me direct number labels target bar par visible rehte hain, jabki Grid view me individual officers ka drill-down milta hai.
+                      </p>
+                    </div>
                   </div>
                 )}
 
                 {/* TOPIC 5: Staff Directory & Duty PINs */}
                 {appGuideActiveTopic === 'staff' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">👥</span>
-                      <h4 className="text-sm font-black text-slate-900">Staff Directory &amp; Duty PIN Management</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">👥</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Staff Directory &amp; Duty PIN Management</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Officer credentials, designation management, and consonant-collapsed inactive defense</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full border border-blue-200">
+                        Zero-Ghost Roster
+                      </span>
                     </div>
 
-                    <div className="space-y-2">
-                      <p>
-                        Field Officers ka login 4-digit Duty PIN par based hota hai:
+                    {/* 4-Card Bento Sequence Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      {/* Step 1 */}
+                      <div className="bg-white border border-blue-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                          <span className="text-[9px] font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded-md">Step 01</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Onboard Officer &amp; Role</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Staff Directory me naya officer add karein aur Designation assign karein (FO, DC, STS, TBHV, LT).
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-blue-700">
+                          <span>➔ Assign Duty PIN</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2 */}
+                      <div className="bg-white border border-blue-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                          <span className="text-[9px] font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded-md">Step 02</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">4-Digit Duty PIN</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Officer ke mobile login aur attendance authentication ke liye secure 4-Digit Duty PIN generate hota hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-blue-700">
+                          <span>➔ Reset Support</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3 */}
+                      <div className="bg-white border border-blue-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                          <span className="text-[9px] font-bold text-blue-800 bg-blue-100 px-1.5 py-0.5 rounded-md">Step 03</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Reset PIN in 1-Click</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            PIN bhoolne par Staff Directory me &lsquo;Reset PIN&rsquo; par click karke naya 4-digit code set karein, bina delay.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-blue-700">
+                          <span>➔ Lifecycle Guard</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4 */}
+                      <div className="bg-white border border-blue-200/90 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                          <span className="text-[9px] font-bold text-rose-800 bg-rose-100 px-1.5 py-0.5 rounded-md">Step 04</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Deactivation &amp; Inactive Guard</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Consonant-Collapsed normalization defense ensures inactive staff past history rehti hai lekin defaulters me 0 ghosting hoti hai.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-rose-700">
+                          <span>✔ Protected</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Security Callout Card */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5 text-slate-700 text-[11px]">
+                      <div className="flex items-center gap-1.5 font-bold text-slate-900 text-xs">
+                        <span>🔒</span>
+                        <span>Inactive Staff PIN Lockout &amp; Historical Safety</span>
+                      </div>
+                      <p className="leading-relaxed">
+                        Deactivated officers ka account `/verify-pin` par strictly locked rehta hai aur wo naya report submit nahi kar sakte. Unke purane sabhi reports, monthly rollups aur audit history 100% surakshit rehte hain.
                       </p>
-                      <ul className="list-disc list-inside space-y-1.5 pl-2 text-slate-600">
-                        <li><strong>PIN Reset:</strong> Agar koi officer apna 4-digit PIN bhool jaye, toh <strong>Staff Directory</strong> me unke naam ke aage `Reset PIN` par click karein aur naya 4-digit code set karein.</li>
-                        <li><strong>Duty Authentication:</strong> Har subah officer login karta hai toh live timestamp aur GPS attendance record hoti hai.</li>
-                      </ul>
                     </div>
                   </div>
                 )}
@@ -13579,51 +13993,114 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 6: Duplicate Radar & 1-Click Auto-Repair */}
                 {appGuideActiveTopic === 'duplicate_radar' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">🛡️</span>
-                      <h4 className="text-sm font-black text-slate-900">Duplicate Patient Radar &amp; 1-Click Auto-Repair Suite</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🛡️</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Duplicate Patient Radar &amp; 1-Click Auto-Repair Suite</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Multi-tier collision detection, cross-district guards, and atomic rollup recalculation</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full border border-rose-200">
+                        Atomic Prune Engine
+                      </span>
                     </div>
 
-                    <p>
-                      Duplicate Radar district aur state level par patient ID collisions aur inflated reporting ko detect aur resolve karta hai:
-                    </p>
-
-                    <div className="space-y-3">
-                      {/* Tab 1 */}
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 block font-bold text-xs">Tab 1: Same-Day Duplicate Check (Within District)</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Agar ek hi district me do alag officers ne ek hi din same patient ID daal di hai, toh yahan alert dikhta hai. Sub-Admin dono officers se baat karke pata karte hain ki asli patient kisne visit kiya.
-                        </p>
-                      </div>
-
-                      {/* Tab 2 */}
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 block font-bold text-xs">Tab 2: Cross-District Collision (Between Districts)</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Agar ek patient ID Bihar ke do alag districts (e.g. Patna aur Gaya) me submit hui hai, toh State Coordinator OPD slip aur address se verify karke ek district me retain karte hain.
-                        </p>
-                      </div>
-
-                      {/* Tab 3 */}
-                      <div className="bg-rose-50 border border-rose-200 p-3.5 rounded-2xl space-y-2">
-                        <div className="flex items-center gap-1.5 font-black text-rose-950 text-xs">
-                          <span>🚨</span>
-                          <span>Tab 3: Notification Inflation &amp; 1-Click Auto-Repair (Most Critical)</span>
+                    {/* 3-Tier Detection Bento Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                              <span>⚠️</span>
+                              <span>Same-Day Check</span>
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">Tier 1</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-800 block">Within District Collision</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Agar ek hi district me do alag officers ne ek hi din same patient ID submit ki hai, toh yahan alert dikhta hai for immediate field audit.
+                          </p>
                         </div>
-                        <p className="text-rose-900 text-[11px] leading-relaxed">
-                          <strong>Kyu hota hai:</strong> Kabhi-kabhi Field Officer 1st-5th tareekh ke patients report karne ke baad, 6th tareekh ki report me wahi 1-5 tareekh ke 20 IDs fir se Notification box me copy-paste kar dete hain. Isse district rollup me total +20 inflate ho jata hai.
-                        </p>
-                        
-                        <div className="bg-white/90 border border-rose-200 rounded-xl p-3 text-[11px] text-rose-950 space-y-2">
-                          <strong>⚡ 1-Click Auto-Repair Dabane Par Kya Hota Hai:</strong>
-                          <ol className="list-decimal list-inside space-y-1 pl-1 text-slate-700">
-                            <li><strong>Earliest Valid Date Safe:</strong> Patient ID jis pehli tareekh ko submit hui thi (e.g. 1st Sept), wo record bilkul intact aur surakshit rehta hai.</li>
-                            <li><strong>Duplicate Stripped:</strong> Baad wali date (e.g. 6th Sept) ki report ke `notification_ids` array se repeat ID hata di jati hai.</li>
-                            <li><strong>Rollup Corrected (Atomic):</strong> System us date ke district rollup me se turant count ghata deta hai (`firestore.Increment(-N)`). Total accurate ho jata hai.</li>
-                            <li><strong>Baki Kaam 100% Safe:</strong> Us officer ki 6th Sept ki Home Visits, FDC Dawai, DBT Bank entry, aur KM Remarks bilkul safe rehte hain!</li>
-                            <li><strong>Sub-Admin RBAC Protection:</strong> Sub-Admin sirf apne assigned district ka data scan aur repair kar sakta hai. Kisi aur district par 403 Forbidden lagta hai.</li>
-                          </ol>
+                        <span className="text-[9px] font-bold text-slate-500 pt-1 border-t border-slate-200">Local District Scope</span>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
+                              <span>🌐</span>
+                              <span>Cross-District</span>
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">Tier 2</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-800 block">Between Districts Collision</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Agar ek patient ID Bihar ke do alag districts (e.g. Patna aur Gaya) me submit hui hai, toh State Coordinator OPD slip se verify karke retain karte hain.
+                          </p>
+                        </div>
+                        <span className="text-[9px] font-bold text-slate-500 pt-1 border-t border-slate-200">Statewide Scope</span>
+                      </div>
+
+                      <div className="bg-rose-50 border border-rose-200 rounded-2xl p-3 flex flex-col justify-between space-y-2">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-black text-rose-950 flex items-center gap-1.5">
+                              <span>🚨</span>
+                              <span>Inflation Radar</span>
+                            </span>
+                            <span className="text-[9px] font-bold text-rose-900 bg-rose-200 px-1.5 py-0.5 rounded">Tier 3</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-rose-900 block">Cross-Date Inflation</strong>
+                          <p className="text-[10px] text-rose-800 mt-1 leading-normal">
+                            Field Officer dwara purani dates ke patients dobara notification box me repeat karne par count inflate ho jata hai. Iska 1-Click Fix uplabdh hai.
+                          </p>
+                        </div>
+                        <span className="text-[9px] font-bold text-rose-700 pt-1 border-t border-rose-200">1-Click Auto-Repair</span>
+                      </div>
+                    </div>
+
+                    {/* 5-Step 1-Click Auto-Repair Bento Flowchart */}
+                    <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-xs font-black text-rose-950 flex items-center gap-1.5">
+                          <span>⚡</span>
+                          <span>1-Click Auto-Repair Execution Pipeline</span>
+                        </h5>
+                        <span className="text-[10px] font-bold text-rose-900 bg-rose-200/80 px-2 py-0.5 rounded-full">
+                          Atomic Decrement
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2">
+                        <div className="bg-white border border-rose-200 rounded-xl p-2.5 space-y-1">
+                          <span className="w-4 h-4 rounded-full bg-rose-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">1</span>
+                          <strong className="text-[10px] font-bold text-slate-900 block">Earliest Valid Date</strong>
+                          <p className="text-[9px] text-slate-600">First submission date record bilkul safe rehta hai.</p>
+                        </div>
+
+                        <div className="bg-white border border-rose-200 rounded-xl p-2.5 space-y-1">
+                          <span className="w-4 h-4 rounded-full bg-rose-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
+                          <strong className="text-[10px] font-bold text-slate-900 block">Duplicate Stripped</strong>
+                          <p className="text-[9px] text-slate-600">Baad wali date se repeat notification ID hat jati hai.</p>
+                        </div>
+
+                        <div className="bg-white border border-rose-200 rounded-xl p-2.5 space-y-1">
+                          <span className="w-4 h-4 rounded-full bg-rose-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">3</span>
+                          <strong className="text-[10px] font-bold text-slate-900 block">Atomic Rollup Recalculation</strong>
+                          <p className="text-[9px] text-slate-600">Increment(-N) se district rollup count turant theek ho jata hai.</p>
+                        </div>
+
+                        <div className="bg-white border border-rose-200 rounded-xl p-2.5 space-y-1">
+                          <span className="w-4 h-4 rounded-full bg-emerald-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">4</span>
+                          <strong className="text-[10px] font-bold text-slate-900 block">Other Work Safe</strong>
+                          <p className="text-[9px] text-slate-600">Visits, FDC dawai, DBT, aur KM bilkul safe rehte hain.</p>
+                        </div>
+
+                        <div className="bg-white border border-rose-200 rounded-xl p-2.5 space-y-1">
+                          <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">5</span>
+                          <strong className="text-[10px] font-bold text-slate-900 block">RBAC Boundary</strong>
+                          <p className="text-[9px] text-slate-600">Sub-Admin sirf apne district me run kar sakta hai (403 guard).</p>
                         </div>
                       </div>
                     </div>
@@ -13633,40 +14110,90 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 7: Excel Reports & Statewide Exports */}
                 {appGuideActiveTopic === 'excel_reports' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">📊</span>
-                      <h4 className="text-sm font-black text-slate-900">State Excel Reports &amp; 33-Sheet KPI Export</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">📊</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">State Excel Reports &amp; 33-Sheet KPI Export</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Enterprise multi-sheet workbooks, Nikshay 24-col exports, and concurrency memory guards</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full border border-teal-200">
+                        Zero-RAM Spike
+                      </span>
                     </div>
 
-                    <p>
-                      DFY MIS me statewide monitoring aur review meetings ke liye multiple ready-to-present Excel formats uplabdh hain:
-                    </p>
-
-                    <div className="space-y-2.5">
-                      <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-indigo-950 block font-bold text-xs">1. 33-Sheet Bihar State KPI Workbook (.xlsx):</strong>
-                        <p className="text-indigo-900 text-[11px]">
-                          Isme Sheet 1 statewide consolidated ranking hoti hai, aur aage ki 32 sheets har district ka dedicated scorecard hoti hain. Har sheet me professional openpyxl borders, colors, target achievement % aur daily breakdown rehta hai.
-                        </p>
+                    {/* 4-Card Bento Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-base p-1 bg-indigo-50 text-indigo-700 rounded-lg">📈</span>
+                          <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-1.5 py-0.5 rounded-md">33 Sheets</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">State KPI Workbook</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Sheet 1 statewide ranking aur 32 district sheets with custom styling, borders aur cohort breakdown.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-indigo-700">Executive Report</div>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 block font-bold text-xs">2. Nikshay Format 24-Column Sheet:</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Notification Tray se download hone wali sheet official Nikshay Portal column order me format hoti hai taaki verification direct ho sake.
-                        </p>
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-base p-1 bg-teal-50 text-teal-700 rounded-lg">📑</span>
+                          <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-1.5 py-0.5 rounded-md">Dual-Sheet</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Dual-Sheet Staff Attendance</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Sheet 1 monthly attendance matrix with P/L/A colors; Sheet 2 granular activity log with next-day morning notes.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-teal-700">Attendance Studio</div>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 block font-bold text-xs">3. Raw Field Activity Dump &amp; Attendance Matrix:</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Har Field Officer dwara submit kiye gaye single-single day ka raw log, travel kilometers, remarks aur monthly attendance status.
-                        </p>
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-base p-1 bg-amber-50 text-amber-700 rounded-lg">📋</span>
+                          <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded-md">24 Columns</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Nikshay 24-Column Sheet</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Notification Tray se direct download, official Nikshay portal columns me structured for rapid verification.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-amber-700">Govt Format</div>
                       </div>
 
-                      <div className="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-[11px] text-emerald-900">
-                        🛡️ <strong>Server RAM Guard:</strong> Heavy 33-sheet export backend me `asyncio.Semaphore(1)` aur explicit garbage collection se chalta hai, taaki server par kabhi RAM crash na ho.
+                      <div className="bg-white border border-slate-200 rounded-xl p-3 flex flex-col justify-between space-y-2 shadow-2xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-base p-1 bg-slate-100 text-slate-700 rounded-lg">🗄️</span>
+                          <span className="text-[9px] font-bold text-slate-800 bg-slate-200 px-1.5 py-0.5 rounded-md">Raw Dump</span>
+                        </div>
+                        <div>
+                          <strong className="text-xs font-black text-slate-900 block">Raw Field Activity Dump</strong>
+                          <p className="text-[10px] text-slate-600 mt-1 leading-normal">
+                            Har Field Officer ke per-day logs, GPS travel kilometers, clinic remarks, aur doctor visits ka granular data.
+                          </p>
+                        </div>
+                        <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-slate-700">Complete Audit</div>
                       </div>
+                    </div>
+
+                    {/* Server RAM Guard Bento */}
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-emerald-950">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-base p-1.5 bg-emerald-100 rounded-xl">🛡️</span>
+                        <div>
+                          <strong className="text-xs font-bold block">Concurrency Semaphore &amp; Server RAM Guard:</strong>
+                          <span className="text-[11px] text-emerald-900 leading-normal">
+                            Heavy Excel exports backend me <code className="bg-white/80 px-1 rounded font-mono font-bold text-[10px]">asyncio.Semaphore(1)</code>, 1000ms Sequential Queue cooldown, aur explicit garbage collection se chalte hain, taaki 512MB Render server par 0% RAM spike ho.
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold bg-white text-emerald-800 border border-emerald-300 px-2.5 py-1 rounded-xl shrink-0">RAM Guard Active</span>
                     </div>
                   </div>
                 )}
@@ -13674,39 +14201,70 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 8: Roles & Audit Trail */}
                 {appGuideActiveTopic === 'audit_trail' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">📜</span>
-                      <h4 className="text-sm font-black text-slate-900">Multi-Admin Roles, District Boundaries &amp; Audit Logs</h4>
-                    </div>
-
-                    <div className="space-y-2.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
-                        <div className="bg-purple-50 border border-purple-200 p-3 rounded-2xl space-y-1">
-                          <strong className="text-purple-950 font-bold block text-xs">👑 Super Admin:</strong>
-                          <ul className="list-disc list-inside space-y-0.5 text-purple-900 pl-1">
-                            <li>Pure Bihar ke sabhi 22+ districts ka complete access.</li>
-                            <li>Official Nikshay State Excel Dumps upload karna.</li>
-                            <li>Sub-Admin accounts create aur manage karna.</li>
-                            <li>Statewide monthly targets configure karna.</li>
-                          </ul>
-                        </div>
-
-                        <div className="bg-sky-50 border border-sky-200 p-3 rounded-2xl space-y-1">
-                          <strong className="text-sky-950 font-bold block text-xs">🛡️ District Sub-Admin:</strong>
-                          <ul className="list-disc list-inside space-y-0.5 text-sky-900 pl-1">
-                            <li>Sirf unke assigned canonical districts ka data dikhta hai.</li>
-                            <li>Apne district ke FOs ki reports review aur PIN reset.</li>
-                            <li>Apne district ka Duplicate Radar 1-Click Auto-Repair.</li>
-                            <li>Doosre districts ka data access ya modify karna strictly 403 Blocked.</li>
-                          </ul>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">📜</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Multi-Admin Roles, District Boundaries &amp; Audit Logs</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Role-based access control (RBAC), canonical district isolation, and tamper-evident logging</p>
                         </div>
                       </div>
+                      <span className="text-[9px] font-bold uppercase bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-200">
+                        RBAC Isolation
+                      </span>
+                    </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1 text-[11px] text-slate-700">
-                        <strong className="text-slate-900 block font-bold text-xs">Tamper-Evident Audit Trail:</strong>
-                        <p>
-                          Jab bhi koi admin target change karta hai, staff PIN reset karta hai, report delete karta hai, ya duplicate repair run karta hai — har action actor ke username, IP/token aur IST timestamp ke saath Firestore audit ledger me permanently darj ho jata hai.
-                        </p>
+                    {/* Dual-Column Bento Comparison Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-purple-50/70 border border-purple-200 rounded-2xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-xs font-black text-purple-950 flex items-center gap-1.5">
+                            <span>👑</span>
+                            <span>Super Admin (Statewide Scope)</span>
+                          </strong>
+                          <span className="text-[9px] font-bold text-purple-900 bg-purple-200 px-2 py-0.5 rounded-full">Full Scope</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-1 text-purple-950 text-[11px] pl-1 leading-relaxed">
+                          <li>Pure Bihar ke sabhi 22+ districts ka complete access.</li>
+                          <li>Official Nikshay State Excel Dumps upload karna.</li>
+                          <li>Sub-Admin accounts create aur manage karna.</li>
+                          <li>Statewide monthly targets aur declared holidays configure karna.</li>
+                        </ul>
+                      </div>
+
+                      <div className="bg-sky-50/70 border border-sky-200 rounded-2xl p-3.5 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <strong className="text-xs font-black text-sky-950 flex items-center gap-1.5">
+                            <span>🛡️</span>
+                            <span>District Sub-Admin (Isolated Scope)</span>
+                          </strong>
+                          <span className="text-[9px] font-bold text-sky-900 bg-sky-200 px-2 py-0.5 rounded-full">Guarded Scope</span>
+                        </div>
+                        <ul className="list-disc list-inside space-y-1 text-sky-950 text-[11px] pl-1 leading-relaxed">
+                          <li>Sirf unke assigned canonical districts ka data dikhta hai.</li>
+                          <li>Apne district ke FOs ki reports review aur PIN reset.</li>
+                          <li>Apne district ka Duplicate Radar 1-Click Auto-Repair.</li>
+                          <li>Doosre districts ka data access ya modify karna strictly <strong>403 Forbidden</strong>.</li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    {/* 3-Stage Security Architecture Bento Sequence */}
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-2.5">
+                      <strong className="text-xs font-black text-slate-900 block">Security Architecture &amp; Tamper-Evident Audit Trail:</strong>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10px]">
+                        <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-1">
+                          <strong className="text-slate-900 font-bold block">1. Cross-District Isolation</strong>
+                          <p className="text-slate-600">Backend har write endpoint par canonical district boundaries validate karta hai.</p>
+                        </div>
+                        <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-1">
+                          <strong className="text-slate-900 font-bold block">2. Disk Snapshot Shield</strong>
+                          <p className="text-slate-600">Sub-Admin single-district queries kabhi statewide disk backup caches ko overwrite nahi karti.</p>
+                        </div>
+                        <div className="bg-white border border-slate-200 rounded-xl p-2.5 space-y-1">
+                          <strong className="text-slate-900 font-bold block">3. Tamper-Evident Audit Ledger</strong>
+                          <p className="text-slate-600">Har target change, report edit, PIN reset ya duplicate repair actor username, IP, aur IST timestamp ke saath permanently darj hota hai.</p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -13715,37 +14273,60 @@ const availableDistrictsForFeed = useMemo(() => {
                 {/* TOPIC 9: FAQs & Solutions */}
                 {appGuideActiveTopic === 'faqs' && (
                   <div className="space-y-4">
-                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
-                      <span className="text-xl">❓</span>
-                      <h4 className="text-sm font-black text-slate-900">Frequently Asked Questions (Admin FAQs)</h4>
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">❓</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Frequently Asked Questions (Admin FAQs)</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">Quick answers to frequent administrative, operational, and technical questions</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-200">
+                        Quick Troubleshooting
+                      </span>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q1: Duplicate 1-Click Fix chalane ke baad agar FO bole ki patient ki visit genuine thi?</strong>
-                        <p className="text-slate-600 text-[11px]">
+                    {/* 6-Card Responsive Bento FAQ Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q1: Duplicate 1-Click Fix chalane ke baad agar FO bole ki patient ki visit genuine thi?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
                           Chinta ki baat nahi hai! 1-Click Fix sirf duplicate &ldquo;TB Notification count&rdquo; ko theek karta hai. Us din ki Home Visit, FDC dawai, aur Travel KM report me waise hi safe rehte hain.
                         </p>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q2: Notification ID Nikshay portal par nahi mil rahi hai, kya karein?</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Pehle check karein ki reporting kitne din pehle hui hai. Agar 3 din (&le;72h) se kam huye hain, toh Government server sync hone ka wait karein. Agar 3 din se purana hai, toh Nikshay search bar me manually type karein.
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q2: Notification ID Nikshay portal par nahi mil rahi hai, kya karein?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          Pehle check karein ki reporting kitne din pehle hui hai. Agar 3 din (&le;72h) se kam huye hain, toh Government server sync hone ka wait karein. Agar 3 din se purana hai, tabhi Nikshay search bar me manually cross-check karein.
                         </p>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q3: FO ka Duty PIN reset kaise karein?</strong>
-                        <p className="text-slate-600 text-[11px]">
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q3: FO ka Duty PIN reset kaise karein?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
                           <strong>Staff Directory</strong> tab me jayein, us officer ke naam ke aage bane `Reset PIN` button par click karein aur naya 4-digit PIN enter karke save karein. FO naye PIN se turant login kar sakta hai.
                         </p>
                       </div>
 
-                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-2xl space-y-1">
-                        <strong className="text-slate-900 font-bold block text-xs">Q4: Render server par extra load toh nahi padega?</strong>
-                        <p className="text-slate-600 text-[11px]">
-                          Nahi, yeh Guide aur Notification Tray 100% Client-Side React me operate karte hain. Iska Render ke 512MB RAM aur CPU par 0.00% load padta hai.
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q4: Subah 8:30 AM par submit hui report kal ke attendance me kyu dikh rahi hai?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          Stealth 10:00 AM Cutoff ke tehat, subah 10:00 AM se pehle submit huye reports kal (yesterday) ke duty me count hote hain aur unpar &lsquo;⏰ Next day morning&rsquo; badge lagta hai. Isse attendance accurate rehti hai.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q5: Render server par extra load toh nahi padega?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          Nahi, yeh Guide, Bento Flowcharts aur Notification Tray 100% Client-Side React me operate karte hain. Iska Render ke 512MB RAM aur CPU par 0.00% load padta hai.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 space-y-1.5">
+                        <strong className="text-slate-900 font-black block text-xs">Q6: Hatae gaye staff defaulters list me kyu nahi aate?</strong>
+                        <p className="text-slate-600 text-[11px] leading-relaxed">
+                          Consonant-collapsed normalization aur direct staffList status lookup se inactive staff deactivation date ke baad expected attendance roster se automatically exclude ho jate hain.
                         </p>
                       </div>
                     </div>
@@ -13759,7 +14340,7 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>DFY Bihar MIS Operations Standard &bull; Version 2.4</span>
+                <span>DFY Bihar MIS Operations Standard &bull; Version 2.8.3</span>
               </span>
               <button
                 type="button"

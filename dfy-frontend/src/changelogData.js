@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.2";
+export const APP_VERSION = "2.8.3";
 export const LAST_UPDATED_DATE = "25 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.8.3",
+    date: "25 Sep 2026",
+    title: "Stealth 10 AM Cutoff Engine, Deactivated Staff Roster Defense, Master Cohort Docs & 100% Native Bento Flowcharts",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "⏰ Stealth 10:00 AM Reporting Cutoff & Next-Day Morning Radar Badge: Submissions completed before 10:00 AM IST are unconditionally attributed to yesterday (D-1), preventing early-morning catch-up entries from skewing current day attendance, and tagged with prominent '⏰ Next day morning HH:MM AM' badges in Attendance Radar.",
+      "📊 Dual-Sheet Staff Attendance Excel Export with Morning Notes: Sheet 1 daily roster automatically flags next-day morning submissions in the remarks column ('Submitted next morning (HH:MM AM)') with zero server RAM spike.",
+      "🛡️ Deactivated Staff Consonant-Collapsed Defense: Dual-layer normalization (consonant-collapsing regex replace(/(.)\\1+/g, '$1') and direct staffList status lookup) permanently shields Sitamarhi and all 22+ districts from inactive staff appearing in chronic defaulters due to phonetic name variations.",
+      "📑 Master Table Documents Column Cohort Breakdown: Enriched Documents column with real-time Current Month vs Previous Month cohort split ('C:X | P:Y'), fully reactive to the 3-way cohort switch and multi-column sorting.",
+      "🧩 100% Native Bento Visual Flowcharts: Overhauled all FO Help Guide chapters and Centralized Admin SOP modules into modern, responsive Bento Visual Flowcharts featuring sequence badges (1➔2➔3), SVG arrows, status chips, and zero-clutter tactical callouts."
+    ],
+    details: [
+      {
+        tag: "Attendance Engine",
+        color: "amber",
+        text: "Unconditional 10:00 AM IST cutoff guarantees that early-morning catch-up reports map to the previous day's duties with distinct next-day morning badges."
+      },
+      {
+        tag: "Staff Lifecycle",
+        color: "rose",
+        text: "Consonant-collapsed key matching ensures soft-deleted and transferred officers never ghost into chronic defaulter streaks, regardless of spelling differences."
+      },
+      {
+        tag: "Cohort Analytics",
+        color: "indigo",
+        text: "Documents section now separates new monthly notifications from backlog document collection, harmonized with Tests, HIV/DM, and Contact Tracing."
+      },
+      {
+        tag: "Bento Visual SOPs",
+        color: "teal",
+        text: "Full bento conversion across FO mobile and Centralized Admin SOPs delivers visual, step-by-step operational clarity with zero cutoff leakage."
+      }
+    ]
+  },
+  {
     version: "v2.8.2",
     date: "25 Sep 2026",
     title: "Dual-Sheet Staff Attendance Export, Retroactive Admin Remarks, Direct Patient 1-Tap Calling & Visual Bento SOPs",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "📊 Dual-Sheet Staff Attendance (.xlsx) Workbook: Added executive attendance export featuring Sheet 1 (Consolidated Monthly Matrix with color-coded Present/Leave/Absent cells, totals & percentages) and Sheet 2 (Detailed Activity Log with doctor visits, patient interventions & travel KM), backed by a 1-second sequential queue preventing Render server spikes.",
       "✏️ Retroactive Admin Inspection Remarks & Overrides: State & Sub-Admins can now add supervisor remarks and modify attendance status (Present, Medical Leave, Casual Leave, Official Duty, Absent) for any past or current day directly from Attendance Radar, syncing instantly to Field Officer calendars.",
