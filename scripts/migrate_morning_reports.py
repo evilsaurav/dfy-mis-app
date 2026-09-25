@@ -9,7 +9,10 @@ into the corresponding 2026-09-24 documents, setting:
   - is_next_day_submission = True
   - submitted_morning_time = formatted_time
   - morning_submission_label = f"Next day morning {formatted_time}"
-  - Merges IDs and array metrics without duplicates
+  - Merges IDs and array metrics dynamically without duplicates
+  - Merges fdc_details by ID
+  - Accurately maps scalar counters via SCALAR_COUNTER_MAP
+  - Preserves all metadata if yesterday document does not exist
   - Deletes the duplicate 2026-09-25 documents
   - Invalidates attendance & reporting caches
 """
@@ -39,21 +42,29 @@ TARGET_FO_NAMES = {
     "diwakar kumar"
 }
 
-ALL_ARRAY_FIELDS = [
-    "notification_ids", "test_ids", "presumptive_ids", "hiv_dm_ids", "dbt_ids",
-    "tpt_treatment_start_ids", "tpt_presumptive_ids", "doctor_visits_ids",
-    "documents_ids", "contact_tracing_ids", "community_meeting_ids",
-    "daily_meeting_ids", "private_doctor_meeting_ids", "chemist_meeting_ids",
-    "ayush_doctor_meeting_ids", "rhp_doctor_meeting_ids", "active_case_finding_ids",
-    "drtb_patient_counseling_ids", "weight_band_ids", "adhar_face_authentication_ids",
-    "consent_with_id_ids", "culture_dst_ids", "visited_names"
-]
+SCALAR_COUNTER_MAP = {
+    "notification_ids": "notifications",
+    "sample_tested_ids": "tests",
+    "test_ids": "tests",
+    "presumptive_ids": "presumptive",
+    "hiv_dm_ids": "hiv_dm",
+    "dbt_ids": "dbt",
+    "contact_tracing_ids": "contact_tracing",
+    "visited_names": "doctor_visits"
+}
 
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 
 
 def get_ist_now() -> datetime:
     return datetime.now(IST_TIMEZONE)
+
+
+def normalize_for_match(text: Any) -> str:
+    """Strips whitespace, punctuation and converts to lowercase for resilient matching."""
+    if text is None:
+        return ""
+    return re.sub(r'[^a-z0-9]', '', str(text).lower())
 
 
 def parse_to_ist_datetime(raw_ts: Any) -> Optional[datetime]:
@@ -167,43 +178,99 @@ def invalidate_caches():
             print(f"    [!] Note: Disk cache pruning notice: {de}")
 
 
-def merge_report_data(yesterday_data: Dict[str, Any], morning_data: Dict[str, Any], formatted_time: str) -> Dict[str, Any]:
-    """Merges morning data into yesterday's document payload cleanly."""
-    merged = dict(yesterday_data)
+def merge_report_data(yesterday_data: Optional[Dict[str, Any]], morning_data: Dict[str, Any], formatted_time: str) -> Dict[str, Any]:
+    """
+    Merges morning data into yesterday's document payload cleanly.
+    - If yesterday_data is empty/None, starts with dict(morning_data) to preserve all metadata.
+    - Dynamically merges all array fields ending in _ids or visited_names without data loss.
+    - Merges fdc_details by item id.
+    - Accurately maps scalar counters using SCALAR_COUNTER_MAP and fallback.
+    """
+    if not yesterday_data:
+        merged = dict(morning_data)
+    else:
+        merged = dict(yesterday_data)
+        # Preserve any metadata from morning_data not in yesterday_data (PIN, coords, etc.)
+        for k, v in morning_data.items():
+            if k not in merged:
+                merged[k] = v
 
-    # 1. Merge all array fields without duplicates
-    for arr_field in ALL_ARRAY_FIELDS:
-        arr_y = yesterday_data.get(arr_field) or []
-        arr_m = morning_data.get(arr_field) or []
-        if arr_y or arr_m:
-            combined = list(dict.fromkeys(list(arr_y) + list(arr_m)))
-            merged[arr_field] = combined
-            
-            # Recalculate scalar counters if applicable (e.g. notification_ids -> notifications)
-            if arr_field.endswith("_ids"):
-                scalar_field = arr_field[:-4]
-                merged[scalar_field] = len(combined)
+    all_keys = set((yesterday_data or {}).keys()).union(morning_data.keys())
 
-    # 2. Preserve / merge remarks
-    rem_y = (yesterday_data.get("remark") or "").strip()
-    rem_m = (morning_data.get("remark") or "").strip()
+    # 1. Dynamic merge for any array ending with _ids or visited_names
+    for k in all_keys:
+        if k.endswith("_ids") or k == "visited_names":
+            arr_y = (yesterday_data or {}).get(k) or []
+            arr_m = morning_data.get(k) or []
+            if isinstance(arr_y, list) or isinstance(arr_m, list):
+                list_y = list(arr_y) if isinstance(arr_y, list) else []
+                list_m = list(arr_m) if isinstance(arr_m, list) else []
+                combined = list(dict.fromkeys(list_y + list_m))
+                merged[k] = combined
+
+    # 2. Merge fdc_details by id or combine
+    if "fdc_details" in all_keys:
+        old_fdc = (yesterday_data or {}).get("fdc_details") or []
+        new_fdc = morning_data.get("fdc_details") or []
+        if isinstance(old_fdc, list) or isinstance(new_fdc, list):
+            list_old = old_fdc if isinstance(old_fdc, list) else []
+            list_new = new_fdc if isinstance(new_fdc, list) else []
+            f_map = {}
+            for item in list_old:
+                if isinstance(item, dict) and item.get("id"):
+                    f_map[item.get("id")] = item
+                elif isinstance(item, dict):
+                    f_map[str(item)] = item
+            for item in list_new:
+                if isinstance(item, dict) and item.get("id"):
+                    f_map[item.get("id")] = item
+                elif isinstance(item, dict):
+                    f_map[str(item)] = item
+            merged["fdc_details"] = list(f_map.values())
+
+    # 3. Update scalar counters using explicit SCALAR_COUNTER_MAP
+    for k, scalar_field in SCALAR_COUNTER_MAP.items():
+        if k in merged and isinstance(merged[k], list):
+            merged[scalar_field] = len(merged[k])
+
+    # Reconcile tests if either sample_tested_ids or test_ids exist
+    if "sample_tested_ids" in merged or "test_ids" in merged:
+        merged["tests"] = max(
+            len(merged.get("sample_tested_ids") or []) if isinstance(merged.get("sample_tested_ids"), list) else 0,
+            len(merged.get("test_ids") or []) if isinstance(merged.get("test_ids"), list) else 0
+        )
+
+    # Fallback scalar update for other _ids fields (e.g. documents_ids -> documents)
+    for k in all_keys:
+        if k.endswith("_ids") and k not in SCALAR_COUNTER_MAP:
+            scalar_cand = k[:-4]
+            if scalar_cand in merged and isinstance(merged.get(k), list):
+                merged[scalar_cand] = len(merged[k])
+
+    # 4. Preserve / merge remarks
+    rem_y = str((yesterday_data or {}).get("remark") or "").strip()
+    rem_m = str(morning_data.get("remark") or "").strip()
     if rem_y and rem_m and rem_m not in rem_y:
         merged["remark"] = f"{rem_y} | Morning Update: {rem_m}"
     elif rem_m:
         merged["remark"] = rem_m
 
-    # 3. Handle travel km
-    km_y = yesterday_data.get("total_km") or 0
+    # 5. Travel KM
+    km_y = (yesterday_data or {}).get("total_km") or 0
     km_m = morning_data.get("total_km") or 0
-    merged["total_km"] = max(km_y, km_m)
+    try:
+        merged["total_km"] = max(float(km_y), float(km_m))
+    except (ValueError, TypeError):
+        pass
 
-    # 4. Stamp next-day morning metadata
+    # 6. Stamp next-day morning metadata
     merged["date_of_reporting"] = TARGET_YESTERDAY_DATE
     merged["date"] = TARGET_YESTERDAY_DATE
     merged["is_next_day_submission"] = True
     merged["submitted_morning_time"] = formatted_time
     merged["morning_submission_label"] = f"Next day morning {formatted_time}"
-    merged["submission_count"] = yesterday_data.get("submission_count", 1) + 1
+    prev_count = (yesterday_data or {}).get("submission_count", 1) if yesterday_data else 0
+    merged["submission_count"] = prev_count + 1
     merged["status"] = "completed"
 
     return merged
@@ -236,15 +303,15 @@ def run_migration(dry_run: bool = False) -> Dict[str, Any]:
     for doc in docs_25:
         data = doc.to_dict() or {}
         fo_name = (data.get("fo_name") or "").strip()
-        clean_fo_name = fo_name.lower()
+        norm_fo_name = normalize_for_match(fo_name)
         raw_ts = data.get("timestamp_completed") or data.get("timestamp") or data.get("submitted_at")
         dt_ist = parse_to_ist_datetime(raw_ts)
 
         is_candidate = False
         reason = ""
 
-        # Condition 1: FO Name matches targeted staff
-        if clean_fo_name in TARGET_FO_NAMES:
+        # Condition 1: FO Name matches targeted staff (case/whitespace-insensitive)
+        if any(normalize_for_match(t) == norm_fo_name for t in TARGET_FO_NAMES):
             is_candidate = True
             reason = f"Officer '{fo_name}' in targeted morning staff list"
         # Condition 2: Completed before 10:00 AM IST on Sept 25
@@ -270,6 +337,11 @@ def run_migration(dry_run: bool = False) -> Dict[str, Any]:
         invalidate_caches()
         return summary
 
+    # Pre-fetch candidate documents for yesterday to perform case/whitespace-insensitive matching
+    all_ydocs = list(col_ref.where("date_of_reporting", "==", TARGET_YESTERDAY_DATE).stream())
+    if not all_ydocs:
+        all_ydocs = list(col_ref.where("date", "==", TARGET_YESTERDAY_DATE).stream())
+
     for doc, morning_data, reason, raw_ts in candidates_to_migrate:
         morning_doc_id = doc.id
         fo_name = (morning_data.get("fo_name") or "").strip()
@@ -285,23 +357,32 @@ def run_migration(dry_run: bool = False) -> Dict[str, Any]:
         yesterday_ref = col_ref.document(yesterday_doc_id)
         yesterday_snap = yesterday_ref.get()
 
-        # If not found by primary key, query by fo_name and date_of_reporting
         target_ref = yesterday_ref
-        yesterday_data = {}
+        yesterday_data = None
+
         if yesterday_snap.exists:
             yesterday_data = yesterday_snap.to_dict() or {}
-            print(f"    [+] Found existing yesterday document: {yesterday_doc_id}")
+            print(f"    [+] Found existing yesterday document by primary ID: {yesterday_doc_id}")
         else:
-            q_ydocs = list(col_ref.where("fo_name", "==", fo_name).where("date_of_reporting", "==", TARGET_YESTERDAY_DATE).stream())
-            if not q_ydocs:
-                q_ydocs = list(col_ref.where("fo_name", "==", fo_name).where("date", "==", TARGET_YESTERDAY_DATE).stream())
-            
-            if q_ydocs:
-                target_ref = q_ydocs[0].reference
-                yesterday_data = q_ydocs[0].to_dict() or {}
-                print(f"    [+] Found alternative yesterday document: {target_ref.id}")
+            # Case/whitespace-insensitive fallback matching
+            norm_fo = normalize_for_match(fo_name)
+            norm_wp = normalize_for_match(working_place)
+
+            matched_ydoc = None
+            for ydoc in all_ydocs:
+                yd = ydoc.to_dict() or {}
+                if normalize_for_match(yd.get("fo_name")) == norm_fo:
+                    matched_ydoc = ydoc
+                    if normalize_for_match(yd.get("working_place")) == norm_wp:
+                        break
+
+            if matched_ydoc:
+                target_ref = matched_ydoc.reference
+                yesterday_data = matched_ydoc.to_dict() or {}
+                print(f"    [+] Found case/whitespace-insensitive match for yesterday: {target_ref.id}")
             else:
                 print(f"    [+] No existing yesterday document found; will create new at {yesterday_doc_id}")
+                yesterday_data = None
 
         # Build merged document
         merged_payload = merge_report_data(yesterday_data, morning_data, formatted_time)
