@@ -3368,19 +3368,13 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- Admin Authentication & Zero-Budget Emergency Recovery ---
+# --- Admin Authentication & Secure Credential Management ---
 class AdminLoginReq(BaseModel):
     password: str
 
-class AdminRecoveryReq(BaseModel):
-    recovery_code: str
-    new_password: str
-
-class AdminChangeSettingsReq(BaseModel):
+class AdminChangePasswordReq(BaseModel):
     current_password: str
-    new_password: Optional[str] = None
-    new_recovery_key: Optional[str] = None
-    new_security_pin: Optional[str] = None
+    new_password: str
 
 def get_or_init_admin_auth() -> dict:
     doc_ref = db.collection("admin_config").document("auth_settings")
@@ -3389,11 +3383,7 @@ def get_or_init_admin_auth() -> dict:
         return doc.to_dict()
     
     default_auth = {
-        "password": "dfyadmin2026",
-        "master_recovery_key": "DFY-RESCUE-9921",
-        "security_pin": "7788",
-        "security_question": "DFY State Organization Code",
-        "security_answer": "BIHAR-DFY-TB",
+        "password": hash_password("dfyadmin2026"),
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
     doc_ref.set(default_auth)
@@ -3406,31 +3396,17 @@ async def admin_login(req: AdminLoginReq, request: Request):
         client_location = await get_ip_location(client_ip)
         client_diff = {"ip": client_ip, "device": client_device, "location": client_location}
 
-        # Fast bypass for master credentials (zero Firestore reads)
-        if req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
-            login_rate_limiter.reset("master_admin")
-            master_user = {
-                "user_id": "admin",
-                "username": "admin",
-                "name": "Super Admin",
-                "role": "SUPER_ADMIN",
-                "allowed_districts": ["All"]
-            }
-            token = create_access_token(master_user)
-            await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master legacy login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
-            return {"success": True, "message": "Login successful", "token": token, "user": master_user}
-
         if login_rate_limiter.is_rate_limited("master_admin"):
             await log_admin_activity("LOGIN_BLOCKED", f"Master admin lockout triggered from {client_device} (Locked for 10m)", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Locked for 10 minutes.")
             
         try:
             auth_data = await asyncio.to_thread(get_or_init_admin_auth)
-            correct_pw = auth_data.get("password", "dfyadmin2026")
+            correct_pw = auth_data.get("password", "")
         except Exception:
-            correct_pw = "dfyadmin2026"
+            correct_pw = ""
 
-        if verify_password(req.password, correct_pw) or req.password == "dfyadmin2026":
+        if correct_pw and verify_password(req.password, correct_pw):
             login_rate_limiter.reset("master_admin")
             master_user = {
                 "user_id": "admin",
@@ -3449,83 +3425,54 @@ async def admin_login(req: AdminLoginReq, request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        if req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
-            master_user = {
-                "user_id": "admin",
-                "username": "admin",
-                "name": "Super Admin",
-                "role": "SUPER_ADMIN",
-                "allowed_districts": ["All"]
-            }
-            token = create_access_token(master_user)
-            return {"success": True, "message": "Login successful (offline fallback)", "token": token, "user": master_user}
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/admin/auth/settings")
-async def get_admin_settings(password: str):
-    try:
-        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
-        if password != auth_data.get("password", "dfyadmin2026"):
-            raise HTTPException(status_code=401, detail="Unauthorized")
-        return {
-            "success": True,
-            "master_recovery_key": auth_data.get("master_recovery_key", "DFY-RESCUE-9921"),
-            "security_pin": auth_data.get("security_pin", "7788"),
-            "last_updated": auth_data.get("last_updated", "")
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/admin/auth/emergency-reset")
-async def admin_emergency_reset(req: AdminRecoveryReq):
-    try:
-        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
-        code = req.recovery_code.strip().upper()
-        
-        valid_key = str(auth_data.get("master_recovery_key", "DFY-RESCUE-9921")).strip().upper()
-        valid_pin = str(auth_data.get("security_pin", "7788")).strip()
-        valid_ans = str(auth_data.get("security_answer", "BIHAR-DFY-TB")).strip().upper()
-        
-        if code in [valid_key, valid_pin, valid_ans]:
-            doc_ref = db.collection("admin_config").document("auth_settings")
-            await asyncio.to_thread(lambda: doc_ref.set({
-                "password": req.new_password,
-                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            }, merge=True))
-            return {"success": True, "message": "Password successfully reset!"}
-        
-        raise HTTPException(status_code=400, detail="Invalid Emergency Recovery Key or PIN.")
-    except HTTPException:
-        raise
-    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/auth/update-credentials")
-async def admin_update_credentials(req: AdminChangeSettingsReq):
+async def admin_update_credentials(req: AdminChangePasswordReq, request: Request, admin: dict = Depends(require_super_admin)):
     try:
-        auth_data = await asyncio.to_thread(get_or_init_admin_auth)
-        if req.current_password != auth_data.get("password", "dfyadmin2026"):
+        user_id = admin.get("user_id") or admin.get("username") or "admin"
+        if not req.new_password or len(req.new_password.strip()) < 6:
+            raise HTTPException(status_code=400, detail="New password must be at least 6 characters long.")
+            
+        user_doc_ref = db.collection("admin_users").document(user_id)
+        user_doc = await asyncio.to_thread(user_doc_ref.get)
+        
+        current_hash = None
+        if user_doc.exists:
+            current_hash = user_doc.to_dict().get("password")
+        else:
+            auth_data = await asyncio.to_thread(get_or_init_admin_auth)
+            current_hash = auth_data.get("password")
+
+        if not current_hash or not verify_password(req.current_password, current_hash):
             raise HTTPException(status_code=401, detail="Current password incorrect.")
-            
-        update_payload = {
-            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-        if req.new_password:
-            update_payload["password"] = req.new_password
-        if req.new_recovery_key:
-            update_payload["master_recovery_key"] = req.new_recovery_key
-        if req.new_security_pin:
-            update_payload["security_pin"] = req.new_security_pin
-            
-        doc_ref = db.collection("admin_config").document("auth_settings")
-        await asyncio.to_thread(lambda: doc_ref.set(update_payload, merge=True))
-        return {"success": True, "message": "Admin credentials updated successfully!"}
+
+        new_hashed = hash_password(req.new_password.strip())
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        await asyncio.to_thread(lambda: user_doc_ref.set({
+            "password": new_hashed,
+            "last_password_change": now_str
+        }, merge=True))
+
+        if user_id == "admin":
+            auth_doc_ref = db.collection("admin_config").document("auth_settings")
+            await asyncio.to_thread(lambda: auth_doc_ref.set({
+                "password": new_hashed,
+                "last_updated": now_str
+            }, merge=True))
+
+        client_ip, client_device = extract_client_info(request)
+        client_location = await get_ip_location(client_ip)
+        client_diff = {"ip": client_ip, "device": client_device, "location": client_location}
+        await log_admin_activity("ADMIN_PASSWORD_CHANGED", f"Master password updated by {admin.get('name', user_id)}", user_name=admin.get("name", user_id), user_id=user_id, role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
+
+        return {"success": True, "message": "Password updated successfully!"}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/admin/export-state-summary")
 async def export_state_summary(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
@@ -6204,7 +6151,7 @@ async def init_default_super_admin():
                 "user_id": "admin",
                 "username": "admin",
                 "name": "Super Admin (Master)",
-                "password": "dfyadmin2026",
+                "password": hash_password("dfyadmin2026"),
                 "role": "SUPER_ADMIN",
                 "allowed_districts": ["All"],
                 "permissions": {
@@ -6231,32 +6178,6 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
         client_ip, client_device = extract_client_info(request)
         client_location = await get_ip_location(client_ip)
         client_diff = {"ip": client_ip, "device": client_device, "location": client_location}
-        
-        # Emergency master admin fast-track (zero Firestore reads)
-        if clean_user in ["admin", "superadmin", "dfyadmin"] and req.password in ["dfyadmin2026", "DFY-RESCUE-9921"]:
-            login_rate_limiter.reset(clean_user)
-            user_data = {
-                "user_id": "admin",
-                "username": "admin",
-                "name": "Super Admin",
-                "role": "SUPER_ADMIN",
-                "allowed_districts": ["All"],
-                "permissions": {
-                    "can_view_dashboard": True,
-                    "can_edit_targets": True,
-                    "can_manage_staff": True,
-                    "can_edit_patient_ids": True,
-                    "can_export_reports": True,
-                    "can_view_audit_logs": True
-                },
-                "status": "ACTIVE"
-            }
-            token = create_access_token(user_data)
-            try:
-                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
-            except Exception:
-                pass
-            return {"success": True, "user": user_data, "token": token}
 
         # Check rate limiter against brute force attacks
         if login_rate_limiter.is_rate_limited(clean_user):
@@ -6274,61 +6195,14 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
             user_doc = await asyncio.to_thread(user_doc_ref.get)
         except Exception as fe:
             print(f"Firestore user lookup notice (quota/network): {fe}")
-            # If master admin password was entered during Firestore outage
-            if clean_user in ["admin", "superadmin", "dfyadmin"] and (verify_password(req.password, "dfyadmin2026") or req.password == "dfyadmin2026"):
-                login_rate_limiter.reset(clean_user)
-                user_data = {
-                    "user_id": "admin",
-                    "username": "admin",
-                    "name": "Super Admin",
-                    "role": "SUPER_ADMIN",
-                    "allowed_districts": ["All"],
-                    "permissions": {
-                        "can_view_dashboard": True,
-                        "can_edit_targets": True,
-                        "can_manage_staff": True,
-                        "can_edit_patient_ids": True,
-                        "can_export_reports": True,
-                        "can_view_audit_logs": True
-                    },
-                    "status": "ACTIVE"
-                }
-                token = create_access_token(user_data)
-                await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login (offline fallback) from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
-                return {"success": True, "user": user_data, "token": token}
-            raise HTTPException(status_code=503, detail="Database currently at capacity (daily quota limit). Please try again or use master admin credentials.")
+            raise HTTPException(status_code=503, detail="Database currently unavailable. Please try again later.")
         
-        if not user_doc.exists:
+        if not user_doc or not user_doc.exists:
             # Fallback check for query by username
             docs = await asyncio.to_thread(lambda: list(db.collection("admin_users").where("username", "==", clean_user).stream()))
             if docs:
                 user_doc = docs[0]
             else:
-                # Master legacy password fallback
-                auth_data = await asyncio.to_thread(get_or_init_admin_auth)
-                master_pw = auth_data.get("password", "dfyadmin2026")
-                if verify_password(req.password, master_pw) and clean_user in ["admin", "superadmin", "dfyadmin"]:
-                    login_rate_limiter.reset(clean_user)
-                    user_data = {
-                        "user_id": "admin",
-                        "username": "admin",
-                        "name": "Super Admin",
-                        "role": "SUPER_ADMIN",
-                        "allowed_districts": ["All"],
-                        "permissions": {
-                            "can_view_dashboard": True,
-                            "can_edit_targets": True,
-                            "can_manage_staff": True,
-                            "can_edit_patient_ids": True,
-                            "can_export_reports": True,
-                            "can_view_audit_logs": True
-                        },
-                        "status": "ACTIVE"
-                    }
-                    token = create_access_token(user_data)
-                    await log_admin_activity("LOGIN_SUCCESS", f"Super Admin master login from {client_device}", user_name="Super Admin", user_id="admin", role="SUPER_ADMIN", ip_address=client_ip, diff=client_diff, location=client_location)
-                    return {"success": True, "user": user_data, "token": token}
-                
                 login_rate_limiter.record_failure(clean_user)
                 await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
                 raise HTTPException(status_code=401, detail="Invalid username or password.")

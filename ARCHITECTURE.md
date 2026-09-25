@@ -205,10 +205,10 @@ flowchart LR
   4. Purges all dashboard RAM and disk cache prefixes.
   5. Records an immutable audit log entry in `admin_audit_logs`.
 
-### 6.3 Zero-Budget Emergency Disaster Recovery
-- **Master Recovery Key**: `DFY-RESCUE-9921` backed by emergency security PIN `7788`.
-- **One-Click Emergency Access Card**: Generates an offline credentials card (`.txt`) for the Chief Medical Officer / State Program Manager.
-- **Self-Healing Reset**: `/admin/emergency-reset` verifies recovery credentials and restores administrative access directly in Firestore.
+### 6.3 Hardened Authentication & Credential Governance
+- **Bcrypt Salted Hashing**: Administrator credentials are automatically salted and hashed via `hash_password()` using bcrypt before persistence in `admin_users`. Plaintext passwords and hardcoded bypasses are strictly prohibited.
+- **Sliding-Window Rate Limiting**: `SlidingWindowRateLimiter` enforces maximum 5 attempts per 10-minute window, issuing HTTP 429 lockouts to neutralize brute-force attacks.
+- **Protected Credential Management**: Password updates require authenticated Super Admin sessions (`require_super_admin`) and verification of existing credentials before committing updates to Firestore.
 
 ### 6.4 Attendance Leave & Absence Subsystem (`daily_staff_leaves`)
 - **State Persistence**: Leave entries are stored in the dedicated Firestore collection `daily_staff_leaves` with deterministic keys formatted as `{YYYY-MM-DD}_{canonical_district}_{fo_name_normalized}`.

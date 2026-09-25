@@ -33,7 +33,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [4. Cross-Officer Duplicate ID Radar](#4-cross-officer-duplicate-id-radar)
   - [5. Enterprise RBAC & Single-Day Report Deletion](#5-enterprise-rbac--single-day-report-deletion)
   - [6. Broadcast & Urgent Announcement System](#6-broadcast--urgent-announcement-system)
-  - [7. Audit Trail Radar & Security Recovery](#7-audit-trail-radar--security-recovery)
+  - [7. Audit Trail Radar & Security Governance](#7-audit-trail-radar--security-governance)
   - [8. Attendance Radar Leave & Absence Tracking Engine](#8--attendance-radar-leave--absence-tracking-engine)
   - [9. Staff Active/Inactive Lifecycle & Historical Retrospection](#9--staff-activeinactive-lifecycle--historical-retrospection)
   - [10. Field Officer Target Pacing Command Card & Dynamic Working Days](#10--field-officer-target-pacing-command-card--dynamic-working-days)
@@ -162,10 +162,10 @@ flowchart TD
 
 ---
 
-### 7. 📜 Audit Trail Radar & Security Recovery
+### 7. 📜 Audit Trail Radar & Security Governance
 - **Immutable Action Logging**: Every target change, patient ID edit, PIN reset, day report deletion, and broadcast is logged with actor name, role, district, and diff details.
 - **Automated 30-Day Retention**: Background engine prunes expired audit records in batches, maintaining compliance and preventing database bloat.
-- **Zero-Budget Emergency Recovery**: Master security key (`DFY-RESCUE-9921`) and PIN (`7788`) self-recovery mechanism for administrator credential resets.
+- **Hardened Authentication**: Strict bcrypt-hashed credential governance with brute-force sliding-window rate limiting (10-minute lockout on repeated failures) and RBAC role boundaries. Super Admin credential updates require authenticated sessions.
 
 ---
 

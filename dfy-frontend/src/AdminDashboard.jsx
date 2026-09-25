@@ -149,13 +149,6 @@ export default function AdminDashboard() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [compareDistA, setCompareDistA] = useState("Jamui");
   const [compareDistB, setCompareDistB] = useState("Bhojpur");
-  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [recoveryCode, setRecoveryCode] = useState("");
-  const [newRecoveryPassword, setNewRecoveryPassword] = useState("");
-  const [confirmRecoveryPassword, setConfirmRecoveryPassword] = useState("");
-  const [recoveryError, setRecoveryError] = useState("");
-  const [recoverySuccess, setRecoverySuccess] = useState("");
-  const [isRecovering, setIsRecovering] = useState(false);
 
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [changeCurrentPw, setChangeCurrentPw] = useState("");
@@ -1999,44 +1992,10 @@ export default function AdminDashboard() {
         fetchData();
       } else {
         const d = await res.json().catch(() => ({}));
-        if ((password === 'dfyadmin2026' || password === 'DFY-RESCUE-9921') && (cleanUser === 'admin' || !cleanUser)) {
-          const rootUser = {
-            username: 'admin',
-            name: 'Super Admin',
-            role: 'SUPER_ADMIN',
-            allowed_districts: ['All'],
-            permissions: { can_edit_targets: true, can_manage_staff: true, can_edit_patient_ids: true, can_export_reports: true }
-          };
-          setCurrentUser(rootUser);
-          setIsAuthenticated(true);
-          try {
-            localStorage.setItem('dfy_admin_user', JSON.stringify(rootUser));
-            localStorage.setItem('dfy_admin_auth', 'true');
-          } catch (e) {}
-          fetchData();
-          return;
-        }
         setError(d.detail || 'Invalid username or password.');
       }
     } catch (err) {
-      if (password === 'dfyadmin2026' || cleanUser === 'admin') {
-        const rootUser = {
-          username: 'admin',
-          name: 'Super Admin',
-          role: 'SUPER_ADMIN',
-          allowed_districts: ['All'],
-          permissions: { can_edit_targets: true, can_manage_staff: true, can_edit_patient_ids: true, can_export_reports: true }
-        };
-        setCurrentUser(rootUser);
-        setIsAuthenticated(true);
-        try {
-          localStorage.setItem('dfy_admin_user', JSON.stringify(rootUser));
-          localStorage.setItem('dfy_admin_auth', 'true');
-        } catch (e) {}
-        fetchData();
-      } else {
-        setError('Login failed. Please check credentials or network connection.');
-      }
+      setError('Login failed. Please check credentials or network connection.');
     }
   };
 
@@ -2170,46 +2129,6 @@ export default function AdminDashboard() {
       alert("Network error while pruning audit logs.");
     } finally {
       setIsPruningAudit(false);
-    }
-  };
-
-  const handleEmergencyReset = async (e) => {
-    e.preventDefault();
-    setRecoveryError('');
-    setRecoverySuccess('');
-    if (!recoveryCode.trim() || !newRecoveryPassword.trim()) {
-      setRecoveryError('Please fill all fields.');
-      return;
-    }
-    if (newRecoveryPassword !== confirmRecoveryPassword) {
-      setRecoveryError('New passwords do not match.');
-      return;
-    }
-    setIsRecovering(true);
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/auth/emergency-reset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ recovery_code: recoveryCode, new_password: newRecoveryPassword })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRecoverySuccess('Password successfully reset! Logging you in...');
-        setPassword(newRecoveryPassword);
-        setTimeout(() => {
-          setShowRecoveryModal(false);
-          setIsAuthenticated(true);
-          try { localStorage.setItem('dfy_admin_auth', 'true'); } catch (e) {}
-          fetchData();
-        }, 1500);
-      } else {
-        setRecoveryError(data.detail || 'Invalid Emergency Recovery Code or PIN.');
-      }
-    } catch (err) {
-      setRecoveryError('Failed to connect to recovery server.');
-    } finally {
-      setIsRecovering(false);
     }
   };
 
@@ -2692,36 +2611,6 @@ export default function AdminDashboard() {
     } finally {
       setRecentIdEditsLoading(false);
     }
-  };
-
-  const downloadEmergencyCard = () => {
-    const card = `=====================================================
-  DOCTORS FOR YOU (DFY) - ADMIN EMERGENCY ACCESS CARD
-=====================================================
-Created / Downloaded: ${new Date().toLocaleString()}
-
-🔐 PORTAL URL: https://dfy-mis-app.vercel.app/admin
-🔑 MASTER RECOVERY KEY: DFY-RESCUE-9921
-🛡️ 4-DIGIT SECURITY PIN: 7788
-📋 STATE MISSION CODE: BIHAR-DFY-TB
-
-INSTRUCTIONS:
-If you ever forget your master admin password:
-1. Open Admin Portal Login screen.
-2. Click "Forgot Password / Emergency Recovery Key".
-3. Enter your Master Recovery Key (DFY-RESCUE-9921) or PIN (7788).
-4. Enter your new password and submit.
-
-Keep this file safe in your Google Drive or personal diary.
-=====================================================`;
-
-    const blob = new Blob([card], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `DFY_Admin_Emergency_Access_Card_${new Date().toISOString().split('T')[0]}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
 
@@ -4474,86 +4363,11 @@ const availableDistrictsForFeed = useMemo(() => {
           </form>
 
           <div className="mt-6 pt-5 border-t border-slate-100 flex flex-col items-center gap-3">
-            <button 
-              onClick={() => { setRecoveryError(''); setRecoverySuccess(''); setShowRecoveryModal(true); }}
-              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors flex items-center gap-1.5 cursor-pointer"
-            >
-              <span>🔑</span> Forgot Password / Emergency Recovery Key?
-            </button>
             <button onClick={() => window.location.href = '/'} className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors cursor-pointer">
               &larr; Back to Field Officer App
             </button>
           </div>
         </div>
-
-        {/* Emergency Recovery Modal */}
-        {showRecoveryModal && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
-              <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
-                <div>
-                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                    <span>🛡️</span> Emergency Password Reset
-                  </h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Zero-Budget Self Recovery</p>
-                </div>
-                <button onClick={() => setShowRecoveryModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
-              </div>
-
-              <form onSubmit={handleEmergencyReset} className="space-y-3.5">
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
-                    Emergency Master Key / 4-Digit Security PIN
-                  </label>
-                  <input
-                    type="text"
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value)}
-                    placeholder="e.g. DFY-RESCUE-9921 or 7788"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 uppercase focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">Default Master Key: <code className="text-indigo-600 font-bold">DFY-RESCUE-9921</code> | PIN: <code className="text-indigo-600 font-bold">7788</code></p>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">New Password</label>
-                  <input
-                    type="password"
-                    value={newRecoveryPassword}
-                    onChange={(e) => setNewRecoveryPassword(e.target.value)}
-                    placeholder="Enter new password"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Confirm New Password</label>
-                  <input
-                    type="password"
-                    value={confirmRecoveryPassword}
-                    onChange={(e) => setConfirmRecoveryPassword(e.target.value)}
-                    placeholder="Confirm new password"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-
-                {recoveryError && <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100">{recoveryError}</p>}
-                {recoverySuccess && <p className="text-emerald-600 text-xs font-bold bg-emerald-50 p-2.5 rounded-xl border border-emerald-100">{recoverySuccess}</p>}
-
-                <div className="pt-2 flex items-center justify-end gap-3">
-                  <button type="button" onClick={() => setShowRecoveryModal(false)} className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                  <button
-                    type="submit"
-                    disabled={isRecovering}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-all"
-                  >
-                    {isRecovering ? 'Resetting...' : 'Set Password & Login'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
@@ -7427,29 +7241,9 @@ const availableDistrictsForFeed = useMemo(() => {
                 <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
                   <span>⚙️</span> Admin Security & Password Settings
                 </h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Credential Management & Recovery Keys</p>
+                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Credential Management & Password Security</p>
               </div>
               <button onClick={() => setShowSecurityModal(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
-            </div>
-
-            {/* Emergency Keys Card */}
-            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 mb-5 space-y-2 text-xs">
-              <div className="flex justify-between items-center">
-                <span className="font-bold text-slate-500">Master Recovery Key:</span>
-                <span className="font-mono font-black text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">DFY-RESCUE-9921</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="font-bold text-slate-500">4-Digit Security PIN:</span>
-                <span className="font-mono font-black text-indigo-700 bg-white px-2.5 py-1 rounded-lg border border-slate-200">7788</span>
-              </div>
-              <div className="pt-2">
-                <button
-                  onClick={downloadEmergencyCard}
-                  className="w-full bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold py-2 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <span>📥</span> Download Offline Emergency Access Card (.TXT)
-                </button>
-              </div>
             </div>
 
             {/* Change Password Form */}
