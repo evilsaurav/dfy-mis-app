@@ -935,7 +935,10 @@ export default function AdminDashboard() {
         total_ids: (r.notifications || 0) + (r.tests || 0) + (r.presumptive || 0) + (r.hiv_dm || 0) + (r.dbt || 0),
         submitted_time: submittedTime,
         timestamp_raw: rawTs,
-        total_km: r.total_km || 0
+        total_km: r.total_km || 0,
+        is_next_day: Boolean(r.is_next_day_submission || r.is_next_day),
+        submitted_morning_time: r.submitted_morning_time || '',
+        submitted_label: r.morning_submission_label || r.submitted_label || (r.is_next_day_submission ? `Next day morning ${r.submitted_morning_time || submittedTime}` : '')
       };
     });
 
@@ -1486,7 +1489,10 @@ export default function AdminDashboard() {
     for (let dist in byDistrict) {
       msg += `*${dist}:*\n`;
       byDistrict[dist].forEach(fo => {
-        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) - ⏰ ${fo.submitted_time || 'Submitted'}\n`;
+        const timeNote = fo.is_next_day 
+          ? `[⏰ ${fo.submitted_label || ('Next day morning ' + fo.submitted_time)}]`
+          : `⏰ ${fo.submitted_time || 'Submitted'}`;
+        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) - ${timeNote}\n`;
       });
       msg += `\n`;
     }
@@ -1499,7 +1505,15 @@ export default function AdminDashboard() {
   };
 
   // Punctuality & Time Classification Helper (Standard evening window: 5 PM - 8 PM)
-  const getSubmissionTimeClassification = (submittedTimeStr, timestampRaw) => {
+  const getSubmissionTimeClassification = (submittedTimeStr, timestampRaw, isNextDay = false) => {
+    if (isNextDay) {
+      return {
+        bracket: 'next_day',
+        label: 'Next Day Morning (< 10 AM)',
+        shortLabel: 'Next Day Morning',
+        badgeClass: 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+      };
+    }
     let hour = null;
     if (submittedTimeStr && typeof submittedTimeStr === 'string') {
       const match = submittedTimeStr.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
@@ -1766,8 +1780,11 @@ export default function AdminDashboard() {
     if (submittedList.length > 0) {
       msg += `*✅ Submitted (${submittedList.length}):*\n`;
       submittedList.forEach(fo => {
-        const timeClass = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
-        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) [⏰ ${fo.submitted_time || 'Submitted'} • ${timeClass.shortLabel}]\n`;
+        const timeClass = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw, fo.is_next_day);
+        const timeDisplay = fo.is_next_day
+          ? `[⏰ ${fo.submitted_label || ('Next day morning ' + fo.submitted_time)}]`
+          : `[⏰ ${fo.submitted_time || 'Submitted'} • ${timeClass.shortLabel}]`;
+        msg += `  - ${fo.fo_name} (${fo.total_ids || 0} IDs) ${timeDisplay}\n`;
       });
       msg += `\n`;
     }
@@ -10238,9 +10255,9 @@ const availableDistrictsForFeed = useMemo(() => {
           : chronicDefaulters.filter(fo => canonicalizeDistrict(fo.district) === attendanceDistrictFilter);
 
         // 2. Precompute time bracket counts for chips
-        const timeCounts = { all: districtMatchedSubmitted.length, on_time: 0, late: 0, delayed: 0, early: 0 };
+        const timeCounts = { all: districtMatchedSubmitted.length, on_time: 0, late: 0, delayed: 0, early: 0, next_day: 0 };
         districtMatchedSubmitted.forEach(fo => {
-          const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+          const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw, fo.is_next_day);
           if (timeCounts[cls.bracket] !== undefined) timeCounts[cls.bracket]++;
         });
 
@@ -10248,7 +10265,7 @@ const availableDistrictsForFeed = useMemo(() => {
         const timeFilteredSubmitted = attendanceTimeFilter === 'all'
           ? districtMatchedSubmitted
           : districtMatchedSubmitted.filter(fo => {
-              const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+              const cls = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw, fo.is_next_day);
               return cls.bracket === attendanceTimeFilter;
             });
 
@@ -10599,6 +10616,20 @@ const availableDistrictsForFeed = useMemo(() => {
                       <span>ℹ️</span>
                       <span>Mid-Day: &lt; 5 PM ({timeCounts.early})</span>
                     </button>
+                    {timeCounts.next_day > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setAttendanceTimeFilter('next_day')}
+                        className={`px-2.5 py-1.5 rounded-xl border transition-all cursor-pointer shrink-0 whitespace-nowrap text-xs flex items-center gap-1.5 ${
+                          attendanceTimeFilter === 'next_day'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs font-black'
+                            : 'bg-amber-100 text-amber-900 border-amber-300 hover:bg-amber-200 font-bold'
+                        }`}
+                      >
+                        <span>⏰</span>
+                        <span>Next Day Morning: &lt; 10 AM ({timeCounts.next_day})</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -10677,7 +10708,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 ) : activeAttendanceTab === 'submitted' ? (
                   filteredSubmitted.length > 0 ? (
                     filteredSubmitted.map((fo, idx) => {
-                      const timeClassification = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw);
+                      const timeClassification = getSubmissionTimeClassification(fo.submitted_time, fo.timestamp_raw, fo.is_next_day);
                       return (
                         <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 sm:p-3 bg-slate-50 hover:bg-emerald-50/40 rounded-xl border border-slate-100 hover:border-emerald-200 transition-colors gap-2 sm:gap-0">
                           <div className="flex items-center gap-2.5">
@@ -10711,9 +10742,15 @@ const availableDistrictsForFeed = useMemo(() => {
                                 {fo.total_ids} IDs
                               </span>
                             )}
-                            <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
-                              <span>⏰</span> {fo.submitted_time || 'Submitted'}
-                            </span>
+                            {fo.is_next_day ? (
+                              <span className="text-[11px] font-black tracking-wide text-amber-900 bg-amber-100 border border-amber-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
+                                <span>⏰</span> {fo.submitted_label || ('Next day morning ' + fo.submitted_time)}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-black tracking-wide text-emerald-800 bg-emerald-100/80 border border-emerald-200 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs">
+                                <span>⏰</span> {fo.submitted_time || 'Submitted'}
+                              </span>
+                            )}
                             <span className={`text-[10px] px-2 py-0.5 rounded-lg border shadow-2xs ${timeClassification.badgeClass}`}>
                               {timeClassification.shortLabel}
                             </span>
