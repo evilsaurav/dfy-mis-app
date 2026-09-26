@@ -13950,7 +13950,8 @@ const availableDistrictsForFeed = useMemo(() => {
                   { key: 'duplicate_radar', label: 'Duplicate Radar & 1-Click Fix', icon: '🛡️', desc: 'Cross-date duplicates & 1-click repair' },
                   { key: 'excel_reports', label: 'Excel Reports & State KPI', icon: '📊', desc: '33-sheet KPI, Nikshay & dumps' },
                   { key: 'audit_trail', label: 'Admin vs Sub-Admin (RBAC)', icon: '📜', desc: 'District boundary protection & logs' },
-                  { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' }
+                  { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' },
+                  { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' }
                 ]
                   .filter(topic => {
                     if (!appGuideSearch.trim()) return true;
@@ -15097,6 +15098,173 @@ const availableDistrictsForFeed = useMemo(() => {
                   </div>
                 )}
 
+                {/* TOPIC 11: Top Performers & Analytics Studio */}
+                {appGuideActiveTopic === 'top_performers_studio' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                      <span className="text-xl">🏆</span>
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">Top Performers &amp; Analytics Studio (v2.8.4)</h4>
+                        <p className="text-[11px] text-slate-500 font-medium">4-Role Clinical Leaderboard, Dynamic Designation Shift &amp; Full-Width Progression Trends</p>
+                      </div>
+                    </div>
+
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-indigo-50 to-teal-50 border border-indigo-200/80 rounded-2xl p-3.5 space-y-1.5 shadow-2xs">
+                      <strong className="text-indigo-950 font-black flex items-center gap-1.5 text-xs">
+                        <span>🌟</span>
+                        <span>Statewide Recognition &amp; Analytics Restructure:</span>
+                      </strong>
+                      <p className="text-indigo-900 text-[11px] leading-relaxed">
+                        Version 2.8.4 introduces a complete redesign of Bihar Statewide Top Performers into a full-width studio at the top of the analytics section, followed by a full-width Daily Progression Trend chart below. Frontline officers across 4 clinical disciplines are recognized for exceptional performance with automated 4-quadrant poster generation.
+                      </p>
+                    </div>
+
+                    {/* 4-Card Sequential Bento Flowchart Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Step 1: 4 Clinical Cadre Segregation */}
+                      <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 border border-indigo-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full">Step 01 &bull; 4 Cadres</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            4 Clinical Cadre Segregation
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Statewide leaderboard automatically segments reports into 4 specialized performance pools:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🏛️</span>
+                              <div><strong>Top Districts (DC):</strong> Ranks districts by notifications and target % achieved.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📋</span>
+                              <div><strong>Top FO & Hub Agents:</strong> Notifications; Hub Agents tagged with amber <code className="bg-amber-100 text-amber-900 px-1 py-0.2 rounded font-bold text-[9px]">HUB AGENT</code> badge.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔬</span>
+                              <div><strong>Top Lab Technicians (LT):</strong> Diagnostic tests performed (<code className="font-mono text-[10px]">tests</code>).</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🧪</span>
+                              <div><strong>Top SCT Agents:</strong> Sputum sample collections (<code className="font-mono text-[10px]">samples_collected</code>).</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                          <span>Role-Based Metrics</span>
+                          <span className="text-indigo-600 font-black">➔ Step 2</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2: Dynamic Designation Shift */}
+                      <div className="bg-gradient-to-br from-teal-50/70 to-slate-50 border border-teal-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full">Step 02 &bull; Dynamic Shift</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Dynamic Designation Shift &amp; Instant Cache Eviction
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Staff designations are managed in real time with instant multi-tier cache invalidation:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>👥</span>
+                              <div><strong>Staff Management Update:</strong> Updating an officer&apos;s designation (e.g. from FO to Hub Agent or Lab Technician) in Staff Directory immediately applies across all monthly historical records.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>⚡</span>
+                              <div><strong>Automatic Pool Reclassification:</strong> The staff member&apos;s metrics dynamically move into their new designation pool without requiring database migrations.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🧹</span>
+                              <div><strong>Instant Cache Eviction:</strong> LocalStorage and dashboard memoized caches are purged instantly, reflecting the change without page refresh.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-teal-100 flex items-center justify-between text-[10px] text-teal-800 font-semibold">
+                          <span>Zero DB Lag</span>
+                          <span className="text-teal-600 font-black">➔ Step 3</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3: HD WhatsApp Poster Studio (1200x1350) */}
+                      <div className="bg-gradient-to-br from-amber-50/70 to-slate-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Step 03 &bull; Poster Studio</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            HD WhatsApp Poster Studio (1200x1350)
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            High-impact statewide recognition poster generated completely on the client side:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🎨</span>
+                              <div><strong>4-Quadrant Layout:</strong> Generates 4-quadrant high-resolution canvas poster (1200x1350) featuring official Doctors For You (DFY logo), Bihar TB mission branding, and gold medal podium styling.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>⬇️</span>
+                              <div><strong>1-Click PNG Download:</strong> Downloads crisp high-resolution PNG (<code className="font-mono text-[10px]">DFY_Top_Performers_[MONTH].png</code>) ready for statewide circulars.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📲</span>
+                              <div><strong>1-Click WhatsApp Broadcast:</strong> Pre-formats structured text broadcast with medals, cadre rankings, and celebration message for official WhatsApp groups.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                          <span>1200x1350 Canvas</span>
+                          <span className="text-amber-600 font-black">➔ Step 4</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4: Full-Width 30-Day Daily Progression Trend */}
+                      <div className="bg-gradient-to-br from-purple-50/70 to-slate-50 border border-purple-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">Step 04 &bull; Full-Width Layout</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Full-Width 30-Day Daily Progression Trend
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Clean visual hierarchy with dedicated full-width progression tracking:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>📊</span>
+                              <div><strong>Uncramped Visual Canvas:</strong> Replaced side-by-side cramped layout with a spacious full-width container directly below Top Performers Studio.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📈</span>
+                              <div><strong>Daily Progression Trend:</strong> Day-by-day non-colliding area chart visualizing cumulative notifications vs daily pace target line.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔍</span>
+                              <div><strong>Executive Readability:</strong> High-density data points with interactive tooltips, Sunday buffers, and month-end trajectory projection.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
+                          <span>Executive Analytics</span>
+                          <span className="text-purple-700 font-black">✓ Restructure Complete</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
 
@@ -15104,7 +15272,7 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>DFY Bihar MIS Operations Standard &bull; Version 2.8.3</span>
+                <span>DFY Bihar MIS Operations Standard &bull; Version 2.8.4</span>
               </span>
               <button
                 type="button"

@@ -3319,6 +3319,142 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "honors_and_badges",
+      icon: "🏆",
+      badge: "New in v2.8.4",
+      badgeColor: "bg-indigo-100 text-indigo-800 border-indigo-200",
+      title: "10. FO Profile Honors, Badges & Achievement Card Studio",
+      subtitle: "Milestone badges, profile showcase, HD card export & WhatsApp celebration share",
+      keywords: "badges honors achievement streak target pacesetter eliminator cascade trail blazer card canvas whatsapp png studio",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-indigo-50 to-purple-50/60 border border-indigo-200/90 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-2xs shrink-0">🏆</span>
+              <div>
+                <strong className="text-indigo-950 font-black block text-xs">Frontline Recognition &amp; Honors:</strong>
+                <span className="text-indigo-800 text-[11px]">Frontline recognition empowers officers through dynamic milestones, punctuality streaks, and shareable celebration cards. Rozana sham <strong>7:00 PM</strong> tak reporting submit karein.</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-black text-indigo-800 bg-white/80 border border-indigo-300 px-2.5 py-1 rounded-xl shadow-2xs shrink-0">
+              v2.8.4 Studio
+            </span>
+          </div>
+
+          {/* 4-Card Sequential Bento Flowchart Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Step 1: 4 Dynamic Milestone Tracks */}
+            <div className="bg-gradient-to-br from-indigo-50/60 to-slate-50 border border-indigo-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">1</span>
+                <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100/80 px-2 py-0.5 rounded-full border border-indigo-200/60">Step 01</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🎖️</span>
+                  <span>4 Dynamic Milestone Tracks</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Har frontline field officer ke clinical dedication aur mehnat ko recognize karne ke liye 4 milestone tracks hain:
+                </p>
+                <ul className="text-[10.5px] text-slate-700 space-y-1 mt-2 pl-0.5">
+                  <li><strong>🎯 Target Achiever:</strong> <code>TB Eliminator (100%+)</code>, <code>Pacesetter (75%+)</code>, <code>Rising Star (50%+)</code>.</li>
+                  <li><strong>⚡ Punctuality Streak:</strong> <code>14-Day Legend</code>, <code>7-Day Iron Streak</code>, <code>3-Day Steady Pulse</code>.</li>
+                  <li><strong>🩺 Cascade Champion:</strong> <code>Clinical Cascade Master</code> (Testing + DBT + HIV/DM), <code>Cascade Specialist</code>.</li>
+                  <li><strong>🏍️ Field Trail Blazer:</strong> <code>Bihar Trail Blazer (150+ KM)</code>, <code>Active Voyager (75+ KM)</code>.</li>
+                </ul>
+              </div>
+              <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                <span>Dynamic Milestones</span>
+                <span className="text-indigo-600 font-black">➔ Agla Step</span>
+              </div>
+            </div>
+
+            {/* Step 2: Profile Honors Showcase */}
+            <div className="bg-gradient-to-br from-teal-50/60 to-slate-50 border border-teal-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">2</span>
+                <span className="text-[9px] font-bold text-teal-800 bg-teal-100/80 px-2 py-0.5 rounded-full border border-teal-200/60">Step 02</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>👤</span>
+                  <span>Profile Honors Showcase</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Live badges rendered in <strong>MyProfileDashboard</strong> (Profile Tab) with flame streak pill (🔥 Streak Days) and mobility counter (🛵 KM Travelled).
+                </p>
+                <div className="mt-2 bg-teal-100/60 border border-teal-200 rounded-xl p-2 text-[10px] text-teal-900 leading-normal">
+                  <strong>💡 Live Profile Sync:</strong> Aapke reports aur activity calendar ke aadhar par charo honors cards profile me real-time unlock aur level up hote hain.
+                </div>
+              </div>
+              <div className="pt-1.5 border-t border-teal-100 flex items-center justify-between text-[10px] text-teal-800 font-semibold">
+                <span>Honors &amp; Badges</span>
+                <span className="text-teal-600 font-black">➔ Agla Step</span>
+              </div>
+            </div>
+
+            {/* Step 3: HD Achievement Card Studio */}
+            <div className="bg-gradient-to-br from-purple-50/60 to-slate-50 border border-purple-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">3</span>
+                <span className="text-[9px] font-bold text-purple-800 bg-purple-100/80 px-2 py-0.5 rounded-full border border-purple-200/60">Step 03</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🎨</span>
+                  <span>HD Achievement Card Studio</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Profile tab me <strong>&ldquo;📲 Share My Achievement Card&rdquo;</strong> button par tap karke interactive achievement card studio ka live preview khulta hai.
+                </p>
+                <div className="mt-2 bg-purple-100/60 border border-purple-200 rounded-xl p-2 text-[10px] text-purple-900 leading-normal">
+                  <strong>✨ Branded Card Preview:</strong> Card me official Doctors For You (DFY emblem), officer name, district, monthly target progress bar, aur charo earned badges beautifully render hote hain.
+                </div>
+              </div>
+              <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
+                <span>Interactive Preview</span>
+                <span className="text-purple-600 font-black">➔ Agla Step</span>
+              </div>
+            </div>
+
+            {/* Step 4: 1-Click HD PNG Export & WhatsApp Share */}
+            <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 border border-emerald-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">4</span>
+                <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200/60">Step 04</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>📲</span>
+                  <span>1-Click HD PNG Export &amp; WhatsApp Share</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  <strong>1080x1350</strong> Canvas HD download (<code>DFY_Achievement_[FO_NAME]_[MONTH].png</code>) button se high-resolution image phone gallery me save karein.
+                </p>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1.5">
+                  <strong>WhatsApp Celebration Share:</strong> Ek click me structured celebration message team WhatsApp group me bhejein, jisme honors aur medals highlight hote hain aur zero patient PII leaked rehti hai.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                <span>1080x1350 Canvas HD</span>
+                <span className="text-emerald-700 font-black">✓ Complete</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Privacy & Zero-Leakage Guarantee */}
+          <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-[11px] text-emerald-900 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">🛡️</span>
+            <div>
+              <strong>Patient Privacy &amp; Zero PII Guarantee:</strong> Achievement card aur WhatsApp celebration share me sirf FO ki overall summary aur badges jate hain — kisi bhi mareez ki Nikshay ID, naam ya clinical data (zero patient PII) leak nahi hota. Official reporting deadline strictly sham <strong>7:00 PM</strong> hai.
+            </div>
+          </div>
+        </div>
+      )
     }
   ];
 
