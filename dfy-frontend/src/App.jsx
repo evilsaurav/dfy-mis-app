@@ -496,6 +496,9 @@ const MyProfileDashboard = ({
   const [copiedKey, setCopiedKey] = useState(null);
   const [editingModal, setEditingModal] = useState(null);
   const [loading, setLoading] = useState(!stats);
+  const [showFoAchievementModal, setShowFoAchievementModal] = useState(false);
+  const [isGeneratingFoCard, setIsGeneratingFoCard] = useState(false);
+  const foCanvasRef = useRef(null);
 
   useEffect(() => {
     if (stats) {
@@ -701,7 +704,9 @@ const MyProfileDashboard = ({
   const workingDaysInfo = stats?.working_days_info;
   const targetVal = Number(stats?.target) || 50;
   const notifAchieved = Number(breakdown?.notification) || 0;
-  const percent = targetVal > 0 ? Math.min(100, Math.round((notifAchieved / targetVal) * 100)) : 0;
+  const rawPercent = targetVal > 0 ? Math.round((notifAchieved / targetVal) * 100) : 0;
+  const percent = targetVal > 0 ? Math.min(100, rawPercent) : 0;
+  const achievedPercent = rawPercent;
   const remainingTarget = Math.max(0, targetVal - notifAchieved);
 
   const totalWorkingDays = workingDaysInfo?.total_working_days || 24;
@@ -749,6 +754,567 @@ const MyProfileDashboard = ({
     }
     return list;
   }, [stats]);
+
+  // Dynamic 4 Clinical Milestone Badges
+  const foBadges = useMemo(() => {
+    // 1. Target Achiever / Star
+    let targetBadge;
+    if (achievedPercent >= 100) {
+      targetBadge = {
+        id: 'target-star',
+        title: 'TB Eliminator (100%+)',
+        icon: '🌟',
+        desc: '100%+ Target Achieved',
+        category: 'Target Achiever',
+        theme: 'emerald',
+        bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      };
+    } else if (achievedPercent >= 75) {
+      targetBadge = {
+        id: 'target-star',
+        title: 'Pacesetter (75%+)',
+        icon: '⭐',
+        desc: '75%+ Target Pace',
+        category: 'Target Achiever',
+        theme: 'teal',
+        bg: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+        badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      };
+    } else if (achievedPercent >= 50) {
+      targetBadge = {
+        id: 'target-star',
+        title: 'Rising Star (50%+)',
+        icon: '🎯',
+        desc: '50%+ Target Progress',
+        category: 'Target Achiever',
+        theme: 'amber',
+        bg: 'bg-amber-50 text-amber-800 border-amber-200',
+        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      };
+    } else {
+      targetBadge = {
+        id: 'target-star',
+        title: 'Target Challenger',
+        icon: '🎯',
+        desc: 'Chasing Monthly Goal',
+        category: 'Target Achiever',
+        theme: 'slate',
+        bg: 'bg-slate-50 text-slate-700 border-slate-200',
+        badgeBg: 'bg-slate-700/40 text-slate-300 border-slate-600/40'
+      };
+    }
+
+    // 2. Punctuality Streak
+    let streakBadge;
+    const streak = Number(stats?.streak_days) || 0;
+    if (streak >= 14) {
+      streakBadge = {
+        id: 'streak',
+        title: '14-Day Legend',
+        icon: '🔥',
+        desc: '14-Day Active Reporting',
+        category: 'Punctuality Streak',
+        theme: 'orange',
+        bg: 'bg-orange-50 text-orange-800 border-orange-200',
+        badgeBg: 'bg-orange-500/20 text-orange-300 border-orange-500/30'
+      };
+    } else if (streak >= 7) {
+      streakBadge = {
+        id: 'streak',
+        title: '7-Day Iron Streak',
+        icon: '🔥',
+        desc: '7-Day Active Reporting',
+        category: 'Punctuality Streak',
+        theme: 'amber',
+        bg: 'bg-amber-50 text-amber-800 border-amber-200',
+        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      };
+    } else if (streak >= 3) {
+      streakBadge = {
+        id: 'streak',
+        title: '3-Day Steady Pulse',
+        icon: '⚡',
+        desc: '3-Day Active Reporting',
+        category: 'Punctuality Streak',
+        theme: 'amber',
+        bg: 'bg-amber-50 text-amber-800 border-amber-200',
+        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      };
+    } else {
+      streakBadge = {
+        id: 'streak',
+        title: 'Daily Reporter',
+        icon: '⚡',
+        desc: 'Consistent Daily Pulse',
+        category: 'Punctuality Streak',
+        theme: 'slate',
+        bg: 'bg-slate-50 text-slate-700 border-slate-200',
+        badgeBg: 'bg-slate-700/40 text-slate-300 border-slate-600/40'
+      };
+    }
+
+    // 3. Cascade Champion
+    let cascadeBadge;
+    const sampleTested = Number(breakdown?.sample_tested || breakdown?.sample_tested_ids?.length || breakdown?.tests) || 0;
+    const dbtVal = Number(breakdown?.dbt || breakdown?.dbt_ids?.length) || 0;
+    const hivDmVal = Number(breakdown?.hiv_dm || breakdown?.hiv_dm_ids?.length) || 0;
+    const activeCascadeCount = (sampleTested > 0 ? 1 : 0) + (dbtVal > 0 ? 1 : 0) + (hivDmVal > 0 ? 1 : 0);
+    if (sampleTested > 0 && dbtVal > 0 && hivDmVal > 0) {
+      cascadeBadge = {
+        id: 'cascade',
+        title: 'Clinical Cascade Master',
+        icon: '🩺',
+        desc: 'Testing + DBT + HIV/DM',
+        category: 'Cascade Champion',
+        theme: 'teal',
+        bg: 'bg-teal-50 text-teal-800 border-teal-200',
+        badgeBg: 'bg-teal-500/20 text-teal-300 border-teal-500/30'
+      };
+    } else if (activeCascadeCount >= 2) {
+      cascadeBadge = {
+        id: 'cascade',
+        title: 'Cascade Specialist',
+        icon: '🩺',
+        desc: 'Multi-service TB Care',
+        category: 'Cascade Champion',
+        theme: 'cyan',
+        bg: 'bg-cyan-50 text-cyan-800 border-cyan-200',
+        badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+      };
+    } else {
+      cascadeBadge = {
+        id: 'cascade',
+        title: 'Case Referrer',
+        icon: '🩺',
+        desc: 'Frontline Linkage',
+        category: 'Cascade Champion',
+        theme: 'slate',
+        bg: 'bg-slate-50 text-slate-700 border-slate-200',
+        badgeBg: 'bg-slate-700/40 text-slate-300 border-slate-600/40'
+      };
+    }
+
+    // 4. Field Trail Blazer
+    let travelBadge;
+    const totalKm = Number(stats?.total_km) || 0;
+    if (totalKm >= 150) {
+      travelBadge = {
+        id: 'travel',
+        title: 'Bihar Trail Blazer (150+ KM)',
+        icon: '🏍️',
+        desc: 'Extensive Field Reach',
+        category: 'Field Trail Blazer',
+        theme: 'indigo',
+        bg: 'bg-indigo-50 text-indigo-800 border-indigo-200',
+        badgeBg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
+      };
+    } else if (totalKm >= 75) {
+      travelBadge = {
+        id: 'travel',
+        title: 'Active Voyager (75+ KM)',
+        icon: '🛵',
+        desc: 'High Mobility Warrior',
+        category: 'Field Trail Blazer',
+        theme: 'sky',
+        bg: 'bg-sky-50 text-sky-800 border-sky-200',
+        badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-500/30'
+      };
+    } else if (totalKm > 0) {
+      travelBadge = {
+        id: 'travel',
+        title: 'Field Cruiser',
+        icon: '🚴',
+        desc: 'Active Field Mobility',
+        category: 'Field Trail Blazer',
+        theme: 'emerald',
+        bg: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+      };
+    } else {
+      travelBadge = {
+        id: 'travel',
+        title: 'Local Case Finder',
+        icon: '🚶',
+        desc: 'Community Based',
+        category: 'Field Trail Blazer',
+        theme: 'slate',
+        bg: 'bg-slate-50 text-slate-700 border-slate-200',
+        badgeBg: 'bg-slate-700/40 text-slate-300 border-slate-600/40'
+      };
+    }
+
+    return [targetBadge, streakBadge, cascadeBadge, travelBadge];
+  }, [achievedPercent, stats?.streak_days, stats?.total_km, breakdown]);
+
+  // Canvas 1080x1350 Generator for HD Shareable Achievement Card
+  const generateFoAchievementCanvas = useCallback(async () => {
+    const canvas = foCanvasRef.current;
+    if (!canvas) return null;
+    const ctx = canvas.getContext('2d');
+    const width = 1080;
+    const height = 1350;
+    canvas.width = width;
+    canvas.height = height;
+
+    const drawRoundRect = (context, x, y, w, h, r) => {
+      if (context.roundRect) {
+        context.beginPath();
+        context.roundRect(x, y, w, h, r);
+      } else {
+        context.beginPath();
+        context.moveTo(x + r, y);
+        context.lineTo(x + w - r, y);
+        context.quadraticCurveTo(x + w, y, x + w, y + r);
+        context.lineTo(x + w, y + h - r);
+        context.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        context.lineTo(x + r, y + h);
+        context.quadraticCurveTo(x, y + h, x, y + h - r);
+        context.lineTo(x, y + r);
+        context.quadraticCurveTo(x, y, x + r, y);
+        context.closePath();
+      }
+    };
+
+    // 1. Deep Gradient Background
+    const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, '#020617'); // slate-950
+    bgGradient.addColorStop(0.45, '#0f172a'); // slate-900
+    bgGradient.addColorStop(0.75, '#1e1b4b'); // deep indigo
+    bgGradient.addColorStop(1, '#022c22'); // deep teal
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Ambient Glow Spheres
+    ctx.save();
+    ctx.filter = 'blur(70px)';
+    ctx.fillStyle = 'rgba(99, 102, 241, 0.25)'; // indigo glow
+    ctx.beginPath();
+    ctx.arc(220, 220, 200, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(20, 184, 166, 0.22)'; // teal glow
+    ctx.beginPath();
+    ctx.arc(880, 480, 220, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(245, 158, 11, 0.15)'; // gold glow
+    ctx.beginPath();
+    ctx.arc(540, 1100, 240, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Card Border Frame
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 2;
+    drawRoundRect(ctx, 30, 30, width - 60, height - 60, 28);
+    ctx.stroke();
+    ctx.restore();
+
+    // 4. DFY Logo & Header Banner
+    const loadLogo = () => new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = '/dfy-logo.png';
+      if (img.complete && img.naturalWidth > 0) {
+        resolve(img);
+      } else {
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+      }
+    });
+
+    const logoImg = await loadLogo();
+    if (logoImg) {
+      try {
+        ctx.save();
+        ctx.drawImage(logoImg, width / 2 - 50, 60, 100, 100);
+        ctx.restore();
+      } catch (e) {}
+    } else {
+      ctx.save();
+      ctx.fillStyle = '#0f766e';
+      ctx.beginPath();
+      ctx.arc(width / 2, 110, 45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 24px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('DFY', width / 2, 118);
+      ctx.restore();
+    }
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#14b8a6';
+    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+    ctx.fillText('DOCTORS FOR YOU', width / 2, 195);
+
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+    ctx.fillText('BIHAR TB ELIMINATION MISSION', width / 2, 222);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 36px system-ui, -apple-system, sans-serif';
+    ctx.fillText('🌟 FIELD OFFICER ACHIEVEMENT CARD', width / 2, 275);
+
+    // 5. Officer Profile Badge Box (Y: 310 to 480)
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1.5;
+    drawRoundRect(ctx, 70, 310, width - 140, 175, 24);
+    ctx.fill();
+    ctx.stroke();
+
+    // Officer Initial Avatar Circle
+    ctx.fillStyle = '#0d9488';
+    ctx.beginPath();
+    ctx.arc(155, 397, 45, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 40px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText((formData.fo_name || 'U').charAt(0).toUpperCase(), 155, 411);
+
+    // Officer Name & District
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 34px system-ui, -apple-system, sans-serif';
+    ctx.fillText(formData.fo_name || 'Field Officer', 225, 385);
+
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'bold 20px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`${(formData.working_place || 'Bihar').toUpperCase()} • FIELD OFFICER`, 225, 420);
+
+    // Streak & KM Pills
+    const streak = stats?.streak_days || 0;
+    const km = stats?.total_km || 0;
+
+    // Streak Pill
+    ctx.fillStyle = 'rgba(245, 158, 11, 0.2)';
+    ctx.strokeStyle = 'rgba(245, 158, 11, 0.5)';
+    ctx.lineWidth = 1;
+    drawRoundRect(ctx, width - 340, 355, 230, 38, 19);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#fde047';
+    ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`🔥 ${streak} Day Streak`, width - 225, 380);
+
+    // KM Pill
+    if (km > 0) {
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
+      ctx.strokeStyle = 'rgba(99, 102, 241, 0.5)';
+      drawRoundRect(ctx, width - 340, 405, 230, 38, 19);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = '#a5b4fc';
+      ctx.fillText(`🛵 ${km} KM Travelled`, width - 225, 430);
+    }
+    ctx.restore();
+
+    // 6. Target Achievement Progress Box (Y: 515 to 735)
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+    ctx.lineWidth = 1.5;
+    drawRoundRect(ctx, 70, 515, width - 140, 220, 24);
+    ctx.fill();
+    ctx.stroke();
+
+    // Target Section Header
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+    ctx.fillText('🎯 MONTHLY NOTIFICATION TARGET PERFORMANCE', 105, 555);
+
+    // Big Numbers: Achieved / Target
+    ctx.fillStyle = '#34d399';
+    ctx.font = '900 56px system-ui, -apple-system, sans-serif';
+    ctx.fillText(String(notifAchieved), 105, 620);
+
+    const notifWidth = ctx.measureText(String(notifAchieved)).width;
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 30px system-ui, -apple-system, sans-serif';
+    ctx.fillText(` / ${targetVal} Goal`, 115 + notifWidth, 615);
+
+    // Percentage Pill
+    const pctPillWidth = 190;
+    ctx.fillStyle = achievedPercent >= 100 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(56, 189, 248, 0.2)';
+    ctx.strokeStyle = achievedPercent >= 100 ? '#10b981' : '#38bdf8';
+    drawRoundRect(ctx, width - 105 - pctPillWidth, 570, pctPillWidth, 48, 24);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = achievedPercent >= 100 ? '#6ee7b7' : '#7dd3fc';
+    ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${achievedPercent}% Achieved`, width - 105 - pctPillWidth / 2, 602);
+
+    // Progress Bar Track
+    const barX = 105;
+    const barY = 645;
+    const barW = width - 210;
+    const barH = 22;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    drawRoundRect(ctx, barX, barY, barW, barH, 11);
+    ctx.fill();
+
+    // Progress Bar Fill
+    const fillRatio = Math.min(1, Math.max(0, notifAchieved / Math.max(1, targetVal)));
+    if (fillRatio > 0) {
+      const fillGradient = ctx.createLinearGradient(barX, 0, barX + barW * fillRatio, 0);
+      fillGradient.addColorStop(0, '#6366f1');
+      fillGradient.addColorStop(0.5, '#a855f7');
+      fillGradient.addColorStop(1, '#10b981');
+      ctx.fillStyle = fillGradient;
+      drawRoundRect(ctx, barX, barY, barW * fillRatio, barH, 11);
+      ctx.fill();
+    }
+
+    // Status footnote inside Target Box
+    ctx.textAlign = 'left';
+    ctx.fillStyle = achievedPercent >= 100 ? '#34d399' : '#94a3b8';
+    ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+    const statusNote = achievedPercent >= 100 
+      ? '🏆 Target 100% Crushed! Outstanding frontline healthcare impact.' 
+      : `${Math.max(0, targetVal - notifAchieved)} notifications remaining to reach monthly target goal.`;
+    ctx.fillText(statusNote, 105, 705);
+    ctx.restore();
+
+    // 7. Honors & Milestone Badges Grid (Y: 760 to 1180)
+    ctx.save();
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+    ctx.fillText('🏆 HONORS & MILESTONE BADGES', 75, 785);
+
+    // 2x2 Bento Badges
+    const badgeW = 445;
+    const badgeH = 175;
+    const positions = [
+      { x: 70, y: 810 },
+      { x: 565, y: 810 },
+      { x: 70, y: 1005 },
+      { x: 565, y: 1005 }
+    ];
+
+    foBadges.forEach((badge, idx) => {
+      if (idx >= 4) return;
+      const pos = positions[idx];
+
+      // Card container
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.5;
+      drawRoundRect(ctx, pos.x, pos.y, badgeW, badgeH, 20);
+      ctx.fill();
+      ctx.stroke();
+
+      // Badge Icon
+      ctx.font = '42px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(badge.icon, pos.x + 24, pos.y + 62);
+
+      // Badge Category Pill
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      drawRoundRect(ctx, pos.x + badgeW - 170, pos.y + 24, 146, 26, 13);
+      ctx.fill();
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(badge.category.toUpperCase(), pos.x + badgeW - 97, pos.y + 41);
+
+      // Badge Title
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      ctx.fillText(badge.title, pos.x + 24, pos.y + 115);
+
+      // Badge Description
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+      ctx.fillText(badge.desc, pos.x + 24, pos.y + 145);
+    });
+    ctx.restore();
+
+    // 8. Footer Section (Y: 1210 to 1315)
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = 'italic bold 17px system-ui, -apple-system, sans-serif';
+    ctx.fillText('“Every notification brings Bihar one step closer to TB Mukt Bharat.”', width / 2, 1235);
+
+    const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`Issued on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1280);
+    ctx.restore();
+
+    return canvas;
+  }, [formData, stats, targetVal, notifAchieved, achievedPercent, foBadges]);
+
+  const handleDownloadFoAchievementCard = useCallback(async () => {
+    try {
+      setIsGeneratingFoCard(true);
+      const canvas = await generateFoAchievementCanvas();
+      if (!canvas) {
+        showToast('Canvas not initialized', 'error');
+        setIsGeneratingFoCard(false);
+        return;
+      }
+      const dataUrl = canvas.toDataURL('image/png');
+      const cleanName = (formData.fo_name || 'Officer').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '');
+      const today = new Date();
+      const monthStr = `${today.getFullYear()}_${String(today.getMonth() + 1).padStart(2, '0')}`;
+      const filename = `DFY_Achievement_${cleanName}_${monthStr}.png`;
+
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('✓ Achievement card downloaded successfully!', 'success');
+    } catch (err) {
+      console.error('Download FO card failed', err);
+      showToast('Failed to download card', 'error');
+    } finally {
+      setIsGeneratingFoCard(false);
+    }
+  }, [generateFoAchievementCanvas, formData.fo_name, showToast]);
+
+  const handleShareFoAchievementWhatsApp = useCallback(() => {
+    const today = new Date();
+    const monthStr = today.toLocaleString('default', { month: 'long', year: 'numeric' });
+    const streak = stats?.streak_days || 0;
+    const km = stats?.total_km || 0;
+
+    let text = `*🏆 DOCTORS FOR YOU — BIHAR TB ELIMINATION MISSION*\n`;
+    text += `*🌟 FIELD OFFICER ACHIEVEMENT CARD*\n\n`;
+    text += `👤 *Officer:* ${formData.fo_name}\n`;
+    text += `📍 *District:* ${formData.working_place}\n`;
+    text += `💼 *Role:* Field Officer\n`;
+    text += `📅 *Period:* ${monthStr}\n\n`;
+
+    text += `*🎯 TARGET PERFORMANCE:*\n`;
+    text += `• Target: ${targetVal} | Achieved: ${notifAchieved} (${achievedPercent}%)\n`;
+    text += `• Active Streak: 🔥 ${streak} Days Active\n`;
+    if (km > 0) {
+      text += `• Field Mobility: 🛵 ${km} KM Travelled\n`;
+    }
+    text += `\n*🏅 EARNED HONORS & BADGES:*\n`;
+    foBadges.forEach(b => {
+      text += `• ${b.icon} *${b.title}* — ${b.desc}\n`;
+    });
+
+    text += `\n_“Every notification brings Bihar one step closer to TB Mukt Bharat.”_\n`;
+    text += `_Doctors For You Frontline Healthcare Operations_`;
+
+    const encoded = encodeURIComponent(text);
+    window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
+  }, [formData, stats, targetVal, notifAchieved, achievedPercent, foBadges]);
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
@@ -831,16 +1397,51 @@ const MyProfileDashboard = ({
               </div>
             </div>
 
-            {stats.badges && stats.badges.length > 0 && (
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {stats.badges.map(b => (
-                  <div key={b.id} className="bg-slate-50 hover:bg-indigo-50/50 border border-slate-200/80 px-2.5 py-1.5 rounded-xl flex items-center gap-1.5 shadow-sm transition-all" title={b.desc}>
-                    <span className="text-sm">{b.icon}</span>
-                    <span className="text-[11px] font-black text-slate-700">{b.title}</span>
+            {/* Honors & Milestone Badges Showcase */}
+            <div className="mt-5 p-4 bg-gradient-to-br from-slate-50 to-indigo-50/40 rounded-2xl border border-indigo-100/70 text-left">
+              <div className="flex items-center justify-between mb-3 px-0.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-base">🏆</span>
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                    Honors & Milestone Badges
+                  </h3>
+                </div>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200/60">
+                  Level Active
+                </span>
+              </div>
+
+              {/* 4 Badges Bento Grid */}
+              <div className="grid grid-cols-2 gap-2 sm:gap-2.5">
+                {foBadges.map((badge, idx) => (
+                  <div 
+                    key={idx} 
+                    className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-xs flex flex-col justify-between hover:border-indigo-300 transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-1 mb-1">
+                      <span className="text-xl">{badge.icon}</span>
+                      <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider truncate">
+                        {badge.category}
+                      </span>
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-slate-800 leading-snug">{badge.title}</h4>
+                      <p className="text-[10px] text-slate-500 font-medium mt-0.5 leading-tight">{badge.desc}</p>
+                    </div>
                   </div>
                 ))}
               </div>
-            )}
+
+              {/* Share My Achievement Card Button */}
+              <button
+                type="button"
+                onClick={() => setShowFoAchievementModal(true)}
+                className="mt-3.5 w-full py-2.5 px-4 rounded-xl text-xs font-black text-white bg-gradient-to-r from-indigo-600 via-purple-600 to-teal-600 hover:from-indigo-700 hover:via-purple-700 hover:to-teal-700 shadow-md shadow-indigo-500/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer border border-white/20 animate-pulse hover:animate-none"
+              >
+                <span>📲</span>
+                <span>Share My Achievement Card</span>
+              </button>
+            </div>
             
             {/* Modern Glassmorphic Field Command Card */}
             <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-indigo-500/20 relative overflow-hidden mt-6 text-left">
@@ -1424,6 +2025,151 @@ const MyProfileDashboard = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden 1080x1350 Canvas for HD Card Export */}
+      <canvas 
+        ref={foCanvasRef} 
+        width={1080} 
+        height={1350} 
+        className="hidden" 
+        aria-hidden="true" 
+      />
+
+      {/* Share My Achievement Card Studio Modal */}
+      {showFoAchievementModal && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-md w-full shadow-2xl overflow-hidden my-auto flex flex-col max-h-[92vh]">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/80">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🌟</span>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">Achievement Card Studio</h3>
+                  <p className="text-[10px] text-slate-400 font-bold">1080x1350 HD Shareable Card</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowFoAchievementModal(false)}
+                className="text-slate-400 hover:text-white text-xl font-bold w-8 h-8 rounded-full flex items-center justify-center hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Body / Live Card Preview */}
+            <div className="p-4 overflow-y-auto custom-scrollbar flex-1 space-y-4">
+              {/* Live Preview Card */}
+              <div className="bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white rounded-3xl p-5 shadow-2xl border border-indigo-500/30 relative overflow-hidden text-left">
+                {/* Ambient glow spheres */}
+                <div className="absolute -top-10 -right-10 w-28 h-28 bg-indigo-500/20 rounded-full blur-xl pointer-events-none" />
+                <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-emerald-500/20 rounded-full blur-xl pointer-events-none" />
+
+                {/* Card DFY Header */}
+                <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <img src="/dfy-logo.png" alt="DFY Logo" className="w-8 h-8 object-contain rounded-full bg-white/10 p-0.5" />
+                    <div>
+                      <h4 className="text-[11px] font-black text-teal-400 tracking-wider uppercase leading-none">Doctors For You</h4>
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">Bihar TB Elimination Mission</p>
+                    </div>
+                  </div>
+                  <span className="text-[9px] font-extrabold uppercase tracking-widest bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-0.5 rounded-full">
+                    Officer Card
+                  </span>
+                </div>
+
+                {/* Officer Profile & Streak */}
+                <div className="flex items-start justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-xl font-black text-white leading-tight">{formData.fo_name}</h3>
+                    <p className="text-xs font-bold text-sky-400 uppercase tracking-wider">{formData.working_place} • Field Officer</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="inline-flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 px-2.5 py-0.5 rounded-full text-[11px] font-black shadow-xs">
+                      🔥 {stats?.streak_days || 0} Day Streak
+                    </span>
+                    {stats?.total_km > 0 && (
+                      <span className="inline-flex items-center gap-1 bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 px-2 py-0.5 rounded-full text-[10px] font-bold">
+                        🛵 {stats.total_km} KM
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Target Progress Bar */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 mb-4">
+                  <div className="flex items-baseline justify-between mb-1.5">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Target Progress</span>
+                    <span className="text-xs font-black text-emerald-400">{notifAchieved} / {targetVal} ({achievedPercent}%)</span>
+                  </div>
+                  <div className="bg-slate-800 rounded-full h-3 overflow-hidden border border-white/10">
+                    <div 
+                      className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all"
+                      style={{ width: `${Math.min(100, Math.max(0, achievedPercent))}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 4 Badges Preview Grid */}
+                <div className="mb-4">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 block mb-2">
+                    Earned Honors & Badges
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {foBadges.map((badge, idx) => (
+                      <div key={idx} className="bg-white/5 border border-white/10 rounded-xl p-2.5 flex items-start gap-2">
+                        <span className="text-xl flex-shrink-0">{badge.icon}</span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-black text-white leading-tight truncate">{badge.title}</p>
+                          <p className="text-[9px] text-slate-400 font-medium leading-tight truncate mt-0.5">{badge.desc}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card Footer */}
+                <div className="border-t border-white/10 pt-2.5 flex items-center justify-between text-[9px] text-slate-400 font-semibold">
+                  <span className="truncate">Bihar TB Elimination Mission</span>
+                  <span>{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (IST)</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex flex-col sm:flex-row items-center gap-2.5">
+              <button
+                type="button"
+                onClick={handleDownloadFoAchievementCard}
+                disabled={isGeneratingFoCard}
+                className="w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-black text-white bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                <span>{isGeneratingFoCard ? '⏳' : '⬇️'}</span>
+                <span>{isGeneratingFoCard ? 'Generating HD Card...' : 'Download Card (PNG)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleShareFoAchievementWhatsApp}
+                className="w-full sm:flex-1 py-2.5 px-4 rounded-xl text-xs font-black text-white bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-500 hover:to-green-500 shadow-md active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>📲</span>
+                <span>Share on WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowFoAchievementModal(false)}
+                className="w-full sm:w-auto py-2.5 px-3 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
