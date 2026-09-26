@@ -2257,6 +2257,7 @@ export default function AdminDashboard() {
           designation: designation || s.designation
         } : s)));
         fetchDirectory();
+        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
         setPinChangeModal(null);
       } else {
         setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update staff details.", loading: false }));
@@ -2297,6 +2298,7 @@ export default function AdminDashboard() {
         fetchStaffList();
         fetchDirectory();
         fetchAttendance(true);
+        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
         setAddStaffModal(null);
       } else {
         setAddStaffModal(prev => ({ ...prev, error: data.detail || "Failed to add officer.", loading: false }));
@@ -8462,10 +8464,12 @@ const availableDistrictsForFeed = useMemo(() => {
                   className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="Field Officer">Field Officer</option>
+                  <option value="Hub Agent">Hub Agent</option>
+                  <option value="SCT Agent">SCT Agent</option>
+                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
                   <option value="District Coordinator">District Coordinator</option>
                   <option value="Senior Treatment Supervisor (STS)">Senior Treatment Supervisor (STS)</option>
                   <option value="TB Health Visitor (TBHV)">TB Health Visitor (TBHV)</option>
-                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
                   <option value="State Health Coordinator">State Health Coordinator</option>
                 </select>
               </div>
@@ -8558,10 +8562,12 @@ const availableDistrictsForFeed = useMemo(() => {
                   className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="Field Officer">Field Officer</option>
+                  <option value="Hub Agent">Hub Agent</option>
+                  <option value="SCT Agent">SCT Agent</option>
+                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
                   <option value="District Coordinator">District Coordinator</option>
                   <option value="Senior Treatment Supervisor (STS)">Senior Treatment Supervisor (STS)</option>
                   <option value="TB Health Visitor (TBHV)">TB Health Visitor (TBHV)</option>
-                  <option value="Lab Technician (LT)">Lab Technician (LT)</option>
                   <option value="State Health Coordinator">State Health Coordinator</option>
                 </select>
               </div>
