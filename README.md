@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.8.3-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.8.4-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -45,6 +45,10 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [16. Consonant-Collapsed Deactivated Staff Roster Defense](#16--consonant-collapsed-deactivated-staff-roster-defense)
   - [17. Master Detailed Table Documents Cohort Analytics (C:X | P:Y)](#17--master-detailed-table-documents-cohort-analytics-cx--py)
   - [18. 100% Native Bento Visual Flowcharts in FO Guide & Centralized Admin SOP](#18--100-native-bento-visual-flowcharts-in-fo-guide--centralized-admin-sop)
+  - [19. Frontline Field Officer Profile Honors, Milestone Badges & HD Achievement Studio](#19--frontline-field-officer-profile-honors-milestone-badges--hd-achievement-studio)
+  - [20. Smart Reporting Streak Preservation (Sundays, Approved Leaves & Holidays)](#20--smart-reporting-streak-preservation-sundays-approved-leaves--holidays)
+  - [21. Bihar Statewide 4-Role Top Performers Studio & Full-Width Analytics](#21--bihar-statewide-4-role-top-performers-studio--full-width-analytics)
+  - [22. Official Doctors For You Branding & Visual Overhaul](#22--official-doctors-for-you-branding--visual-overhaul)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -319,10 +323,72 @@ flowchart TD
 - **Modern Bento Grid Architecture**:
   - Replaced legacy text-heavy instructions with responsive, visual Bento Flowcharts featuring sequence badges (`1➔2➔3`), SVG connecting arrows, status chips, and tactical callouts.
 - **Field Officer Help Guide (`App.jsx`)**:
-  - 9 visual chapters covering App Registration, Daily Attendance, Reporting Formats, Clinical Cascade, WhatsApp Broadcasts, Offline Sync, Patient Calling, Calendar Codes, and Emergency Duty.
+  - 10 visual chapters covering App Registration, Daily Attendance, Reporting Formats, Clinical Cascade, WhatsApp Broadcasts, Offline Sync, Patient Calling, Calendar Codes, Emergency Duty, and FO Profile Honors & Badges.
   - Strict compliance with the Zero-Leakage Privacy Rule (7:00 PM evening deadline strictly enforced in all visual diagrams).
 - **Centralized Admin SOP (`AdminDashboard.jsx`)**:
-  - 10 comprehensive operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, and Security Governance.
+  - 11 comprehensive operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, Security Governance, and Statewide Top Performers Analytics.
+
+---
+
+### 19. 🌟 Frontline Field Officer Profile Honors, Milestone Badges & HD Achievement Studio
+- **Dynamic 4-Track Milestone Recognition (`MyProfileDashboard` in `App.jsx`)**:
+  - Automatically evaluates frontline field officers against four key clinical performance vectors:
+    - 🎯 **Target Achiever / Star**: `TB Eliminator (100%+)` (🌟 Emerald/Gold), `Pacesetter (75%+)` (⭐ Cyan/Teal), `Rising Star (50%+)` (🎯 Amber/Orange), `Target Challenger` (Slate).
+    - ⚡ **Punctuality Streak**: `14-Day Legend` (🔥 Fortnight Streak), `7-Day Iron Streak` (🔥 Week Milestone), `3-Day Steady Pulse` (⚡ Active Consistency), `Daily Reporter`.
+    - 🩺 **Cascade Champion**: Evaluates complete clinical engagement across tests, DBT, and HIV/DM screening $\rightarrow$ `Clinical Cascade Master` (Testing + DBT + HIV/DM), `Cascade Specialist`, `Case Referrer`.
+    - 🏍️ **Field Trail Blazer**: Ground travel odometer $\rightarrow$ `Bihar Trail Blazer (150+ KM)` (🏍️), `Active Voyager (75+ KM)` (🛵), `Field Cruiser` (🚴), `Local Case Finder` (🚶).
+- **"📲 Share My Achievement Card" Studio**:
+  - Frontline officers tap a glowing, animated gradient action button to launch an interactive live modal preview dialog with Doctors For You official branding.
+- **Client-Side 1080x1350 Canvas HD PNG Generator**:
+  - Renders a crystal-clear, high-resolution achievement poster entirely in the client browser with zero server CPU/RAM impact.
+  - Automatically downloads as `DFY_Achievement_[FO_NAME]_[MONTH].png`.
+- **1-Click WhatsApp Celebration Share**:
+  - Prepares congratulatory, formatted WhatsApp text featuring officer stats, active streak, travel KM, and all 4 earned badges.
+- **Strict Zero-Leakage Privacy Guard**:
+  - Guaranteed zero leakage of internal cutoff timings (official 7:00 PM deadline maintained) and zero patient PII or Nikshay IDs exposed.
+
+---
+
+### 20. 🔥 Smart Reporting Streak Preservation (Sundays, Approved Leaves & Holidays)
+- **Exempt / Excused Non-Working Day Classification (`is_exempt_day` in `main.py`)**:
+  - Sundays (`d.weekday() == 6`), approved leaves (`is_leave: true` across Casual, Medical, Official Duty), and declared government holidays are recognized as sanctioned non-working days.
+- **Streak Preservation & Exempt Bridging (`calculate_reporting_streak`)**:
+  - Prevents reporting streaks from resetting to 0 when field officers encounter scheduled weekly offs or authorized leaves. The streak smoothly bridges past exempt days to connect with prior active reporting days.
+- **Overtime & Off-Day Credit**:
+  - Submitting reports during Sundays or holidays awards `+1` bonus streak day.
+- **Monday Morning Anchor Stepping**:
+  - If an officer opens the app Monday morning before submitting, the engine steps past the unsubmitted Sunday off to anchor against Friday/Saturday, preventing false morning streak resets.
+- **Accountability Barrier**:
+  - Unexcused absences on mandatory working days terminate the streak immediately. Traversal is capped at 60 days to prevent runaway loops.
+
+---
+
+### 21. 🏆 Bihar Statewide 4-Role Top Performers Studio & Full-Width Analytics
+- **Full-Width Studio Architecture (`AdminDashboard.jsx`)**:
+  - Replaced legacy column grids with a full-width **Statewide Top Performers Studio** row positioned at the very top of executive analytics.
+- **4 Dedicated Clinical Role Cadres**:
+  - 🏛️ **Top Districts (DC)**: Ranks districts by monthly notification volume and target achievement percentage.
+  - 📋 **Top Field Officers & Hub Agents**: Ranked by notifications; Hub Agents stationed at high-volume urban medical hubs are distinguished with a glowing amber `HUB AGENT` badge.
+  - 🔬 **Top Lab Technicians (LT)**: Ranked by diagnostic sputum and molecular tests conducted (`tests`).
+  - 🧪 **Top SCT Agents**: Ranked by sputum sample collections (`samples_collected`).
+- **Dynamic Staff Designation Shift & Instant Cache Invalidation**:
+  - When an administrator updates an officer's designation in Staff Management, the backend dynamically maps historical reports into their new designation pool and evicts multi-tier caches (`staff_directory_map`, `statewide_top_`, `inactive_staff_keys`) with zero page reloads required.
+- **1200x1350 4-Quadrant HD Canvas Poster Studio**:
+  - Client-side Canvas generator renders a high-definition 4-quadrant state performance poster topped by the official Doctors For You emblem for state review presentations.
+  - Generates 1-click formatted WhatsApp broadcast summaries with medal rankings (🥇, 🥈, 🥉).
+- **Spacious Full-Width Daily Progression Trend (Day 1 - 30)**:
+  - Positioned directly below the studio, the 30-day AreaChart expands to full width (`h-72 sm:h-80`) with tick interval `0`, preventing label truncation across all days of the month.
+
+---
+
+### 22. 🩺 Official Doctors For You Branding & Visual Overhaul
+- **High-Definition Vectorized Circular Emblem (`/dfy-logo.png`)**:
+  - Anti-aliased circular alpha emblem generated at 512x512 and 2048x2048 resolutions.
+- **Comprehensive Cross-Platform Integration**:
+  - **FO Mobile PWA**: Header emblem, Profile card, and Guide banner.
+  - **Admin Leadership Dashboard**: Main navigation bar, Admin Login security card, and SOP Help Modal header.
+  - **Browser & PWA Manifests**: High-resolution `favicon.png`, `favicon.ico`, `pwa-192x192.png`, and `pwa-512x512.png`.
+  - **Export Posters**: Pre-cached cross-origin image decoding for instant inclusion in Canvas poster and card downloads.
 
 ---
 
@@ -372,11 +438,13 @@ Mis field report/
 ├── generate_templates.py       # Helper scripts for Excel template generation
 ├── templates/                  # Excel KPI report templates & assets
 ├── tests/                      # Automated Python and Node test batteries
+│   ├── test_statewide_top_performers.py
+│   ├── test_streak_leave_holiday_preservation.py
+│   ├── test_fo_achievement_badges_ui.mjs
+│   ├── test_top_performers_studio_ui.mjs
+│   ├── test_guide_new_features_flowcharts_ui.mjs
 │   ├── test_attendance_leaves_and_lifecycle.py
-│   ├── test_district_registry.py
-│   ├── test_ingestion_defense.py
-│   ├── test_repair_duplicate_notifications.py
-│   └── test_scoped_caching.py
+│   └── test_repair_duplicate_notifications.py
 │
 └── dfy-frontend/               # React 19 + Vite Frontend Application
     ├── index.html              # App entry HTML with PWA meta tags
@@ -384,10 +452,11 @@ Mis field report/
     ├── vite.config.js          # Vite build configuration & PWA setup
     ├── public/
     │   ├── manifest.json       # Progressive Web App (PWA) manifest
-    │   └── favicon.svg         # DFY brand icon
+    │   ├── dfy-logo.png        # Official Doctors For You circular emblem
+    │   └── favicon.png         # High-resolution brand favicon
     └── src/
-        ├── App.jsx             # Field Officer Mobile PWA: offline PIN, pacing card, duplicate modals
-        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Analytics Dashboard with Attendance Leaves & Repair Suite
+        ├── App.jsx             # Field Officer Mobile PWA: Honors & Badges, Achievement Studio, Offline PIN
+        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Dashboard: 4-Role Top Performers Studio & Full-Width Analytics
         ├── changelogData.js    # Client-side in-app changelog & version history
         ├── offlineQueue.js     # IndexedDB offline storage & auto-sync engine
         ├── staff_directory.json # Master local baseline staff directory
@@ -413,6 +482,7 @@ Mis field report/
 |---|---|---|
 | `POST` | `/admin/login` | Admin & Sub-Admin credentials login with RBAC permissions |
 | `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing (`force_refresh` support) |
+| `GET` | `/api/statewide-top-performers` | Multi-metric statewide leaderboard across 4 cadres (Districts DC, FO & Hub Agents, Lab Technicians LT, SCT Agents) with dynamic designation mapping and cache invalidation |
 | `POST` | `/admin/reports/delete-day` | Delete an officer's single-day report with atomic rollup rollback & RBAC |
 | `GET` | `/admin/attendance/live` | Live field staff attendance radar (submitted vs missing) |
 | `GET` | `/admin/today-attendance` | Live attendance radar with date cutoff (`inactive_since`), 10 AM morning cutoff segregation, submitted vs missing vs on-leave resolution |
