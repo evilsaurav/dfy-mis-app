@@ -3778,10 +3778,18 @@ const availableDistrictsForFeed = useMemo(() => {
           hiv_dm_prev: 0,
           tests_cur: 0,
           tests_prev: 0,
+          dbt_cur: 0,
+          dbt_prev: 0,
+          home_visits_cur: 0,
+          home_visits_prev: 0,
           contact_tracing_cur: 0,
           contact_tracing_prev: 0,
+          follow_ups_cur: 0,
+          follow_ups_prev: 0,
           documents_cur: 0,
           documents_prev: 0,
+          differentiated_tb_cur: 0,
+          differentiated_tb_prev: 0,
         };
       }
       for (let k in map[key]) {
@@ -3806,6 +3814,20 @@ const availableDistrictsForFeed = useMemo(() => {
           else map[key].tests_prev += 1;
         }
       });
+      (r.dbt_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].dbt_cur += 1;
+          else map[key].dbt_prev += 1;
+        }
+      });
+      (r.home_visit_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].home_visits_cur += 1;
+          else map[key].home_visits_prev += 1;
+        }
+      });
       (r.contact_tracing_ids || []).forEach(id => {
         const clean = String(id).trim();
         if (clean) {
@@ -3813,11 +3835,25 @@ const availableDistrictsForFeed = useMemo(() => {
           else map[key].contact_tracing_prev += 1;
         }
       });
+      (r.follow_up_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].follow_ups_cur += 1;
+          else map[key].follow_ups_prev += 1;
+        }
+      });
       (r.documents_ids || []).forEach(id => {
         const clean = String(id).trim();
         if (clean) {
           if (currentMonthNotifIdSet.has(clean)) map[key].documents_cur += 1;
           else map[key].documents_prev += 1;
+        }
+      });
+      (r.differentiated_tb_ids || []).forEach(id => {
+        const clean = String(id).trim();
+        if (clean) {
+          if (currentMonthNotifIdSet.has(clean)) map[key].differentiated_tb_cur += 1;
+          else map[key].differentiated_tb_prev += 1;
         }
       });
     });
@@ -3848,13 +3884,21 @@ const availableDistrictsForFeed = useMemo(() => {
         if (masterTableCohortFilter === 'current_cohort') {
           if (sortKey === 'hiv_dm') return row.hiv_dm_cur;
           if (sortKey === 'tests') return row.tests_cur;
+          if (sortKey === 'dbt') return row.dbt_cur;
+          if (sortKey === 'home_visits') return row.home_visits_cur;
           if (sortKey === 'contact_tracing') return row.contact_tracing_cur;
+          if (sortKey === 'follow_ups') return row.follow_ups_cur;
           if (sortKey === 'documents') return row.documents_cur;
+          if (sortKey === 'differentiated_tb') return row.differentiated_tb_cur;
         } else if (masterTableCohortFilter === 'backlog') {
           if (sortKey === 'hiv_dm') return row.hiv_dm_prev;
           if (sortKey === 'tests') return row.tests_prev;
+          if (sortKey === 'dbt') return row.dbt_prev;
+          if (sortKey === 'home_visits') return row.home_visits_prev;
           if (sortKey === 'contact_tracing') return row.contact_tracing_prev;
+          if (sortKey === 'follow_ups') return row.follow_ups_prev;
           if (sortKey === 'documents') return row.documents_prev;
+          if (sortKey === 'differentiated_tb') return row.differentiated_tb_prev;
         }
         return row[sortKey] ?? 0;
       };
@@ -3868,6 +3912,40 @@ const availableDistrictsForFeed = useMemo(() => {
     });
     return data;
   }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter]);
+
+  // Aggregate totals across all rows in tableData (for both All Districts and District Drill-down)
+  const tableTotals = useMemo(() => {
+    const init = {
+      target: 0,
+      notifications: 0,
+      tests: 0, tests_cur: 0, tests_prev: 0,
+      presumptive: 0,
+      doctor_visits: 0,
+      hiv_dm: 0, hiv_dm_cur: 0, hiv_dm_prev: 0,
+      dbt: 0, dbt_cur: 0, dbt_prev: 0,
+      sample_collection: 0,
+      outcome_assigned: 0,
+      home_visits: 0, home_visits_cur: 0, home_visits_prev: 0,
+      contact_tracing: 0, contact_tracing_cur: 0, contact_tracing_prev: 0,
+      follow_ups: 0, follow_ups_cur: 0, follow_ups_prev: 0,
+      face_to_face: 0,
+      documents: 0, documents_cur: 0, documents_prev: 0,
+      fdc_provided: 0,
+      kit_consumption: 0,
+      differentiated_tb: 0, differentiated_tb_cur: 0, differentiated_tb_prev: 0,
+      tpt_treatment_start: 0,
+      tpt_presumptive: 0,
+      adhar_face_auth: 0,
+      consent_with_id: 0,
+      overrides: 0,
+    };
+    return (tableData || []).reduce((acc, row) => {
+      for (const k in init) {
+        acc[k] += (Number(row[k]) || 0);
+      }
+      return acc;
+    }, init);
+  }, [tableData]);
 
   const requestSort = (key) => {
     let direction = 'desc';
@@ -6287,8 +6365,21 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                             )}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.dbt > 0 ? row.dbt : <span className="text-slate-300 font-normal">—</span>}
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? (row.dbt_cur > 0 ? row.dbt_cur : <span className="text-slate-300 font-normal">—</span>)
+                            : masterTableCohortFilter === 'backlog'
+                            ? (row.dbt_prev > 0 ? row.dbt_prev : <span className="text-slate-300 font-normal">—</span>)
+                            : (
+                              <span>
+                                {row.dbt > 0 ? row.dbt : <span className="text-slate-300 font-normal">—</span>}
+                                {row.dbt > 0 && (row.dbt_cur > 0 || row.dbt_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.dbt_cur} | P:{row.dbt_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                         </td>
                         <td className="p-3 tabular-num font-medium">
                           {row.sample_collection > 0 ? row.sample_collection : <span className="text-slate-300 font-normal">—</span>}
@@ -6296,8 +6387,21 @@ const availableDistrictsForFeed = useMemo(() => {
                         <td className="p-3 tabular-num font-medium">
                           {row.outcome_assigned > 0 ? row.outcome_assigned : <span className="text-slate-300 font-normal">—</span>}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.home_visits > 0 ? row.home_visits : <span className="text-slate-300 font-normal">—</span>}
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? (row.home_visits_cur > 0 ? row.home_visits_cur : <span className="text-slate-300 font-normal">—</span>)
+                            : masterTableCohortFilter === 'backlog'
+                            ? (row.home_visits_prev > 0 ? row.home_visits_prev : <span className="text-slate-300 font-normal">—</span>)
+                            : (
+                              <span>
+                                {row.home_visits > 0 ? row.home_visits : <span className="text-slate-300 font-normal">—</span>}
+                                {row.home_visits > 0 && (row.home_visits_cur > 0 || row.home_visits_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.home_visits_cur} | P:{row.home_visits_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                         </td>
                         <td className="p-3 tabular-num font-semibold text-slate-700">
                           {masterTableCohortFilter === 'current_cohort'
@@ -6315,8 +6419,21 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                             )}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.follow_ups > 0 ? row.follow_ups : <span className="text-slate-300 font-normal">—</span>}
+                        <td className="p-3 tabular-num font-semibold text-slate-700">
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? (row.follow_ups_cur > 0 ? row.follow_ups_cur : <span className="text-slate-300 font-normal">—</span>)
+                            : masterTableCohortFilter === 'backlog'
+                            ? (row.follow_ups_prev > 0 ? row.follow_ups_prev : <span className="text-slate-300 font-normal">—</span>)
+                            : (
+                              <span>
+                                {row.follow_ups > 0 ? row.follow_ups : <span className="text-slate-300 font-normal">—</span>}
+                                {row.follow_ups > 0 && (row.follow_ups_cur > 0 || row.follow_ups_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.follow_ups_cur} | P:{row.follow_ups_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                         </td>
                         <td className="p-3 tabular-num font-medium">
                           {row.face_to_face > 0 ? row.face_to_face : <span className="text-slate-300 font-normal">—</span>}
@@ -6344,7 +6461,20 @@ const availableDistrictsForFeed = useMemo(() => {
                           {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
                         </td>
                         <td className="p-3 tabular-num font-bold text-pink-600">
-                          {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
+                          {masterTableCohortFilter === 'current_cohort'
+                            ? (row.differentiated_tb_cur > 0 ? row.differentiated_tb_cur : <span className="text-slate-300 font-normal">—</span>)
+                            : masterTableCohortFilter === 'backlog'
+                            ? (row.differentiated_tb_prev > 0 ? row.differentiated_tb_prev : <span className="text-slate-300 font-normal">—</span>)
+                            : (
+                              <span>
+                                {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
+                                {row.differentiated_tb > 0 && (row.differentiated_tb_cur > 0 || row.differentiated_tb_prev > 0) && (
+                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                    C:{row.differentiated_tb_cur} | P:{row.differentiated_tb_prev}
+                                  </span>
+                                )}
+                              </span>
+                            )}
                         </td>
                         <td className="p-3 tabular-num font-bold text-teal-600">
                           {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
@@ -6364,6 +6494,160 @@ const availableDistrictsForFeed = useMemo(() => {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot className="bg-slate-100/95 border-t-2 border-slate-300 text-xs font-black text-slate-900 sticky bottom-0 z-10 shadow-[0_-4px_12px_-2px_rgba(0,0,0,0.06)]">
+                    <tr>
+                      <td className="p-3 sticky left-0 z-20 bg-slate-200/95 backdrop-blur-md border-r border-slate-300 shadow-[4px_0_12px_-2px_rgba(0,0,0,0.1)] text-slate-900">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="tracking-wide">TOTAL</span>
+                          <span className="text-[10px] font-bold text-slate-600 bg-white/80 px-1.5 py-0.5 rounded border border-slate-300">
+                            {selectedDistrict === 'All' ? `${tableData.length} Dists` : `${tableData.length} Staff`}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3 tabular-num font-black text-slate-900">{tableTotals.target}</td>
+                      <td className="p-3 tabular-num font-black text-emerald-700">{tableTotals.notifications}</td>
+                      <td className="p-3 tabular-num font-black text-blue-700">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.tests_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.tests_prev
+                          : (
+                            <span>
+                              {tableTotals.tests}
+                              {(tableTotals.tests_cur > 0 || tableTotals.tests_prev > 0) && (
+                                <span className="text-[9px] font-bold text-blue-900/60 block -mt-0.5">
+                                  C:{tableTotals.tests_cur} | P:{tableTotals.tests_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-black text-amber-700">{tableTotals.presumptive}</td>
+                      <td className="p-3 tabular-num font-black text-purple-700">{tableTotals.doctor_visits}</td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.hiv_dm_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.hiv_dm_prev
+                          : (
+                            <span>
+                              {tableTotals.hiv_dm}
+                              {(tableTotals.hiv_dm_cur > 0 || tableTotals.hiv_dm_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.hiv_dm_cur} | P:{tableTotals.hiv_dm_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.dbt_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.dbt_prev
+                          : (
+                            <span>
+                              {tableTotals.dbt}
+                              {(tableTotals.dbt_cur > 0 || tableTotals.dbt_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.dbt_cur} | P:{tableTotals.dbt_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.sample_collection}</td>
+                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.outcome_assigned}</td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.home_visits_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.home_visits_prev
+                          : (
+                            <span>
+                              {tableTotals.home_visits}
+                              {(tableTotals.home_visits_cur > 0 || tableTotals.home_visits_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.home_visits_cur} | P:{tableTotals.home_visits_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.contact_tracing_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.contact_tracing_prev
+                          : (
+                            <span>
+                              {tableTotals.contact_tracing}
+                              {(tableTotals.contact_tracing_cur > 0 || tableTotals.contact_tracing_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.contact_tracing_cur} | P:{tableTotals.contact_tracing_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.follow_ups_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.follow_ups_prev
+                          : (
+                            <span>
+                              {tableTotals.follow_ups}
+                              {(tableTotals.follow_ups_cur > 0 || tableTotals.follow_ups_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.follow_ups_cur} | P:{tableTotals.follow_ups_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.face_to_face}</td>
+                      <td className="p-3 tabular-num font-black text-slate-800">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.documents_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.documents_prev
+                          : (
+                            <span>
+                              {tableTotals.documents}
+                              {(tableTotals.documents_cur > 0 || tableTotals.documents_prev > 0) && (
+                                <span className="text-[9px] font-bold text-slate-500 block -mt-0.5">
+                                  C:{tableTotals.documents_cur} | P:{tableTotals.documents_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.fdc_provided}</td>
+                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.kit_consumption}</td>
+                      <td className="p-3 tabular-num font-black text-pink-700">
+                        {masterTableCohortFilter === 'current_cohort'
+                          ? tableTotals.differentiated_tb_cur
+                          : masterTableCohortFilter === 'backlog'
+                          ? tableTotals.differentiated_tb_prev
+                          : (
+                            <span>
+                              {tableTotals.differentiated_tb}
+                              {(tableTotals.differentiated_tb_cur > 0 || tableTotals.differentiated_tb_prev > 0) && (
+                                <span className="text-[9px] font-bold text-pink-900/60 block -mt-0.5">
+                                  C:{tableTotals.differentiated_tb_cur} | P:{tableTotals.differentiated_tb_prev}
+                                </span>
+                              )}
+                            </span>
+                          )}
+                      </td>
+                      <td className="p-3 tabular-num font-black text-teal-700">{tableTotals.tpt_treatment_start}</td>
+                      <td className="p-3 tabular-num font-black text-cyan-700">{tableTotals.tpt_presumptive}</td>
+                      <td className="p-3 tabular-num font-black text-orange-700">{tableTotals.adhar_face_auth}</td>
+                      <td className="p-3 tabular-num font-black text-indigo-700">{tableTotals.consent_with_id}</td>
+                      <td className="p-3 tabular-num font-black text-red-600">{tableTotals.overrides}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
