@@ -2863,6 +2863,17 @@ export default function AdminDashboard() {
     ctx.fill();
     ctx.restore();
 
+    // Draw DFY Logo at top-left if available
+    const logoImg = new Image();
+    logoImg.src = '/dfy-logo.png';
+    if (logoImg.complete && logoImg.naturalWidth > 0) {
+      try {
+        ctx.save();
+        ctx.drawImage(logoImg, 50, 45, 95, 95);
+        ctx.restore();
+      } catch (e) {}
+    }
+
     // Top Header Banner
     ctx.fillStyle = '#14b8a6';
     ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
@@ -2871,8 +2882,8 @@ export default function AdminDashboard() {
 
     // Main Title
     ctx.fillStyle = '#ffffff';
-    ctx.font = '900 46px system-ui, -apple-system, sans-serif';
-    ctx.fillText('🏆 STATEWIDE TOP PERFORMERS', width / 2, 130);
+    ctx.font = '900 44px system-ui, -apple-system, sans-serif';
+    ctx.fillText('🏆 STATEWIDE TOP PERFORMERS', width / 2, 125);
 
     // Period Pill
     const periodLabel = topPerformersPeriod === 'weekly' 
@@ -2884,123 +2895,164 @@ export default function AdminDashboard() {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
     const pillWidth = 420;
     ctx.beginPath();
-    ctx.roundRect((width - pillWidth) / 2, 155, pillWidth, 40, 20);
+    ctx.roundRect((width - pillWidth) / 2, 150, pillWidth, 38, 19);
     ctx.fill();
     ctx.fillStyle = '#fde047';
     ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
-    ctx.fillText(periodLabel, width / 2, 181);
+    ctx.fillText(periodLabel, width / 2, 175);
 
-    // Two Columns Bento Panels
-    const colWidth = 520;
-    const colHeight = 960;
-    const leftX = 60;
-    const rightX = 620;
-    const topY = 230;
-
-    const drawPanel = (x, y, w, h, title, subtitle, icon, headerColor) => {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.roundRect(x, y, w, h, 24);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = headerColor;
-      ctx.font = '900 24px system-ui, -apple-system, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(`${icon} ${title}`, x + 25, y + 45);
-
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-      ctx.fillText(subtitle, x + 25, y + 70);
-
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.beginPath();
-      ctx.moveTo(x + 20, y + 88);
-      ctx.lineTo(x + w - 20, y + 88);
-      ctx.stroke();
-    };
-
-    drawPanel(leftX, topY, colWidth, colHeight, 'TOP 5 DISTRICTS', 'Statewide Target Achievement & Volume', '🏛️', '#38bdf8');
-    drawPanel(rightX, topY, colWidth, colHeight, 'TOP 5 FIELD OFFICERS', 'Frontline Clinical Notifications', '👤', '#a78bfa');
+    // 4 Bento Panels in 2x2 Grid
+    const pWidth = 535;
+    const pHeight = 515;
+    const col1X = 50;
+    const col2X = 615;
+    const row1Y = 215;
+    const row2Y = 750;
 
     const medals = ['🥇', '🥈', '🥉', '4', '5'];
     const rankColors = ['#f59e0b', '#94a3b8', '#d97706', '#64748b', '#64748b'];
 
-    // Draw Top 5 Districts
-    const districts = topPerformersData.top_districts || [];
-    districts.forEach((d, idx) => {
-      const itemY = topY + 105 + (idx * 165);
-      ctx.fillStyle = idx === 0 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.04)';
-      ctx.strokeStyle = idx === 0 ? 'rgba(245, 158, 11, 0.45)' : 'rgba(255, 255, 255, 0.08)';
+    const drawQuadrant = (x, y, title, subtitle, icon, headerColor, items, renderItem) => {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.roundRect(leftX + 20, itemY, colWidth - 40, 145, 16);
+      ctx.roundRect(x, y, pWidth, pHeight, 20);
       ctx.fill();
       ctx.stroke();
 
-      ctx.font = idx < 3 ? '32px system-ui' : 'bold 24px system-ui';
-      ctx.fillStyle = rankColors[idx];
-      ctx.textAlign = 'center';
-      ctx.fillText(medals[idx], leftX + 55, itemY + (idx < 3 ? 50 : 45));
+      ctx.fillStyle = headerColor;
+      ctx.font = '900 20px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${icon} ${title}`, x + 20, y + 36);
 
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText(subtitle, x + 20, y + 56);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(x + 20, y + 68);
+      ctx.lineTo(x + pWidth - 20, y + 68);
+      ctx.stroke();
+
+      if (!items || items.length === 0) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = 'italic 14px system-ui, -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No data recorded for this period', x + pWidth / 2, y + 270);
+        return;
+      }
+
+      items.slice(0, 5).forEach((item, idx) => {
+        const itemY = y + 80 + (idx * 83);
+        ctx.fillStyle = idx === 0 ? 'rgba(245, 158, 11, 0.12)' : 'rgba(255, 255, 255, 0.03)';
+        ctx.strokeStyle = idx === 0 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(255, 255, 255, 0.07)';
+        ctx.beginPath();
+        ctx.roundRect(x + 14, itemY, pWidth - 28, 73, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = idx < 3 ? '26px system-ui' : 'bold 20px system-ui';
+        ctx.fillStyle = rankColors[idx];
+        ctx.textAlign = 'center';
+        ctx.fillText(medals[idx], x + 44, itemY + (idx < 3 ? 44 : 40));
+
+        renderItem(item, x + 76, itemY, pWidth - 95);
+      });
+    };
+
+    // 1. Q1: Top 5 Districts
+    drawQuadrant(col1X, row1Y, 'TOP 5 DISTRICTS', 'Target Achievement & Volume', '🏛️', '#38bdf8', topPerformersData.top_districts || [], (d, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
-      ctx.fillText(d.district, leftX + 95, itemY + 45);
-
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = '900 28px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${d.notifications}`, leftX + 95, itemY + 85);
-      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText(' Notifications', leftX + 95 + ctx.measureText(`${d.notifications}`).width + 8, itemY + 83);
+      ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
+      ctx.fillText(d.district, startX, startY + 28);
 
       const pctText = `${d.percentage}% Target`;
       ctx.fillStyle = d.percentage >= 100 ? '#10b981' : '#f59e0b';
-      ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-      ctx.fillText(pctText, leftX + 95, itemY + 118);
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText(pctText, startX, startY + 54);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`${d.notifications}`, startX + pWidth - 110, startY + 36);
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('notifs', startX + pWidth - 110, startY + 54);
     });
 
-    // Draw Top 5 Staff
-    const staff = topPerformersData.top_staff || [];
-    staff.forEach((s, idx) => {
-      const itemY = topY + 105 + (idx * 165);
-      ctx.fillStyle = idx === 0 ? 'rgba(167, 139, 250, 0.15)' : 'rgba(255, 255, 255, 0.04)';
-      ctx.strokeStyle = idx === 0 ? 'rgba(167, 139, 250, 0.45)' : 'rgba(255, 255, 255, 0.08)';
-      ctx.beginPath();
-      ctx.roundRect(rightX + 20, itemY, colWidth - 40, 145, 16);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.font = idx < 3 ? '32px system-ui' : 'bold 24px system-ui';
-      ctx.fillStyle = rankColors[idx];
-      ctx.textAlign = 'center';
-      ctx.fillText(medals[idx], rightX + 55, itemY + (idx < 3 ? 50 : 45));
-
+    // 2. Q2: Top 5 FO & Hub Agents
+    const foItems = topPerformersData.top_fo || topPerformersData.top_staff || [];
+    drawQuadrant(col2X, row1Y, 'TOP 5 FO & HUB AGENTS', 'Clinical TB Notifications', '📋', '#a78bfa', foItems, (s, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 23px system-ui, -apple-system, sans-serif';
-      ctx.fillText(s.fo_name, rightX + 95, itemY + 45);
+      ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+      ctx.fillText(s.fo_name, startX, startY + 26);
 
+      const isHub = s.designation === 'Hub Agent' || String(s.designation || '').toUpperCase().includes('HUB');
+      ctx.fillStyle = isHub ? '#fbbf24' : '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`${isHub ? '⭐ HUB AGENT • ' : ''}${s.district}`, startX, startY + 52);
+
+      ctx.textAlign = 'right';
       ctx.fillStyle = '#a78bfa';
-      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`📍 ${s.district}`, rightX + 95, itemY + 75);
-
-      ctx.fillStyle = '#34d399';
-      ctx.font = '900 26px system-ui, -apple-system, sans-serif';
-      ctx.fillText(`${s.notifications}`, rightX + 95, itemY + 115);
-      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`${s.notifications}`, startX + pWidth - 110, startY + 36);
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
       ctx.fillStyle = '#94a3b8';
-      ctx.fillText(' Notifs Achieved', rightX + 95 + ctx.measureText(`${s.notifications}`).width + 8, itemY + 113);
+      ctx.fillText('notifs', startX + pWidth - 110, startY + 54);
+    });
+
+    // 3. Q3: Top 5 Lab Technicians
+    drawQuadrant(col1X, row2Y, 'TOP 5 LAB TECHNICIANS', 'Diagnostic Tests Performed', '🔬', '#34d399', topPerformersData.top_lt || [], (s, startX, startY) => {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+      ctx.fillText(s.fo_name, startX, startY + 26);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`📍 ${s.district} • Lab Tech`, startX, startY + 52);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#34d399';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      const testsCount = s.tests || s.metric_value || 0;
+      ctx.fillText(`${testsCount}`, startX + pWidth - 110, startY + 36);
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('tests', startX + pWidth - 110, startY + 54);
+    });
+
+    // 4. Q4: Top 5 SCT Agents
+    drawQuadrant(col2X, row2Y, 'TOP 5 SCT AGENTS', 'Sputum Samples Collected', '🧪', '#f43f5e', topPerformersData.top_sct || [], (s, startX, startY) => {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+      ctx.fillText(s.fo_name, startX, startY + 26);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`📍 ${s.district} • SCT Agent`, startX, startY + 52);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#f43f5e';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      const samplesCount = s.samples_collected || s.metric_value || 0;
+      ctx.fillText(`${samplesCount}`, startX + pWidth - 110, startY + 36);
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('samples', startX + pWidth - 110, startY + 54);
     });
 
     // Footer
     const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#64748b';
-    ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1300);
+    ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1315);
   }, [topPerformersData, topPerformersPeriod, month]);
 
   const handleDownloadTopPerformersPoster = useCallback(() => {
@@ -3025,21 +3077,58 @@ export default function AdminDashboard() {
   const handleShareTopPerformersWhatsApp = useCallback(() => {
     const periodName = topPerformersPeriod === 'weekly' ? 'Weekly Sprint (Last 7 Days)' : topPerformersPeriod === 'fortnightly' ? '15-Day Drive' : `Monthly (${month})`;
     let text = `*🏆 DOCTORS FOR YOU — BIHAR TB MISSION*\n`;
-    text += `*🌟 TOP PERFORMERS LEADERBOARD (${periodName})*\n\n`;
+    text += `*🌟 STATEWIDE TOP PERFORMERS LEADERBOARD (${periodName})*\n\n`;
 
-    text += `*🏛️ TOP 5 DISTRICTS:*\n`;
-    (topPerformersData?.top_districts || []).slice(0, 5).forEach((d, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-      text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% Target)\n`;
-    });
+    // 1. Top 5 Districts
+    text += `*🏛️ TOP 5 DISTRICTS (DC TARGET & VOLUME):*\n`;
+    const dists = topPerformersData?.top_districts || [];
+    if (dists.length === 0) {
+      text += `_No district data recorded_\n`;
+    } else {
+      dists.slice(0, 5).forEach((d, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% Target)\n`;
+      });
+    }
 
-    text += `\n*👤 TOP 5 FIELD OFFICERS:*\n`;
-    (topPerformersData?.top_staff || []).slice(0, 5).forEach((s, i) => {
-      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-      text += `${medal} *${s.fo_name}* (${s.district}): ${s.notifications} Notifs\n`;
-    });
+    // 2. Top 5 FO & Hub Agents
+    text += `\n*📋 TOP 5 FIELD OFFICERS & HUB AGENTS:*\n`;
+    const foList = topPerformersData?.top_fo || topPerformersData?.top_staff || [];
+    if (foList.length === 0) {
+      text += `_No FO/Hub records recorded_\n`;
+    } else {
+      foList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        const badge = (s.designation === 'Hub Agent' || String(s.designation || '').toUpperCase().includes('HUB')) ? ' [HUB AGENT]' : '';
+        text += `${medal} *${s.fo_name}* (${s.district})${badge}: ${s.notifications} Notifs\n`;
+      });
+    }
 
-    text += `\n_Congratulations to all top performers for leading Bihar's TB elimination drive! 🏥_`;
+    // 3. Top 5 Lab Technicians
+    text += `\n*🔬 TOP 5 LAB TECHNICIANS (LT TESTS):*\n`;
+    const ltList = topPerformersData?.top_lt || [];
+    if (ltList.length === 0) {
+      text += `_No LT test records recorded_\n`;
+    } else {
+      ltList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.tests || s.metric_value || 0} Tests\n`;
+      });
+    }
+
+    // 4. Top 5 SCT Agents
+    text += `\n*🧪 TOP 5 SCT AGENTS (SPUTUM COLLECTIONS):*\n`;
+    const sctList = topPerformersData?.top_sct || [];
+    if (sctList.length === 0) {
+      text += `_No SCT collection records recorded_\n`;
+    } else {
+      sctList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.samples_collected || s.metric_value || 0} Collections\n`;
+      });
+    }
+
+    text += `\n_Congratulations to all clinical champions leading Bihar's TB elimination drive! 🏥_`;
 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   }, [topPerformersData, topPerformersPeriod, month]);
@@ -5810,282 +5899,340 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Visual Analytics Row: Daily Progression Trend & Bihar Top Performers Studio */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Option A: Day-by-Day Daily Progression Trend */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col justify-between">
-                <div>
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg">📈</span>
-                        <h3 className="text-slate-800 font-black text-base">
-                          Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
-                        </h3>
-                      </div>
-                      <p className="text-slate-400 text-xs font-semibold mt-0.5">
-                        {selectedDistrict !== 'All' 
-                          ? `Day-by-day progression for ${selectedDistrict}` 
-                          : (isSubAdmin 
-                              ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
-                              : 'Day-by-day statewide performance progression across Bihar')}
-                      </p>
-                    </div>
-
-                    {/* Metric Switcher */}
-                    <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-[11px] font-bold">
-                      {[
-                        { key: 'notifications', label: '🔔 Notif' },
-                        { key: 'tests', label: '🔬 Tests' },
-                        { key: 'total_km', label: '🚗 KM' },
-                        { key: 'presumptive', label: '🩺 Presump' }
-                      ].map(m => (
-                        <button
-                          key={m.key}
-                          type="button"
-                          onClick={() => setActiveMetric(m.key)}
-                          className={`px-2.5 py-1 rounded-lg transition-all ${
-                            activeMetric === m.key
-                              ? 'bg-indigo-600 text-white shadow-sm'
-                              : 'text-slate-600 hover:text-slate-900'
-                          }`}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Trend Badges */}
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                      Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
-                    </span>
-                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                      Daily Avg: {dailyTrendStats.avgDaily} / day
-                    </span>
-                    <span className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
-                      Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
-                    </span>
-                  </div>
-                </div>
-
-                {/* AreaChart */}
-                <div className="h-60 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={dailyTrendStats.chartData} margin={{ top: 5, right: 15, left: -15, bottom: 5 }}>
-                      <defs>
-                        <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
-                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis 
-                        dataKey="day" 
-                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
-                        axisLine={{ stroke: '#e2e8f0' }} 
-                        tickLine={false}
-                        interval={1}
-                      />
-                      <YAxis 
-                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} 
-                        axisLine={false} 
-                        tickLine={false} 
-                      />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
-                        labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
-                        formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
-                      />
-                      <Area 
-                        type="monotone" 
-                        dataKey="value" 
-                        stroke="#6366f1" 
-                        strokeWidth={2.5} 
-                        fillOpacity={1} 
-                        fill="url(#trendGradient)" 
-                        dot={{ r: 2, fill: '#6366f1' }}
-                        activeDot={{ r: 5, fill: '#4338ca' }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Bihar Top Performers Studio */}
-              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-2xl shadow-md border border-indigo-900/60 flex flex-col justify-between relative overflow-hidden">
+            {/* TOP: Full-Width Bihar Statewide Top Performers Studio */}
+            <div className="w-full mb-6">
+              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md border border-indigo-900/60 relative overflow-hidden">
                 {/* Decorative background glow */}
-                <div className="absolute -top-12 -right-12 w-36 h-36 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none" />
-                <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-teal-500/15 rounded-full blur-2xl pointer-events-none" />
+                <div className="absolute -top-12 -right-12 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
 
                 <div>
                   {/* Studio Header */}
-                  <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-white/10">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">🏆</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl sm:text-3xl">🏆</span>
                       <div>
-                        <h3 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
-                          Bihar Top Performers
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                            Statewide
+                        <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-2">
+                          Bihar Statewide Top Performers Studio
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wider">
+                            Statewide Broadcast
                           </span>
                         </h3>
-                        <p className="text-[10px] font-medium text-slate-400">Top 5 Champions (No RBAC Limit)</p>
+                        <p className="text-xs text-slate-400 font-medium">
+                          Statewide leaderboards recognizing Field Officers, Hub Agents, Lab Technicians, SCT Agents &amp; Districts
+                        </p>
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => setShowTopPerformersModal(true)}
-                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-[11px] shadow-sm flex items-center gap-1 transition-all cursor-pointer active:scale-95 shrink-0"
-                      title="Generate and Share High-Res Poster"
-                    >
-                      <span>📲</span>
-                      <span>Share Poster</span>
-                    </button>
-                  </div>
-
-                  {/* Period Pills Switcher */}
-                  <div className="grid grid-cols-3 gap-1 bg-white/10 p-1 rounded-xl mb-3 text-[11px] font-black text-center">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTopPerformersPeriod('weekly');
-                        fetchTopPerformers('weekly');
-                      }}
-                      className={`py-1 rounded-lg transition-all cursor-pointer ${
-                        topPerformersPeriod === 'weekly'
-                          ? 'bg-indigo-600 text-white shadow-xs font-black'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Weekly
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTopPerformersPeriod('fortnightly');
-                        fetchTopPerformers('fortnightly');
-                      }}
-                      className={`py-1 rounded-lg transition-all cursor-pointer ${
-                        topPerformersPeriod === 'fortnightly'
-                          ? 'bg-indigo-600 text-white shadow-xs font-black'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      15 Days
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTopPerformersPeriod('monthly');
-                        fetchTopPerformers('monthly');
-                      }}
-                      className={`py-1 rounded-lg transition-all cursor-pointer ${
-                        topPerformersPeriod === 'monthly'
-                          ? 'bg-indigo-600 text-white shadow-xs font-black'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Monthly
-                    </button>
-                  </div>
-
-                  {/* Tab Selector: Districts vs Staff */}
-                  <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2 text-xs font-bold">
-                    <div className="flex gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={() => setTopPerformersTab('districts')}
-                        className={`pb-1 text-[11px] uppercase tracking-wider font-black transition-colors cursor-pointer ${
-                          topPerformersTab === 'districts'
-                            ? 'text-teal-400 border-b-2 border-teal-400'
-                            : 'text-slate-400 hover:text-slate-300'
-                        }`}
+                        onClick={handleShareTopPerformersWhatsApp}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                        title="Quick Share Top Performers to WhatsApp"
                       >
-                        🏛️ Top 5 Districts
+                        <span>📲</span>
+                        <span>WhatsApp Share</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setTopPerformersTab('staff')}
-                        className={`pb-1 text-[11px] uppercase tracking-wider font-black transition-colors cursor-pointer ${
-                          topPerformersTab === 'staff'
-                            ? 'text-purple-400 border-b-2 border-purple-400'
-                            : 'text-slate-400 hover:text-slate-300'
-                        }`}
+                        onClick={() => setShowTopPerformersModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                        title="Generate and Share High-Res Poster"
                       >
-                        👤 Top 5 Staff
+                        <span>🎨</span>
+                        <span>Poster Studio</span>
                       </button>
                     </div>
-
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {topPerformersPeriod === 'weekly' ? '7 Days' : topPerformersPeriod === 'fortnightly' ? '15 Days' : 'Full Month'}
-                    </span>
                   </div>
 
-                  {/* List Content */}
-                  <div className="space-y-1.5 min-h-[220px]">
+                  {/* Controls bar: Timeframe Switchers & Date Range */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white/5 p-2.5 rounded-xl border border-white/10 mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-300">Period:</span>
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('weekly');
+                            fetchTopPerformers('weekly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'weekly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Weekly (7 Days)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('fortnightly');
+                            fetchTopPerformers('fortnightly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'fortnightly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          15 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('monthly');
+                            fetchTopPerformers('monthly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'monthly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Monthly ({month})
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                      <span>📅 Active Range: <strong className="text-white font-mono">{topPerformersData?.start_date || `${month}-01`}</strong> to <strong className="text-white font-mono">{topPerformersData?.end_date || 'Today'}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* 4 Clinical Role Tabs */}
+                  <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('districts')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'districts'
+                          ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🏛️</span>
+                      <span>Top Districts (DC)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('fo')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'fo'
+                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>📋</span>
+                      <span>Top FO &amp; Hub Agents</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('lt')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'lt'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🔬</span>
+                      <span>Top Lab Technicians (LT)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('sct')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'sct'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🧪</span>
+                      <span>Top SCT Agents</span>
+                    </button>
+                  </div>
+
+                  {/* Top Performers Showcase Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 min-h-[140px]">
                     {loadingTopPerformers ? (
-                      <div className="flex items-center justify-center h-48 text-slate-400 text-xs gap-2">
+                      <div className="col-span-full py-12 flex items-center justify-center text-xs text-slate-400 gap-2 bg-white/5 rounded-2xl border border-white/5">
                         <span className="animate-spin text-lg">🌀</span> Loading Champions...
                       </div>
                     ) : topPerformersTab === 'districts' ? (
-                      /* Top 5 Districts */
                       (topPerformersData?.top_districts || []).length === 0 ? (
-                        <div className="text-center py-10 text-xs text-slate-400">No district records found</div>
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No district records found for this period
+                        </div>
                       ) : (
                         (topPerformersData?.top_districts || []).slice(0, 5).map((dist, idx) => (
                           <div 
                             key={idx}
-                            className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
                               idx === 0 
-                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-200' 
-                                : 'bg-white/5 border-white/5 text-slate-200 hover:bg-white/10'
+                                ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
                             }`}
                           >
-                            <div className="flex items-center gap-2">
-                              <span className="w-5 text-center text-xs font-black">
-                                {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
-                              </span>
-                              <span className="font-bold text-xs text-white">{dist.district}</span>
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                  dist.percentage >= 100 
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
+                                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                }`}>
+                                  {dist.percentage}% Target
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-1" title={dist.district}>
+                                {dist.district}
+                              </div>
                             </div>
-                            <div className="flex items-center gap-2.5 text-right font-mono">
-                              <span className="text-teal-300 text-xs font-black">{dist.notifications} notifs</span>
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
-                                {dist.percentage}%
-                              </span>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-teal-300 font-black">{dist.notifications} notifs</span>
+                              <span className="text-slate-400 text-[10px]">Target: {dist.target || 0}</span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    ) : topPerformersTab === 'fo' ? (
+                      (topPerformersData?.top_fo || topPerformersData?.top_staff || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Field Officer or Hub Agent records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_fo || topPerformersData?.top_staff || []).slice(0, 5).map((staff, idx) => {
+                          const isHub = staff.designation === 'Hub Agent' || String(staff.designation || '').toUpperCase().includes('HUB');
+                          return (
+                            <div 
+                              key={idx}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                                idx === 0 
+                                  ? 'bg-purple-500/15 border-purple-500/35 text-purple-200 shadow-sm' 
+                                  : idx === 1 
+                                  ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                  : idx === 2 
+                                  ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                  : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="text-xl font-black">
+                                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                  </span>
+                                  {isHub ? (
+                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wider">
+                                      HUB AGENT
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wider">
+                                      FO
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                  {staff.fo_name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mb-1">
+                                  📍 {staff.district}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                                <span className="text-purple-300 font-black">{staff.notifications ?? staff.metric_value ?? 0} notifs</span>
+                                <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )
+                    ) : topPerformersTab === 'lt' ? (
+                      (topPerformersData?.top_lt || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Lab Technician records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_lt || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+                                  Lab Technician
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-emerald-300 font-black">{staff.tests ?? staff.metric_value ?? 0} tests</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
                             </div>
                           </div>
                         ))
                       )
                     ) : (
-                      /* Top 5 Staff */
-                      (topPerformersData?.top_staff || []).length === 0 ? (
-                        <div className="text-center py-10 text-xs text-slate-400">No staff records found</div>
+                      (topPerformersData?.top_sct || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No SCT Agent records found for this period
+                        </div>
                       ) : (
-                        (topPerformersData?.top_staff || []).slice(0, 5).map((staff, idx) => (
+                        (topPerformersData?.top_sct || []).slice(0, 5).map((staff, idx) => (
                           <div 
                             key={idx}
-                            className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
                               idx === 0 
-                                ? 'bg-purple-500/15 border-purple-500/30 text-purple-200' 
-                                : 'bg-white/5 border-white/5 text-slate-200 hover:bg-white/10'
+                                ? 'bg-rose-500/15 border-rose-500/35 text-rose-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
                             }`}
                           >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="w-5 text-center text-xs font-black shrink-0">
-                                {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
-                              </span>
-                              <div className="truncate">
-                                <div className="font-bold text-xs text-white truncate">{staff.fo_name}</div>
-                                <div className="text-[9px] text-slate-400">{staff.district}</div>
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 uppercase tracking-wider">
+                                  SCT Agent
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
                               </div>
                             </div>
-                            <div className="text-right font-mono shrink-0">
-                              <span className="text-purple-300 text-xs font-black">{staff.notifications} notifs</span>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-rose-300 font-black">{staff.samples_collected ?? staff.metric_value ?? 0} collections</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
                             </div>
                           </div>
                         ))
@@ -6095,16 +6242,119 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
 
                 {/* Bottom Quick Share Trigger */}
-                <div className="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>State TB Mission Bihar</span>
+                <div className="pt-3 mt-4 border-t border-white/10 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+                  <span>Statewide Bihar TB Elimination Mission • Doctors For You MIS</span>
                   <button 
                     type="button"
                     onClick={() => setShowTopPerformersModal(true)}
-                    className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                    className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer text-xs"
                   >
                     Share Poster / Download Card →
                   </button>
                 </div>
+              </div>
+            </div>
+
+            {/* BOTTOM: Full-Width Daily Progression Trend */}
+            <div className="w-full bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100 mb-6">
+              <div>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">📈</span>
+                      <h3 className="text-slate-800 font-black text-base sm:text-lg">
+                        Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
+                      </h3>
+                    </div>
+                    <p className="text-slate-400 text-xs font-semibold mt-0.5">
+                      {selectedDistrict !== 'All' 
+                        ? `Day-by-day progression for ${selectedDistrict}` 
+                        : (isSubAdmin 
+                            ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
+                            : 'Day-by-day statewide performance progression across Bihar')}
+                    </p>
+                  </div>
+
+                  {/* Metric Switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
+                    {[
+                      { key: 'notifications', label: '🔔 Notif' },
+                      { key: 'tests', label: '🔬 Tests' },
+                      { key: 'total_km', label: '🚗 KM' },
+                      { key: 'presumptive', label: '🩺 Presump' }
+                    ].map(m => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => setActiveMetric(m.key)}
+                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                          activeMetric === m.key
+                            ? 'bg-indigo-600 text-white shadow-sm font-black'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Trend Badges */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    Daily Avg: {dailyTrendStats.avgDaily} / day
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
+                    Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* AreaChart - Spacious h-72 sm:h-80 Container */}
+              <div className="h-72 sm:h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dailyTrendStats.chartData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="day" 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={{ stroke: '#e2e8f0' }} 
+                      tickLine={false}
+                      interval={0}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
+                      labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
+                      formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke="#6366f1" 
+                      strokeWidth={2.5} 
+                      fillOpacity={1} 
+                      fill="url(#trendGradient)" 
+                      dot={{ r: 2.5, fill: '#6366f1' }}
+                      activeDot={{ r: 5, fill: '#4338ca' }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
 
@@ -16317,16 +16567,16 @@ const availableDistrictsForFeed = useMemo(() => {
                   </div>
                 </div>
 
-                {/* Poster Columns: Districts & Staff */}
+                {/* Poster Columns: 4 Clinical Quadrants */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
-                  {/* Left Column: Top 5 Districts */}
+                  {/* Q1: Top 5 Districts */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
                       <div className="flex items-center gap-2">
                         <span className="text-lg">🏛️</span>
                         <div>
                           <h4 className="text-xs font-black uppercase tracking-wider text-sky-400">Top 5 Districts</h4>
-                          <p className="text-[10px] text-slate-400">Statewide Target Achievement</p>
+                          <p className="text-[10px] text-slate-400">Target Achievement &amp; Volume</p>
                         </div>
                       </div>
                       <span className="text-[10px] font-mono text-slate-400">Target %</span>
@@ -16369,14 +16619,14 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   </div>
 
-                  {/* Right Column: Top 5 Field Officers */}
+                  {/* Q2: Top 5 FO & Hub Agents */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
                       <div className="flex items-center gap-2">
-                        <span className="text-lg">👤</span>
+                        <span className="text-lg">📋</span>
                         <div>
-                          <h4 className="text-xs font-black uppercase tracking-wider text-purple-400">Top 5 Field Officers</h4>
-                          <p className="text-[10px] text-slate-400">Frontline Notifications Champion</p>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-purple-400">Top 5 FO &amp; Hub Agents</h4>
+                          <p className="text-[10px] text-slate-400">Clinical TB Notifications</p>
                         </div>
                       </div>
                       <span className="text-[10px] font-mono text-slate-400">Volume</span>
@@ -16385,15 +16635,75 @@ const availableDistrictsForFeed = useMemo(() => {
                     <div className="space-y-2">
                       {loadingTopPerformers ? (
                         <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
-                      ) : (topPerformersData?.top_staff || []).length === 0 ? (
+                      ) : (topPerformersData?.top_fo || topPerformersData?.top_staff || []).length === 0 ? (
                         <div className="py-8 text-center text-xs text-slate-400">No records available</div>
                       ) : (
-                        (topPerformersData?.top_staff || []).slice(0, 5).map((s, i) => (
+                        (topPerformersData?.top_fo || topPerformersData?.top_staff || []).slice(0, 5).map((s, i) => {
+                          const isHub = s.designation === 'Hub Agent' || String(s.designation || '').toUpperCase().includes('HUB');
+                          return (
+                            <div 
+                              key={i} 
+                              className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                                i === 0 
+                                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-100' 
+                                  : i === 1 
+                                  ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
+                                  : i === 2 
+                                  ? 'bg-amber-700/15 border-amber-700/30 text-amber-200' 
+                                  : 'bg-white/5 border-white/5 text-slate-200'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="w-6 text-center text-base font-black shrink-0">
+                                  {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                                </span>
+                                <div className="truncate">
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    <span className="font-bold text-sm text-white truncate">{s.fo_name}</span>
+                                    {isHub && (
+                                      <span className="text-[8px] font-black px-1 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                                        HUB
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-purple-300 font-medium">📍 {s.district}</span>
+                                </div>
+                              </div>
+                              <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono shrink-0">
+                                {s.notifications ?? s.metric_value ?? 0} notifs
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Q3: Top 5 Lab Technicians */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🔬</span>
+                        <div>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-emerald-400">Top 5 Lab Technicians</h4>
+                          <p className="text-[10px] text-slate-400">Diagnostic Tests Performed</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">Tests</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingTopPerformers ? (
+                        <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
+                      ) : (topPerformersData?.top_lt || []).length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">No records available</div>
+                      ) : (
+                        (topPerformersData?.top_lt || []).slice(0, 5).map((s, i) => (
                           <div 
                             key={i} 
                             className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
                               i === 0 
-                                ? 'bg-purple-500/20 border-purple-500/40 text-purple-100' 
+                                ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-100' 
                                 : i === 1 
                                 ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
                                 : i === 2 
@@ -16407,11 +16717,61 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                               <div className="truncate">
                                 <span className="font-bold text-sm text-white block truncate">{s.fo_name}</span>
-                                <span className="text-[10px] text-purple-300 font-medium">📍 {s.district}</span>
+                                <span className="text-[10px] text-emerald-300 font-medium">📍 {s.district}</span>
                               </div>
                             </div>
                             <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono shrink-0">
-                              {s.notifications} notifs
+                              {s.tests ?? s.metric_value ?? 0} tests
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Q4: Top 5 SCT Agents */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🧪</span>
+                        <div>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-rose-400">Top 5 SCT Agents</h4>
+                          <p className="text-[10px] text-slate-400">Sputum Samples Collected</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">Collections</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingTopPerformers ? (
+                        <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
+                      ) : (topPerformersData?.top_sct || []).length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">No records available</div>
+                      ) : (
+                        (topPerformersData?.top_sct || []).slice(0, 5).map((s, i) => (
+                          <div 
+                            key={i} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                              i === 0 
+                                ? 'bg-rose-500/20 border-rose-500/40 text-rose-100' 
+                                : i === 1 
+                                ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
+                                : i === 2 
+                                ? 'bg-amber-700/15 border-amber-700/30 text-amber-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 text-center text-base font-black shrink-0">
+                                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                              </span>
+                              <div className="truncate">
+                                <span className="font-bold text-sm text-white block truncate">{s.fo_name}</span>
+                                <span className="text-[10px] text-rose-300 font-medium">📍 {s.district}</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-rose-500/20 text-rose-300 border border-rose-500/30 font-mono shrink-0">
+                              {s.samples_collected ?? s.metric_value ?? 0} collections
                             </span>
                           </div>
                         ))
