@@ -11,7 +11,10 @@ const AdminDashboard = lazy(() => import('./AdminDashboard.jsx'));
 
 const RouteLoadingFallback = () => (
   <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 text-white">
-    <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-3"></div>
+    <div className="relative mb-4">
+      <img src="/dfy-logo.png" alt="Doctors For You" className="w-16 h-16 rounded-2xl shadow-xl ring-2 ring-teal-500/40 object-contain p-1 bg-white animate-pulse" />
+    </div>
+    <div className="w-8 h-8 border-3 border-teal-500 border-t-transparent rounded-full animate-spin mb-3"></div>
     <p className="font-bold text-xs uppercase tracking-widest text-slate-300">⚡ Loading DFY TB MIS...</p>
   </div>
 );

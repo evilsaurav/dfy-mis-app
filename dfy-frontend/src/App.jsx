@@ -753,8 +753,15 @@ const MyProfileDashboard = ({
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
       {/* Profile Header & Monthly Target Card */}
-      <div className="bg-white rounded-3xl p-6 shadow-xl shadow-indigo-100/50 border border-slate-100 mb-6 text-center">
-        <div className="w-20 h-20 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 font-black">
+      <div className="bg-white rounded-3xl p-6 shadow-xl shadow-teal-900/5 border border-slate-100 mb-6 text-center relative overflow-hidden">
+        <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+          <div className="flex items-center gap-2">
+            <img src="/dfy-logo.png" alt="Doctors For You" className="w-6 h-6 object-contain" />
+            <span className="text-[10px] font-black tracking-wider uppercase text-teal-800">Doctors For You</span>
+          </div>
+          <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-0.5 rounded-full border border-slate-200/60">Field Operations</span>
+        </div>
+        <div className="w-20 h-20 bg-teal-50 text-teal-700 rounded-full flex items-center justify-center text-3xl mx-auto mb-3 font-black border-2 border-teal-100 shadow-inner">
           {(formData.fo_name || 'U').charAt(0)}
         </div>
         <h2 className="text-2xl font-black text-slate-800">{formData.fo_name}</h2>
@@ -2584,8 +2591,8 @@ const FoHelpGuide = () => {
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-teal-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-indigo-950/20 border border-teal-700/50">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center text-2xl border border-white/20 shrink-0">
-            📖
+          <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center p-1 border border-white/40 shrink-0 shadow-md">
+            <img src="/dfy-logo.png" alt="Doctors For You" className="w-full h-full object-contain" />
           </div>
           <div>
             <h2 className="text-xl font-black tracking-tight">FO Field Manual &amp; App Guide</h2>
@@ -5457,12 +5464,12 @@ function App() {
       <header className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 p-3.5 sm:p-4 sticky top-0 z-40 shadow-xs">
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-br from-teal-600 via-teal-700 to-emerald-700 h-10 w-10 sm:h-11 sm:w-11 rounded-2xl flex items-center justify-center shadow-md shadow-teal-700/20 text-white font-black text-xl shrink-0">
-              <svg width="20" height="20" className="sm:w-[22px] sm:h-[22px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-2xl bg-white border border-teal-200/90 p-1 shadow-md shadow-teal-700/15 flex items-center justify-center shrink-0 overflow-hidden">
+              <img src="/dfy-logo.png" alt="Doctors For You Logo" className="w-full h-full object-contain" />
             </div>
             <div>
               <h1 className="text-base sm:text-lg font-black tracking-tight leading-tight text-slate-800">DFY <span className="text-teal-700">REPORTING</span></h1>
-              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider mt-0.5">Mobile MIS Portal</p>
+              <p className="text-slate-400 text-[9px] sm:text-[10px] font-bold uppercase tracking-wider mt-0.5">Doctors For You &bull; Mobile MIS</p>
             </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3 ml-auto">

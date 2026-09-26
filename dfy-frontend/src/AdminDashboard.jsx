@@ -4644,8 +4644,11 @@ const availableDistrictsForFeed = useMemo(() => {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
         <div className="bg-white/95 backdrop-blur-xl p-6 sm:p-8 rounded-3xl shadow-[0_20px_50px_rgba(79,70,229,0.07)] w-full max-w-md border border-slate-200/80 animate-fade-in-down">
           <div className="text-center mb-6">
-            <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3.5 font-black shadow-md shadow-indigo-500/25">
-              🔐
+            <div className="w-16 h-16 bg-white border border-slate-200/90 rounded-2xl flex items-center justify-center p-1.5 mx-auto mb-3 shadow-md shadow-teal-900/10">
+              <img src="/dfy-logo.png" alt="Doctors For You Logo" className="w-full h-full object-contain" />
+            </div>
+            <div className="inline-block bg-teal-50 text-teal-800 text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border border-teal-200 mb-1.5">
+              Doctors For You
             </div>
             <h1 className="text-2xl font-black text-slate-800 tracking-tight">Admin Portal</h1>
             <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-1">State Health MIS Management</p>
@@ -4708,8 +4711,8 @@ const availableDistrictsForFeed = useMemo(() => {
             
             {/* 1. Left: Brand & Admin Identity */}
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-teal-700 via-teal-800 to-emerald-800 text-white flex items-center justify-center font-black text-lg shadow-sm shadow-teal-700/25 shrink-0">
-                📊
+              <div className="w-10 h-10 rounded-xl bg-white border border-teal-200/90 p-0.5 shadow-sm shadow-teal-700/20 flex items-center justify-center shrink-0 overflow-hidden">
+                <img src="/dfy-logo.png" alt="Doctors For You Logo" className="w-full h-full object-contain" />
               </div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -13627,7 +13630,9 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* Header */}
             <div className="flex justify-between items-center border-b border-slate-100 pb-4 shrink-0">
               <div className="flex items-center gap-3">
-                <span className="text-2xl p-2.5 bg-indigo-50 rounded-2xl border border-indigo-200 text-indigo-700">📘</span>
+                <div className="w-11 h-11 bg-white border border-teal-200/90 rounded-2xl p-1 shrink-0 shadow-sm flex items-center justify-center overflow-hidden">
+                  <img src="/dfy-logo.png" alt="Doctors For You" className="w-full h-full object-contain" />
+                </div>
                 <div>
                   <h3 className="text-lg font-black text-slate-800">DFY TB MIS — Admin SOP &amp; Feature Guide</h3>
                   <p className="text-xs text-slate-500 font-medium">Standard Operating Procedures for Super Admins &amp; District Sub-Admins</p>

@@ -1,4 +1,4 @@
-﻿{
+{
   "short_name": "DFY MIS",
   "name": "DFY Reporting MIS",
   "description": "Daily Activity & KPI MIS Field Reporting Portal for Doctors For You",
@@ -16,16 +16,16 @@
       "purpose": "any maskable"
     },
     {
-      "src": "/favicon.svg",
-      "type": "image/svg+xml",
-      "sizes": "any",
+      "src": "/favicon.png",
+      "type": "image/png",
+      "sizes": "64x64",
       "purpose": "any"
     }
   ],
   "start_url": "/",
   "scope": "/",
   "background_color": "#f8fafc",
-  "theme_color": "#4f46e5",
+  "theme_color": "#0f766e",
   "display": "standalone",
   "orientation": "portrait"
 }
