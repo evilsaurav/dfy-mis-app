@@ -62,7 +62,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any, Tuple, Set
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 import pandas as pd
 import io
 import os
@@ -2772,6 +2772,78 @@ async def get_staff_directory():
         fallback_dir = load_baseline_staff_directory()
         return {"status": "success", "data": fallback_dir, "fallback": True}
 
+
+def is_exempt_day(d: date, daily_history: dict) -> bool:
+    """
+    Checks if a calendar date is exempt from mandatory reporting.
+    Exempt days:
+    - Sundays (weekly off in standard health administration, d.weekday() == 6)
+    - Approved staff leaves (Casual, Medical, Official Duty, Declared Holiday, or is_leave == True)
+    """
+    if d.weekday() == 6:
+        return True
+    d_str = d.strftime("%Y-%m-%d")
+    record = daily_history.get(d_str)
+    if not isinstance(record, dict):
+        return False
+    if record.get("is_leave") is True or bool(record.get("is_leave")):
+        return True
+    status = str(record.get("status", "")).strip().lower()
+    if status in ("leave", "holiday", "declared holiday", "casual", "medical", "official duty"):
+        return True
+    reason = str(record.get("reason_type", "")).strip().lower()
+    if reason in ("leave", "holiday", "declared holiday", "casual", "medical", "official duty"):
+        return True
+    return False
+
+
+def calculate_reporting_streak(daily_history: dict, today: Optional[date] = None) -> int:
+    """
+    Calculates consecutive reporting streak in days.
+    Preserves streak across Sundays (weekly off), approved leaves (Casual, Medical, Official Duty),
+    and declared holidays without resetting to 0.
+
+    Anchoring:
+    - If today is already submitted: start checking from today.
+    - If today is NOT submitted: start checking from yesterday.
+
+    Traversal:
+    - If day is submitted: streak += 1, check_date -= 1 day.
+    - Else if day is exempt (Sunday or approved leave / holiday): bridge past without breaking streak.
+    - Else (unexcused absence on working day): streak terminates (break).
+    - Defensively capped at 60 days to prevent infinite loops.
+    """
+    if today is None:
+        today = get_ist_now().date()
+
+    today_str = today.strftime("%Y-%m-%d")
+    today_submitted = bool(daily_history.get(today_str, {}).get("submitted"))
+
+    check_date = today if today_submitted else (today - timedelta(days=1))
+
+    streak_days = 0
+    days_checked = 0
+    max_days = 60
+
+    while days_checked < max_days:
+        days_checked += 1
+        d_str = check_date.strftime("%Y-%m-%d")
+        record = daily_history.get(d_str, {})
+        is_submitted = bool(record.get("submitted"))
+
+        if is_submitted:
+            streak_days += 1
+            check_date -= timedelta(days=1)
+        elif is_exempt_day(check_date, daily_history):
+            # Exempt day (Sunday or approved leave / declared holiday) - bridge without breaking streak
+            check_date -= timedelta(days=1)
+        else:
+            # Regular working day was missed without approved leave - streak terminates
+            break
+
+    return streak_days
+
+
 class ProfileStatsRequest(BaseModel):
     working_place: str
     fo_name: str
@@ -3026,26 +3098,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
                             "marked_by": leave_marked_by
                         }
         
-        # Calculate Reporting Streak
-        sorted_dates = sorted(daily_history.keys(), reverse=True)
-        streak_days = 0
-        today = get_ist_now().date()
-        
-        # Check streak starting from today or yesterday
-        check_date = today
-        if today.strftime("%Y-%m-%d") not in daily_history or not daily_history.get(today.strftime("%Y-%m-%d"), {}).get("submitted"):
-            # Maybe today is not yet reported, check from yesterday
-            from datetime import timedelta
-            check_date = today - timedelta(days=1)
-            
-        while True:
-            d_str = check_date.strftime("%Y-%m-%d")
-            if d_str in daily_history and daily_history[d_str].get("submitted"):
-                streak_days += 1
-                from datetime import timedelta
-                check_date = check_date - timedelta(days=1)
-            else:
-                break
+        # Calculate Reporting Streak (Preserves streaks across Sundays, approved leaves & declared holidays)
+        streak_days = calculate_reporting_streak(daily_history, today=get_ist_now().date())
 
         total_km_month = sum(d.get("total_km", 0) for d in daily_history.values())
         
