@@ -2817,7 +2817,7 @@ def calculate_reporting_streak(daily_history: dict, today: Optional[date] = None
         today = get_ist_now().date()
 
     today_str = today.strftime("%Y-%m-%d")
-    today_submitted = bool(daily_history.get(today_str, {}).get("submitted"))
+    today_submitted = bool((daily_history.get(today_str) or {}).get("submitted"))
 
     check_date = today if today_submitted else (today - timedelta(days=1))
 
@@ -2828,7 +2828,7 @@ def calculate_reporting_streak(daily_history: dict, today: Optional[date] = None
     while days_checked < max_days:
         days_checked += 1
         d_str = check_date.strftime("%Y-%m-%d")
-        record = daily_history.get(d_str, {})
+        record = daily_history.get(d_str) or {}
         is_submitted = bool(record.get("submitted"))
 
         if is_submitted:
