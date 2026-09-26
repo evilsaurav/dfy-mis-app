@@ -1068,20 +1068,38 @@ async def get_statewide_top_performers(
         else:
             filtered_reports = raw_reports
 
-        # Load inactive staff keys
-        inactive_keys = set(cache.get("inactive_staff_keys") or [])
-        if not inactive_keys:
+        # Load staff directory metadata (designations, targets, is_active) with 180s caching
+        staff_meta = cache.get("staff_directory_map")
+        if staff_meta is None or not isinstance(staff_meta, dict):
+            staff_meta = {}
             try:
                 raw_staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
                 for doc in raw_staff_docs:
                     d = doc.to_dict() if hasattr(doc, "to_dict") else {}
-                    if d.get("is_active") is False or d.get("status") == "inactive":
-                        dist = canonicalize_district(d.get("district") or "")
-                        fo_name = (d.get("name") or "").strip()
-                        if dist and fo_name:
-                            inactive_keys.add(normalize_staff_key(dist, fo_name))
-            except Exception:
-                pass
+                    dist = canonicalize_district(d.get("district") or "")
+                    fo_name = (d.get("name") or d.get("fo_name") or "").strip()
+                    if dist and fo_name:
+                        k = normalize_staff_key(dist, fo_name)
+                        is_active = (d.get("is_active") is not False) and (d.get("status") != "inactive")
+                        staff_meta[k] = {
+                            "name": fo_name,
+                            "designation": (d.get("designation") or "Field Officer").strip(),
+                            "target": float(d.get("target", 50) or 50),
+                            "is_active": is_active
+                        }
+                cache.set("staff_directory_map", staff_meta, ttl=180)
+            except Exception as e_meta:
+                print(f"[Leaderboard] Notice loading staff_directory_map: {e_meta}")
+                staff_meta = {}
+
+        # Inactive staff keys
+        inactive_keys = set(cache.get("inactive_staff_keys") or [])
+        if not inactive_keys:
+            for k, meta in staff_meta.items():
+                if not meta.get("is_active", True):
+                    inactive_keys.add(k)
+            if inactive_keys:
+                cache.set("inactive_staff_keys", list(inactive_keys), ttl=300)
 
         # Load district targets
         dist_targets = {}
@@ -1095,9 +1113,11 @@ async def get_statewide_top_performers(
         except Exception:
             pass
 
-        # Aggregate by District and by Staff
+        # Aggregate by District and by Staff designation roles
         district_counts = {}
-        staff_counts = {}
+        fo_counts = {}
+        lt_counts = {}
+        sct_counts = {}
 
         for r in filtered_reports:
             c_dist = canonicalize_district(r.get("working_place") or r.get("district") or "")
@@ -1111,6 +1131,14 @@ async def get_statewide_top_performers(
             if notifs == 0:
                 notifs = int(r.get("notifications") or 0)
 
+            tests = len(r.get("sample_tested_ids") or [])
+            if tests == 0:
+                tests = int(r.get("tests") or 0)
+
+            samples_collected = len(r.get("sample_collection_ids") or [])
+            if samples_collected == 0:
+                samples_collected = int(r.get("sample_collection") or r.get("samples_collected") or 0)
+
             # District aggregate
             if c_dist not in district_counts:
                 district_counts[c_dist] = {
@@ -1123,19 +1151,53 @@ async def get_statewide_top_performers(
 
             # Staff aggregate (exclude deactivated staff)
             norm_key = normalize_staff_key(c_dist, c_fo)
-            if norm_key in inactive_keys or any(k in norm_key for k in ["purushotam", "purushottam"]):
+            is_deactivated = (
+                norm_key in inactive_keys or
+                not staff_meta.get(norm_key, {}).get("is_active", True) or
+                any(k in norm_key for k in ["purushotam", "purushottam"])
+            )
+            if is_deactivated:
                 continue
 
+            meta = staff_meta.get(norm_key, {})
+            display_name = meta.get("name") or c_fo
+            desig = (meta.get("designation") or "Field Officer").strip()
+            desig_upper = desig.upper()
             staff_key = f"{c_dist}_{c_fo}"
-            if staff_key not in staff_counts:
-                staff_counts[staff_key] = {
-                    "fo_name": c_fo,
-                    "district": c_dist,
-                    "notifications": 0,
-                    "target": 50,
-                    "percentage": 0.0
-                }
-            staff_counts[staff_key]["notifications"] += notifs
+
+            if "LT" in desig_upper or "LAB TECHNICIAN" in desig_upper:
+                if staff_key not in lt_counts:
+                    lt_counts[staff_key] = {
+                        "fo_name": display_name,
+                        "district": c_dist,
+                        "designation": desig or "Lab Technician (LT)",
+                        "tests": 0,
+                        "notifications": 0
+                    }
+                lt_counts[staff_key]["tests"] += tests
+                lt_counts[staff_key]["notifications"] += notifs
+            elif "SCT" in desig_upper or "SPUTUM" in desig_upper:
+                if staff_key not in sct_counts:
+                    sct_counts[staff_key] = {
+                        "fo_name": display_name,
+                        "district": c_dist,
+                        "designation": desig or "SCT Agent",
+                        "samples_collected": 0,
+                        "notifications": 0
+                    }
+                sct_counts[staff_key]["samples_collected"] += samples_collected
+                sct_counts[staff_key]["notifications"] += notifs
+            else:
+                if staff_key not in fo_counts:
+                    fo_counts[staff_key] = {
+                        "fo_name": display_name,
+                        "district": c_dist,
+                        "designation": desig or "Field Officer",
+                        "notifications": 0,
+                        "target": float(meta.get("target", 50) or 50),
+                        "percentage": 0.0
+                    }
+                fo_counts[staff_key]["notifications"] += notifs
 
         # Compute percentages for districts
         for d in district_counts.values():
@@ -1148,9 +1210,9 @@ async def get_statewide_top_performers(
                 eff_target = max(1.0, float(t_val))
             d["percentage"] = round((d["notifications"] / eff_target) * 100, 1)
 
-        # Compute percentages for staff
-        for s in staff_counts.values():
-            s_target = 50.0
+        # Compute percentages for FO staff
+        for s in fo_counts.values():
+            s_target = float(s.get("target") or 50.0)
             if period == "weekly":
                 eff_target = max(1.0, float(round(s_target * 7 / 24)))
             elif period == "fortnightly":
@@ -1177,18 +1239,52 @@ async def get_statewide_top_performers(
                 "percentage": d["percentage"]
             })
 
-        # Sort staff
-        sorted_staff = list(staff_counts.values())
-        sorted_staff.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
-        
-        top_staff = []
-        for i, s in enumerate(sorted_staff[:5]):
-            top_staff.append({
+        # Sort FO & Hub Agents (ranked by notifications)
+        sorted_fo = list(fo_counts.values())
+        sorted_fo.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
+        top_fo = []
+        for i, s in enumerate(sorted_fo[:5]):
+            top_fo.append({
                 "rank": i + 1,
                 "fo_name": s["fo_name"],
                 "district": s["district"],
+                "designation": s.get("designation") or "Field Officer",
                 "notifications": s["notifications"],
-                "percentage": s["percentage"]
+                "percentage": s["percentage"],
+                "metric_value": s["notifications"],
+                "metric_label": "notifications"
+            })
+
+        # Sort Lab Technicians (ranked by tests)
+        sorted_lt = list(lt_counts.values())
+        sorted_lt.sort(key=lambda x: (x["tests"], x["notifications"]), reverse=True)
+        top_lt = []
+        for i, s in enumerate(sorted_lt[:5]):
+            top_lt.append({
+                "rank": i + 1,
+                "fo_name": s["fo_name"],
+                "district": s["district"],
+                "designation": s.get("designation") or "Lab Technician (LT)",
+                "tests": s["tests"],
+                "notifications": s["notifications"],
+                "metric_value": s["tests"],
+                "metric_label": "tests"
+            })
+
+        # Sort SCT Agents (ranked by samples_collected)
+        sorted_sct = list(sct_counts.values())
+        sorted_sct.sort(key=lambda x: (x["samples_collected"], x["notifications"]), reverse=True)
+        top_sct = []
+        for i, s in enumerate(sorted_sct[:5]):
+            top_sct.append({
+                "rank": i + 1,
+                "fo_name": s["fo_name"],
+                "district": s["district"],
+                "designation": s.get("designation") or "SCT Agent",
+                "samples_collected": s["samples_collected"],
+                "notifications": s["notifications"],
+                "metric_value": s["samples_collected"],
+                "metric_label": "collections"
             })
 
         result = {
@@ -1198,7 +1294,10 @@ async def get_statewide_top_performers(
             "start_date": start_date or f"{month}-01",
             "end_date": today_str,
             "top_districts": top_districts,
-            "top_staff": top_staff
+            "top_fo": top_fo,
+            "top_lt": top_lt,
+            "top_sct": top_sct,
+            "top_staff": top_fo
         }
         cache.set(cache_key, result, ttl=180) # 3-minute cache
         return result
@@ -1208,6 +1307,9 @@ async def get_statewide_top_performers(
             "success": False,
             "error": str(e),
             "top_districts": [],
+            "top_fo": [],
+            "top_lt": [],
+            "top_sct": [],
             "top_staff": []
         }
 
@@ -5492,6 +5594,10 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         
         cache.delete("staff_directory_list")
         cache.delete("staff_directory_dict")
+        cache.delete("staff_directory_map")
+        cache.delete("staff_directory")
+        cache.delete("inactive_staff_keys")
+        cache.delete_prefix("statewide_top_")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
@@ -5616,6 +5722,10 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
         cache.delete("staff_directory_dict")
+        cache.delete("staff_directory_map")
+        cache.delete("staff_directory")
+        cache.delete("inactive_staff_keys")
+        cache.delete_prefix("statewide_top_")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
@@ -5681,6 +5791,10 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         cache.delete(f"pin_{doc_id}")
         cache.delete("staff_directory_list")
         cache.delete("staff_directory_dict")
+        cache.delete("staff_directory_map")
+        cache.delete("staff_directory")
+        cache.delete("inactive_staff_keys")
+        cache.delete_prefix("statewide_top_")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
         
@@ -5807,6 +5921,10 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
         cache.delete(f"pin_{primary_id}")
         cache.delete("staff_directory_list")
         cache.delete("staff_directory_dict")
+        cache.delete("staff_directory_map")
+        cache.delete("staff_directory")
+        cache.delete("inactive_staff_keys")
+        cache.delete_prefix("statewide_top_")
         cache.delete_prefix("admin_staff_full_list")
         cache.delete_prefix("attendance_")
 
