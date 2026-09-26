@@ -2816,10 +2816,8 @@ export default function AdminDashboard() {
   const fetchTopPerformers = useCallback(async (period = topPerformersPeriod) => {
     try {
       setLoadingTopPerformers(true);
-      const token = localStorage.getItem('dfy_token');
-      const res = await fetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}`);
       if (res.ok) {
         const json = await res.json();
         if (json && json.success) {
@@ -2831,7 +2829,7 @@ export default function AdminDashboard() {
     } finally {
       setLoadingTopPerformers(false);
     }
-  }, [month, topPerformersPeriod]);
+  }, [month, topPerformersPeriod, authFetch]);
 
   const generateTopPerformersPosterCanvas = useCallback(async () => {
     const canvas = topPerformersCanvasRef.current;
