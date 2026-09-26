@@ -800,6 +800,14 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
     if not did:
         did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
 
+    raw_ts = data.get("timestamp_completed") or data.get("timestamp") or data.get("submitted_at")
+    iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
+    submitted_time = format_to_ist_time(raw_ts)
+    is_next_day = bool(data.get("is_next_day_submission"))
+    morning_time = data.get("submitted_morning_time") or ""
+    morning_label = data.get("morning_submission_label") or (f"Next day morning {morning_time or submitted_time}" if is_next_day else "")
+    total_ids = sum(len(v) for k, v in data.items() if isinstance(v, list) and k.endswith("_ids"))
+
     return {
         "id": did,
         "doc_id": did,
@@ -807,6 +815,15 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
         "date_of_reporting": dt,
         "working_place": c_wp,
         "fo_name": canonicalize_fo_name(fo, c_wp),
+        
+        # Timestamps & Radar Submission Metadata
+        "timestamp_completed": iso_ts,
+        "timestamp_raw": iso_ts,
+        "submitted_time": submitted_time,
+        "total_ids": total_ids,
+        "is_next_day_submission": is_next_day,
+        "submitted_morning_time": morning_time,
+        "morning_submission_label": morning_label,
         
         # Big 5
         "total_km": data.get("total_km", 0) or 0,

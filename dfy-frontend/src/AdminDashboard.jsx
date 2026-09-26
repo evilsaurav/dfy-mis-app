@@ -910,28 +910,39 @@ export default function AdminDashboard() {
       const cleanFo = (r.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const key = `${dist}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
 
-      const rawTs = r.timestamp_completed || r.timestamp || r.submitted_at || '';
-      let submittedTime = "Submitted";
-      if (rawTs) {
+      const rawTs = r.timestamp_completed || r.timestamp || r.submitted_at || r.timestamp_raw || '';
+      let submittedTime = r.submitted_time || "Submitted";
+      if ((!submittedTime || submittedTime === "Submitted") && rawTs) {
         try {
-          const d = new Date(rawTs);
+          const cleanTs = String(rawTs).includes('T') ? rawTs : String(rawTs).replace(' ', 'T');
+          const d = new Date(cleanTs);
           if (!isNaN(d.getTime())) {
             submittedTime = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
           }
         } catch (e) {}
       }
 
+      // Stealth 10 AM Cutoff Segregation for in-memory derivation:
+      const isNextDay = Boolean(r.is_next_day_submission || r.is_next_day);
+      const morningTime = r.submitted_morning_time || (isNextDay ? submittedTime : '');
+      const submittedLabel = r.morning_submission_label || r.submitted_label || (isNextDay ? `Next day morning ${morningTime}` : (submittedTime || 'Submitted'));
+
+      // Total IDs: use r.total_ids if present (computed across all _ids lists), else sum available numeric categories
+      const computedTotalIds = r.total_ids !== undefined
+        ? r.total_ids
+        : ((r.notifications || 0) + (r.tests || 0) + (r.presumptive || 0) + (r.hiv_dm || 0) + (r.dbt || 0) + (r.differentiated_tb || 0) + (r.tpt_treatment_start || 0) + (r.sample_collection || 0) + (r.contact_tracing || 0) + (r.face_to_face || 0) + (r.documents || 0));
+
       reportsMap[key] = {
         district: dist,
         fo_name: (r.fo_name || '').trim(),
         submission_count: r.submission_count || 1,
-        total_ids: (r.notifications || 0) + (r.tests || 0) + (r.presumptive || 0) + (r.hiv_dm || 0) + (r.dbt || 0),
+        total_ids: computedTotalIds,
         submitted_time: submittedTime,
         timestamp_raw: rawTs,
         total_km: r.total_km || 0,
-        is_next_day: Boolean(r.is_next_day_submission || r.is_next_day),
-        submitted_morning_time: r.submitted_morning_time || '',
-        submitted_label: r.morning_submission_label || r.submitted_label || (r.is_next_day_submission ? `Next day morning ${r.submitted_morning_time || submittedTime}` : '')
+        is_next_day: isNextDay,
+        submitted_morning_time: morningTime,
+        submitted_label: submittedLabel
       };
     });
 
@@ -1004,8 +1015,10 @@ export default function AdminDashboard() {
       const derived = deriveAttendanceFromRecords(targetDate);
       if (derived) {
         setAttendance(derived);
-        if (isPastDateInMonth) {
-          return; // Past date in loaded month is 100% complete in rawRecords! No network request needed!
+        // Only return early if we have valid timestamps in derived data (guards against stale pre-cached records)
+        const hasTimestamps = derived.submitted_fos.length === 0 || derived.submitted_fos.some(fo => fo.submitted_time && fo.submitted_time !== 'Submitted');
+        if (isPastDateInMonth && hasTimestamps) {
+          return; // Past date in loaded month is 100% complete in rawRecords with timestamps! No network request needed!
         }
       }
     }
