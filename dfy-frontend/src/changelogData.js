@@ -1,16 +1,53 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.3";
-export const LAST_UPDATED_DATE = "25 Sep 2026";
+export const APP_VERSION = "2.8.4";
+export const LAST_UPDATED_DATE = "26 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.4",
+    date: "26 Sep 2026",
+    title: "FO Profile Honors & Badges Showcase, HD Shareable Card Studio, 4-Role Statewide Leaderboard & Full-Width Layout",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🌟 Field Officer Profile Honors & Badges Showcase: Unlocked 4 dynamic clinical achievement badges (Target Achiever, Punctuality Streak, Cascade Champion, and Field Trail Blazer) recognizing field dedication across milestone tiers with zero performance overhead.",
+      "📲 HD Shareable Achievement Card Studio: Frontline officers can now launch an interactive achievement card studio featuring live preview, 1080x1350 HD Canvas PNG download, and 1-click WhatsApp celebration messaging.",
+      "🏆 Full-Width Admin Dashboard Restructure: Replaced cramped side-by-side analytics with a full-width Bihar Statewide Top Performers Studio at the top followed by a spacious full-width Daily Progression Trend chart below.",
+      "🎖️ 4-Role Statewide Leaderboard & Poster Generator: Expanded top performers into 4 clinical disciplines—Districts (DC Target %), Field Officers & Hub Agents (with distinct amber badges), Lab Technicians (Tests), and SCT Agents (Sputum Collections)—with integrated 4-tier Canvas poster download and WhatsApp broadcasts.",
+      "⚡ Dynamic Staff Designation Mapping & Cache Eviction: Integrated real-time designation lookups from staff directory with instant multi-cache invalidation upon role updates, seamlessly shifting staff between specialized leaderboard buckets.",
+      "🏥 Official Doctors For You Branding: Unified visual branding with the official Doctors For You logo integrated across web app headers, admin navigation, login cards, PWA app icons, and favicons."
+    ],
+    details: [
+      {
+        tag: "FO Gamification",
+        color: "amber",
+        text: "Dynamic milestone badges reward top field performers, consistency streaks, clinical cascade completion, and travel diligence."
+      },
+      {
+        tag: "Achievement Studio",
+        color: "teal",
+        text: "Client-side 1080x1350 canvas card generator enables officers to export crisp, branded recognition cards for team celebrations with 0% server load."
+      },
+      {
+        tag: "Admin Layout",
+        color: "indigo",
+        text: "Full-width layout gives executive visibility to statewide top performers across all 4 frontline healthcare cadres and full 30-day progression trends."
+      },
+      {
+        tag: "Branding & Cache",
+        color: "emerald",
+        text: "Official DFY identity across all viewports and instant leaderboard cache invalidation guarantee consistent, real-time reporting."
+      }
+    ]
+  },
   {
     version: "v2.8.3",
     date: "25 Sep 2026",
     title: "Stealth 10 AM Cutoff Engine, Deactivated Staff Roster Defense, Master Cohort Docs & 100% Native Bento Flowcharts",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "⏰ Stealth 10:00 AM Reporting Cutoff & Next-Day Morning Radar Badge: Submissions completed before 10:00 AM IST are unconditionally attributed to yesterday (D-1), preventing early-morning catch-up entries from skewing current day attendance, and tagged with prominent '⏰ Next day morning HH:MM AM' badges in Attendance Radar.",
       "📊 Dual-Sheet Staff Attendance Excel Export with Morning Notes: Sheet 1 daily roster automatically flags next-day morning submissions in the remarks column ('Submitted next morning (HH:MM AM)') with zero server RAM spike.",

@@ -2833,7 +2833,7 @@ export default function AdminDashboard() {
     }
   }, [month, topPerformersPeriod]);
 
-  const generateTopPerformersPosterCanvas = useCallback(() => {
+  const generateTopPerformersPosterCanvas = useCallback(async () => {
     const canvas = topPerformersCanvasRef.current;
     if (!canvas || !topPerformersData) return;
     const ctx = canvas.getContext('2d');
@@ -2863,10 +2863,21 @@ export default function AdminDashboard() {
     ctx.fill();
     ctx.restore();
 
-    // Draw DFY Logo at top-left if available
-    const logoImg = new Image();
-    logoImg.src = '/dfy-logo.png';
-    if (logoImg.complete && logoImg.naturalWidth > 0) {
+    // Draw DFY Logo at top-left if available (robust async loader)
+    const loadLogo = () => new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.src = '/dfy-logo.png';
+      if (img.complete && img.naturalWidth > 0) {
+        resolve(img);
+      } else {
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+      }
+    });
+
+    const logoImg = await loadLogo();
+    if (logoImg) {
       try {
         ctx.save();
         ctx.drawImage(logoImg, 50, 45, 95, 95);
@@ -3055,9 +3066,9 @@ export default function AdminDashboard() {
     ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1315);
   }, [topPerformersData, topPerformersPeriod, month]);
 
-  const handleDownloadTopPerformersPoster = useCallback(() => {
+  const handleDownloadTopPerformersPoster = useCallback(async () => {
     try {
-      generateTopPerformersPosterCanvas();
+      await generateTopPerformersPosterCanvas();
       const canvas = topPerformersCanvasRef.current;
       if (!canvas) return;
       const dataUrl = canvas.toDataURL('image/png');

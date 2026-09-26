@@ -2136,7 +2136,7 @@ const MyProfileDashboard = ({
                 {/* Card Footer */}
                 <div className="border-t border-white/10 pt-2.5 flex items-center justify-between text-[9px] text-slate-400 font-semibold">
                   <span className="truncate">Bihar TB Elimination Mission</span>
-                  <span>{new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })} (IST)</span>
+                  <span>{new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })} (IST)</span>
                 </div>
               </div>
             </div>
