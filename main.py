@@ -1020,7 +1020,196 @@ async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_cu
 
 @app.get("/api/system-version")
 async def get_system_version():
-    return {"status": "success", "version": "2.8.1", "min_supported_version": "2.8.0"}
+    return {"status": "success", "version": "2.8.3", "min_supported_version": "2.8.0"}
+
+@app.get("/api/statewide-top-performers")
+async def get_statewide_top_performers(
+    month: Optional[str] = None,
+    period: str = "monthly",
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Statewide Leaderboard for Bihar Top Performers Studio.
+    Bypasses Sub-Admin district RBAC by design so all coordinators can view statewide champions.
+    Returns Top 5 Districts and Top 5 Field Officers for the specified period ('weekly', 'fortnightly', 'monthly').
+    """
+    try:
+        now_dt = datetime.utcnow() + timedelta(hours=5, minutes=30)
+        today_str = now_dt.strftime("%Y-%m-%d")
+        if not month:
+            month = now_dt.strftime("%Y-%m")
+            
+        period = (period or "monthly").lower().strip()
+        if period not in ("weekly", "fortnightly", "monthly"):
+            period = "monthly"
+
+        cache_key = f"statewide_top_{month}_{period}"
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Calculate date range
+        start_date = None
+        if period == "weekly":
+            start_date = (now_dt - timedelta(days=6)).strftime("%Y-%m-%d")
+        elif period == "fortnightly":
+            start_date = (now_dt - timedelta(days=14)).strftime("%Y-%m-%d")
+
+        # Load all monthly reports without district restrictions (statewide)
+        raw_reports = await get_raw_monthly_reports(month, force=False) or []
+
+        # Filter by date if weekly or fortnightly
+        if start_date:
+            filtered_reports = [
+                r for r in raw_reports 
+                if (r.get("date_of_reporting") or r.get("date") or "") >= start_date 
+                and (r.get("date_of_reporting") or r.get("date") or "") <= today_str
+            ]
+        else:
+            filtered_reports = raw_reports
+
+        # Load inactive staff keys
+        inactive_keys = set(cache.get("inactive_staff_keys") or [])
+        if not inactive_keys:
+            try:
+                raw_staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+                for doc in raw_staff_docs:
+                    d = doc.to_dict() if hasattr(doc, "to_dict") else {}
+                    if d.get("is_active") is False or d.get("status") == "inactive":
+                        dist = canonicalize_district(d.get("district") or "")
+                        fo_name = (d.get("name") or "").strip()
+                        if dist and fo_name:
+                            inactive_keys.add(normalize_staff_key(dist, fo_name))
+            except Exception:
+                pass
+
+        # Load district targets
+        dist_targets = {}
+        try:
+            target_res = await get_targets(district=None, month=month)
+            if target_res and "targets" in target_res:
+                for t in target_res["targets"]:
+                    d_clean = canonicalize_district(t.get("district") or "")
+                    t_num = float(t.get("target") or 50)
+                    dist_targets[d_clean] = dist_targets.get(d_clean, 0) + t_num
+        except Exception:
+            pass
+
+        # Aggregate by District and by Staff
+        district_counts = {}
+        staff_counts = {}
+
+        for r in filtered_reports:
+            c_dist = canonicalize_district(r.get("working_place") or r.get("district") or "")
+            raw_fo = (r.get("fo_name") or "").strip()
+            c_fo = canonicalize_fo_name(raw_fo, c_dist)
+            
+            if not c_dist or not c_fo:
+                continue
+
+            notifs = len(r.get("notification_ids") or [])
+            if notifs == 0:
+                notifs = int(r.get("notifications") or 0)
+
+            # District aggregate
+            if c_dist not in district_counts:
+                district_counts[c_dist] = {
+                    "district": c_dist,
+                    "notifications": 0,
+                    "target": dist_targets.get(c_dist, 50),
+                    "percentage": 0.0
+                }
+            district_counts[c_dist]["notifications"] += notifs
+
+            # Staff aggregate (exclude deactivated staff)
+            norm_key = normalize_staff_key(c_dist, c_fo)
+            if norm_key in inactive_keys or any(k in norm_key for k in ["purushotam", "purushottam"]):
+                continue
+
+            staff_key = f"{c_dist}_{c_fo}"
+            if staff_key not in staff_counts:
+                staff_counts[staff_key] = {
+                    "fo_name": c_fo,
+                    "district": c_dist,
+                    "notifications": 0,
+                    "target": 50,
+                    "percentage": 0.0
+                }
+            staff_counts[staff_key]["notifications"] += notifs
+
+        # Compute percentages for districts
+        for d in district_counts.values():
+            t_val = d["target"]
+            if period == "weekly":
+                eff_target = max(1.0, float(round(t_val * 7 / 24)))
+            elif period == "fortnightly":
+                eff_target = max(1.0, float(round(t_val * 15 / 24)))
+            else:
+                eff_target = max(1.0, float(t_val))
+            d["percentage"] = round((d["notifications"] / eff_target) * 100, 1)
+
+        # Compute percentages for staff
+        for s in staff_counts.values():
+            s_target = 50.0
+            if period == "weekly":
+                eff_target = max(1.0, float(round(s_target * 7 / 24)))
+            elif period == "fortnightly":
+                eff_target = max(1.0, float(round(s_target * 15 / 24)))
+            else:
+                eff_target = max(1.0, float(s_target))
+            s["percentage"] = round((s["notifications"] / eff_target) * 100, 1)
+
+        # Sort districts
+        sorted_districts = list(district_counts.values())
+        if period == "monthly":
+            sorted_districts.sort(key=lambda x: (x["percentage"], x["notifications"]), reverse=True)
+        else:
+            sorted_districts.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
+
+        # Assign rank and take top 5
+        top_districts = []
+        for i, d in enumerate(sorted_districts[:5]):
+            top_districts.append({
+                "rank": i + 1,
+                "district": d["district"],
+                "notifications": d["notifications"],
+                "target": int(d["target"]),
+                "percentage": d["percentage"]
+            })
+
+        # Sort staff
+        sorted_staff = list(staff_counts.values())
+        sorted_staff.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
+        
+        top_staff = []
+        for i, s in enumerate(sorted_staff[:5]):
+            top_staff.append({
+                "rank": i + 1,
+                "fo_name": s["fo_name"],
+                "district": s["district"],
+                "notifications": s["notifications"],
+                "percentage": s["percentage"]
+            })
+
+        result = {
+            "success": True,
+            "month": month,
+            "period": period,
+            "start_date": start_date or f"{month}-01",
+            "end_date": today_str,
+            "top_districts": top_districts,
+            "top_staff": top_staff
+        }
+        cache.set(cache_key, result, ttl=180) # 3-minute cache
+        return result
+    except Exception as e:
+        print(f"Error in get_statewide_top_performers: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "top_districts": [],
+            "top_staff": []
+        }
 
 @app.get("/get-directory")
 async def get_directory():

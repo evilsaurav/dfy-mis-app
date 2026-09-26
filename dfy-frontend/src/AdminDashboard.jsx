@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 
 const feedCategoriesConfig = [
@@ -130,6 +130,15 @@ export default function AdminDashboard() {
   const [selectedFO, setSelectedFO] = useState('All');
   const [sortConfig, setSortConfig] = useState({ key: 'notifications', direction: 'desc' });
   const [masterTableCohortFilter, setMasterTableCohortFilter] = useState('all'); // 'all' | 'current_cohort' | 'backlog'
+  
+  // Bihar Top Performers Studio States
+  const [topPerformersPeriod, setTopPerformersPeriod] = useState('weekly'); // 'weekly' | 'fortnightly' | 'monthly'
+  const [topPerformersTab, setTopPerformersTab] = useState('districts'); // 'districts' | 'staff'
+  const [topPerformersData, setTopPerformersData] = useState(null);
+  const [loadingTopPerformers, setLoadingTopPerformers] = useState(false);
+  const [showTopPerformersModal, setShowTopPerformersModal] = useState(false);
+  const topPerformersCanvasRef = useRef(null);
+
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [targetModalMonth, setTargetModalMonth] = useState(new Date().toISOString().slice(0, 7));
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
@@ -223,10 +232,10 @@ export default function AdminDashboard() {
 
   // Toast Notification System
   const [toast, setToast] = useState(null);
-  const showToast = (message, type = 'success') => {
+  const showToast = useCallback((message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
   // Automated Daily Cloud Backup (Option A) State
   const [showBackupModal, setShowBackupModal] = useState(false);
@@ -2802,6 +2811,237 @@ export default function AdminDashboard() {
     }
   };
 
+  const fetchTopPerformers = useCallback(async (period = topPerformersPeriod) => {
+    try {
+      setLoadingTopPerformers(true);
+      const token = localStorage.getItem('dfy_token');
+      const res = await fetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.success) {
+          setTopPerformersData(json);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch statewide top performers:', err);
+    } finally {
+      setLoadingTopPerformers(false);
+    }
+  }, [month, topPerformersPeriod]);
+
+  const generateTopPerformersPosterCanvas = useCallback(() => {
+    const canvas = topPerformersCanvasRef.current;
+    if (!canvas || !topPerformersData) return;
+    const ctx = canvas.getContext('2d');
+    const width = 1200;
+    const height = 1350;
+    canvas.width = width;
+    canvas.height = height;
+
+    // Background Gradient (Deep Navy/Indigo to Teal)
+    const bgGradient = ctx.createLinearGradient(0, 0, width, height);
+    bgGradient.addColorStop(0, '#0f172a');
+    bgGradient.addColorStop(0.5, '#1e1b4b');
+    bgGradient.addColorStop(1, '#042f2e');
+    ctx.fillStyle = bgGradient;
+    ctx.fillRect(0, 0, width, height);
+
+    // Glow accents
+    ctx.save();
+    ctx.filter = 'blur(60px)';
+    ctx.fillStyle = 'rgba(99, 102, 241, 0.2)';
+    ctx.beginPath();
+    ctx.arc(200, 200, 180, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(20, 184, 166, 0.2)';
+    ctx.beginPath();
+    ctx.arc(1000, 400, 200, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Top Header Banner
+    ctx.fillStyle = '#14b8a6';
+    ctx.font = 'bold 22px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('DOCTORS FOR YOU • BIHAR TB ELIMINATION MISSION', width / 2, 70);
+
+    // Main Title
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 46px system-ui, -apple-system, sans-serif';
+    ctx.fillText('🏆 STATEWIDE TOP PERFORMERS', width / 2, 130);
+
+    // Period Pill
+    const periodLabel = topPerformersPeriod === 'weekly' 
+      ? '📅 WEEKLY SPRINT (LAST 7 DAYS)' 
+      : topPerformersPeriod === 'fortnightly' 
+      ? '📅 15-DAY PERFORMANCE DRIVE' 
+      : `📅 MONTHLY LEADERBOARD (${month})`;
+    
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
+    const pillWidth = 420;
+    ctx.beginPath();
+    ctx.roundRect((width - pillWidth) / 2, 155, pillWidth, 40, 20);
+    ctx.fill();
+    ctx.fillStyle = '#fde047';
+    ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+    ctx.fillText(periodLabel, width / 2, 181);
+
+    // Two Columns Bento Panels
+    const colWidth = 520;
+    const colHeight = 960;
+    const leftX = 60;
+    const rightX = 620;
+    const topY = 230;
+
+    const drawPanel = (x, y, w, h, title, subtitle, icon, headerColor) => {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 24);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = headerColor;
+      ctx.font = '900 24px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${icon} ${title}`, x + 25, y + 45);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText(subtitle, x + 25, y + 70);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(x + 20, y + 88);
+      ctx.lineTo(x + w - 20, y + 88);
+      ctx.stroke();
+    };
+
+    drawPanel(leftX, topY, colWidth, colHeight, 'TOP 5 DISTRICTS', 'Statewide Target Achievement & Volume', '🏛️', '#38bdf8');
+    drawPanel(rightX, topY, colWidth, colHeight, 'TOP 5 FIELD OFFICERS', 'Frontline Clinical Notifications', '👤', '#a78bfa');
+
+    const medals = ['🥇', '🥈', '🥉', '4', '5'];
+    const rankColors = ['#f59e0b', '#94a3b8', '#d97706', '#64748b', '#64748b'];
+
+    // Draw Top 5 Districts
+    const districts = topPerformersData.top_districts || [];
+    districts.forEach((d, idx) => {
+      const itemY = topY + 105 + (idx * 165);
+      ctx.fillStyle = idx === 0 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(255, 255, 255, 0.04)';
+      ctx.strokeStyle = idx === 0 ? 'rgba(245, 158, 11, 0.45)' : 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.roundRect(leftX + 20, itemY, colWidth - 40, 145, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = idx < 3 ? '32px system-ui' : 'bold 24px system-ui';
+      ctx.fillStyle = rankColors[idx];
+      ctx.textAlign = 'center';
+      ctx.fillText(medals[idx], leftX + 55, itemY + (idx < 3 ? 50 : 45));
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
+      ctx.fillText(d.district, leftX + 95, itemY + 45);
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '900 28px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`${d.notifications}`, leftX + 95, itemY + 85);
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(' Notifications', leftX + 95 + ctx.measureText(`${d.notifications}`).width + 8, itemY + 83);
+
+      const pctText = `${d.percentage}% Target`;
+      ctx.fillStyle = d.percentage >= 100 ? '#10b981' : '#f59e0b';
+      ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
+      ctx.fillText(pctText, leftX + 95, itemY + 118);
+    });
+
+    // Draw Top 5 Staff
+    const staff = topPerformersData.top_staff || [];
+    staff.forEach((s, idx) => {
+      const itemY = topY + 105 + (idx * 165);
+      ctx.fillStyle = idx === 0 ? 'rgba(167, 139, 250, 0.15)' : 'rgba(255, 255, 255, 0.04)';
+      ctx.strokeStyle = idx === 0 ? 'rgba(167, 139, 250, 0.45)' : 'rgba(255, 255, 255, 0.08)';
+      ctx.beginPath();
+      ctx.roundRect(rightX + 20, itemY, colWidth - 40, 145, 16);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = idx < 3 ? '32px system-ui' : 'bold 24px system-ui';
+      ctx.fillStyle = rankColors[idx];
+      ctx.textAlign = 'center';
+      ctx.fillText(medals[idx], rightX + 55, itemY + (idx < 3 ? 50 : 45));
+
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 23px system-ui, -apple-system, sans-serif';
+      ctx.fillText(s.fo_name, rightX + 95, itemY + 45);
+
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`📍 ${s.district}`, rightX + 95, itemY + 75);
+
+      ctx.fillStyle = '#34d399';
+      ctx.font = '900 26px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`${s.notifications}`, rightX + 95, itemY + 115);
+      ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(' Notifs Achieved', rightX + 95 + ctx.measureText(`${s.notifications}`).width + 8, itemY + 113);
+    });
+
+    // Footer
+    const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1300);
+  }, [topPerformersData, topPerformersPeriod, month]);
+
+  const handleDownloadTopPerformersPoster = useCallback(() => {
+    try {
+      generateTopPerformersPosterCanvas();
+      const canvas = topPerformersCanvasRef.current;
+      if (!canvas) return;
+      const dataUrl = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `DFY_Top_Performers_${topPerformersPeriod}_${month}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('✓ Poster downloaded successfully!', 'success');
+    } catch (err) {
+      console.error('Download poster failed', err);
+      showToast('Failed to download poster', 'error');
+    }
+  }, [generateTopPerformersPosterCanvas, topPerformersPeriod, month, showToast]);
+
+  const handleShareTopPerformersWhatsApp = useCallback(() => {
+    const periodName = topPerformersPeriod === 'weekly' ? 'Weekly Sprint (Last 7 Days)' : topPerformersPeriod === 'fortnightly' ? '15-Day Drive' : `Monthly (${month})`;
+    let text = `*🏆 DOCTORS FOR YOU — BIHAR TB MISSION*\n`;
+    text += `*🌟 TOP PERFORMERS LEADERBOARD (${periodName})*\n\n`;
+
+    text += `*🏛️ TOP 5 DISTRICTS:*\n`;
+    (topPerformersData?.top_districts || []).slice(0, 5).forEach((d, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+      text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% Target)\n`;
+    });
+
+    text += `\n*👤 TOP 5 FIELD OFFICERS:*\n`;
+    (topPerformersData?.top_staff || []).slice(0, 5).forEach((s, i) => {
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+      text += `${medal} *${s.fo_name}* (${s.district}): ${s.notifications} Notifs\n`;
+    });
+
+    text += `\n_Congratulations to all top performers for leading Bihar's TB elimination drive! 🏥_`;
+
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
+  }, [topPerformersData, topPerformersPeriod, month]);
+
   useEffect(() => {
     if (isAuthenticated) { 
       fetchData(false); 
@@ -2811,8 +3051,9 @@ export default function AdminDashboard() {
       fetchStaffList(); 
       fetchActiveBroadcasts();
       fetchPacingSettings(month, selectedDistrict);
+      fetchTopPerformers(topPerformersPeriod);
     }
-  }, [month, selectedDistrict, isAuthenticated]);
+  }, [month, selectedDistrict, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
 
   // Lazy Tab Loading: Fetch Duplicate Audit & Duplicate Scan when modal is opened
   useEffect(() => {
@@ -3736,19 +3977,6 @@ const availableDistrictsForFeed = useMemo(() => {
     });
     return result.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
   }, [rawRecords, targetsData, staffDirectory, currentUser]);
-
-  // Radar Chart Data (Work Balance)
-  const radarData = useMemo(() => {
-    return [
-      { subject: 'Notifications', A: totals.notifications, fullMark: 150 },
-      { subject: 'Testing', A: totals.tests, fullMark: 150 },
-      { subject: 'Home Visits', A: totals.home_visits, fullMark: 150 },
-      { subject: 'Doc Visits', A: totals.doctor_visits, fullMark: 150 },
-      { subject: 'Logistics', A: totals.fdc_provided + totals.kit_consumption, fullMark: 150 },
-      { subject: 'Presumptive', A: totals.presumptive, fullMark: 150 },
-        { subject: 'Special Tracking', A: totals.differentiated_tb + totals.tpt_treatment_start + totals.tpt_presumptive + totals.adhar_face_auth + totals.consent_with_id, fullMark: 150 }
-    ];
-  }, [totals]);
 
   // Set of all patient IDs notified in the current month across active records
   const currentMonthNotifIdSet = useMemo(() => {
@@ -5577,7 +5805,7 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
-            {/* Visual Analytics Row: Option A (Daily Progression Trend) & Work Balance Radar */}
+            {/* Visual Analytics Row: Daily Progression Trend & Bihar Top Performers Studio */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Option A: Day-by-Day Daily Progression Trend */}
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 lg:col-span-2 flex flex-col justify-between">
@@ -5682,22 +5910,195 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* Radar Chart */}
-              <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+              {/* Bihar Top Performers Studio */}
+              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 rounded-2xl shadow-md border border-indigo-900/60 flex flex-col justify-between relative overflow-hidden">
+                {/* Decorative background glow */}
+                <div className="absolute -top-12 -right-12 w-36 h-36 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none" />
+                <div className="absolute -bottom-12 -left-12 w-36 h-36 bg-teal-500/15 rounded-full blur-2xl pointer-events-none" />
+
                 <div>
-                  <h3 className="text-slate-800 font-black mb-1 text-center">Work Balance Radar</h3>
-                  <p className="text-slate-400 text-[11px] font-semibold text-center mb-2">Multi-domain clinical balance</p>
+                  {/* Studio Header */}
+                  <div className="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">🏆</span>
+                      <div>
+                        <h3 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+                          Bihar Top Performers
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                            Statewide
+                          </span>
+                        </h3>
+                        <p className="text-[10px] font-medium text-slate-400">Top 5 Champions (No RBAC Limit)</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowTopPerformersModal(true)}
+                      className="px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-[11px] shadow-sm flex items-center gap-1 transition-all cursor-pointer active:scale-95 shrink-0"
+                      title="Generate and Share High-Res Poster"
+                    >
+                      <span>📲</span>
+                      <span>Share Poster</span>
+                    </button>
+                  </div>
+
+                  {/* Period Pills Switcher */}
+                  <div className="grid grid-cols-3 gap-1 bg-white/10 p-1 rounded-xl mb-3 text-[11px] font-black text-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('weekly');
+                        fetchTopPerformers('weekly');
+                      }}
+                      className={`py-1 rounded-lg transition-all cursor-pointer ${
+                        topPerformersPeriod === 'weekly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Weekly
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('fortnightly');
+                        fetchTopPerformers('fortnightly');
+                      }}
+                      className={`py-1 rounded-lg transition-all cursor-pointer ${
+                        topPerformersPeriod === 'fortnightly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      15 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('monthly');
+                        fetchTopPerformers('monthly');
+                      }}
+                      className={`py-1 rounded-lg transition-all cursor-pointer ${
+                        topPerformersPeriod === 'monthly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Monthly
+                    </button>
+                  </div>
+
+                  {/* Tab Selector: Districts vs Staff */}
+                  <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-2 text-xs font-bold">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTopPerformersTab('districts')}
+                        className={`pb-1 text-[11px] uppercase tracking-wider font-black transition-colors cursor-pointer ${
+                          topPerformersTab === 'districts'
+                            ? 'text-teal-400 border-b-2 border-teal-400'
+                            : 'text-slate-400 hover:text-slate-300'
+                        }`}
+                      >
+                        🏛️ Top 5 Districts
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTopPerformersTab('staff')}
+                        className={`pb-1 text-[11px] uppercase tracking-wider font-black transition-colors cursor-pointer ${
+                          topPerformersTab === 'staff'
+                            ? 'text-purple-400 border-b-2 border-purple-400'
+                            : 'text-slate-400 hover:text-slate-300'
+                        }`}
+                      >
+                        👤 Top 5 Staff
+                      </button>
+                    </div>
+
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {topPerformersPeriod === 'weekly' ? '7 Days' : topPerformersPeriod === 'fortnightly' ? '15 Days' : 'Full Month'}
+                    </span>
+                  </div>
+
+                  {/* List Content */}
+                  <div className="space-y-1.5 min-h-[220px]">
+                    {loadingTopPerformers ? (
+                      <div className="flex items-center justify-center h-48 text-slate-400 text-xs gap-2">
+                        <span className="animate-spin text-lg">🌀</span> Loading Champions...
+                      </div>
+                    ) : topPerformersTab === 'districts' ? (
+                      /* Top 5 Districts */
+                      (topPerformersData?.top_districts || []).length === 0 ? (
+                        <div className="text-center py-10 text-xs text-slate-400">No district records found</div>
+                      ) : (
+                        (topPerformersData?.top_districts || []).slice(0, 5).map((dist, idx) => (
+                          <div 
+                            key={idx}
+                            className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                              idx === 0 
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-5 text-center text-xs font-black">
+                                {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                              </span>
+                              <span className="font-bold text-xs text-white">{dist.district}</span>
+                            </div>
+                            <div className="flex items-center gap-2.5 text-right font-mono">
+                              <span className="text-teal-300 text-xs font-black">{dist.notifications} notifs</span>
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/10 text-slate-300">
+                                {dist.percentage}%
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    ) : (
+                      /* Top 5 Staff */
+                      (topPerformersData?.top_staff || []).length === 0 ? (
+                        <div className="text-center py-10 text-xs text-slate-400">No staff records found</div>
+                      ) : (
+                        (topPerformersData?.top_staff || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`flex items-center justify-between p-2 rounded-xl border transition-all ${
+                              idx === 0 
+                                ? 'bg-purple-500/15 border-purple-500/30 text-purple-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="w-5 text-center text-xs font-black shrink-0">
+                                {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                              </span>
+                              <div className="truncate">
+                                <div className="font-bold text-xs text-white truncate">{staff.fo_name}</div>
+                                <div className="text-[9px] text-slate-400">{staff.district}</div>
+                              </div>
+                            </div>
+                            <div className="text-right font-mono shrink-0">
+                              <span className="text-purple-300 text-xs font-black">{staff.notifications} notifs</span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    )}
+                  </div>
                 </div>
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={radarData}>
-                      <PolarGrid stroke="#e2e8f0" />
-                      <PolarAngleAxis dataKey="subject" tick={{fill: '#64748b', fontSize: 10, fontWeight: 700}} />
-                      <PolarRadiusAxis angle={30} domain={[0, 'auto']} tick={false} />
-                      <Radar name="Metrics" dataKey="A" stroke="#6366f1" fill="#6366f1" fillOpacity={0.4} />
-                      <Tooltip contentStyle={{borderRadius: '8px', border: 'none', boxShadow: '0 4px 15px rgba(0,0,0,0.1)'}} />
-                    </RadarChart>
-                  </ResponsiveContainer>
+
+                {/* Bottom Quick Share Trigger */}
+                <div className="pt-2 mt-2 border-t border-white/10 flex items-center justify-between text-[10px] text-slate-400">
+                  <span>State TB Mission Bihar</span>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTopPerformersModal(true)}
+                    className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                  >
+                    Share Poster / Download Card →
+                  </button>
                 </div>
               </div>
             </div>
@@ -15790,6 +16191,264 @@ const availableDistrictsForFeed = useMemo(() => {
                 <p className="text-[11px] text-slate-500 leading-relaxed">
                   <strong className="text-slate-700">Enterprise Disaster Protection:</strong> Daily backups are stored in a separate, isolated Google Cloud Storage container with strict access controls. No field report or patient record can be permanently lost.
                 </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🏆 Bihar Statewide Top Performers Poster Studio Modal */}
+      {showTopPerformersModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-slate-950 text-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-indigo-900/60 animate-fade-in my-auto">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-6 border-b border-white/10 flex justify-between items-center bg-slate-900/80">
+              <div className="flex items-center gap-3">
+                <span className="text-3xl">🏆</span>
+                <div>
+                  <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                    Bihar Top Performers Studio
+                    <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
+                      Statewide Broadcast
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium">
+                    Gamified leaderboards across all 38 districts &amp; frontline field officers for WhatsApp sharing
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setShowTopPerformersModal(false)}
+                className="text-slate-400 hover:text-white text-2xl font-bold p-1 leading-none transition-colors cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 custom-scrollbar">
+              {/* Controls bar: Timeframe Switcher */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-white/5 p-3 rounded-2xl border border-white/10">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-300">Timeframe:</span>
+                  <div className="flex bg-black/40 p-1 rounded-xl border border-white/10 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('weekly');
+                        fetchTopPerformers('weekly');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        topPerformersPeriod === 'weekly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Weekly (7 Days)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('fortnightly');
+                        fetchTopPerformers('fortnightly');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        topPerformersPeriod === 'fortnightly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      15 Days
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTopPerformersPeriod('monthly');
+                        fetchTopPerformers('monthly');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                        topPerformersPeriod === 'monthly'
+                          ? 'bg-indigo-600 text-white shadow-xs font-black'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Monthly ({month})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>📅 Range: <strong className="text-white font-mono">{topPerformersData?.start_date || `${month}-01`}</strong> to <strong className="text-white font-mono">{topPerformersData?.end_date || 'Today'}</strong></span>
+                </div>
+              </div>
+
+              {/* High-Resolution Live Poster Card Preview */}
+              <div className="relative rounded-3xl p-6 border border-indigo-500/30 bg-gradient-to-br from-slate-900 via-indigo-950 to-teal-950 text-white shadow-2xl overflow-hidden">
+                {/* Glow spheres */}
+                <div className="absolute top-0 right-10 w-72 h-72 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute bottom-0 left-10 w-72 h-72 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+
+                {/* Poster Header */}
+                <div className="text-center relative z-10 space-y-1 mb-6">
+                  <div className="text-xs uppercase tracking-widest font-black text-teal-400">
+                    DOCTORS FOR YOU • BIHAR TB ELIMINATION MISSION
+                  </div>
+                  <h3 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                    🏆 STATEWIDE TOP PERFORMERS
+                  </h3>
+                  <div className="inline-block mt-2 px-4 py-1 rounded-full bg-white/10 border border-yellow-400/30 text-yellow-300 font-bold text-xs">
+                    {topPerformersPeriod === 'weekly' 
+                      ? 'WEEKLY SPRINT (LAST 7 DAYS)' 
+                      : topPerformersPeriod === 'fortnightly' 
+                      ? '15-DAY PERFORMANCE DRIVE' 
+                      : `MONTHLY LEADERBOARD (${month})`}
+                  </div>
+                </div>
+
+                {/* Poster Columns: Districts & Staff */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+                  {/* Left Column: Top 5 Districts */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🏛️</span>
+                        <div>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-sky-400">Top 5 Districts</h4>
+                          <p className="text-[10px] text-slate-400">Statewide Target Achievement</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">Target %</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingTopPerformers ? (
+                        <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
+                      ) : (topPerformersData?.top_districts || []).length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">No records available</div>
+                      ) : (
+                        (topPerformersData?.top_districts || []).slice(0, 5).map((d, i) => (
+                          <div 
+                            key={i} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                              i === 0 
+                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-100' 
+                                : i === 1 
+                                ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
+                                : i === 2 
+                                ? 'bg-amber-700/15 border-amber-700/30 text-amber-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-6 text-center text-base font-black">
+                                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                              </span>
+                              <div>
+                                <span className="font-bold text-sm text-white block">{d.district}</span>
+                                <span className="text-[10px] text-sky-300 font-mono font-semibold">{d.notifications} notifications</span>
+                              </div>
+                            </div>
+                            <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${d.percentage >= 100 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
+                              {d.percentage}%
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Top 5 Field Officers */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">👤</span>
+                        <div>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-purple-400">Top 5 Field Officers</h4>
+                          <p className="text-[10px] text-slate-400">Frontline Notifications Champion</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">Volume</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingTopPerformers ? (
+                        <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
+                      ) : (topPerformersData?.top_staff || []).length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">No records available</div>
+                      ) : (
+                        (topPerformersData?.top_staff || []).slice(0, 5).map((s, i) => (
+                          <div 
+                            key={i} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                              i === 0 
+                                ? 'bg-purple-500/20 border-purple-500/40 text-purple-100' 
+                                : i === 1 
+                                ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
+                                : i === 2 
+                                ? 'bg-amber-700/15 border-amber-700/30 text-amber-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 text-center text-base font-black shrink-0">
+                                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                              </span>
+                              <div className="truncate">
+                                <span className="font-bold text-sm text-white block truncate">{s.fo_name}</span>
+                                <span className="text-[10px] text-purple-300 font-medium">📍 {s.district}</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-mono shrink-0">
+                              {s.notifications} notifs
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Poster Preview Footer */}
+                <div className="mt-4 pt-3 border-t border-white/10 text-center text-[10px] text-slate-400 relative z-10">
+                  State TB Mission Bihar • Doctors For You MIS
+                </div>
+              </div>
+
+              {/* Hidden 1200x1350 Canvas for HD PNG Export */}
+              <canvas ref={topPerformersCanvasRef} className="hidden" />
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="p-4 sm:p-5 border-t border-white/10 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
+              <span className="text-[11px] text-slate-400">
+                HD 1200x1350 PNG card generated on-the-fly via client HTML5 canvas. Zero server memory load.
+              </span>
+
+              <div className="flex items-center gap-2.5 ml-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowTopPerformersModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShareTopPerformersWhatsApp}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-600/30 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <span>📲</span>
+                  <span>Share on WhatsApp</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadTopPerformersPoster}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black bg-gradient-to-r from-indigo-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 text-white shadow-lg shadow-indigo-600/30 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <span>⬇️</span>
+                  <span>Download Poster (PNG)</span>
+                </button>
               </div>
             </div>
           </div>
