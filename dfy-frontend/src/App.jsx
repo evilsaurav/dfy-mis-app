@@ -501,6 +501,49 @@ const MyProfileDashboard = ({
   const [isGeneratingFoCard, setIsGeneratingFoCard] = useState(false);
   const foCanvasRef = useRef(null);
 
+  // Field Officer Read-Only Travel & TA Log State (v2.8.5)
+  const [foTaMonth, setFoTaMonth] = useState(() => {
+    const today = new Date();
+    return today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
+  });
+  const [foTaData, setFoTaData] = useState(null);
+  const [foTaLoading, setFoTaLoading] = useState(false);
+  const [showFoTaDetails, setShowFoTaDetails] = useState(false);
+
+  useEffect(() => {
+    if (!formData?.working_place || !formData?.fo_name || !formData?.pin) return;
+    let isCancelled = false;
+    const fetchFoTa = async () => {
+      setFoTaLoading(true);
+      try {
+        const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+        const params = new URLSearchParams({
+          month: foTaMonth,
+          district: formData.working_place,
+          fo_name: formData.fo_name,
+          pin: formData.pin
+        });
+        const res = await fetch(`${API_BASE_URL}/api/ta-logs?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (!isCancelled && data.success && data.logs && data.logs.length > 0) {
+            setFoTaData(data.logs[0]);
+          } else if (!isCancelled) {
+            setFoTaData(null);
+          }
+        } else if (!isCancelled) {
+          setFoTaData(null);
+        }
+      } catch (err) {
+        if (!isCancelled) setFoTaData(null);
+      } finally {
+        if (!isCancelled) setFoTaLoading(false);
+      }
+    };
+    fetchFoTa();
+    return () => { isCancelled = true; };
+  }, [formData?.working_place, formData?.fo_name, formData?.pin, foTaMonth]);
+
   useEffect(() => {
     if (stats) {
       setLoading(false);
@@ -2188,6 +2231,175 @@ const MyProfileDashboard = ({
               </div>
             );
           })
+        )}
+      </div>
+
+      {/* Travel Allowance & Bike Log Ledger (Read-Only) */}
+      <div className="mt-6 bg-white rounded-3xl p-5 shadow-xl shadow-teal-900/5 border border-slate-100 text-left">
+        {/* Header Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3.5 border-b border-slate-100 gap-2 mb-4">
+          <div className="flex items-center gap-2.5">
+            <div className="w-10 h-10 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center text-xl shadow-inner shrink-0">
+              🛵
+            </div>
+            <div>
+              <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-1.5">
+                <span>My Travel &amp; TA Log</span>
+                <span className="text-[10px] font-bold bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full">
+                  ₹4.00/KM
+                </span>
+              </h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                Official Motorcycle Reimbursement Ledger
+              </p>
+            </div>
+          </div>
+
+          {/* Month Selector for Historic Inspection */}
+          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/80 rounded-xl px-2 py-1 self-start sm:self-auto">
+            <span className="text-[10px] font-bold text-slate-400 uppercase">Month:</span>
+            <input
+              type="month"
+              value={foTaMonth}
+              onChange={(e) => setFoTaMonth(e.target.value)}
+              className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+            />
+          </div>
+        </div>
+
+        {foTaLoading ? (
+          <div className="py-8 text-center text-slate-400 font-bold text-xs animate-pulse">
+            ⏳ Loading verified travel allowance records...
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Status Indicator */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-bold text-slate-400">Approval Status:</span>
+              {foTaData ? (
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <span>✓</span> Verified by District Coordinator
+                </span>
+              ) : (
+                <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-amber-200/80">
+                  Pending Verification / Draft
+                </span>
+              )}
+            </div>
+
+            {/* 4 Bento Metric Cards */}
+            <div className="grid grid-cols-2 gap-2.5">
+              {/* Card 1: Verified KM */}
+              <div className="bg-slate-50/90 rounded-2xl p-3 border border-slate-100">
+                <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                  Total Travel
+                </span>
+                <div className="text-lg font-black text-slate-800 tabular-num">
+                  {foTaData ? (foTaData.total_km || 0) : (stats?.total_km || 0)} <span className="text-xs font-bold text-slate-400">KM</span>
+                </div>
+                <span className="text-[9px] font-bold text-slate-400">
+                  {foTaData?.daily_logs ? Object.keys(foTaData.daily_logs).length : 0} days recorded
+                </span>
+              </div>
+
+              {/* Card 2: Gross TA */}
+              <div className="bg-blue-50/60 rounded-2xl p-3 border border-blue-100/80">
+                <span className="text-[9px] font-black uppercase tracking-wider text-blue-500 block mb-1">
+                  Gross TA Claim
+                </span>
+                <div className="text-lg font-black text-blue-900 tabular-num">
+                  ₹ {foTaData ? Number(foTaData.gross_amount || 0).toFixed(2) : (Number((stats?.total_km || 0) * 4.0)).toFixed(2)}
+                </div>
+                <span className="text-[9px] font-bold text-blue-400">
+                  Computed @ ₹4.00/KM
+                </span>
+              </div>
+
+              {/* Card 3: Deductions */}
+              <div className="bg-rose-50/50 rounded-2xl p-3 border border-rose-100">
+                <span className="text-[9px] font-black uppercase tracking-wider text-rose-500 block mb-1">
+                  Deductions
+                </span>
+                <div className="text-lg font-black text-rose-700 tabular-num">
+                  {foTaData && Number(foTaData.deduction_amount) > 0 ? (
+                    `- ₹ ${Number(foTaData.deduction_amount).toFixed(2)}`
+                  ) : (
+                    '₹ 0.00'
+                  )}
+                </div>
+                <p className="text-[9px] font-semibold text-rose-600 truncate" title={foTaData?.deduction_reason || ''}>
+                  {foTaData?.deduction_reason ? foTaData.deduction_reason : 'Zero deductions'}
+                </p>
+              </div>
+
+              {/* Card 4: Net Approved Payout */}
+              <div className="bg-emerald-50/80 rounded-2xl p-3 border border-emerald-200">
+                <span className="text-[9px] font-black uppercase tracking-wider text-emerald-700 block mb-1">
+                  Net Approved Payout
+                </span>
+                <div className="text-lg font-black text-emerald-950 tabular-num">
+                  {foTaData ? (
+                    `₹ ${Number(foTaData.final_payable_amount || 0).toFixed(2)}`
+                  ) : (
+                    'Pending DC Entry'
+                  )}
+                </div>
+                <span className="text-[9px] font-bold text-emerald-600">
+                  Approved for Payroll
+                </span>
+              </div>
+            </div>
+
+            {/* Admin Final Remarks */}
+            {foTaData?.admin_final_remarks && (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900 font-medium">
+                💬 <strong>Admin / DC Remark:</strong> {foTaData.admin_final_remarks}
+              </div>
+            )}
+
+            {/* Expandable Day-by-Day Inspection */}
+            {foTaData?.daily_logs && Object.keys(foTaData.daily_logs).length > 0 && (
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowFoTaDetails(!showFoTaDetails)}
+                  className="w-full text-center py-2 text-xs font-black text-teal-800 hover:text-teal-900 bg-teal-50 hover:bg-teal-100 rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <span>{showFoTaDetails ? '▲ Hide Daily Meter Details' : '▼ Inspect Day-by-Day Meter Readings'}</span>
+                </button>
+
+                {showFoTaDetails && (
+                  <div className="mt-3 space-y-2 max-h-72 overflow-y-auto pr-1 animate-fade-in">
+                    {Object.entries(foTaData.daily_logs)
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([dateKey, dayData]) => (
+                        <div key={dateKey} className="bg-slate-50/90 border border-slate-200/70 p-2.5 rounded-xl text-xs flex flex-col gap-1">
+                          <div className="flex items-center justify-between font-bold text-slate-800">
+                            <span>📅 {dateKey}</span>
+                            <span className="text-teal-800 font-black tabular-num">{dayData.total_km || 0} KM (₹{Number(dayData.amount || 0).toFixed(2)})</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5">
+                            <span>Initial: <strong className="text-slate-700">{dayData.initial_reading || '—'}</strong></span>
+                            <span>Final: <strong className="text-slate-700">{dayData.final_reading || '—'}</strong></span>
+                            {dayData.is_override && <span className="text-amber-700 font-bold">(Broken Meter Override)</span>}
+                          </div>
+                          {(dayData.from_location || dayData.to_location) && (
+                            <div className="text-[11px] text-slate-600">
+                              📍 <span>Route: {dayData.from_location || formData.working_place} ➔ {dayData.to_location || 'Field Centers'}</span>
+                            </div>
+                          )}
+                          {(dayData.purpose || dayData.remarks) && (
+                            <div className="text-[11px] text-slate-500 italic">
+                              📝 {dayData.purpose} {dayData.remarks ? `(${dayData.remarks})` : ''}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </div>
         </>
