@@ -167,6 +167,7 @@ export default function AdminDashboard() {
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [showReportsStudio, setShowReportsStudio] = useState(false);
   const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks"); // kpi_workbooks, state_matrix, staff_attendance, cascade_funnel, whatsapp_bulletin
+  const [isTaFullscreen, setIsTaFullscreen] = useState(true);
   const [duplicateRadarTab, setDuplicateRadarTab] = useState("collisions"); // collisions, journeys
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [reportsDistrict, setReportsDistrict] = useState("");
@@ -5055,6 +5056,17 @@ const availableDistrictsForFeed = useMemo(() => {
     }
   }, [taDistrictStaff, taSelectedStaffKey]);
 
+  // Escape key listener to close reports studio or modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && showReportsStudio) {
+        setShowReportsStudio(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showReportsStudio]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
@@ -6232,8 +6244,9 @@ const availableDistrictsForFeed = useMemo(() => {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowReportsStudio(true);
+                    setIsTaFullscreen(true);
                     setReportsStudioTab('ta_payout');
+                    setShowReportsStudio(true);
                   }}
                   className="px-3 py-1.5 rounded-xl text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
                 >
@@ -10062,44 +10075,147 @@ const availableDistrictsForFeed = useMemo(() => {
 
       {/* 📊 Unified Reports & Export Studio Modal */}
       {showReportsStudio && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className={`bg-white rounded-3xl p-5 sm:p-7 w-full ${reportsStudioTab === 'ta_payout' ? 'max-w-6xl xl:max-w-7xl' : 'max-w-4xl'} shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in`}>
+        <div className={reportsStudioTab === 'ta_payout' && isTaFullscreen
+          ? "fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex flex-col w-screen h-screen overflow-hidden animate-fade-in"
+          : "fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in"
+        }>
+          <div className={reportsStudioTab === 'ta_payout' && isTaFullscreen
+            ? "bg-slate-50 w-full h-full flex flex-col overflow-hidden shadow-2xl"
+            : `bg-white rounded-3xl p-5 sm:p-7 w-full ${reportsStudioTab === 'ta_payout' ? 'max-w-6xl xl:max-w-7xl' : 'max-w-4xl'} shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-fade-in`
+          }>
             
-            {/* Modal Header */}
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
-              <div>
-                <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
-                  <span>📊</span> DFY Executive Reports &amp; Export Studio
-                </h3>
-                <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {month} &bull; Bihar TB Mission ({Object.keys(staffDirectory).length || 22} Districts)</p>
-              </div>
-              <button onClick={() => setShowReportsStudio(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none">&times;</button>
-            </div>
+            {/* Header: Dedicated Full-Screen Workspace Header vs Standard Modal Header */}
+            {reportsStudioTab === 'ta_payout' && isTaFullscreen ? (
+              <div className="bg-white border-b border-slate-200 px-4 sm:px-8 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0 shadow-2xs z-30">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center font-black text-xl shadow-inner shrink-0">
+                    🛵
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
+                        <span>DFY Travel Allowance &amp; Bike Log Studio</span>
+                      </h3>
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-teal-100 text-teal-800 px-2.5 py-0.5 rounded-full border border-teal-200 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-teal-600 animate-pulse"></span>
+                        Full Screen Workspace
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                      Month: {taMonth} &bull; District: {taDistrict} &bull; Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')} &bull; Standard Rate @ ₹4.00 / KM
+                    </p>
+                  </div>
+                </div>
 
-            {/* Studio Navigation Tabs */}
-            <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
-              {[
-                { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
-                { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
-                { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
-                { id: "staff_attendance", label: "📋 Staff Attendance (.xlsx)", icon: "📋" },
-                { id: "ta_payout", label: "🛵 Travel Allowance (.xlsx)", icon: "🛵" },
-                { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
-                { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
-              ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setReportsStudioTab(tab.id)}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 ${reportsStudioTab === tab.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                >
-                  <span>{tab.icon}</span>
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
+                {/* Switcher & Action controls */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Quick Tab Switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80">
+                    {[
+                      { id: "kpi_workbooks", label: "📁 KPI", title: "District KPI Workbooks" },
+                      { id: "medicine_consumption", label: "💊 Meds", title: "Medicine Consumption" },
+                      { id: "state_matrix", label: "🏢 State", title: "State Summary (.xlsx)" },
+                      { id: "staff_attendance", label: "📋 Attendance", title: "Staff Attendance (.xlsx)" },
+                      { id: "ta_payout", label: "🛵 Travel Allowance", title: "Travel Allowance & Bike Log" },
+                      { id: "cascade_funnel", label: "📈 Funnel", title: "Cascade Funnel" },
+                      { id: "whatsapp_bulletin", label: "📱 Bulletin", title: "WhatsApp Bulletin" }
+                    ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => {
+                          setReportsStudioTab(tab.id);
+                          if (tab.id === 'ta_payout') setIsTaFullscreen(true);
+                        }}
+                        title={tab.title}
+                        className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${reportsStudioTab === tab.id ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'}`}
+                      >
+                        <span>{tab.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Window / Fullscreen Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setIsTaFullscreen(!isTaFullscreen)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/80 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    title={isTaFullscreen ? "Switch to standard modal window" : "Switch to full screen"}
+                  >
+                    <span>{isTaFullscreen ? "🗗" : "⛶"}</span>
+                    <span className="hidden md:inline font-bold">{isTaFullscreen ? "Window View" : "Full Screen"}</span>
+                  </button>
+
+                  {/* Close Button */}
+                  <button
+                    type="button"
+                    onClick={() => setShowReportsStudio(false)}
+                    className="px-4 py-1.5 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-900 text-white transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+                    title="Close Studio (Esc)"
+                  >
+                    <span>✕</span>
+                    <span>Close Studio</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {/* Modal Header */}
+                <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                      <span>📊</span> DFY Executive Reports &amp; Export Studio
+                    </h3>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">Month: {month} &bull; Bihar TB Mission ({Object.keys(staffDirectory).length || 22} Districts)</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {reportsStudioTab === 'ta_payout' && (
+                      <button
+                        type="button"
+                        onClick={() => setIsTaFullscreen(true)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-bold bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                        title="Expand to Full Screen Workspace"
+                      >
+                        <span>⛶</span>
+                        <span>Full Screen</span>
+                      </button>
+                    )}
+                    <button onClick={() => setShowReportsStudio(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none cursor-pointer">&times;</button>
+                  </div>
+                </div>
+
+                {/* Studio Navigation Tabs */}
+                <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
+                  {[
+                    { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
+                    { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
+                    { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
+                    { id: "staff_attendance", label: "📋 Staff Attendance (.xlsx)", icon: "📋" },
+                    { id: "ta_payout", label: "🛵 Travel Allowance (.xlsx)", icon: "🛵" },
+                    { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
+                    { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
+                  ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setReportsStudioTab(tab.id);
+                        if (tab.id === 'ta_payout') setIsTaFullscreen(true);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${reportsStudioTab === tab.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    >
+                      <span>{tab.icon}</span>
+                      <span>{tab.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
 
             {/* Studio Content Area */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar my-4 pr-1">
+            <div className={reportsStudioTab === 'ta_payout' && isTaFullscreen
+              ? "flex-1 overflow-y-auto px-4 sm:px-8 py-6 space-y-6 custom-scrollbar bg-slate-50"
+              : "flex-1 overflow-y-auto custom-scrollbar my-4 pr-1"
+            }>
               
               {/* Tab 1: District KPI Workbooks */}
               {reportsStudioTab === "kpi_workbooks" && (
@@ -11117,38 +11233,49 @@ const availableDistrictsForFeed = useMemo(() => {
 
                   {/* 31-Day Interactive Bike Log Table */}
                   <div ref={taDailyTableRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden scroll-mt-28">
-                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                    <div className="p-4 sm:px-6 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                       <div>
-                        <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                        <h3 className="text-sm sm:text-base font-black text-slate-800 flex items-center gap-2">
                           <span>🗓️</span>
                           <span>Day-by-Day Two-Wheeler Meter Readings &amp; Route Verification — {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'Officer')}</span>
                         </h3>
                         <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                          Month: {taMonth} | Designation: {taDesignation} | District: {taDistrict}
+                          Month: {taMonth} | Designation: {taDesignation} | District: {taDistrict} | 31-Day Field Verification Log
                         </p>
                       </div>
-                      {taLoading && (
-                        <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-lg animate-pulse flex items-center gap-1.5">
-                          <span>⏳</span> Loading verified records...
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {taLoading && (
+                          <span className="text-xs font-bold text-teal-700 bg-teal-50 px-3 py-1 rounded-xl animate-pulse flex items-center gap-1.5 border border-teal-200">
+                            <span>⏳</span> Loading verified records...
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleSaveTaLog}
+                          disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                          className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                        >
+                          <span>{taSaving ? '⏳' : '💾'}</span>
+                          <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead className="sticky top-0 z-20 bg-slate-800 text-white font-bold text-[11px]">
+                    <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[420px] overflow-y-auto custom-scrollbar">
+                      <table className="w-full text-left text-xs border-collapse min-w-[1380px]">
+                        <thead className="sticky top-0 z-20 bg-slate-900 text-white font-bold text-xs shadow-sm">
                           <tr>
-                            <th className="px-3 py-2.5 text-center">Date</th>
-                            <th className="px-2 py-2.5 text-center">Day</th>
-                            <th className="px-3 py-2.5 text-center min-w-[110px]">Initial Reading (KM)</th>
-                            <th className="px-3 py-2.5 text-center min-w-[110px]">Final Reading (KM)</th>
-                            <th className="px-2 py-2.5 text-center" title="Check if speedometer was broken/disconnected">Broken Meter?</th>
-                            <th className="px-3 py-2.5 text-center min-w-[90px]">Total KM</th>
-                            <th className="px-2 py-2.5 text-center">Rate</th>
-                            <th className="px-3 py-2.5 text-center min-w-[100px]">Amount (₹)</th>
-                            <th className="px-3 py-2.5 min-w-[130px]">From Location</th>
-                            <th className="px-3 py-2.5 min-w-[130px]">To Location</th>
-                            <th className="px-3 py-2.5 min-w-[180px]">Purpose of Travel &amp; Remarks</th>
+                            <th className="px-3.5 py-3 text-center min-w-[100px]">Date</th>
+                            <th className="px-2.5 py-3 text-center min-w-[65px]">Day</th>
+                            <th className="px-3.5 py-3 text-center min-w-[140px]">Initial Reading (KM)</th>
+                            <th className="px-3.5 py-3 text-center min-w-[140px]">Final Reading (KM)</th>
+                            <th className="px-2.5 py-3 text-center min-w-[85px]" title="Check if speedometer was broken/disconnected">Broken Meter?</th>
+                            <th className="px-3 py-3 text-center min-w-[95px]">Total KM</th>
+                            <th className="px-2 py-3 text-center min-w-[65px]">Rate</th>
+                            <th className="px-3 py-3 text-center min-w-[110px]">Amount (₹)</th>
+                            <th className="px-3.5 py-3 min-w-[200px]">From Location</th>
+                            <th className="px-3.5 py-3 min-w-[220px]">To Location</th>
+                            <th className="px-3.5 py-3 min-w-[280px]">Purpose of Travel &amp; Remarks</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -11165,12 +11292,12 @@ const availableDistrictsForFeed = useMemo(() => {
                                 }`}
                               >
                                 {/* Date */}
-                                <td className="px-3 py-2 text-center font-bold text-slate-700 tabular-num whitespace-nowrap">
+                                <td className="px-3.5 py-2 text-center font-bold text-slate-700 tabular-num whitespace-nowrap">
                                   {day.dateStr}
                                 </td>
 
                                 {/* Day */}
-                                <td className={`px-2 py-2 text-center font-bold text-[11px] ${
+                                <td className={`px-2.5 py-2 text-center font-bold text-[11px] ${
                                   isSunday ? 'text-indigo-600' : 'text-slate-500'
                                 }`}>
                                   {day.dayName}
@@ -11184,7 +11311,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                     value={entry.initial_reading || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'initial_reading', e.target.value)}
                                     placeholder="e.g. 12000"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
                                   />
                                 </td>
 
@@ -11196,7 +11323,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                     value={entry.final_reading || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'final_reading', e.target.value)}
                                     placeholder="e.g. 12045"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
                                   />
                                 </td>
 
@@ -11220,10 +11347,10 @@ const availableDistrictsForFeed = useMemo(() => {
                                       value={entry.total_km || ''}
                                       onChange={(e) => handleUpdateDailyLog(day.dateStr, 'total_km', e.target.value)}
                                       placeholder="KM"
-                                      className="w-full bg-amber-50 border border-amber-300 rounded-lg px-2 py-1 text-xs text-center font-black text-amber-900 outline-none focus:bg-white focus:ring-1 focus:ring-amber-500"
+                                      className="w-full bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-center font-black text-amber-900 outline-none focus:bg-white focus:ring-1.5 focus:ring-amber-500 shadow-2xs"
                                     />
                                   ) : (
-                                    <span className={`inline-block px-2 py-1 rounded-md text-xs font-black tabular-num ${
+                                    <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-black tabular-num ${
                                       Number(entry.total_km) > 0 ? 'bg-teal-50 text-teal-800' : 'text-slate-400'
                                     }`}>
                                       {entry.total_km || 0}
@@ -11247,8 +11374,8 @@ const availableDistrictsForFeed = useMemo(() => {
                                     type="text"
                                     value={entry.from_location || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'from_location', e.target.value)}
-                                    placeholder={taDistrict}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                                    placeholder={taDistrict + " HQ / Home"}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
                                   />
                                 </td>
 
@@ -11258,8 +11385,8 @@ const availableDistrictsForFeed = useMemo(() => {
                                     type="text"
                                     value={entry.to_location || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'to_location', e.target.value)}
-                                    placeholder="Visited PHC / Clinic..."
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                                    placeholder="Visited PHC / Sub-Center / Clinic..."
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
                                   />
                                 </td>
 
@@ -11269,8 +11396,8 @@ const availableDistrictsForFeed = useMemo(() => {
                                     type="text"
                                     value={entry.purpose || entry.remarks || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'purpose', e.target.value)}
-                                    placeholder="e.g. Sample collection, Doctor visit..."
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                                    placeholder="e.g. Sample collection, Doctor visit, Follow-up..."
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
                                   />
                                 </td>
                               </tr>
@@ -11399,10 +11526,40 @@ const availableDistrictsForFeed = useMemo(() => {
 
             </div>
 
-            {/* Modal Footer */}
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button onClick={() => setShowReportsStudio(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all">Close Studio</button>
-            </div>
+            {/* Modal / Full-Screen Footer */}
+            {reportsStudioTab === 'ta_payout' && isTaFullscreen ? (
+              <div className="bg-white border-t border-slate-200 px-4 sm:px-8 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-xs z-30">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className="font-bold text-slate-700">Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')}</span>
+                  <span>&bull;</span>
+                  <span>Total Distance: <strong className="text-teal-800 font-black">{taCalculatedTotals.totalKm} KM</strong></span>
+                  <span>&bull;</span>
+                  <span>Net Approved Payout: <strong className="text-emerald-800 font-black">₹ {taCalculatedTotals.netPayable.toFixed(2)}</strong></span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSaveTaLog}
+                    disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                    className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                  >
+                    <span>{taSaving ? '⏳' : '💾'}</span>
+                    <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowReportsStudio(false)}
+                    className="px-4 py-2 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-900 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>✕ Close Studio (Esc)</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="pt-3 border-t border-slate-100 flex justify-end">
+                <button onClick={() => setShowReportsStudio(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all cursor-pointer">Close Studio</button>
+              </div>
+            )}
 
           </div>
         </div>

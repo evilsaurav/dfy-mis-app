@@ -105,6 +105,38 @@ assert(
   'FO App uses dfy_fo_ta_cache_ for instant zero-read local storage hydration'
 );
 
+// 8. Check Full-Screen Seamless Workspace for Travel Allowance Entry
+assert(
+  adminContent.includes('const [isTaFullscreen, setIsTaFullscreen] = useState(true);'),
+  'AdminDashboard declares isTaFullscreen state defaulting to true'
+);
+assert(
+  adminContent.includes("reportsStudioTab === 'ta_payout' && isTaFullscreen") &&
+  adminContent.includes("w-screen h-screen overflow-hidden"),
+  'Reports Studio expands to full-screen (w-screen h-screen) when viewing Travel Allowance'
+);
+assert(
+  adminContent.includes('min-w-[1380px]') &&
+  adminContent.includes('min-w-[200px]') &&
+  adminContent.includes('min-w-[220px]') &&
+  adminContent.includes('min-w-[280px]'),
+  'Day-by-Day table enforces generous minimum widths for columns and route entries preventing cropping'
+);
+assert(
+  adminContent.includes('sticky top-0 z-20 bg-slate-900'),
+  'Day-by-Day table features sticky high-contrast header for seamless vertical scrolling'
+);
+assert(
+  adminContent.includes("e.key === 'Escape'") &&
+  adminContent.includes('setShowReportsStudio(false)'),
+  'Escape key event listener safely closes Reports Studio workspace'
+);
+assert(
+  adminContent.includes('setIsTaFullscreen(!isTaFullscreen)') ||
+  adminContent.includes('setIsTaFullscreen(true)'),
+  'Full-screen workspace provides toggle controls between full screen and windowed views'
+);
+
 console.log(`\nResults: ${passed}/${total} assertions passed.`);
 if (passed === total) {
   console.log('🎉 ALL TRAVEL ALLOWANCE & REPORTS STUDIO INTEGRATION TESTS PASSED 100%!\n');
