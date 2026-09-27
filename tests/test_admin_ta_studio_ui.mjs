@@ -9,9 +9,10 @@ assert(fs.existsSync(adminDashboardPath), "AdminDashboard.jsx must exist");
 
 const code = fs.readFileSync(adminDashboardPath, 'utf8');
 
-// 1. Navigation Tab
-assert(code.includes("'travel_allowance'"), "AdminDashboard must define 'travel_allowance' tab");
-assert(code.includes("Travel & Bike TA Studio") || code.includes("Travel &amp; Bike TA Studio"), "AdminDashboard must have Travel & Bike TA Studio navigation tab");
+// 1. Location in Reports Studio (Strictly removed from Main Tabs)
+assert(!code.includes("onClick={() => setActiveMainTab('travel_allowance')}"), "TA Studio must be removed from main navbar tabs");
+assert(code.includes('reportsStudioTab === "ta_payout"'), "TA Studio must reside inside Reports Studio under ta_payout tab");
+assert(code.includes("Travel Allowance (.xlsx)") || code.includes("Travel Allowance"), "Reports Studio must have Travel Allowance tab");
 
 // 2. State & Hooks (Lexical Safety & Rate)
 assert(code.includes("taDistrict"), "taDistrict state must exist");

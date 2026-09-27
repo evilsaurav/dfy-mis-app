@@ -5362,6 +5362,8 @@ function App() {
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
     culture_dst_ids: [],
+    morning_km: "",
+    evening_km: "",
     total_km: "",
     remark: "", visited_names: []
   });
@@ -5761,6 +5763,9 @@ function App() {
                   tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                   adhar_face_authentication_ids: [], consent_with_id_ids: [],
                   culture_dst_ids: [],
+                  morning_km: "",
+                  evening_km: "",
+                  total_km: "",
                   remark: "", visited_names: []
                 }));
               }
@@ -5995,6 +6000,9 @@ function App() {
       tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
       adhar_face_authentication_ids: [], consent_with_id_ids: [],
       culture_dst_ids: [],
+      morning_km: "",
+      evening_km: "",
+      total_km: "",
       remark: "", visited_names: []
     });
     setPinStatus(null);
@@ -6036,6 +6044,9 @@ function App() {
                 tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                 adhar_face_authentication_ids: [], consent_with_id_ids: [],
                 culture_dst_ids: [],
+                morning_km: "",
+                evening_km: "",
+                total_km: "",
                 remark: "", visited_names: []
               }));
               try {
@@ -6467,6 +6478,17 @@ function App() {
       text += `\n*Remarks:*\n` + formData.remark.trim() + '\n';
     }
 
+    if (formData.total_km || formData.morning_km || formData.evening_km) {
+      const tKm = formData.total_km || (Number(formData.evening_km) >= Number(formData.morning_km) ? (Number(formData.evening_km) - Number(formData.morning_km)) : 0);
+      if (Number(tKm) > 0 || formData.morning_km || formData.evening_km) {
+        text += `\n*Field Travel (Bike):* ${tKm} KM`;
+        if (formData.morning_km || formData.evening_km) {
+          text += ` (Start: ${formData.morning_km || '—'} | End: ${formData.evening_km || '—'})`;
+        }
+        text += `\n`;
+      }
+    }
+
     return text.trim();
   };
 
@@ -6490,7 +6512,10 @@ function App() {
       ...formData, 
       working_place: (formData.working_place || '').trim(),
       fo_name: (formData.fo_name || '').trim(),
-      date: formData.date_of_reporting || new Date().toISOString().split('T')[0] 
+      date: formData.date_of_reporting || new Date().toISOString().split('T')[0],
+      morning_km: formData.morning_km ? Number(formData.morning_km) : 0,
+      evening_km: formData.evening_km ? Number(formData.evening_km) : 0,
+      total_km: formData.total_km ? Number(formData.total_km) : 0
     };
 
     // Keep credentials secured in offline vault
@@ -6510,8 +6535,9 @@ function App() {
 
     const hasVisited = Array.isArray(formData.visited_names) && formData.visited_names.length > 0;
     const hasRemark = Boolean(formData.remark && formData.remark.trim());
+    const hasTravel = Boolean(Number(formData.total_km) > 0 || Number(formData.morning_km) > 0 || Number(formData.evening_km) > 0);
 
-    if (totalCount === 0 && !hasVisited && !hasRemark) {
+    if (totalCount === 0 && !hasVisited && !hasRemark && !hasTravel) {
       showToast("⚠️ Khali report submit nahi ho sakti! Kripya kam se kam ek Patient ID, Doctor Visit, ya Remark darj karein.", "error");
       setIsSubmitting(false);
       return;
@@ -6542,6 +6568,8 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
+          morning_km: "",
+          evening_km: "",
           total_km: "",
           remark: "", visited_names: []
         }));
@@ -6600,6 +6628,8 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
+          morning_km: "",
+          evening_km: "",
           total_km: "",
           remark: "", visited_names: []
         }));
@@ -7278,33 +7308,102 @@ function App() {
                     <div className="flex items-center gap-2">
                       <span className="text-lg">🛵</span>
                       <div>
-                        <label className="block text-xs font-black text-amber-950 tracking-wide uppercase">Aaj Ka Field Safar (Travel KM)</label>
-                        <span className="block text-[10px] text-amber-800/80 font-medium">Daily Two-Wheeler / Bike Distance (Optional)</span>
+                        <label className="block text-xs font-black text-amber-950 tracking-wide uppercase">Aaj Ka Bike Meter Reading (Travel KM)</label>
+                        <span className="block text-[10px] text-amber-800/80 font-medium">Subah &amp; Shaam ki Meter Reading (100% Optional)</span>
                       </div>
                     </div>
                     <span className="text-[9px] font-black uppercase tracking-wider bg-amber-200/70 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300/60">
                       TA Log
                     </span>
                   </div>
-                  <div className="p-4 sm:p-5">
-                    <div className="flex items-center gap-3">
-                      <div className="relative flex-1">
-                        <input 
-                          type="text" 
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={formData.total_km || ''} 
-                          onChange={(e) => setFormData({ ...formData, total_km: e.target.value.replace(/\D/g, '') })} 
-                          placeholder="e.g. 25" 
-                          className="w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-num" 
-                        />
-                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">
-                          KM
-                        </span>
+                  <div className="p-4 sm:p-5 space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Morning Odometer */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                          <span>🌅</span>
+                          <span>Subah Ki Reading (Start KM)</span>
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={formData.morning_km || ''} 
+                            onChange={(e) => {
+                              const mVal = e.target.value.replace(/\D/g, '');
+                              const mNum = mVal ? parseInt(mVal, 10) : null;
+                              const eNum = formData.evening_km ? parseInt(formData.evening_km, 10) : null;
+                              let tot = "";
+                              if (mNum !== null && eNum !== null) {
+                                tot = eNum >= mNum ? String(eNum - mNum) : "0";
+                              }
+                              setFormData(prev => ({ ...prev, morning_km: mVal, total_km: tot }));
+                            }} 
+                            placeholder="e.g. 12450" 
+                            className="w-full h-11 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-nums" 
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">
+                            KM
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Evening Odometer */}
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                          <span>🌆</span>
+                          <span>Shaam Ki Reading (End KM)</span>
+                        </label>
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={formData.evening_km || ''} 
+                            onChange={(e) => {
+                              const eVal = e.target.value.replace(/\D/g, '');
+                              const eNum = eVal ? parseInt(eVal, 10) : null;
+                              const mNum = formData.morning_km ? parseInt(formData.morning_km, 10) : null;
+                              let tot = "";
+                              if (mNum !== null && eNum !== null) {
+                                tot = eNum >= mNum ? String(eNum - mNum) : "0";
+                              }
+                              setFormData(prev => ({ ...prev, evening_km: eVal, total_km: tot }));
+                            }} 
+                            placeholder="e.g. 12485" 
+                            className="w-full h-11 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-nums" 
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400 uppercase">
+                            KM
+                          </span>
+                        </div>
                       </div>
                     </div>
-                    <p className="text-[10px] text-slate-500 mt-2 font-medium">
-                      💡 Yeh distance Admin TA studio mein auto-fill hoga aur month-end travel allowance banega.
+
+                    {/* Auto-Calculated Distance Display & Validation Alert */}
+                    <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold text-slate-600">Auto-Calculated Safar:</span>
+                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-xl text-xs font-black tabular-nums border ${
+                          formData.total_km && Number(formData.total_km) > 0
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : 'bg-slate-100 text-slate-500 border-slate-200'
+                        }`}>
+                          <span>🛵</span>
+                          <span>{formData.total_km ? `${formData.total_km} KM` : '0 KM'}</span>
+                        </span>
+                      </div>
+
+                      {formData.morning_km && formData.evening_km && Number(formData.evening_km) < Number(formData.morning_km) && (
+                        <span className="text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                          <span>⚠️</span> Shaam ki reading subah se kam nahi ho sakti!
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-[10px] text-slate-500 font-medium">
+                      💡 <strong>Note:</strong> Yeh readings optional hain. Filleup hone par yeh Admin TA studio mein auto-fill hokar travel allowance calculate karengi.
                     </p>
                   </div>
                 </div>
@@ -7661,6 +7760,30 @@ function App() {
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs">
                   <span className="font-bold text-slate-400 uppercase text-[10px] block mb-1">Visited Doctors / Stores</span>
                   <p className="font-semibold text-slate-700">{formData.visited_names.join(', ')}</p>
+                </div>
+              )}
+
+              {/* Field Travel / Bike Distance Preview */}
+              {(formData.morning_km || formData.evening_km || (formData.total_km && formData.total_km !== '0')) && (
+                <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200/80 text-xs shadow-2xs">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-amber-950 text-xs flex items-center gap-1.5">
+                      <span>🛵</span> Field Travel &amp; Bike Meter
+                    </span>
+                    <span className="font-black text-amber-900 bg-amber-200/80 text-[10px] px-2.5 py-0.5 rounded-full border border-amber-300">
+                      {formData.total_km ? `${formData.total_km} KM` : '0 KM'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs font-semibold bg-white/90 p-2.5 rounded-xl border border-amber-100">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block">Subah (Start KM)</span>
+                      <span className="font-mono font-bold text-slate-800">{formData.morning_km || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block">Shaam (End KM)</span>
+                      <span className="font-mono font-bold text-slate-800">{formData.evening_km || '—'}</span>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
