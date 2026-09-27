@@ -14822,7 +14822,8 @@ const availableDistrictsForFeed = useMemo(() => {
                   { key: 'excel_reports', label: 'Excel Reports & State KPI', icon: '📊', desc: '33-sheet KPI, Nikshay & dumps' },
                   { key: 'audit_trail', label: 'Admin vs Sub-Admin (RBAC)', icon: '📜', desc: 'District boundary protection & logs' },
                   { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' },
-                  { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' }
+                  { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' },
+                  { key: 'travel_allowance_studio', label: 'Travel Allowance & Bike Log Studio', icon: '🛵', desc: 'Pre-fill, ₹4.00/KM, Deductions & Multi-Sheet Excel' }
                 ]
                   .filter(topic => {
                     if (!appGuideSearch.trim()) return true;
@@ -16130,6 +16131,178 @@ const availableDistrictsForFeed = useMemo(() => {
                         <div className="pt-2 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
                           <span>Executive Analytics</span>
                           <span className="text-purple-700 font-black">✓ Restructure Complete</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TOPIC 12: Travel Allowance (TA) & Bike Log Management Studio */}
+                {appGuideActiveTopic === 'travel_allowance_studio' && (
+                  <div className="space-y-6">
+                    <div className="flex items-center gap-2 pb-2 border-b border-slate-100">
+                      <span className="text-xl">🛵</span>
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900">Travel Allowance &amp; Bike Log Studio (v2.8.5)</h4>
+                        <p className="text-[11px] text-slate-500 font-medium">1-Click Daily Report Pre-fill, Fixed ₹4.00/KM Rate Engine, Month-End Deductions &amp; Multi-Sheet Excel Export</p>
+                      </div>
+                    </div>
+
+                    {/* Header Banner */}
+                    <div className="bg-gradient-to-r from-teal-500/10 via-emerald-500/10 to-transparent border border-teal-200/80 rounded-2xl p-4 flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center font-black text-lg shadow-sm shrink-0">
+                          🛵
+                        </div>
+                        <div>
+                          <div className="text-xs font-black text-slate-900">
+                            Two-Wheeler Mileage Reimbursement &amp; Payroll Audit Ledger (@ ₹4.00/KM)
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            Automated mileage reconciliation pulling from daily reports, itemized admin deductions, and multi-sheet openpyxl Excel engine.
+                          </div>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-teal-100 text-teal-800 border border-teal-200/80 shrink-0">
+                        v2.8.5 Standard
+                      </span>
+                    </div>
+
+                    {/* 4-Card Sequential Bento Flowchart */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Step 1: 1-Click Pre-fill from Daily Reports */}
+                      <div className="bg-gradient-to-br from-teal-50/70 to-slate-50 border border-teal-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-teal-800 bg-teal-100 px-2 py-0.5 rounded-full">Step 01 &bull; 1-Click Pre-fill</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            1-Click Pre-fill from Daily Reports
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Seamless synchronization from field officer daily activity submissions:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>⚡</span>
+                              <div><strong>Pre-fill from Daily Reports:</strong> 1-click button scans <code className="font-mono text-[10px]">daily_field_reports</code> for selected staff and month.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🗺️</span>
+                              <div><strong>Odometer &amp; Checkpoints:</strong> Automatically populates initial morning reading, evening reading, total daily KM, and visited clinics/locations into 31-day editable table.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔒</span>
+                              <div><strong>Sub-Admin RBAC Guard:</strong> District coordinators are strictly restricted to their permitted districts; cross-district data is completely isolated.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-teal-100 flex items-center justify-between text-[10px] text-teal-800 font-semibold">
+                          <span>0 Manual Data Entry</span>
+                          <span className="text-teal-600 font-black">➔ Step 2</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2: Verified Mileage & ₹4.00/KM Rate Engine */}
+                      <div className="bg-gradient-to-br from-blue-50/70 to-slate-50 border border-blue-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full">Step 02 &bull; Rate Engine</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Verified Mileage &amp; Rate Engine (₹4.00 / KM)
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Deterministic calculation adhering strictly to Bihar Health Mission standards:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🏍️</span>
+                              <div><strong>Fixed ₹4.00 / KM:</strong> Rate is strictly locked at ₹4.00/KM; daily claim amounts auto-compute as <code className="font-mono text-[10px]">KM &times; 4.00</code>.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🛠️</span>
+                              <div><strong>Broken Meter Override:</strong> In cases of odometer failure, administrators can check Broken Meter override (<code className="font-mono text-[10px]">is_override: true</code>) and enter verified distance manually.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>💾</span>
+                              <div><strong>Anti-Double-Tap Guard:</strong> Save TA Log button features immediate loading lock and server-side recalculation to prevent duplicate writes or count corruption.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-blue-100 flex items-center justify-between text-[10px] text-blue-800 font-semibold">
+                          <span>₹4.00/KM Rate</span>
+                          <span className="text-blue-600 font-black">➔ Step 3</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3: Month-End Deductions & Payroll Reconciliation */}
+                      <div className="bg-gradient-to-br from-rose-50/70 to-slate-50 border border-rose-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-rose-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-rose-800 bg-rose-100 px-2 py-0.5 rounded-full">Step 03 &bull; Reconciliation</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Month-End Deductions &amp; Reconciliation
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Itemized adjustments and transparent audit remarks before payroll disbursement:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>⚖️</span>
+                              <div><strong>Gross vs Net Payout:</strong> Net payable is computed deterministically: <code className="font-mono text-[10px]">Final Payable = max(0, Gross - Deductions)</code>.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📝</span>
+                              <div><strong>Mandatory Reason Logging:</strong> Any deduction amount requires a clear explanation (e.g. unauthorized travel, capped ceiling, duplicate claim).</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>👁️</span>
+                              <div><strong>FO Ledger Sync:</strong> Deductions and remarks are instantly reflected in the field officer's read-only ledger, ensuring 100% transparency.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-rose-100 flex items-center justify-between text-[10px] text-rose-800 font-semibold">
+                          <span>Audit Accountability</span>
+                          <span className="text-rose-600 font-black">➔ Step 4</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4: Multi-Sheet Excel Export (.xlsx) */}
+                      <div className="bg-gradient-to-br from-emerald-50/70 to-slate-50 border border-emerald-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">Step 04 &bull; Multi-Sheet Export</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Multi-Sheet Excel Export (.xlsx)
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Official state audit-ready workbook formatted for accounts disbursement:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>📑</span>
+                              <div><strong>Sheet 1 ("DASHBOARD"):</strong> Consolidated payroll reconciliation roster with staff names, designations, total KM, gross amounts, deductions, net payouts, and grand total <code className="font-mono text-[10px]">=SUM()</code> formulas.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🛵</span>
+                              <div><strong>Sheets 2..N (Staff Bike Logs):</strong> Individual tab for each staff member with 31-day readings, rate (₹4.00), routes, purpose, summary box, and coordinator signature lines.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🛡️</span>
+                              <div><strong>Concurrency RAM Guard:</strong> Backend generation is protected by <code className="font-mono text-[10px]">asyncio.Semaphore(1)</code> and explicit garbage collection, eliminating Render RAM spikes.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                          <span>Multi-Sheet Workbook</span>
+                          <span className="text-emerald-700 font-black">✓ Export Ready</span>
                         </div>
                       </div>
                     </div>

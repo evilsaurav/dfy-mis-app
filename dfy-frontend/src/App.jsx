@@ -3664,6 +3664,143 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "travel_allowance_ledger",
+      icon: "🛵",
+      badge: "New in v2.8.5",
+      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
+      title: "11. Travel Allowance (TA) & Bike Log Ledger",
+      subtitle: "Day-by-day odometer inspection, ₹4.00/KM rate, admin deductions & transparent net payout",
+      keywords: "travel allowance ta bike log odometer meter reading km rate deduction claim ledger profile ₹4 ₹4.00",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-teal-50 to-emerald-50/60 border border-teal-200/90 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-teal-600 text-white flex items-center justify-center text-sm font-bold shadow-2xs shrink-0">🛵</span>
+              <div>
+                <strong className="text-teal-950 font-black block text-xs">Official Two-Wheeler Travel Allowance Ledger:</strong>
+                <span className="text-teal-800 text-[11px]">Field officers ke daily transit ko tamper-proof ledger me inspect karein. Rozana sham <strong>7:00 PM</strong> tak reporting submit karein.</span>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-teal-100 text-teal-800 border border-teal-200/80 shrink-0">
+              ₹4.00 / KM
+            </span>
+          </div>
+
+          {/* 4-Card Sequential Bento Flowchart */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Step 1: Daily Odometer Sync */}
+            <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between group">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="w-5 h-5 rounded-full bg-teal-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">1</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Odometer Sync</span>
+                </div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>📊</span>
+                  <span>Daily Odometer Sync</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Daily Field Report me bhari gayi morning reading, evening reading aur transit distance automatic TA system me link hoti hai.
+                </p>
+                <div className="mt-2 p-2 bg-slate-50 rounded-xl border border-slate-100 text-[10px] text-slate-500 font-medium">
+                  • Subah initial reading aur sham ki final reading accurate bharein.<br />
+                  • Sham <strong>7:00 PM</strong> reporting deadline se pehle submit karein.
+                </div>
+              </div>
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-semibold mt-2">
+                <span>Morning &amp; Evening KM</span>
+                <span className="text-teal-700 font-bold">Auto-Linked</span>
+              </div>
+            </div>
+
+            {/* Step 2: Fixed Mileage Rate Engine */}
+            <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between group">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">2</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mileage Rate Engine</span>
+                </div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>⚡</span>
+                  <span>Fixed Mileage Rate Engine (₹4.00 / KM)</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Bihar Health Mission guidelines ke mutabiq fixed <strong>₹4.00 / KM</strong> reimbursement rate mathematically calculate hota hai.
+                </p>
+                <div className="mt-2 p-2 bg-blue-50/70 rounded-xl border border-blue-100 text-[10px] text-blue-800 font-medium">
+                  • <code>Gross TA = Total Verified KM &times; ₹4.00</code><br />
+                  • Kisi bhi faulty meter case me coordinator manual override check kar sakte hain.
+                </div>
+              </div>
+              <div className="pt-2 border-t border-blue-100 flex items-center justify-between text-[10px] text-blue-700 font-semibold mt-2">
+                <span>Official Rate</span>
+                <span className="text-blue-800 font-bold">₹4.00 / KM Fixed</span>
+              </div>
+            </div>
+
+            {/* Step 3: Admin Deductions & Transparency */}
+            <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between group">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="w-5 h-5 rounded-full bg-rose-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">3</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Reconciliation</span>
+                </div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>⚖️</span>
+                  <span>Admin Deductions &amp; Transparency</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Agar month-end par koi travel cap ya penalty deduction hota hai, to admin ko uska reason aur remarks document karna lazmi hota hai.
+                </p>
+                <div className="mt-2 p-2 bg-rose-50/70 rounded-xl border border-rose-100 text-[10px] text-rose-800 font-medium">
+                  • <code>Net Payable = Gross TA - Admin Deductions</code><br />
+                  • Har deduction ka reason FO Profile ledger me 100% transparent dikhta hai.
+                </div>
+              </div>
+              <div className="pt-2 border-t border-rose-100 flex items-center justify-between text-[10px] text-rose-700 font-semibold mt-2">
+                <span>Deductions + Reason</span>
+                <span className="text-rose-800 font-bold">Full Transparency</span>
+              </div>
+            </div>
+
+            {/* Step 4: Tamper-Proof Read-Only Ledger */}
+            <div className="bg-white rounded-2xl p-3.5 border border-slate-200/90 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between group">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-[10px] font-black shrink-0">4</span>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Security</span>
+                </div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🔒</span>
+                  <span>Tamper-Proof Read-Only Ledger</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Field Officers ke Profile tab me dedicated <strong>🛵 My Travel &amp; TA Log</strong> section 100% read-only rehta hai.
+                </p>
+                <div className="mt-2 p-2 bg-emerald-50/70 rounded-xl border border-emerald-100 text-[10px] text-emerald-800 font-medium">
+                  • Month picker se kisi bhi mahine ka historical claim dekhein.<br />
+                  • Audit compliance ke liye field level par inputs strictly disabled rehte hain.
+                </div>
+              </div>
+              <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-700 font-semibold mt-2">
+                <span>Audit Safety</span>
+                <span className="text-emerald-800 font-bold">100% Read-Only</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Privacy & Zero-Leakage Guarantee */}
+          <div className="bg-teal-50 border border-teal-200 rounded-2xl p-3 text-[11px] text-teal-950 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">🛡️</span>
+            <div>
+              <strong>Audit Integrity &amp; Transparency:</strong> TA ledger Bihar State Mission standard par based hai. Field level par inputs strictly disabled hain taaki audit trail secure rahe. Official reporting deadline strictly sham <strong>7:00 PM</strong> hai.
+            </div>
+          </div>
+        </div>
+      )
     }
   ];
 

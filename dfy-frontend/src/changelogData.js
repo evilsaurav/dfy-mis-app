@@ -1,16 +1,53 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.4";
-export const LAST_UPDATED_DATE = "26 Sep 2026";
+export const APP_VERSION = "2.8.5";
+export const LAST_UPDATED_DATE = "27 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.5",
+    date: "27 Sep 2026",
+    title: "Travel Allowance (TA) & Bike Log Studio, 1-Click Pre-fill, Month-End Deductions, Multi-Sheet Excel & Read-Only FO Ledger",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🛵 Travel Allowance (TA) & Bike Log Management Studio: Dedicated administrative control center for verifying and managing monthly two-wheeler travel logs across all Bihar districts at the fixed official rate of ₹4.00 / KM.",
+      "⚡ 1-Click Pre-fill from Daily Reports: Automatically pulls initial morning odometer, evening meter, daily distance, and visited location checkpoints directly from submitted daily field reports into editable 31-day sheets.",
+      "⚖️ Month-End Deduction & Net Payout Reconciliation: Administrators can adjust claims with itemized deductions, mandatory penalty reasons, net payable calculations (Gross - Deduction), and supervisor audit remarks.",
+      "📊 Multi-Sheet Excel Workbook Export: Generates audit-ready .xlsx workbooks featuring Sheet 1 ('DASHBOARD' district payroll reconciliation with grand total =SUM() formulas) and individual staff bike travel logs matching Bihar Health Mission guidelines.",
+      "🔒 Tamper-Proof FO Read-Only Ledger: Field Officers inspect verified daily odometer logs, approved TA payout, and admin deduction remarks inside their Profile with 100% disabled inputs preventing unauthorized tampering.",
+      "📈 Presentation-Ready Mobility Analytics: Real-time executive KPI indicators tracking Project Mobility (YTD) cumulative KM, FO Daily Travel Average (KM/day), and Total TA Approved (₹)."
+    ],
+    details: [
+      {
+        tag: "TA Management",
+        color: "teal",
+        text: "Full administrative suite for monthly bike logs with broken meter overrides, 1-click pre-fill, and live recalculation at ₹4.00/KM."
+      },
+      {
+        tag: "Payroll Reconciliation",
+        color: "amber",
+        text: "Itemized deductions with mandatory reason logging and net payout transparency protect state health funds from inflated claims."
+      },
+      {
+        tag: "Excel Engine",
+        color: "emerald",
+        text: "Concurrency-locked (asyncio.Semaphore(1)) multi-sheet openpyxl workbook generator produces formatted state audit workbooks with zero RAM spikes."
+      },
+      {
+        tag: "FO Read-Only Ledger",
+        color: "indigo",
+        text: "Zero-mutation read-only view in FO profile provides full visibility into verified mileage, deductions, and payout status."
+      }
+    ]
+  },
   {
     version: "v2.8.4",
     date: "26 Sep 2026",
     title: "FO Profile Honors & Badges Showcase, HD Shareable Card Studio, 4-Role Statewide Leaderboard & Full-Width Layout",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🌟 Field Officer Profile Honors & Badges Showcase: Unlocked 4 dynamic clinical achievement badges (Target Achiever, Punctuality Streak, Cascade Champion, and Field Trail Blazer) recognizing field dedication across milestone tiers with zero performance overhead.",
       "📲 HD Shareable Achievement Card Studio: Frontline officers can now launch an interactive achievement card studio featuring live preview, 1080x1350 HD Canvas PNG download, and 1-click WhatsApp celebration messaging.",
