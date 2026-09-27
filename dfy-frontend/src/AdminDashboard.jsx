@@ -368,6 +368,8 @@ export default function AdminDashboard() {
   const [taPrefilling, setTaPrefilling] = useState(false);
   const [taExporting, setTaExporting] = useState(false);
   const [taSummaryList, setTaSummaryList] = useState([]);
+  const [taAnalytics, setTaAnalytics] = useState(null);
+  const [loadingTaAnalytics, setLoadingTaAnalytics] = useState(false);
 
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
     setLedgerLoading(true);
@@ -3155,6 +3157,26 @@ export default function AdminDashboard() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   }, [topPerformersData, topPerformersPeriod, month]);
 
+  const fetchTaAnalytics = useCallback(async (targetMonth = month, targetDistrict = selectedDistrict) => {
+    try {
+      setLoadingTaAnalytics(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const distParam = targetDistrict || 'All';
+      const mParam = targetMonth || '';
+      const res = await authFetch(`${API_BASE_URL}/api/ta-logs/analytics?month=${encodeURIComponent(mParam)}&district=${encodeURIComponent(distParam)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          setTaAnalytics(data);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch TA analytics:", err);
+    } finally {
+      setLoadingTaAnalytics(false);
+    }
+  }, [authFetch, month, selectedDistrict]);
+
   useEffect(() => {
     if (isAuthenticated) { 
       fetchData(false); 
@@ -3165,8 +3187,9 @@ export default function AdminDashboard() {
       fetchActiveBroadcasts();
       fetchPacingSettings(month, selectedDistrict);
       fetchTopPerformers(topPerformersPeriod);
+      fetchTaAnalytics(month, selectedDistrict);
     }
-  }, [month, selectedDistrict, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
+  }, [month, selectedDistrict, isAuthenticated, topPerformersPeriod, fetchTopPerformers, fetchTaAnalytics]);
 
   // Lazy Tab Loading: Fetch Duplicate Audit & Duplicate Scan when modal is opened
   useEffect(() => {
@@ -4873,6 +4896,7 @@ const availableDistrictsForFeed = useMemo(() => {
         const data = await res.json();
         showToast(data.message || `Saved TA log for ${sName}. Payable: ₹${data.final_payable_amount}`, "success");
         fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
+        fetchTaAnalytics(taMonth, taDistrict);
       } else {
         const err = await res.json().catch(() => ({}));
         showToast(err.detail || "Failed to save TA log.", "error");
@@ -6154,6 +6178,101 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               );
             })()}
+
+            {/* Frontline Mobility & Travel Allowance (TA) Executive Analytics Bento (v2.8.5) */}
+            <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-black text-base shadow-xs shrink-0">
+                    🛵
+                  </div>
+                  <div>
+                    <h3 className="text-slate-800 text-xs sm:text-sm font-black flex items-center gap-1.5">
+                      <span>Frontline Mobility &amp; Travel Allowance (TA) Indicators</span>
+                      <span className="text-[10px] font-black bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        v2.8.5
+                      </span>
+                    </h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                      Verified Two-Wheeler Field Transit, Mission Cumulative Distance &amp; TA Reimbursement (@ ₹4.00/KM)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveMainTab('travel_allowance')}
+                  className="px-3 py-1.5 rounded-xl text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 transition-all flex items-center gap-1.5 self-start sm:self-auto cursor-pointer"
+                >
+                  <span>🛵 Open TA Studio</span>
+                  <span>&rarr;</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {/* CARD 1: Project Mobility (YTD) */}
+                <div className="p-4 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200/80 transition-all shadow-2xs hover:shadow-xs group">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                      Project Mobility (YTD)
+                    </span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-teal-50 text-teal-700">
+                      Cumulative
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-2xl font-black text-slate-900 tabular-num">
+                      {(taAnalytics?.total_project_km_ytd ?? 0).toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-normal">KM</span>
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-500 mt-2 truncate">
+                    Grand cumulative field travel across all districts
+                  </p>
+                </div>
+
+                {/* CARD 2: FO Daily Travel Average */}
+                <div className="p-4 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200/80 transition-all shadow-2xs hover:shadow-xs group">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                      FO Daily Travel Average
+                    </span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                      Mobility
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-2xl font-black text-slate-900 tabular-num">
+                      {taAnalytics?.avg_daily_km_per_fo ?? 0}
+                    </span>
+                    <span className="text-xs font-black text-slate-400 uppercase tracking-normal">KM / Day</span>
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-500 mt-2 truncate">
+                    Average distance traveled per active FO work day
+                  </p>
+                </div>
+
+                {/* CARD 3: Total TA Approved */}
+                <div className="p-4 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200/80 transition-all shadow-2xs hover:shadow-xs group">
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">
+                      Total TA Approved
+                    </span>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                      Disbursement
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-xs font-black text-emerald-700">₹</span>
+                    <span className="text-2xl font-black text-emerald-800 tabular-num">
+                      {(taAnalytics?.total_ta_final_payable ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-500 mt-2 truncate">
+                    Gross: ₹{(taAnalytics?.total_ta_gross ?? 0).toLocaleString('en-IN')} &bull; Ded: -₹{(taAnalytics?.total_ta_deductions ?? 0).toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+            </div>
 
             {/* Secondary Metrics Grid */}
             <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
