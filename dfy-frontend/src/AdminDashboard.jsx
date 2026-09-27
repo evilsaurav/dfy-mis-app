@@ -354,6 +354,21 @@ export default function AdminDashboard() {
   const [ledgerDistrict, setLedgerDistrict] = useState('All');
   const [ledgerExporting, setLedgerExporting] = useState(false);
 
+  // Travel Allowance (TA) & Bike Log Management Studio State (v2.8.5)
+  const [taDistrict, setTaDistrict] = useState(() => (selectedDistrict !== 'All' ? selectedDistrict : 'Gaya'));
+  const [taMonth, setTaMonth] = useState(() => month || new Date().toISOString().slice(0, 7));
+  const [taSelectedStaffKey, setTaSelectedStaffKey] = useState('');
+  const [taDailyLogs, setTaDailyLogs] = useState({});
+  const [taDeductionAmount, setTaDeductionAmount] = useState(0);
+  const [taDeductionReason, setTaDeductionReason] = useState('');
+  const [taAdminRemarks, setTaAdminRemarks] = useState('');
+  const [taDesignation, setTaDesignation] = useState('Field Officer');
+  const [taLoading, setTaLoading] = useState(false);
+  const [taSaving, setTaSaving] = useState(false);
+  const [taPrefilling, setTaPrefilling] = useState(false);
+  const [taExporting, setTaExporting] = useState(false);
+  const [taSummaryList, setTaSummaryList] = useState([]);
+
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
     setLedgerLoading(true);
     try {
@@ -4737,6 +4752,257 @@ const availableDistrictsForFeed = useMemo(() => {
     window.location.reload();
   };
 
+  // ============================================================================
+  // TRAVEL ALLOWANCE (TA) & BIKE LOG STUDIO LOGIC (v2.8.5)
+  // ============================================================================
+  const taDistrictStaff = useMemo(() => {
+    if (!staffList || staffList.length === 0) return [];
+    return staffList.filter(s => {
+      if (s.is_active === false || s.status === 'inactive') return false;
+      const sDist = canonicalizeDistrict(s.district || '');
+      return sDist.toLowerCase() === canonicalizeDistrict(taDistrict).toLowerCase();
+    }).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [staffList, taDistrict]);
+
+  const taCurrentStaff = useMemo(() => {
+    if (!taSelectedStaffKey) return null;
+    return taDistrictStaff.find(s => (s.id === taSelectedStaffKey || s.key === taSelectedStaffKey || s.name === taSelectedStaffKey)) || null;
+  }, [taDistrictStaff, taSelectedStaffKey]);
+
+  const taMonthDays = useMemo(() => {
+    try {
+      const [yr, mn] = (taMonth || '2026-09').split('-').map(Number);
+      const daysInMonth = new Date(yr, mn, 0).getDate();
+      const days = [];
+      const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${taMonth}-${String(d).padStart(2, '0')}`;
+        const dt = new Date(yr, mn - 1, d);
+        days.push({
+          dateStr,
+          dayNum: d,
+          dayName: dayNames[dt.getDay()],
+          isSunday: dt.getDay() === 0
+        });
+      }
+      return days;
+    } catch {
+      return [];
+    }
+  }, [taMonth]);
+
+  const taCalculatedTotals = useMemo(() => {
+    let totKm = 0;
+    Object.values(taDailyLogs || {}).forEach(entry => {
+      const km = Number(entry?.total_km) || 0;
+      totKm += km;
+    });
+    const gross = Math.round(totKm * 4.0 * 100) / 100;
+    const ded = Math.max(0, Number(taDeductionAmount) || 0);
+    const net = Math.max(0, Math.round((gross - ded) * 100) / 100);
+    return { totalKm: totKm, grossAmount: gross, deductionAmount: ded, netPayable: net };
+  }, [taDailyLogs, taDeductionAmount]);
+
+  const fetchTaLog = useCallback(async (dist, mon, sKey) => {
+    if (!dist || !mon) return;
+    setTaLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const params = new URLSearchParams({
+        month: mon,
+        district: dist
+      });
+      if (sKey) params.append('staff_key', sKey);
+      const res = await authFetch(`${API_BASE_URL}/api/ta-logs?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && data.logs) {
+          setTaSummaryList(data.logs);
+          if (sKey) {
+            const cleanSKey = sKey.trim().toLowerCase();
+            const found = data.logs.find(l => (l.staff_key && l.staff_key.toLowerCase() === cleanSKey) || (l.staff_name && l.staff_name.toLowerCase() === cleanSKey));
+            if (found) {
+              setTaDailyLogs(found.daily_logs || {});
+              setTaDeductionAmount(found.deduction_amount || 0);
+              setTaDeductionReason(found.deduction_reason || '');
+              setTaAdminRemarks(found.admin_final_remarks || '');
+              setTaDesignation(found.designation || 'Field Officer');
+            } else {
+              setTaDailyLogs({});
+              setTaDeductionAmount(0);
+              setTaDeductionReason('');
+              setTaAdminRemarks('');
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error fetching TA logs:", err);
+    } finally {
+      setTaLoading(false);
+    }
+  }, [authFetch]);
+
+  const handleSaveTaLog = async () => {
+    if (!taCurrentStaff && !taSelectedStaffKey) {
+      showToast("Please select a staff member first.", "error");
+      return;
+    }
+    setTaSaving(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const sName = taCurrentStaff ? taCurrentStaff.name : taSelectedStaffKey;
+      const sKey = taCurrentStaff ? (taCurrentStaff.id || taCurrentStaff.key || taCurrentStaff.name) : taSelectedStaffKey;
+      const payload = {
+        month: taMonth,
+        district: taDistrict,
+        staff_name: sName,
+        staff_key: sKey,
+        designation: taDesignation || (taCurrentStaff?.designation) || "Field Officer",
+        daily_logs: taDailyLogs,
+        deduction_amount: Number(taDeductionAmount) || 0,
+        deduction_reason: taDeductionReason || '',
+        admin_final_remarks: taAdminRemarks || ''
+      };
+      const res = await authFetch(`${API_BASE_URL}/api/ta-logs/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(data.message || `Saved TA log for ${sName}. Payable: ₹${data.final_payable_amount}`, "success");
+        fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Failed to save TA log.", "error");
+      }
+    } catch (err) {
+      showToast("Error saving TA log: " + err.message, "error");
+    } finally {
+      setTaSaving(false);
+    }
+  };
+
+  const handlePrefillTaFromReports = async () => {
+    if (!taCurrentStaff && !taSelectedStaffKey) {
+      showToast("Please select a staff member first.", "error");
+      return;
+    }
+    setTaPrefilling(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const sName = taCurrentStaff ? taCurrentStaff.name : taSelectedStaffKey;
+      const params = new URLSearchParams({
+        month: taMonth,
+        district: taDistrict,
+        staff_name: sName
+      });
+      const res = await authFetch(`${API_BASE_URL}/api/ta-logs/prefill-from-reports?${params.toString()}`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          const filled = data.daily_logs || {};
+          setTaDailyLogs(prev => ({ ...prev, ...filled }));
+          showToast(`⚡ Pre-filled ${Object.keys(filled).length} report days for ${sName}! Total: ${data.total_km} KM (₹${data.gross_amount})`, "success");
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Failed to pre-fill from daily reports.", "error");
+      }
+    } catch (err) {
+      showToast("Error pre-filling: " + err.message, "error");
+    } finally {
+      setTaPrefilling(false);
+    }
+  };
+
+  const handleExportTaExcel = async () => {
+    setTaExporting(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const params = new URLSearchParams({
+        month: taMonth,
+        district: taDistrict
+      });
+      const res = await authFetch(`${API_BASE_URL}/api/ta-logs/export-excel?${params.toString()}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `DFY_TA_Bike_Log_${taDistrict}_${taMonth}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast(`📑 Exported TA & Bike Log workbook for ${taDistrict} (${taMonth})`, "success");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.detail || "Failed to export TA workbook.", "error");
+      }
+    } catch (err) {
+      showToast("Export error: " + err.message, "error");
+    } finally {
+      setTaExporting(false);
+    }
+  };
+
+  const handleUpdateDailyLog = (dateStr, field, value) => {
+    setTaDailyLogs(prev => {
+      const current = prev[dateStr] || {
+        initial_reading: '',
+        final_reading: '',
+        total_km: 0,
+        is_override: false,
+        rate: 4.0,
+        amount: 0,
+        from_location: '',
+        to_location: '',
+        purpose: '',
+        remarks: ''
+      };
+      const updated = { ...current, [field]: value };
+
+      if (field === 'initial_reading' || field === 'final_reading' || field === 'is_override' || field === 'total_km') {
+        const init = Number(updated.initial_reading) || 0;
+        const fin = Number(updated.final_reading) || 0;
+        if (!updated.is_override) {
+          if (fin >= init && init > 0) {
+            updated.total_km = fin - init;
+          } else {
+            updated.total_km = Number(updated.total_km) || 0;
+          }
+        } else {
+          updated.total_km = Number(updated.total_km) || 0;
+        }
+        updated.amount = Math.round(updated.total_km * 4.0 * 100) / 100;
+      }
+      return { ...prev, [dateStr]: updated };
+    });
+  };
+
+  useEffect(() => {
+    if (activeMainTab === 'travel_allowance') {
+      fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
+    }
+  }, [activeMainTab, taDistrict, taMonth, taSelectedStaffKey, fetchTaLog]);
+
+  useEffect(() => {
+    if (taDistrictStaff.length > 0) {
+      const found = taDistrictStaff.some(s => (s.id === taSelectedStaffKey || s.key === taSelectedStaffKey || s.name === taSelectedStaffKey));
+      if (!found) {
+        const first = taDistrictStaff[0];
+        setTaSelectedStaffKey(first.id || first.key || first.name);
+        setTaDesignation(first.designation || 'Field Officer');
+      }
+    } else {
+      setTaSelectedStaffKey('');
+    }
+  }, [taDistrictStaff, taSelectedStaffKey]);
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
@@ -5401,6 +5667,18 @@ const availableDistrictsForFeed = useMemo(() => {
                 <span>District Benchmarks &amp; Pacing</span>
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => setActiveMainTab('travel_allowance')}
+              className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer ${
+                activeMainTab === 'travel_allowance'
+                  ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
+                  : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
+              }`}
+            >
+              <span>🛵</span>
+              <span>Travel &amp; Bike TA Studio</span>
+            </button>
           </div>
 
           <div className="flex items-center gap-2 text-[11px] font-bold text-teal-950 px-3 py-1.5 bg-teal-50/80 rounded-xl border border-teal-200/90 self-start md:self-auto tabular-num">
@@ -8177,6 +8455,484 @@ const availableDistrictsForFeed = useMemo(() => {
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Tab 4: Travel Allowance (TA) & Bike Log Management Studio (v2.8.5) */}
+    {activeMainTab === 'travel_allowance' && (
+      <div className="space-y-6 animate-fade-in">
+        {/* Studio Top Control & Filter Bar */}
+        <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center font-black text-2xl shadow-inner shrink-0">
+              🛵
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
+                <span>Travel Allowance (TA) &amp; Bike Log Management Studio</span>
+                <span className="text-[10px] font-black bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                  v2.8.5 Active
+                </span>
+              </h2>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                Official Bihar Health Mission Two-Wheeler Mileage Reimbursement &amp; Audit Ledger (@ ₹4.00/KM)
+              </p>
+            </div>
+          </div>
+
+          {/* District, Month, Staff Selectors & Actions */}
+          <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+            {/* District Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Dist:</span>
+              <select
+                value={taDistrict}
+                onChange={(e) => {
+                  setTaDistrict(e.target.value);
+                  setTaSelectedStaffKey('');
+                }}
+                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+              >
+                {districts
+                  .filter(d => d !== 'All' && (isSuperAdmin || (currentUser?.allowed_districts || []).map(canonicalizeDistrict).includes(d)))
+                  .map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+              </select>
+            </div>
+
+            {/* Month Picker */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Month:</span>
+              <input
+                type="month"
+                value={taMonth}
+                onChange={(e) => setTaMonth(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Staff Selector */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Staff:</span>
+              <select
+                value={taSelectedStaffKey}
+                onChange={(e) => {
+                  setTaSelectedStaffKey(e.target.value);
+                  const found = taDistrictStaff.find(s => (s.id === e.target.value || s.name === e.target.value));
+                  if (found) setTaDesignation(found.designation || 'Field Officer');
+                }}
+                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[180px]"
+              >
+                {taDistrictStaff.length === 0 ? (
+                  <option value="">No staff in {taDistrict}</option>
+                ) : (
+                  taDistrictStaff.map(s => (
+                    <option key={s.id || s.name} value={s.id || s.name}>
+                      {s.name} ({s.designation || 'Field Officer'})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            {/* Action Buttons */}
+            <button
+              type="button"
+              onClick={handlePrefillTaFromReports}
+              disabled={taPrefilling || taSaving || !taSelectedStaffKey}
+              className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Auto-fill meter readings and travel locations from submitted Daily Field Reports"
+            >
+              <span>{taPrefilling ? '⏳' : '⚡'}</span>
+              <span>{taPrefilling ? 'Pre-filling...' : 'Pre-fill from Daily Reports'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSaveTaLog}
+              disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+            >
+              <span>{taSaving ? '⏳' : '💾'}</span>
+              <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportTaExcel}
+              disabled={taExporting}
+              className="px-3.5 py-2 rounded-xl text-xs font-black bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              title="Download professional multi-sheet Excel workbook with Dashboard and Staff Bike Logs"
+            >
+              <span>{taExporting ? '⏳' : '📑'}</span>
+              <span>{taExporting ? 'Exporting...' : 'Export District TA Workbook (.xlsx)'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Month-End Reconciliation & Payroll Accounting Card */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Card 1: Total Mileage */}
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Total Monthly Travel</span>
+              <span className="text-xs p-1.5 rounded-lg bg-teal-50 text-teal-700 font-bold">🛵 Odometer</span>
+            </div>
+            <div>
+              <div className="text-2xl font-black text-slate-800 tabular-num">
+                {taCalculatedTotals.totalKm.toLocaleString('en-IN')} <span className="text-sm font-bold text-slate-500">KM</span>
+              </div>
+              <p className="text-[11px] font-bold text-slate-400 mt-1">
+                {Object.values(taDailyLogs).filter(x => Number(x?.total_km) > 0).length} Active Travel Days in {taMonth}
+              </p>
+            </div>
+          </div>
+
+          {/* Card 2: Gross TA Amount */}
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Gross TA Claim</span>
+              <span className="text-xs p-1.5 rounded-lg bg-blue-50 text-blue-700 font-bold">₹4.00 / KM</span>
+            </div>
+            <div>
+              <div className="text-2xl font-black text-blue-900 tabular-num">
+                ₹ {taCalculatedTotals.grossAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <p className="text-[11px] font-bold text-slate-400 mt-1">
+                {taCalculatedTotals.totalKm} KM &times; ₹4.00 fixed rate
+              </p>
+            </div>
+          </div>
+
+          {/* Card 3: Admin Deductions */}
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-rose-100 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-rose-500">Admin Deductions (₹)</span>
+              <span className="text-xs p-1 rounded-lg bg-rose-50 text-rose-600 font-bold">Penalties / Cap</span>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-black text-rose-600">- ₹</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={taDeductionAmount || ''}
+                  onChange={(e) => setTaDeductionAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+                  placeholder="0.00"
+                  className="w-full bg-rose-50/50 border border-rose-200 rounded-lg px-2.5 py-1 text-sm font-black text-rose-700 outline-none focus:ring-1 focus:ring-rose-500"
+                />
+              </div>
+              <input
+                type="text"
+                value={taDeductionReason}
+                onChange={(e) => setTaDeductionReason(e.target.value)}
+                placeholder="Reason for deduction..."
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 outline-none focus:ring-1 focus:ring-slate-400"
+              />
+            </div>
+          </div>
+
+          {/* Card 4: Net Approved Payout */}
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 rounded-2xl p-4 shadow-sm border border-emerald-200/90 flex flex-col justify-between">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">Net Approved Payout</span>
+              <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-600 text-white font-black text-[10px]">PASS PAYROLL</span>
+            </div>
+            <div>
+              <div className="text-2xl font-black text-emerald-950 tabular-num">
+                ₹ {taCalculatedTotals.netPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+              <input
+                type="text"
+                value={taAdminRemarks}
+                onChange={(e) => setTaAdminRemarks(e.target.value)}
+                placeholder="Admin remarks for accounts..."
+                className="w-full mt-1.5 bg-white/90 border border-emerald-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-700 outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 31-Day Interactive Bike Log Table */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                <span>🗓️</span>
+                <span>Day-by-Day Two-Wheeler Meter Readings &amp; Route Verification — {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'Officer')}</span>
+              </h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                Month: {taMonth} | Designation: {taDesignation} | District: {taDistrict}
+              </p>
+            </div>
+            {taLoading && (
+              <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-lg animate-pulse flex items-center gap-1.5">
+                <span>⏳</span> Loading verified records...
+              </span>
+            )}
+          </div>
+
+          <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="sticky top-0 z-20 bg-slate-800 text-white font-bold text-[11px]">
+                <tr>
+                  <th className="px-3 py-2.5 text-center">Date</th>
+                  <th className="px-2 py-2.5 text-center">Day</th>
+                  <th className="px-3 py-2.5 text-center min-w-[110px]">Initial Reading (KM)</th>
+                  <th className="px-3 py-2.5 text-center min-w-[110px]">Final Reading (KM)</th>
+                  <th className="px-2 py-2.5 text-center" title="Check if speedometer was broken/disconnected">Broken Meter?</th>
+                  <th className="px-3 py-2.5 text-center min-w-[90px]">Total KM</th>
+                  <th className="px-2 py-2.5 text-center">Rate</th>
+                  <th className="px-3 py-2.5 text-center min-w-[100px]">Amount (₹)</th>
+                  <th className="px-3 py-2.5 min-w-[130px]">From Location</th>
+                  <th className="px-3 py-2.5 min-w-[130px]">To Location</th>
+                  <th className="px-3 py-2.5 min-w-[180px]">Purpose of Travel &amp; Remarks</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {taMonthDays.map((day) => {
+                  const entry = taDailyLogs[day.dateStr] || {};
+                  const isOverride = Boolean(entry.is_override);
+                  const isSunday = day.isSunday;
+
+                  return (
+                    <tr
+                      key={day.dateStr}
+                      className={`hover:bg-teal-50/40 transition-colors ${
+                        isSunday ? 'bg-indigo-50/30' : ''
+                      }`}
+                    >
+                      {/* Date */}
+                      <td className="px-3 py-2 text-center font-bold text-slate-700 tabular-num whitespace-nowrap">
+                        {day.dateStr}
+                      </td>
+
+                      {/* Day */}
+                      <td className={`px-2 py-2 text-center font-bold text-[11px] ${
+                        isSunday ? 'text-indigo-600' : 'text-slate-500'
+                      }`}>
+                        {day.dayName}
+                      </td>
+
+                      {/* Initial Reading */}
+                      <td className="px-2 py-1.5 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          value={entry.initial_reading || ''}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'initial_reading', e.target.value)}
+                          placeholder="e.g. 12000"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                        />
+                      </td>
+
+                      {/* Final Reading */}
+                      <td className="px-2 py-1.5 text-center">
+                        <input
+                          type="number"
+                          min="0"
+                          value={entry.final_reading || ''}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'final_reading', e.target.value)}
+                          placeholder="e.g. 12045"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                        />
+                      </td>
+
+                      {/* Broken Meter Toggle */}
+                      <td className="px-2 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isOverride}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'is_override', e.target.checked)}
+                          className="w-4 h-4 text-teal-600 rounded cursor-pointer accent-teal-600"
+                          title="Enable manual KM entry if bike meter was damaged"
+                        />
+                      </td>
+
+                      {/* Total KM */}
+                      <td className="px-2 py-1.5 text-center">
+                        {isOverride ? (
+                          <input
+                            type="number"
+                            min="0"
+                            value={entry.total_km || ''}
+                            onChange={(e) => handleUpdateDailyLog(day.dateStr, 'total_km', e.target.value)}
+                            placeholder="KM"
+                            className="w-full bg-amber-50 border border-amber-300 rounded-lg px-2 py-1 text-xs text-center font-black text-amber-900 outline-none focus:bg-white focus:ring-1 focus:ring-amber-500"
+                          />
+                        ) : (
+                          <span className={`inline-block px-2 py-1 rounded-md text-xs font-black tabular-num ${
+                            Number(entry.total_km) > 0 ? 'bg-teal-50 text-teal-800' : 'text-slate-400'
+                          }`}>
+                            {entry.total_km || 0}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Rate */}
+                      <td className="px-2 py-2 text-center font-bold text-slate-400 text-[11px]">
+                        ₹4.00
+                      </td>
+
+                      {/* Amount */}
+                      <td className="px-3 py-2 text-center font-bold text-slate-800 tabular-num whitespace-nowrap">
+                        ₹ {Number(entry.amount || 0).toFixed(2)}
+                      </td>
+
+                      {/* From Location */}
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={entry.from_location || ''}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'from_location', e.target.value)}
+                          placeholder={taDistrict}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                        />
+                      </td>
+
+                      {/* To Location */}
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={entry.to_location || ''}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'to_location', e.target.value)}
+                          placeholder="Visited PHC / Clinic..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                        />
+                      </td>
+
+                      {/* Purpose & Remarks */}
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="text"
+                          value={entry.purpose || entry.remarks || ''}
+                          onChange={(e) => handleUpdateDailyLog(day.dateStr, 'purpose', e.target.value)}
+                          placeholder="e.g. Sample collection, Doctor visit..."
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1 focus:ring-teal-500"
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot className="bg-slate-100/90 font-black text-xs border-t-2 border-slate-300">
+                <tr>
+                  <td colSpan="5" className="px-4 py-3 text-right uppercase tracking-wider text-slate-600">
+                    Grand Monthly Totals:
+                  </td>
+                  <td className="px-3 py-3 text-center text-teal-800 text-sm tabular-num">
+                    {taCalculatedTotals.totalKm} KM
+                  </td>
+                  <td className="px-2 py-3 text-center text-slate-400">
+                    ₹4/KM
+                  </td>
+                  <td className="px-3 py-3 text-center text-blue-900 text-sm tabular-num">
+                    ₹ {taCalculatedTotals.grossAmount.toFixed(2)}
+                  </td>
+                  <td colSpan="3" className="px-4 py-3 text-right text-emerald-800">
+                    Approved Net Payout: <strong className="text-emerald-900 text-sm">₹ {taCalculatedTotals.netPayable.toFixed(2)}</strong>
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        {/* District Monthly Reconciliation Roster Overview */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                <span>📋</span>
+                <span>District Staff Travel Allowance Payroll Roster — {taDistrict} ({taMonth})</span>
+              </h3>
+              <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                Summary of saved and calculated monthly claims for all officers in this district
+              </p>
+            </div>
+            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+              {taDistrictStaff.length} Officers Registered
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-2.5 text-center">Sl. No</th>
+                  <th className="px-3 py-2.5">Officer Name</th>
+                  <th className="px-3 py-2.5">Designation</th>
+                  <th className="px-3 py-2.5 text-center">Total KM</th>
+                  <th className="px-3 py-2.5 text-center">Gross Claim (₹)</th>
+                  <th className="px-3 py-2.5 text-center">Deductions (₹)</th>
+                  <th className="px-3 py-2.5 text-center">Net Approved (₹)</th>
+                  <th className="px-3 py-2.5 text-center">Status</th>
+                  <th className="px-3 py-2.5 text-center">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {taDistrictStaff.map((staff, idx) => {
+                  const staffKey = staff.id || staff.name;
+                  const log = taSummaryList.find(l => (l.staff_key && l.staff_key.toLowerCase() === staffKey.toLowerCase()) || (l.staff_name && l.staff_name.toLowerCase() === staff.name.toLowerCase()));
+                  const isCurrent = (taSelectedStaffKey === staff.id || taSelectedStaffKey === staff.name);
+
+                  const totKm = log ? (log.total_km || 0) : 0;
+                  const gross = log ? (log.gross_amount || 0) : 0;
+                  const ded = log ? (log.deduction_amount || 0) : 0;
+                  const net = log ? (log.final_payable_amount || 0) : 0;
+
+                  return (
+                    <tr
+                      key={staff.id || staff.name}
+                      className={`hover:bg-slate-50 transition-colors ${
+                        isCurrent ? 'bg-teal-50/50 font-bold' : ''
+                      }`}
+                    >
+                      <td className="px-3 py-2.5 text-center text-slate-400 font-bold">{idx + 1}</td>
+                      <td className="px-3 py-2.5 font-bold text-slate-800">{staff.name}</td>
+                      <td className="px-3 py-2.5 text-slate-500">{staff.designation || 'Field Officer'}</td>
+                      <td className="px-3 py-2.5 text-center font-bold text-slate-700 tabular-num">{totKm} KM</td>
+                      <td className="px-3 py-2.5 text-center text-slate-700 tabular-num">₹ {gross.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-center text-rose-600 font-semibold tabular-num">
+                        {ded > 0 ? `- ₹ ${ded.toFixed(2)}` : '₹ 0.00'}
+                      </td>
+                      <td className="px-3 py-2.5 text-center font-black text-emerald-700 tabular-num">₹ {net.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 text-center">
+                        {log ? (
+                          <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            Saved &amp; Verified
+                          </span>
+                        ) : (
+                          <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                            Draft / Not Saved
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTaSelectedStaffKey(staff.id || staff.name);
+                            setTaDesignation(staff.designation || 'Field Officer');
+                          }}
+                          className={`text-[11px] font-bold px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            isCurrent
+                              ? 'bg-teal-700 text-white shadow-xs'
+                              : 'bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-200'
+                          }`}
+                        >
+                          {isCurrent ? 'Editing Now' : 'Inspect / Edit ➔'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
