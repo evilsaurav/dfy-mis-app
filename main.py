@@ -9989,3 +9989,361 @@ async def get_ta_analytics(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+ta_excel_semaphore = asyncio.Semaphore(1)
+
+
+@app.get("/api/ta-logs/export-excel")
+async def export_travel_allowance_excel(
+    month: str,
+    district: str,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Multi-Sheet District Travel Allowance & Bike Log Excel Export:
+    - Sheet 1: "DASHBOARD" - Master reconciliation payroll table with bold SUM formulas.
+    - Sheets 2..N: Individual staff bike logs matching the Bihar Health Mission standard format.
+    Guarded by asyncio.Semaphore(1) and garbage collection for Render RAM stability.
+    """
+    clean_dist = canonicalize_district(district)
+    clean_month = month.strip()
+
+    if not clean_dist:
+        raise HTTPException(status_code=400, detail="Valid district is required.")
+
+    # Sub-Admin Permission Guard
+    if admin.get("role") == "SUB_ADMIN":
+        allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+        if clean_dist.lower() not in allowed:
+            raise HTTPException(status_code=403, detail="Not authorized to export TA logs for this district.")
+
+    async with ta_excel_semaphore:
+        wb = None
+        try:
+            # 1. Fetch Staff Directory for this district
+            staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+            staff_list = []
+            seen_keys = set()
+            for sd in staff_docs:
+                sdata = sd.to_dict()
+                if canonicalize_district(sdata.get("district", "")).lower() == clean_dist.lower():
+                    if sdata.get("status", "Active") != "Deactivated":
+                        skey = sd.id
+                        sname = sdata.get("name", "Unknown").strip()
+                        staff_list.append({
+                            "key": skey,
+                            "name": sname,
+                            "designation": sdata.get("designation", "Field Officer")
+                        })
+                        seen_keys.add(skey)
+                        seen_keys.add(sname.lower())
+
+            # 2. Fetch all TA logs for this month and district
+            ta_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+            ta_by_staff = {}
+            for td in ta_docs:
+                tdata = td.to_dict()
+                if canonicalize_district(tdata.get("district", "")).lower() == clean_dist.lower():
+                    skey = tdata.get("staff_key") or td.id
+                    sname = tdata.get("staff_name", "").strip()
+                    ta_by_staff[skey] = tdata
+                    if sname:
+                        ta_by_staff[sname.lower()] = tdata
+                        # If staff was not in staff_directory, add to list
+                        if skey not in seen_keys and sname.lower() not in seen_keys:
+                            staff_list.append({
+                                "key": skey,
+                                "name": sname,
+                                "designation": tdata.get("designation", "Field Officer")
+                            })
+                            seen_keys.add(skey)
+                            seen_keys.add(sname.lower())
+
+            # Sort staff alphabetically
+            staff_list.sort(key=lambda x: x["name"].lower())
+
+            # Determine number of days in month
+            try:
+                yr, mn = map(int, clean_month.split("-"))
+                _, num_days = calendar.monthrange(yr, mn)
+            except Exception:
+                num_days = 30
+
+            # 3. Create openpyxl Workbook
+            wb = openpyxl.Workbook()
+            ws_dash = wb.active
+            ws_dash.title = "DASHBOARD"
+
+            # Title Row 1
+            ws_dash.merge_cells("A1:I1")
+            t_cell = ws_dash["A1"]
+            t_cell.value = "DOCTORS FOR YOU — BIHAR TB ELIMINATION MISSION"
+            t_cell.font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+            t_cell.fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+            t_cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws_dash.row_dimensions[1].height = 28
+
+            # Subtitle Row 2
+            ws_dash.merge_cells("A2:I2")
+            s_cell = ws_dash["A2"]
+            s_cell.value = f"MONTHLY TRAVEL ALLOWANCE & BIKE LOG RECONCILIATION DASHBOARD — {clean_month.upper()} — DISTRICT: {clean_dist.upper()}"
+            s_cell.font = Font(name="Calibri", size=11, bold=True, color="1E3A8A")
+            s_cell.fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
+            s_cell.alignment = Alignment(horizontal="center", vertical="center")
+            ws_dash.row_dimensions[2].height = 22
+
+            ws_dash.row_dimensions[3].height = 10
+
+            # Dashboard Table Headers
+            dash_headers = [
+                "Sl. No", "Employee Name", "Designation", "Type of TA",
+                "Total KM", "Gross Amount (₹)", "Deductions (₹)", "Deduction Reason", "Final Payable Amount (₹)"
+            ]
+            ws_dash.row_dimensions[4].height = 24
+            for c_idx, h_text in enumerate(dash_headers, 1):
+                cell = ws_dash.cell(row=4, column=c_idx, value=h_text)
+                cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+                cell.fill = PatternFill(start_color="0F766E", end_color="0F766E", fill_type="solid")
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                cell.border = EXCEL_HEADER_BORDER
+
+            # Populate Dashboard Data Rows
+            start_row = 5
+            curr_row = start_row
+            sl_no = 1
+            for staff in staff_list:
+                s_name = staff["name"]
+                s_desig = staff.get("designation", "Field Officer")
+                s_log = ta_by_staff.get(staff["key"]) or ta_by_staff.get(s_name.lower()) or {}
+
+                t_km = int(s_log.get("total_km") or 0)
+                gross = float(s_log.get("gross_amount") or round(t_km * 4.00, 2))
+                ded = float(s_log.get("deduction_amount") or 0.0)
+                ded_reason = str(s_log.get("deduction_reason") or "").strip()
+                final_p = float(s_log.get("final_payable_amount") or max(0.0, round(gross - ded, 2)))
+
+                row_vals = [
+                    sl_no,
+                    s_name,
+                    s_desig,
+                    "Bike Log Reimbursement (@ ₹4/KM)",
+                    t_km,
+                    gross,
+                    ded,
+                    ded_reason,
+                    final_p
+                ]
+
+                for c_idx, val in enumerate(row_vals, 1):
+                    c = ws_dash.cell(row=curr_row, column=c_idx, value=val)
+                    c.border = EXCEL_THIN_BORDER
+                    c.font = Font(name="Calibri", size=10)
+                    if c_idx in [1, 5, 6, 7, 9]:
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+
+                curr_row += 1
+                sl_no += 1
+
+            # Grand Total Row
+            last_data_row = curr_row - 1
+            if last_data_row >= start_row:
+                tot_vals = [
+                    "TOTAL",
+                    "",
+                    "",
+                    "",
+                    f"=SUM(E{start_row}:E{last_data_row})",
+                    f"=SUM(F{start_row}:F{last_data_row})",
+                    f"=SUM(G{start_row}:G{last_data_row})",
+                    "",
+                    f"=SUM(I{start_row}:I{last_data_row})"
+                ]
+                for c_idx, val in enumerate(tot_vals, 1):
+                    c = ws_dash.cell(row=curr_row, column=c_idx, value=val)
+                    c.font = Font(name="Calibri", size=11, bold=True, color="1E3A8A")
+                    c.fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+                    c.border = EXCEL_HEADER_BORDER
+                    if c_idx in [1, 5, 6, 7, 9]:
+                        c.alignment = Alignment(horizontal="center", vertical="center")
+                    else:
+                        c.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Column auto-fit for DASHBOARD
+            for col in ws_dash.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.value and not str(cell.value).startswith("="):
+                        max_len = max(max_len, len(str(cell.value)))
+                ws_dash.column_dimensions[col_letter].width = max(max_len + 3, 14)
+
+            # 4. Sheets 2..N: Individual Staff Bike Logs
+            for staff in staff_list:
+                s_name = staff["name"]
+                clean_sheet_name = re.sub(r'[:\\/?*\[\]]', '', s_name).strip()[:31] or f"Staff_{staff['key']}"
+                ws = wb.create_sheet(title=clean_sheet_name)
+
+                s_log = ta_by_staff.get(staff["key"]) or ta_by_staff.get(s_name.lower()) or {}
+                daily_logs = s_log.get("daily_logs") or {}
+
+                # Title
+                ws.merge_cells("A1:H1")
+                ws["A1"] = "DOCTORS FOR YOU — BIHAR TB ELIMINATION MISSION"
+                ws["A1"].font = Font(name="Calibri", size=12, bold=True, color="FFFFFF")
+                ws["A1"].fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+                ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+                ws.row_dimensions[1].height = 24
+
+                # Subtitle
+                ws.merge_cells("A2:H2")
+                ws["A2"] = f"BIKE TRAVEL LOG BOOK & TA CLAIM — {clean_month.upper()}"
+                ws["A2"].font = Font(name="Calibri", size=10, bold=True, color="1E293B")
+                ws["A2"].fill = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
+                ws["A2"].alignment = Alignment(horizontal="center", vertical="center")
+                ws.row_dimensions[2].height = 20
+
+                # Metadata
+                ws["A3"] = "Employee Name:"; ws["A3"].font = Font(bold=True)
+                ws["B3"] = s_name; ws["B3"].font = Font(bold=True, color="1E3A8A")
+                ws["D3"] = "District:"; ws["D3"].font = Font(bold=True)
+                ws["E3"] = clean_dist
+                ws["G3"] = "Rate:"; ws["G3"].font = Font(bold=True)
+                ws["H3"] = "₹4.00 / KM"; ws["H3"].font = Font(bold=True, color="047857")
+
+                ws["A4"] = "Designation:"; ws["A4"].font = Font(bold=True)
+                ws["B4"] = staff.get("designation", "Field Officer")
+                ws["D4"] = "Month:"; ws["D4"].font = Font(bold=True)
+                ws["E4"] = clean_month
+                ws["G4"] = "Vehicle Type:"; ws["G4"].font = Font(bold=True)
+                ws["H4"] = "Two Wheeler (Motorbike)"
+
+                ws.row_dimensions[5].height = 8
+
+                # Table Headers
+                day_headers = ["Date", "Initial Reading (KM)", "Final Reading (KM)", "Total KM", "Rate (₹)", "Amount (₹)", "Route (From - To)", "Purpose & Remarks"]
+                ws.row_dimensions[6].height = 22
+                for c_idx, h_text in enumerate(day_headers, 1):
+                    c = ws.cell(row=6, column=c_idx, value=h_text)
+                    c.font = Font(name="Calibri", size=9, bold=True, color="FFFFFF")
+                    c.fill = PatternFill(start_color="334155", end_color="334155", fill_type="solid")
+                    c.alignment = Alignment(horizontal="center", vertical="center")
+                    c.border = EXCEL_HEADER_BORDER
+
+                first_day_row = 7
+                d_row = first_day_row
+                for day in range(1, num_days + 1):
+                    date_str = f"{clean_month}-{day:02d}"
+                    day_entry = daily_logs.get(date_str) or {}
+
+                    init_r = day_entry.get("initial_reading", "") if day_entry else ""
+                    final_r = day_entry.get("final_reading", "") if day_entry else ""
+                    d_km = int(day_entry.get("total_km") or 0) if day_entry else 0
+                    rate = 4.00
+                    d_amt = float(day_entry.get("amount") or round(d_km * rate, 2)) if day_entry else 0.0
+
+                    from_loc = str(day_entry.get("from_location") or "").strip()
+                    to_loc = str(day_entry.get("to_location") or "").strip()
+                    route = f"{from_loc} to {to_loc}" if (from_loc and to_loc) else (from_loc or to_loc)
+
+                    purpose = str(day_entry.get("purpose") or "").strip()
+                    remarks = str(day_entry.get("remarks") or "").strip()
+                    combined_purpose = f"{purpose} ({remarks})" if (purpose and remarks) else (purpose or remarks)
+
+                    day_vals = [
+                        date_str,
+                        init_r if init_r != 0 else "",
+                        final_r if final_r != 0 else "",
+                        d_km,
+                        rate,
+                        d_amt,
+                        route,
+                        combined_purpose
+                    ]
+
+                    for c_idx, val in enumerate(day_vals, 1):
+                        c = ws.cell(row=d_row, column=c_idx, value=val)
+                        c.border = EXCEL_THIN_BORDER
+                        c.font = Font(name="Calibri", size=9)
+                        if c_idx in [1, 2, 3, 4, 5, 6]:
+                            c.alignment = Alignment(horizontal="center", vertical="center")
+                        else:
+                            c.alignment = Alignment(horizontal="left", vertical="center")
+                    d_row += 1
+
+                last_day_row = d_row - 1
+
+                # Summary Box
+                sum_row_1 = last_day_row + 2
+                ws.cell(row=sum_row_1, column=3, value="Total KM Claimed:").font = Font(bold=True)
+                c_tot_km = ws.cell(row=sum_row_1, column=4, value=f"=SUM(D{first_day_row}:D{last_day_row})")
+                c_tot_km.font = Font(bold=True, color="1E3A8A")
+
+                ws.cell(row=sum_row_1, column=6, value="Gross TA Claim:").font = Font(bold=True)
+                c_tot_claim = ws.cell(row=sum_row_1, column=7, value=f"=SUM(F{first_day_row}:F{last_day_row})")
+                c_tot_claim.font = Font(bold=True, color="1E3A8A")
+
+                ded_amt = float(s_log.get("deduction_amount") or 0.0)
+                ded_reas = str(s_log.get("deduction_reason") or "").strip()
+                sum_row_2 = sum_row_1 + 1
+                c_ded_label = ws.cell(row=sum_row_2, column=3, value="Admin Deductions:")
+                c_ded_label.font = Font(bold=True, color="DC2626")
+                c_ded_val = ws.cell(row=sum_row_2, column=4, value=ded_amt)
+                c_ded_val.font = Font(bold=True, color="DC2626")
+
+                ws.cell(row=sum_row_2, column=6, value="Deduction Reason:").font = Font(bold=True)
+                ws.cell(row=sum_row_2, column=7, value=ded_reas).font = Font(size=9)
+
+                final_amt = float(s_log.get("final_payable_amount") or 0.0)
+                sum_row_3 = sum_row_2 + 1
+                for c_col, (lbl, val) in [(3, ("Net Approved Payout:", final_amt)), (6, ("Status:", "Approved for Payroll"))]:
+                    c_lbl = ws.cell(row=sum_row_3, column=c_col, value=lbl)
+                    c_lbl.font = Font(bold=True, color="047857", size=10)
+                    c_lbl.fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+                    c_v = ws.cell(row=sum_row_3, column=c_col + 1, value=val)
+                    c_v.font = Font(bold=True, color="047857", size=10)
+                    c_v.fill = PatternFill(start_color="D1FAE5", end_color="D1FAE5", fill_type="solid")
+
+                # Signatures Line
+                sig_line_row = sum_row_3 + 3
+                ws.cell(row=sig_line_row, column=1, value="____________________________________")
+                ws.cell(row=sig_line_row, column=4, value="____________________________________")
+                ws.cell(row=sig_line_row, column=7, value="____________________________________")
+
+                sig_label_row = sig_line_row + 1
+                ws.cell(row=sig_label_row, column=1, value="Signature of Field Officer").font = Font(bold=True, size=9)
+                ws.cell(row=sig_label_row, column=4, value="Verified by District Coordinator").font = Font(bold=True, size=9)
+                ws.cell(row=sig_label_row, column=7, value="Approved by State Accounts").font = Font(bold=True, size=9)
+
+                # Column auto-fit for Staff Sheet
+                for col in ws.columns:
+                    max_len = 0
+                    col_letter = get_column_letter(col[0].column)
+                    for cell in col:
+                        if cell.value and not str(cell.value).startswith("="):
+                            max_len = max(max_len, len(str(cell.value)))
+                    ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+            # Output to stream
+            output = io.BytesIO()
+            wb.save(output)
+            output.seek(0)
+            content_bytes = output.getvalue()
+
+            filename = f"DFY_TA_Bike_Log_{clean_dist}_{clean_month}.xlsx"
+            headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+            return ExcelStreamingResponse(
+                content_bytes,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers=headers
+            )
+        finally:
+            if wb:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
+            gc.collect()
