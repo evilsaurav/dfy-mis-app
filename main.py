@@ -9551,5 +9551,441 @@ async def update_pacing_settings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==============================================================================
+# TRAVEL ALLOWANCE (TA) & BIKE LOG MANAGEMENT MODULE (v2.8.5)
+# ==============================================================================
+
+class DailyTaEntry(BaseModel):
+    initial_reading: Optional[int] = 0
+    final_reading: Optional[int] = 0
+    total_km: Optional[int] = 0
+    is_override: Optional[bool] = False
+    rate: Optional[float] = 4.00
+    amount: Optional[float] = 0.00
+    from_location: Optional[str] = ""
+    to_location: Optional[str] = ""
+    purpose: Optional[str] = ""
+    remarks: Optional[str] = ""
+
+class SaveTaLogRequest(BaseModel):
+    month: str                         # Format: YYYY-MM
+    district: str
+    staff_name: str
+    staff_key: str
+    designation: Optional[str] = "Field Officer"
+    daily_logs: Dict[str, DailyTaEntry] = {}  # Key: YYYY-MM-DD
+    deduction_amount: Optional[float] = 0.00
+    deduction_reason: Optional[str] = ""
+    admin_final_remarks: Optional[str] = ""
 
 
+def build_ta_doc_id(month: str, district: str, staff_key: str) -> str:
+    clean_month = month.strip()
+    clean_dist = canonicalize_district(district).lower().replace(" ", "")
+    clean_skey = staff_key.strip().lower().replace(" ", "")
+    if clean_skey.startswith(f"{clean_dist}_"):
+        return f"{clean_month}_{clean_skey}"
+    elif clean_skey.startswith(clean_dist):
+        return f"{clean_month}_{clean_skey}"
+    else:
+        return f"{clean_month}_{clean_dist}_{clean_skey}"
+
+
+@app.get("/api/ta-logs")
+async def get_ta_logs(
+    month: str,
+    district: Optional[str] = None,
+    staff_key: Optional[str] = None,
+    fo_name: Optional[str] = None,
+    pin: Optional[str] = None,
+    admin: Optional[dict] = Depends(get_optional_admin)
+):
+    """
+    Query monthly Travel Allowance logs.
+    - Admins/Sub-Admins: Full query access bounded by allowed_districts.
+    - Field Officers: Strict Read-Only access to their own monthly ledger verified via PIN.
+    """
+    try:
+        clean_month = month.strip()
+        is_admin = admin is not None
+        allowed_districts = []
+
+        if is_admin:
+            if admin.get("role") == "SUB_ADMIN":
+                allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+                if district:
+                    c_dist = canonicalize_district(district).lower()
+                    if c_dist not in allowed_districts:
+                        raise HTTPException(status_code=403, detail="Access denied for this district.")
+        else:
+            # Field Officer Authentication via PIN
+            if not district or (not staff_key and not fo_name) or not pin:
+                raise HTTPException(status_code=401, detail="Authentication required (Admin token or FO credentials with PIN).")
+
+            c_wp = canonicalize_district(district)
+            target_name = (fo_name or staff_key or "").strip()
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', target_name).lower()
+
+            candidate_ids = [
+                f"{c_wp}_{target_name}".replace(" ", "").lower(),
+                (staff_key or "").strip().lower(),
+                f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
+            ]
+            if "aurangabad" in c_wp.lower():
+                candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{target_name}".replace(" ", "").lower()])
+            if "champaran" in c_wp.lower():
+                candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+            if "bhojpur" in c_wp.lower():
+                candidate_ids.extend([f"bhojpur_{clean_fo}"])
+            candidate_ids = [cid for cid in dict.fromkeys(candidate_ids) if cid]
+
+            pin_valid = False
+            for cid in candidate_ids:
+                try:
+                    s_doc = await asyncio.to_thread(lambda d_id=cid: db.collection("staff_directory").document(d_id).get())
+                    if s_doc.exists:
+                        stored_pin = str(s_doc.to_dict().get("pin", ""))
+                        if verify_password(str(pin), stored_pin) or str(pin).strip() == stored_pin.strip():
+                            pin_valid = True
+                            break
+                except Exception:
+                    pass
+
+            if not pin_valid:
+                raise HTTPException(status_code=401, detail="Invalid PIN or credentials.")
+
+            # Lock staff_key to the requesting FO
+            staff_key = staff_key or candidate_ids[0]
+
+        # Target staff single lookup
+        if staff_key and district:
+            c_dist = canonicalize_district(district)
+            doc_id = build_ta_doc_id(clean_month, c_dist, staff_key)
+
+            doc_snap = await asyncio.to_thread(lambda: db.collection("travel_allowance_logs").document(doc_id).get())
+            if doc_snap.exists:
+                return {"success": True, "logs": [doc_snap.to_dict()]}
+
+            # Fallback search across month documents if ID casing differed
+            all_month_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+            matched = []
+            clean_skey = staff_key.strip().lower().replace(" ", "")
+            for d in all_month_docs:
+                dat = d.to_dict()
+                if canonicalize_district(dat.get("district", "")).lower() == c_dist.lower():
+                    if dat.get("staff_key", "").strip().lower().replace(" ", "") == clean_skey:
+                        matched.append(dat)
+            return {"success": True, "logs": matched}
+
+        # Multi-record query for Admin/District Coordinators
+        query_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+        results = []
+        for d in query_docs:
+            dat = d.to_dict()
+            doc_dist = canonicalize_district(dat.get("district", "")).lower()
+
+            if district:
+                if doc_dist != canonicalize_district(district).lower():
+                    continue
+
+            if allowed_districts and doc_dist not in allowed_districts:
+                continue
+
+            results.append(dat)
+
+        return {"success": True, "logs": results}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ta-logs/save")
+async def save_ta_log(
+    req: SaveTaLogRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    Save or update monthly Travel Allowance log for a staff member.
+    Enforces deterministic ₹4.00/KM rate, deduction accounting, Sub-Admin district boundary checks, and audit logging.
+    """
+    try:
+        clean_dist = canonicalize_district(req.district)
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+
+        # Sub-Admin District Isolation
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+            if clean_dist.lower() not in allowed:
+                raise HTTPException(status_code=403, detail="Not authorized to modify TA logs for this district.")
+
+        # Recalculate daily entries deterministically
+        calculated_daily = {}
+        total_km = 0
+        for day_str, entry in req.daily_logs.items():
+            init_r = max(0, int(entry.initial_reading or 0))
+            final_r = max(0, int(entry.final_reading or 0))
+
+            if entry.is_override:
+                day_km = max(0, int(entry.total_km or 0))
+            else:
+                if final_r >= init_r and init_r > 0:
+                    day_km = final_r - init_r
+                else:
+                    day_km = max(0, int(entry.total_km or 0))
+
+            day_amount = round(day_km * 4.00, 2)
+            total_km += day_km
+            calculated_daily[day_str] = {
+                "initial_reading": init_r,
+                "final_reading": final_r,
+                "total_km": day_km,
+                "is_override": bool(entry.is_override),
+                "rate": 4.00,
+                "amount": day_amount,
+                "from_location": (entry.from_location or "").strip(),
+                "to_location": (entry.to_location or "").strip(),
+                "purpose": (entry.purpose or "").strip(),
+                "remarks": (entry.remarks or "").strip()
+            }
+
+        gross_amount = round(total_km * 4.00, 2)
+        deduction_amount = max(0.0, round(float(req.deduction_amount or 0.0), 2))
+        deduction_reason = (req.deduction_reason or "").strip()
+        if deduction_amount > 0 and not deduction_reason:
+            deduction_reason = "Administrative deduction"
+
+        final_payable_amount = max(0.0, round(gross_amount - deduction_amount, 2))
+
+        doc_id = build_ta_doc_id(req.month, clean_dist, req.staff_key)
+        doc_ref = db.collection("travel_allowance_logs").document(doc_id)
+
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        ta_doc = {
+            "doc_id": doc_id,
+            "month": req.month.strip(),
+            "district": clean_dist,
+            "staff_name": req.staff_name.strip(),
+            "staff_key": req.staff_key.strip(),
+            "designation": (req.designation or "Field Officer").strip(),
+            "rate_per_km": 4.00,
+            "total_km": total_km,
+            "gross_amount": gross_amount,
+            "deduction_amount": deduction_amount,
+            "deduction_reason": deduction_reason,
+            "final_payable_amount": final_payable_amount,
+            "admin_final_remarks": (req.admin_final_remarks or "").strip(),
+            "daily_logs": calculated_daily,
+            "last_updated_at": now_str,
+            "last_updated_by": admin.get("name") or admin.get("username", "Admin"),
+            "last_updated_role": admin.get("role", "SUB_ADMIN")
+        }
+
+        await asyncio.to_thread(lambda: doc_ref.set(ta_doc, merge=True))
+
+        # Evict TA Caches
+        cache.delete_prefix("ta_")
+        cache.delete(f"ta_logs_{req.month}_{clean_dist.lower()}")
+        cache.delete(f"ta_analytics_{req.month}_{clean_dist.lower()}")
+        cache.delete("ta_analytics_all")
+
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        await log_admin_activity(
+            action_type="TA_LOG_SAVED",
+            details=f"Saved TA & Bike Log for {req.staff_name} ({clean_dist}) for {req.month}: {total_km} KM, Payable: ₹{final_payable_amount}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist
+        )
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "total_km": total_km,
+            "gross_amount": gross_amount,
+            "deduction_amount": deduction_amount,
+            "final_payable_amount": final_payable_amount,
+            "message": f"TA Log for {req.staff_name} saved successfully."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ta-logs/prefill-from-reports")
+async def prefill_ta_log_from_reports(
+    month: str,
+    district: str,
+    staff_name: str,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    1-Click Pre-fill: Scans daily_field_reports for the staff member in that district/month
+    and synthesizes daily bike meter logs (morning_km, evening_km, visited_names).
+    """
+    try:
+        clean_dist = canonicalize_district(district)
+        if not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid district is required.")
+
+        # Sub-Admin Permission Check
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+            if clean_dist.lower() not in allowed:
+                raise HTTPException(status_code=403, detail="Not authorized for this district.")
+
+        # Query reports matching district
+        rep_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("working_place", "==", district).stream()))
+        if not rep_docs:
+            rep_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").stream()))
+
+        clean_target_name = staff_name.strip().lower()
+        month_prefix = month.strip()
+        daily_logs = {}
+        total_km = 0
+
+        for r_snap in rep_docs:
+            rep = r_snap.to_dict()
+            r_wp = canonicalize_district(rep.get("working_place", ""))
+            if r_wp.lower() != clean_dist.lower():
+                continue
+
+            r_fo = str(rep.get("fo_name") or "").strip().lower()
+            if r_fo != clean_target_name:
+                continue
+
+            r_date = str(rep.get("date") or "").strip()
+            if not r_date.startswith(month_prefix):
+                continue
+
+            m_km = int(rep.get("morning_km") or 0)
+            e_km = int(rep.get("evening_km") or 0)
+            rep_tot = int(rep.get("total_km") or 0)
+
+            if e_km >= m_km and m_km > 0:
+                d_km = e_km - m_km
+            elif rep_tot > 0:
+                d_km = rep_tot
+            else:
+                d_km = 0
+
+            visited = str(rep.get("visited_names") or "").strip()
+            field_area = str(rep.get("field_work_area") or "").strip()
+            to_loc = field_area if field_area else (visited[:50] if visited else "")
+            purpose = f"Field Visits: {visited}" if visited else "Field Routine Investigation"
+
+            day_amt = round(d_km * 4.00, 2)
+            total_km += d_km
+            daily_logs[r_date] = {
+                "initial_reading": m_km,
+                "final_reading": e_km,
+                "total_km": d_km,
+                "is_override": False,
+                "rate": 4.00,
+                "amount": day_amt,
+                "from_location": clean_dist,
+                "to_location": to_loc,
+                "purpose": purpose,
+                "remarks": ""
+            }
+
+        daily_logs = dict(sorted(daily_logs.items()))
+        gross_amount = round(total_km * 4.00, 2)
+
+        return {
+            "success": True,
+            "month": month,
+            "district": clean_dist,
+            "staff_name": staff_name,
+            "daily_logs": daily_logs,
+            "total_km": total_km,
+            "gross_amount": gross_amount
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/ta-logs/analytics")
+async def get_ta_analytics(
+    month: Optional[str] = None,
+    district: Optional[str] = "All",
+    admin: Optional[dict] = Depends(get_optional_admin)
+):
+    """
+    Presentation-Ready Mobility Analytics:
+    - Total Project KM (Cumulative / YTD)
+    - Monthly Total KM
+    - FO Daily Mobility Average
+    - Gross TA, Deductions, and Net Disbursed TA
+    """
+    try:
+        allowed_districts = []
+        if admin and admin.get("role") == "SUB_ADMIN":
+            allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+            if district and district != "All":
+                c_dist = canonicalize_district(district).lower()
+                if c_dist not in allowed_districts:
+                    raise HTTPException(status_code=403, detail="Not authorized for this district.")
+
+        target_month = (month.strip() if month else "") or get_ist_now().strftime("%Y-%m")
+        clean_dist = canonicalize_district(district) if district and district != "All" else None
+
+        all_ta_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").stream()))
+
+        total_project_km_ytd = 0
+        month_total_km = 0
+        total_ta_gross = 0.0
+        total_ta_deductions = 0.0
+        total_ta_final_payable = 0.0
+        active_days_count = 0
+
+        for d_snap in all_ta_docs:
+            d = d_snap.to_dict()
+            doc_dist = canonicalize_district(d.get("district", "")).lower()
+
+            if allowed_districts and doc_dist not in allowed_districts:
+                continue
+
+            if clean_dist and doc_dist != clean_dist.lower():
+                continue
+
+            # Accumulate YTD project KM across all months for the district scope
+            doc_km = int(d.get("total_km") or 0)
+            total_project_km_ytd += doc_km
+
+            # Filter for requested month metrics
+            if d.get("month", "").strip() == target_month:
+                month_total_km += doc_km
+                total_ta_gross += float(d.get("gross_amount") or 0.0)
+                total_ta_deductions += float(d.get("deduction_amount") or 0.0)
+                total_ta_final_payable += float(d.get("final_payable_amount") or 0.0)
+
+                daily_logs = d.get("daily_logs") or {}
+                for day_data in daily_logs.values():
+                    if int(day_data.get("total_km") or 0) > 0:
+                        active_days_count += 1
+
+        avg_daily_km_per_fo = round(month_total_km / active_days_count, 1) if active_days_count > 0 else 0.0
+
+        return {
+            "success": True,
+            "month": target_month,
+            "district": district or "All",
+            "total_project_km_ytd": total_project_km_ytd,
+            "month_total_km": month_total_km,
+            "avg_daily_km_per_fo": avg_daily_km_per_fo,
+            "total_ta_gross": round(total_ta_gross, 2),
+            "total_ta_deductions": round(total_ta_deductions, 2),
+            "total_ta_final_payable": round(total_ta_final_payable, 2)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
