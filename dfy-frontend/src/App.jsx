@@ -513,6 +513,24 @@ const MyProfileDashboard = ({
   useEffect(() => {
     if (!formData?.working_place || !formData?.fo_name || !formData?.pin) return;
     let isCancelled = false;
+    const cacheKey = `dfy_fo_ta_cache_${formData.working_place}_${formData.fo_name}_${foTaMonth}`.replace(/\s+/g, '_').toLowerCase();
+
+    // 1. Instant zero-read cache hydration from local storage
+    try {
+      const rawCached = localStorage.getItem(cacheKey);
+      if (rawCached) {
+        const parsed = JSON.parse(rawCached);
+        if (parsed && parsed.data) {
+          setFoTaData(parsed.data);
+          // If cached less than 10 minutes ago, keep cached data without spamming network
+          if (parsed.timestamp && Date.now() - parsed.timestamp < 600000) {
+            setFoTaLoading(false);
+            return;
+          }
+        }
+      }
+    } catch (e) {}
+
     const fetchFoTa = async () => {
       setFoTaLoading(true);
       try {
@@ -527,7 +545,11 @@ const MyProfileDashboard = ({
         if (res.ok) {
           const data = await res.json();
           if (!isCancelled && data.success && data.logs && data.logs.length > 0) {
-            setFoTaData(data.logs[0]);
+            const logItem = data.logs[0];
+            setFoTaData(logItem);
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify({ data: logItem, timestamp: Date.now() }));
+            } catch (e) {}
           } else if (!isCancelled) {
             setFoTaData(null);
           }
@@ -5340,6 +5362,7 @@ function App() {
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
     culture_dst_ids: [],
+    total_km: "",
     remark: "", visited_names: []
   });
 
@@ -6519,6 +6542,7 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
+          total_km: "",
           remark: "", visited_names: []
         }));
 
@@ -6576,6 +6600,7 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
+          total_km: "",
           remark: "", visited_names: []
         }));
 
@@ -7242,6 +7267,45 @@ function App() {
                         ))}
                       </ul>
                     )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Field Travel / Bike Distance (Optional) */}
+              <div id="sec-travel-km" className="grid grid-cols-1 gap-4 mt-4 scroll-mt-36">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-amber-200/90 overflow-hidden">
+                  <div className="bg-amber-50/80 px-5 py-4 border-b border-amber-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">🛵</span>
+                      <div>
+                        <label className="block text-xs font-black text-amber-950 tracking-wide uppercase">Aaj Ka Field Safar (Travel KM)</label>
+                        <span className="block text-[10px] text-amber-800/80 font-medium">Daily Two-Wheeler / Bike Distance (Optional)</span>
+                      </div>
+                    </div>
+                    <span className="text-[9px] font-black uppercase tracking-wider bg-amber-200/70 text-amber-900 px-2.5 py-0.5 rounded-full border border-amber-300/60">
+                      TA Log
+                    </span>
+                  </div>
+                  <div className="p-4 sm:p-5">
+                    <div className="flex items-center gap-3">
+                      <div className="relative flex-1">
+                        <input 
+                          type="text" 
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={formData.total_km || ''} 
+                          onChange={(e) => setFormData({ ...formData, total_km: e.target.value.replace(/\D/g, '') })} 
+                          placeholder="e.g. 25" 
+                          className="w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-num" 
+                        />
+                        <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-slate-400">
+                          KM
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-2 font-medium">
+                      💡 Yeh distance Admin TA studio mein auto-fill hoga aur month-end travel allowance banega.
+                    </p>
                   </div>
                 </div>
               </div>

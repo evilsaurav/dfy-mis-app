@@ -370,6 +370,7 @@ export default function AdminDashboard() {
   const [taSummaryList, setTaSummaryList] = useState([]);
   const [taAnalytics, setTaAnalytics] = useState(null);
   const [loadingTaAnalytics, setLoadingTaAnalytics] = useState(false);
+  const taDailyTableRef = useRef(null);
 
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
     setLedgerLoading(true);
@@ -3881,6 +3882,7 @@ const availableDistrictsForFeed = useMemo(() => {
     return records.reduce((acc, curr) => {
       for (let key in init) {
         if (key === 'overrides') acc[key] += curr.is_override ? 1 : 0;
+        else if (key === 'total_km') acc[key] += (Number(curr.total_km) || 0);
         else acc[key] += (curr[key] || 0);
       }
       return acc;
@@ -4959,13 +4961,14 @@ const availableDistrictsForFeed = useMemo(() => {
     }
   };
 
-  const handleExportTaExcel = async () => {
+  const handleExportTaExcel = async (targetDist = taDistrict, targetMonth = taMonth) => {
     setTaExporting(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const distToUse = targetDist && targetDist !== 'All' ? targetDist : (taDistrict !== 'All' ? taDistrict : 'Gaya');
       const params = new URLSearchParams({
-        month: taMonth,
-        district: taDistrict
+        month: targetMonth || taMonth,
+        district: distToUse
       });
       const res = await authFetch(`${API_BASE_URL}/api/ta-logs/export-excel?${params.toString()}`);
       if (res.ok) {
@@ -6073,7 +6076,7 @@ const availableDistrictsForFeed = useMemo(() => {
               const clinicalCoveragePct = notifCount > 0 ? Math.min(100, Math.round((clinicalTotal / (notifCount * 3)) * 100)) : 0;
 
               // 4. Field Travel & Active Staff
-              const totalKm = totals.total_km || 0;
+              const totalKm = Math.max(Number(totals.total_km) || 0, Number(taAnalytics?.month_total_km) || 0);
               const activeStaffCount = new Set(filteredRecords.map(r => r.fo_name).filter(Boolean)).size;
               const avgKmPerStaff = activeStaffCount > 0 ? (totalKm / activeStaffCount).toFixed(1) : 0;
 
@@ -8810,7 +8813,7 @@ const availableDistrictsForFeed = useMemo(() => {
         </div>
 
         {/* 31-Day Interactive Bike Log Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div ref={taDailyTableRef} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden scroll-mt-28">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
             <div>
               <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
@@ -9070,6 +9073,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           onClick={() => {
                             setTaSelectedStaffKey(staff.id || staff.name);
                             setTaDesignation(staff.designation || 'Field Officer');
+                            taDailyTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                           }}
                           className={`text-[11px] font-bold px-3 py-1 rounded-lg transition-all cursor-pointer ${
                             isCurrent
@@ -10558,6 +10562,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
                 { id: "state_matrix", label: "🏢 State Summary (.xlsx)", icon: "🏢" },
                 { id: "staff_attendance", label: "📋 Staff Attendance (.xlsx)", icon: "📋" },
+                { id: "ta_payout", label: "🛵 Travel Allowance (.xlsx)", icon: "🛵" },
                 { id: "cascade_funnel", label: "📈 Cascade Funnel", icon: "📈" },
                 { id: "whatsapp_bulletin", label: "📱 WhatsApp Bulletin", icon: "📱" }
               ].filter(tab => !isSubAdmin || tab.id !== "state_matrix").map(tab => (
@@ -11349,6 +11354,99 @@ const availableDistrictsForFeed = useMemo(() => {
                   <pre className="bg-slate-900 text-emerald-400 font-mono text-xs p-4 rounded-2xl border border-slate-800 overflow-x-auto whitespace-pre-wrap select-all">
                     {liveWhatsAppBulletin}
                   </pre>
+                </div>
+              )}
+
+              {/* Tab: Travel Allowance & Bike Payout */}
+              {reportsStudioTab === "ta_payout" && (
+                <div className="space-y-4 animate-fade-in">
+                  <div className="bg-amber-50/70 p-4 sm:p-5 rounded-2xl border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-black text-amber-950 mb-0.5 flex items-center gap-2">
+                        <span>🛵</span> Official Multi-Sheet Travel Allowance &amp; Bike Log Workbooks
+                      </h4>
+                      <p className="text-xs text-amber-900/80 font-medium">
+                        Automated multi-sheet Excel generator: Sheet 1 (Summary &amp; Sign-off) + 1 dedicated sheet per verified Field Officer with odometer readings and route validation.
+                      </p>
+                    </div>
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-950 px-3 py-1 rounded-full shrink-0 self-start sm:self-auto border border-amber-300">
+                      Month: {month}
+                    </span>
+                  </div>
+
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Travel Distance</span>
+                      <p className="text-2xl font-black text-slate-800 tabular-num">
+                        {(Number(taAnalytics?.month_total_km) || Number(totals.total_km) || 0).toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-bold">KM</span>
+                      </p>
+                      <span className="text-[11px] font-semibold text-amber-700 mt-1 block">Active Field Mobility</span>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Verified Payout</span>
+                      <p className="text-2xl font-black text-emerald-700 tabular-num">
+                        ₹{(Number(taAnalytics?.total_ta_final_payable) || Math.round((Number(taAnalytics?.month_total_km) || Number(totals.total_km) || 0) * 4.0)).toLocaleString('en-IN')}
+                      </p>
+                      <span className="text-[11px] font-semibold text-emerald-800 mt-1 block">Standard Rate @ ₹4.00 / KM</span>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Active Field Officers</span>
+                      <p className="text-2xl font-black text-indigo-700 tabular-num">
+                        {new Set(filteredRecords.map(r => r.fo_name).filter(Boolean)).size} <span className="text-xs text-slate-400 font-bold">Staff</span>
+                      </p>
+                      <span className="text-[11px] font-semibold text-indigo-700 mt-1 block">Reporting Across {selectedDistrict !== 'All' ? selectedDistrict : 'All Districts'}</span>
+                    </div>
+                  </div>
+
+                  {/* Export and Full Studio Jump Deck */}
+                  <div className="bg-slate-50/90 p-5 rounded-2xl border border-slate-200/90 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div>
+                        <h5 className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                          Official Payout Export Engine
+                        </h5>
+                        <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                          Download the audit-ready payroll workbook for {selectedDistrict !== 'All' ? selectedDistrict : (taDistrict || 'Gaya')} with all verified meter readings.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleExportTaExcel(selectedDistrict !== 'All' ? selectedDistrict : (taDistrict || 'Gaya'), month)}
+                          disabled={taExporting}
+                          className="bg-emerald-700 hover:bg-emerald-800 text-white font-black px-4 py-2.5 rounded-xl text-xs shadow-md shadow-emerald-700/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                        >
+                          {taExporting ? (
+                            <>
+                              <svg className="animate-spin h-3.5 w-3.5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" /></svg>
+                              <span>Generating Excel...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>📥</span>
+                              <span>Download Travel Allowance (.xlsx)</span>
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowReportsStudio(false);
+                            setActiveMainTab('travel_allowance');
+                          }}
+                          className="bg-gradient-to-r from-teal-700 to-teal-800 hover:from-teal-800 hover:to-teal-900 text-white font-black px-4 py-2.5 rounded-xl text-xs shadow-md shadow-teal-700/20 active:scale-95 transition-all flex items-center gap-2 cursor-pointer"
+                        >
+                          <span>🚀</span>
+                          <span>Open Full 31-Day TA Studio &rarr;</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
 

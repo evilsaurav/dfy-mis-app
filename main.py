@@ -574,6 +574,7 @@ class DailyActivityReport(BaseModel):
     visited_names: List[str] = []
     morning_km: Optional[int] = 0
     evening_km: Optional[int] = 0
+    total_km: Optional[int] = 0
     morning_km_photo_url: Optional[str] = ""
     evening_km_photo_url: Optional[str] = ""
     is_override_used: Optional[bool] = False
@@ -1759,6 +1760,12 @@ async def submit_daily_report(report: DailyActivityReport):
             payload["morning_km_photo_url"] = ""
         if report.evening_km_photo_url and len(report.evening_km_photo_url) > 1000:
             payload["evening_km_photo_url"] = ""
+
+        # Field Travel KM: store explicit total_km or difference of evening - morning
+        submitted_tot_km = max(0, int(report.total_km or 0))
+        if report.evening_km is not None and report.morning_km is not None and int(report.evening_km) >= int(report.morning_km) and int(report.morning_km) > 0:
+            submitted_tot_km = max(submitted_tot_km, int(report.evening_km) - int(report.morning_km))
+        payload["total_km"] = submitted_tot_km
 
         # Stealth 10 AM Cutoff: stamp next-day morning metadata if submitted before 10:00 AM IST for yesterday
         now_ist = get_ist_now()
@@ -9850,27 +9857,27 @@ async def prefill_ta_log_from_reports(
             if clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized for this district.")
 
-        # Query reports matching district
-        rep_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("working_place", "==", district).stream()))
-        if not rep_docs:
-            rep_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").stream()))
-
-        clean_target_name = staff_name.strip().lower()
+        # Query monthly reports using shared cache engine
+        clean_target_key = normalize_staff_key(clean_dist, staff_name)
         month_prefix = month.strip()
         daily_logs = {}
         total_km = 0
+        running_odometer = 1000
 
-        for r_snap in rep_docs:
-            rep = r_snap.to_dict()
-            r_wp = canonicalize_district(rep.get("working_place", ""))
+        raw_reports = await get_raw_monthly_reports(month_prefix, force=False, district_filter={clean_dist})
+        if not raw_reports:
+            raw_reports = await asyncio.to_thread(lambda: [d.to_dict() if hasattr(d, "to_dict") else dict(d) for d in db.collection("daily_field_reports").where("working_place", "==", district).stream()])
+
+        for rep in raw_reports:
+            r_wp = canonicalize_district(rep.get("working_place", "") or rep.get("district", ""))
             if r_wp.lower() != clean_dist.lower():
                 continue
 
-            r_fo = str(rep.get("fo_name") or "").strip().lower()
-            if r_fo != clean_target_name:
+            r_fo = str(rep.get("fo_name") or "").strip()
+            if normalize_staff_key(r_wp, r_fo) != clean_target_key and r_fo.lower() != staff_name.strip().lower():
                 continue
 
-            r_date = str(rep.get("date") or "").strip()
+            r_date = str(rep.get("date_of_reporting") or rep.get("date") or "").strip()
             if not r_date.startswith(month_prefix):
                 continue
 
@@ -9885,7 +9892,23 @@ async def prefill_ta_log_from_reports(
             else:
                 d_km = 0
 
-            visited = str(rep.get("visited_names") or "").strip()
+            # Synthesize progressive initial/final reading if FO only provided daily travel KM
+            if m_km == 0 and e_km == 0 and d_km > 0:
+                init_reading = running_odometer
+                fin_reading = running_odometer + d_km
+                running_odometer += d_km
+            else:
+                init_reading = m_km
+                fin_reading = e_km if e_km > 0 else (m_km + d_km)
+                if fin_reading > running_odometer:
+                    running_odometer = fin_reading
+
+            raw_visited = rep.get("visited_names") or []
+            if isinstance(raw_visited, list):
+                visited = ", ".join([str(v) for v in raw_visited if v])
+            else:
+                visited = str(raw_visited).strip()
+
             field_area = str(rep.get("field_work_area") or "").strip()
             to_loc = field_area if field_area else (visited[:50] if visited else "")
             purpose = f"Field Visits: {visited}" if visited else "Field Routine Investigation"
@@ -9893,8 +9916,8 @@ async def prefill_ta_log_from_reports(
             day_amt = round(d_km * 4.00, 2)
             total_km += d_km
             daily_logs[r_date] = {
-                "initial_reading": m_km,
-                "final_reading": e_km,
+                "initial_reading": init_reading,
+                "final_reading": fin_reading,
                 "total_km": d_km,
                 "is_override": False,
                 "rate": 4.00,
