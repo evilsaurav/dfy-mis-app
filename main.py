@@ -362,6 +362,34 @@ def require_super_admin(admin: dict = Depends(get_current_admin)) -> dict:
         raise HTTPException(status_code=403, detail="Access denied. Super Admin authority required.")
     return admin
 
+def get_optional_admin(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+) -> Optional[dict]:
+    """
+    FastAPI security dependency for dual-auth endpoints (Admin or Field Officer).
+    Validates JWT token from 'Authorization: Bearer <token>' header or '?token=<token>' query param if present.
+    If no token is supplied, returns None cleanly without throwing 401.
+    If a token is supplied but expired or invalid, raises 401.
+    """
+    raw_token = None
+    if authorization and authorization.startswith("Bearer "):
+        raw_token = authorization.split("Bearer ", 1)[1].strip()
+    elif token:
+        raw_token = token.strip()
+
+    if not raw_token:
+        return None
+
+    try:
+        payload = jwt.decode(raw_token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid authentication token. Access denied.")
+
+
 # --- Sliding-Window Rate Limiter (Brute-Force Guard) ---
 class SlidingWindowRateLimiter:
     def __init__(self, max_attempts: int = 5, window_seconds: int = 600):
@@ -4466,14 +4494,60 @@ class EditIdRequest(BaseModel):
     pin: Optional[str] = ""
 
 @app.post("/api/reports/edit-id")
-async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_admin)):
+async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(get_optional_admin)):
     try:
         c_wp = canonicalize_district(req.working_place)
-        if admin.get("role") == "SUB_ADMIN":
-            allowed = admin.get("allowed_districts", [])
-            allowed_c = [canonicalize_district(a).lower() for a in allowed]
-            if "All" not in allowed and c_wp.lower() not in allowed_c and req.working_place.lower() not in allowed_c:
-                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit IDs in district '{req.working_place}'.")
+        is_admin = admin is not None
+
+        # Dual-Authentication & Authorization Enforcement
+        if req.edited_by == "Admin":
+            if not is_admin:
+                raise HTTPException(
+                    status_code=401, 
+                    detail="Authentication token required. Please log in as an administrator."
+                )
+            if admin.get("role") == "SUB_ADMIN":
+                allowed = admin.get("allowed_districts", [])
+                allowed_c = [canonicalize_district(a).lower() for a in allowed]
+                if "All" not in allowed and c_wp.lower() not in allowed_c and req.working_place.lower() not in allowed_c:
+                    raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit IDs in district '{req.working_place}'.")
+        else:
+            # Field Officer Authentication (PIN required)
+            if not req.pin or not str(req.pin).strip():
+                raise HTTPException(status_code=401, detail="PIN authorization is required for Field Officers.")
+
+            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
+            candidate_pin_ids = [
+                f"{c_wp}_{req.fo_name}".replace(" ", "").lower(),
+                f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
+                f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
+            ]
+            if "aurangabad" in c_wp.lower():
+                candidate_pin_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
+            if "champaran" in c_wp.lower():
+                candidate_pin_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+            if "bhojpur" in c_wp.lower():
+                candidate_pin_ids.extend([f"bhojpur_{clean_fo}"])
+            candidate_pin_ids = list(dict.fromkeys(candidate_pin_ids))
+
+            pin_match = False
+            staff_found = False
+            for pid in candidate_pin_ids:
+                try:
+                    staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(pid).get)
+                    if staff_doc.exists:
+                        staff_found = True
+                        real_p = str(staff_doc.to_dict().get("pin", ""))
+                        if verify_password(str(req.pin), real_p) or str(req.pin) == real_p:
+                            pin_match = True
+                            break
+                except Exception:
+                    pass
+            if staff_found and not pin_match:
+                raise HTTPException(status_code=401, detail="Invalid PIN authorization.")
+            if not pin_match and not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
+                raise HTTPException(status_code=401, detail="Invalid PIN authorization.")
+
         cat_key = req.category if req.category.endswith("_ids") else f"{req.category}_ids"
         
         if req.action not in ["replace", "delete", "add"]:
@@ -4486,24 +4560,6 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
                 lens_desc = "8 or 9" if 8 in valid_lens else "9"
                 raise HTTPException(status_code=400, detail=f"Invalid Patient ID '{clean_new_id}'. Must be exactly {lens_desc} digits.")
             req.new_id = clean_new_id
-            
-        if req.edited_by == "FO" and req.pin:
-            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
-            candidate_pin_ids = [
-                f"{c_wp}_{req.fo_name}".replace(" ", "").lower(),
-                f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
-                f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
-            ]
-            pin_match = False
-            for pid in candidate_pin_ids:
-                staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(pid).get)
-                if staff_doc.exists:
-                    real_p = str(staff_doc.to_dict().get("pin", ""))
-                    if verify_password(str(req.pin), real_p) or str(req.pin) == real_p:
-                        pin_match = True
-                        break
-            if not pin_match and not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
-                raise HTTPException(status_code=401, detail="Invalid PIN authorization.")
 
         candidate_doc_ids = [
             f"{c_wp}_{req.fo_name}_{req.date}".replace(" ", "_").lower(),
@@ -4537,7 +4593,7 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             doc_id = matching_docs[0].id
 
         # 🛡️ Strict 24-Hour Editing Window Rule for Field Officers
-        if req.edited_by == "FO":
+        if not is_admin or req.edited_by == "FO":
             is_expired = False
             evaluated = False
 
@@ -4665,9 +4721,14 @@ async def edit_patient_id(req: EditIdRequest, admin: dict = Depends(get_current_
             "edited_by": req.edited_by
         }
         await asyncio.to_thread(lambda: db.collection("id_edit_logs").add(log_entry))
-        actor_name = admin.get("name") or admin.get("username") or req.edited_by or "Admin"
-        actor_id = admin.get("user_id") or admin.get("username", "admin")
-        actor_role = admin.get("role", "SUB_ADMIN")
+        if admin:
+            actor_name = admin.get("name") or admin.get("username") or "Admin"
+            actor_id = admin.get("user_id") or admin.get("username", "admin")
+            actor_role = admin.get("role", "SUB_ADMIN")
+        else:
+            actor_name = req.fo_name
+            actor_id = f"{c_wp}_{req.fo_name}".replace(" ", "_").lower()
+            actor_role = "FIELD_OFFICER"
         await log_admin_activity(
             action_type=f"PATIENT_ID_{req.action.upper()}",
             details=f"{actor_name} ({actor_role}) {req.action}d ID in {cat_key} for {req.fo_name} on {req.date} (Old: {req.old_id}, New: {req.new_id})",
