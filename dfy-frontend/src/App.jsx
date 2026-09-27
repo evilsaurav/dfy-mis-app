@@ -11,6 +11,7 @@ import {
   getDistrictRegistry, 
   isPatientIdNotified 
 } from './offlineQueue'
+import { downloadOrShareCanvas } from './canvasShare'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
 const getLocalYMD = (d = new Date()) => {
@@ -1264,19 +1265,15 @@ const MyProfileDashboard = ({
         setIsGeneratingFoCard(false);
         return;
       }
-      const dataUrl = canvas.toDataURL('image/png');
       const cleanName = (formData.fo_name || 'Officer').trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '');
       const today = new Date();
       const monthStr = `${today.getFullYear()}_${String(today.getMonth() + 1).padStart(2, '0')}`;
       const filename = `DFY_Achievement_${cleanName}_${monthStr}.png`;
 
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      showToast('✓ Achievement card downloaded successfully!', 'success');
+      const result = await downloadOrShareCanvas(canvas, filename, `DFY Field Officer Achievement - ${formData.fo_name || 'Officer'}`);
+      if (result.success) {
+        showToast(result.method === 'share' ? '✓ Card ready in Apple Share Sheet!' : '✓ Achievement card downloaded successfully!', 'success');
+      }
     } catch (err) {
       console.error('Download FO card failed', err);
       showToast('Failed to download card', 'error');

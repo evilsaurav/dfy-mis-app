@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
+import { downloadOrShareCanvas } from './canvasShare';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -3069,14 +3070,11 @@ export default function AdminDashboard() {
       await generateTopPerformersPosterCanvas();
       const canvas = topPerformersCanvasRef.current;
       if (!canvas) return;
-      const dataUrl = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `DFY_Top_Performers_${topPerformersPeriod}_${month}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      showToast('✓ Poster downloaded successfully!', 'success');
+      const filename = `DFY_Top_Performers_${topPerformersPeriod}_${month}.png`;
+      const result = await downloadOrShareCanvas(canvas, filename, `DFY Bihar Statewide Top Performers - ${topPerformersPeriod} (${month})`);
+      if (result.success) {
+        showToast(result.method === 'share' ? '✓ Poster ready in Apple Share Sheet!' : '✓ Poster downloaded successfully!', 'success');
+      }
     } catch (err) {
       console.error('Download poster failed', err);
       showToast('Failed to download poster', 'error');
