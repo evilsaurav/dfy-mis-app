@@ -6423,11 +6423,13 @@ class AdminUserLoginReq(BaseModel):
     username: str
     password: str
 
+VALID_ADMIN_ROLES = {"SUPER_ADMIN", "MAIN_INCHARGE", "MIS", "SUB_ADMIN"}
+
 class AdminUserCreateReq(BaseModel):
     username: str
     name: str
     password: str
-    role: Optional[str] = "SUB_ADMIN" # "SUPER_ADMIN" or "SUB_ADMIN"
+    role: Optional[str] = "SUB_ADMIN" # "SUPER_ADMIN", "MAIN_INCHARGE", "MIS", or "SUB_ADMIN"
     allowed_districts: Optional[List[str]] = ["All"]
     permissions: Optional[Dict[str, bool]] = {
         "can_view_dashboard": True,
@@ -6726,12 +6728,16 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
         if existing.exists:
             raise HTTPException(status_code=400, detail=f"Username '{clean_user}' is already taken.")
             
+        clean_role = (req.role or "SUB_ADMIN").strip().upper()
+        if clean_role not in VALID_ADMIN_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role '{req.role}'. Must be one of: {', '.join(sorted(VALID_ADMIN_ROLES))}.")
+            
         new_user = {
             "user_id": clean_user,
             "username": clean_user,
             "name": req.name.strip(),
             "password": hash_password(req.password),
-            "role": req.role or "SUB_ADMIN",
+            "role": clean_role,
             "allowed_districts": req.allowed_districts or ["All"],
             "permissions": req.permissions or {
                 "can_view_dashboard": True,
@@ -6749,7 +6755,7 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
         await asyncio.to_thread(lambda: doc_ref.set(new_user))
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
-        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
+        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {clean_role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
         
         safe_user = {k: v for k, v in new_user.items() if k != "password"}
         return {"success": True, "user": safe_user, "message": f"User {req.name} successfully created!"}
@@ -6773,7 +6779,10 @@ async def update_admin_user(req: AdminUserUpdateReq, admin: dict = Depends(requi
         if req.password:
             update_data["password"] = hash_password(req.password)
         if req.role is not None:
-            update_data["role"] = req.role
+            clean_role = req.role.strip().upper()
+            if clean_role not in VALID_ADMIN_ROLES:
+                raise HTTPException(status_code=400, detail=f"Invalid role '{req.role}'. Must be one of: {', '.join(sorted(VALID_ADMIN_ROLES))}.")
+            update_data["role"] = clean_role
         if req.allowed_districts is not None:
             update_data["allowed_districts"] = req.allowed_districts
         if req.permissions is not None:
@@ -9595,6 +9604,14 @@ class SaveTaLogRequest(BaseModel):
     deduction_amount: Optional[float] = 0.00
     deduction_reason: Optional[str] = ""
     admin_final_remarks: Optional[str] = ""
+    admin_remarks: Optional[str] = ""
+
+class TaDistrictActionRequest(BaseModel):
+    month: str
+    district: str
+    action: str  # 'submit' | 'approve' | 'revert'
+    revert_reason: Optional[str] = ""
+    staff_keys: Optional[List[str]] = None
 
 
 def build_ta_doc_id(month: str, district: str, staff_key: str) -> str:
@@ -9609,6 +9626,7 @@ def build_ta_doc_id(month: str, district: str, staff_key: str) -> str:
         return f"{clean_month}_{clean_dist}_{clean_skey}"
 
 
+@app.get("/admin/ta/log")
 @app.get("/api/ta-logs")
 async def get_ta_logs(
     month: str,
@@ -9620,7 +9638,8 @@ async def get_ta_logs(
 ):
     """
     Query monthly Travel Allowance logs.
-    - Admins/Sub-Admins: Full query access bounded by allowed_districts.
+    - Admins/Sub-Admins/Incharges/MIS: Query access bounded by allowed_districts.
+    - Caches district-wide query results in SimpleTTLCache with 300s TTL.
     - Field Officers: Strict Read-Only access to their own monthly ledger verified via PIN.
     """
     try:
@@ -9629,9 +9648,10 @@ async def get_ta_logs(
         allowed_districts = []
 
         if is_admin:
-            if admin.get("role") == "SUB_ADMIN":
+            admin_role = admin.get("role", "SUB_ADMIN")
+            if admin_role != "SUPER_ADMIN":
                 allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
-                if district:
+                if "all" not in allowed_districts and district:
                     c_dist = canonicalize_district(district).lower()
                     if c_dist not in allowed_districts:
                         raise HTTPException(status_code=403, detail="Access denied for this district.")
@@ -9682,7 +9702,13 @@ async def get_ta_logs(
 
             doc_snap = await asyncio.to_thread(lambda: db.collection("travel_allowance_logs").document(doc_id).get())
             if doc_snap.exists:
-                return {"success": True, "logs": [doc_snap.to_dict()]}
+                dat = doc_snap.to_dict()
+                dat.setdefault("status", "DRAFT")
+                dat.setdefault("submitted_at", "")
+                dat.setdefault("approved_at", "")
+                dat.setdefault("revert_reason", "")
+                dat.setdefault("dispute", None)
+                return {"success": True, "logs": [dat]}
 
             # Fallback search across month documents if ID casing differed
             all_month_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
@@ -9692,23 +9718,67 @@ async def get_ta_logs(
                 dat = d.to_dict()
                 if canonicalize_district(dat.get("district", "")).lower() == c_dist.lower():
                     if dat.get("staff_key", "").strip().lower().replace(" ", "") == clean_skey:
+                        dat.setdefault("status", "DRAFT")
+                        dat.setdefault("submitted_at", "")
+                        dat.setdefault("approved_at", "")
+                        dat.setdefault("revert_reason", "")
+                        dat.setdefault("dispute", None)
                         matched.append(dat)
             return {"success": True, "logs": matched}
 
-        # Multi-record query for Admin/District Coordinators
+        # Multi-record query for district roster (with 300s TTL cache)
+        if district and district.strip().lower() != "all":
+            clean_dist = canonicalize_district(district)
+            cache_key = f"ta_roster_{clean_month}_{clean_dist.lower()}"
+            cached_logs = cache.get(cache_key)
+            if cached_logs is not None:
+                return {"success": True, "logs": cached_logs}
+
+            query_docs = await asyncio.to_thread(lambda: list(
+                db.collection("travel_allowance_logs")
+                .where("month", "==", clean_month)
+                .where("district", "==", clean_dist)
+                .stream()
+            ))
+
+            if not query_docs:
+                # Fallback for documents that may have alternate casing
+                all_month = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+                query_docs = [d for d in all_month if canonicalize_district(d.to_dict().get("district", "")).lower() == clean_dist.lower()]
+
+            results = []
+            for d in query_docs:
+                dat = d.to_dict()
+                doc_dist = canonicalize_district(dat.get("district", "")).lower()
+
+                if allowed_districts and "all" not in allowed_districts and doc_dist not in allowed_districts:
+                    continue
+
+                dat.setdefault("status", "DRAFT")
+                dat.setdefault("submitted_at", "")
+                dat.setdefault("approved_at", "")
+                dat.setdefault("revert_reason", "")
+                dat.setdefault("dispute", None)
+                results.append(dat)
+
+            cache.set(cache_key, results, ttl=300)
+            return {"success": True, "logs": results}
+
+        # Multi-record statewide / multi-district query
         query_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
         results = []
         for d in query_docs:
             dat = d.to_dict()
             doc_dist = canonicalize_district(dat.get("district", "")).lower()
 
-            if district:
-                if doc_dist != canonicalize_district(district).lower():
-                    continue
-
-            if allowed_districts and doc_dist not in allowed_districts:
+            if allowed_districts and "all" not in allowed_districts and doc_dist not in allowed_districts:
                 continue
 
+            dat.setdefault("status", "DRAFT")
+            dat.setdefault("submitted_at", "")
+            dat.setdefault("approved_at", "")
+            dat.setdefault("revert_reason", "")
+            dat.setdefault("dispute", None)
             results.append(dat)
 
         return {"success": True, "logs": results}
@@ -9732,10 +9802,11 @@ async def save_ta_log(
         if not clean_dist:
             raise HTTPException(status_code=400, detail="Valid district is required.")
 
-        # Sub-Admin District Isolation
-        if admin.get("role") == "SUB_ADMIN":
+        admin_role = admin.get("role", "SUB_ADMIN")
+        # Sub-Admin / District Isolation
+        if admin_role != "SUPER_ADMIN":
             allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
-            if clean_dist.lower() not in allowed:
+            if "all" not in allowed and clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized to modify TA logs for this district.")
 
         # Recalculate daily entries deterministically
@@ -9775,6 +9846,7 @@ async def save_ta_log(
             deduction_reason = "Administrative deduction"
 
         final_payable_amount = max(0.0, round(gross_amount - deduction_amount, 2))
+        remarks_val = (req.admin_final_remarks or req.admin_remarks or "").strip()
 
         doc_id = build_ta_doc_id(req.month, clean_dist, req.staff_key)
         doc_ref = db.collection("travel_allowance_logs").document(doc_id)
@@ -9793,30 +9865,52 @@ async def save_ta_log(
             "deduction_amount": deduction_amount,
             "deduction_reason": deduction_reason,
             "final_payable_amount": final_payable_amount,
-            "admin_final_remarks": (req.admin_final_remarks or "").strip(),
+            "admin_final_remarks": remarks_val,
             "daily_logs": calculated_daily,
             "last_updated_at": now_str,
             "last_updated_by": admin.get("name") or admin.get("username", "Admin"),
-            "last_updated_role": admin.get("role", "SUB_ADMIN")
+            "last_updated_role": admin_role
         }
+
+        # Workflow state preservation
+        existing_doc = await asyncio.to_thread(doc_ref.get)
+        if existing_doc.exists:
+            existing_data = existing_doc.to_dict() or {}
+            ta_doc["status"] = existing_data.get("status", "DRAFT")
+            ta_doc["submitted_at"] = existing_data.get("submitted_at", "")
+            ta_doc["submitted_by"] = existing_data.get("submitted_by", "")
+            ta_doc["approved_at"] = existing_data.get("approved_at", "")
+            ta_doc["approved_by"] = existing_data.get("approved_by", "")
+            ta_doc["reverted_at"] = existing_data.get("reverted_at", "")
+            ta_doc["revert_reason"] = existing_data.get("revert_reason", "")
+            ta_doc["dispute"] = existing_data.get("dispute", None)
+        else:
+            ta_doc["status"] = "DRAFT"
+            ta_doc["submitted_at"] = ""
+            ta_doc["submitted_by"] = ""
+            ta_doc["approved_at"] = ""
+            ta_doc["approved_by"] = ""
+            ta_doc["reverted_at"] = ""
+            ta_doc["revert_reason"] = ""
+            ta_doc["dispute"] = None
 
         await asyncio.to_thread(lambda: doc_ref.set(ta_doc, merge=True))
 
         # Evict TA Caches
         cache.delete_prefix("ta_")
-        cache.delete(f"ta_logs_{req.month}_{clean_dist.lower()}")
-        cache.delete(f"ta_analytics_{req.month}_{clean_dist.lower()}")
+        cache.delete(f"ta_roster_{req.month.strip()}_{clean_dist.lower()}")
+        cache.delete(f"ta_logs_{req.month.strip()}_{clean_dist.lower()}")
+        cache.delete(f"ta_analytics_{req.month.strip()}_{clean_dist.lower()}")
         cache.delete("ta_analytics_all")
 
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
-        actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type="TA_LOG_SAVED",
             details=f"Saved TA & Bike Log for {req.staff_name} ({clean_dist}) for {req.month}: {total_km} KM, Payable: ₹{final_payable_amount}",
             user_name=actor_name,
             user_id=actor_id,
-            role=actor_role,
+            role=admin_role,
             district=clean_dist
         )
 
@@ -9828,6 +9922,138 @@ async def save_ta_log(
             "deduction_amount": deduction_amount,
             "final_payable_amount": final_payable_amount,
             "message": f"TA Log for {req.staff_name} saved successfully."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ta/district-action")
+async def ta_district_action(
+    req: TaDistrictActionRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    District Action State Machine:
+    - 'submit': MIS or SUPER_ADMIN (moves district roster from DRAFT/REVERTED to SUBMITTED)
+    - 'approve': MAIN_INCHARGE or SUPER_ADMIN (moves district roster from SUBMITTED to APPROVED)
+    - 'revert': MAIN_INCHARGE or SUPER_ADMIN (moves district roster from SUBMITTED to REVERTED with revert_reason)
+    """
+    try:
+        clean_month = req.month.strip()
+        clean_dist = canonicalize_district(req.district)
+        if not clean_month or not clean_dist:
+            raise HTTPException(status_code=400, detail="Valid month and district are required.")
+
+        admin_role = admin.get("role", "SUB_ADMIN")
+        allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+
+        # District isolation check for non-Super Admin
+        if admin_role != "SUPER_ADMIN":
+            if "all" not in allowed and clean_dist.lower() not in allowed:
+                raise HTTPException(status_code=403, detail="Not authorized for this district.")
+
+        action = req.action.strip().lower()
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+
+        if action == "submit":
+            if admin_role not in ["MIS", "SUPER_ADMIN"]:
+                raise HTTPException(status_code=403, detail="Only MIS or Super Admin can submit district TA roster.")
+            status_val = "SUBMITTED"
+            update_payload = {
+                "status": "SUBMITTED",
+                "submitted_at": now_str,
+                "submitted_by": actor_name,
+                "submitted_by_id": actor_id,
+                "last_updated_at": now_str,
+                "last_updated_by": actor_name,
+                "last_updated_role": admin_role
+            }
+        elif action == "approve":
+            if admin_role not in ["MAIN_INCHARGE", "SUPER_ADMIN"]:
+                raise HTTPException(status_code=403, detail="Only Main Incharge or Super Admin can approve district TA roster.")
+            status_val = "APPROVED"
+            update_payload = {
+                "status": "APPROVED",
+                "approved_at": now_str,
+                "approved_by": actor_name,
+                "approved_by_id": actor_id,
+                "last_updated_at": now_str,
+                "last_updated_by": actor_name,
+                "last_updated_role": admin_role
+            }
+        elif action == "revert":
+            if admin_role not in ["MAIN_INCHARGE", "SUPER_ADMIN"]:
+                raise HTTPException(status_code=403, detail="Only Main Incharge or Super Admin can revert district TA roster.")
+            status_val = "REVERTED"
+            update_payload = {
+                "status": "REVERTED",
+                "reverted_at": now_str,
+                "reverted_by": actor_name,
+                "reverted_by_id": actor_id,
+                "revert_reason": (req.revert_reason or "").strip(),
+                "last_updated_at": now_str,
+                "last_updated_by": actor_name,
+                "last_updated_role": admin_role
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid action '{req.action}'. Must be 'submit', 'approve', or 'revert'.")
+
+        # Query district documents using compound filter
+        docs = await asyncio.to_thread(lambda: list(
+            db.collection("travel_allowance_logs")
+            .where("month", "==", clean_month)
+            .where("district", "==", clean_dist)
+            .stream()
+        ))
+
+        if not docs:
+            # Fallback for case-insensitive district matching
+            all_month = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+            docs = [d for d in all_month if canonicalize_district(d.to_dict().get("district", "")).lower() == clean_dist.lower()]
+
+        # Filter by staff_keys if provided
+        target_skeys = set(k.strip().lower().replace(" ", "") for k in req.staff_keys) if req.staff_keys else None
+        if target_skeys and docs:
+            docs = [d for d in docs if d.to_dict().get("staff_key", "").strip().lower().replace(" ", "") in target_skeys]
+
+        # Batch update if documents exist
+        if docs:
+            def _apply_batch(doc_list, payload):
+                chunk_size = 400
+                for i in range(0, len(doc_list), chunk_size):
+                    batch = db.batch()
+                    for d in doc_list[i:i + chunk_size]:
+                        batch.set(d.reference, payload, merge=True)
+                    batch.commit()
+
+            await asyncio.to_thread(_apply_batch, docs, update_payload)
+
+        # Invalidate TTL cache
+        cache.delete(f"ta_roster_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_logs_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_analytics_{clean_month}_{clean_dist.lower()}")
+        cache.delete_prefix("ta_")
+
+        # Log admin activity
+        await log_admin_activity(
+            action_type=f"TA_DISTRICT_{action.upper()}",
+            details=f"District {clean_dist} TA roster for {clean_month} action '{action}' performed (Status: {status_val}). Notes: {req.revert_reason or ''}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=admin_role,
+            district=clean_dist
+        )
+
+        return {
+            "success": True,
+            "action": action,
+            "status": status_val,
+            "updated_count": len(docs),
+            "message": f"District {clean_dist} TA roster successfully marked as {status_val}."
         }
     except HTTPException:
         raise
