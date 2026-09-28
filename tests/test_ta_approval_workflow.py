@@ -225,7 +225,7 @@ async def test_ta_district_action_unauthorized_roles_and_district_isolation():
             "allowed_districts": ["Gaya"]
         })
 
-        # SUB_ADMIN cannot perform district-action (403)
+        # SUB_ADMIN without can_manage_ta cannot perform district-action (403)
         sub_res = await ac.post("/api/ta/district-action", json={
             "month": "2026-09",
             "district": "Gaya",
@@ -233,12 +233,58 @@ async def test_ta_district_action_unauthorized_roles_and_district_isolation():
         }, headers={"Authorization": f"Bearer {subadmin_token}"})
         assert sub_res.status_code == 403
 
-        # MIS cannot submit outside allowed district (403)
+        # SUB_ADMIN with can_manage_ta permission CAN submit (200)
+        subadmin_ta_token = main.create_access_token({
+            "user_id": "test_gaya_subadmin_ta",
+            "name": "Sub Admin With TA",
+            "role": "SUB_ADMIN",
+            "allowed_districts": ["Gaya"],
+            "permissions": {"can_manage_ta": True}
+        })
+        sub_ta_res = await ac.post("/api/ta/district-action", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers={"Authorization": f"Bearer {subadmin_ta_token}"})
+        assert sub_ta_res.status_code == 200
+
+        # SUB_ADMIN with can_manage_ta: False cannot save TA log (403)
+        subadmin_blocked_ta_token = main.create_access_token({
+            "user_id": "test_gaya_subadmin_blocked",
+            "name": "Sub Admin Blocked TA",
+            "role": "SUB_ADMIN",
+            "allowed_districts": ["Gaya"],
+            "permissions": {"can_manage_ta": False}
+        })
+        save_blocked_res = await ac.post("/api/ta-logs/save", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "staff_key": "officer_subadmin_test",
+            "staff_name": "Officer SubAdmin Test",
+            "daily_logs": {
+                "2026-09-01": {"initial_reading": 100, "final_reading": 150, "total_km": 50, "rate": 4.0, "amount": 200.0}
+            }
+        }, headers={"Authorization": f"Bearer {subadmin_blocked_ta_token}"})
+        assert save_blocked_res.status_code == 403
+
+        # SUB_ADMIN with can_manage_ta: True can save TA log (200)
+        save_allowed_res = await ac.post("/api/ta-logs/save", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "staff_key": "officer_subadmin_test",
+            "staff_name": "Officer SubAdmin Test",
+            "daily_logs": {
+                "2026-09-01": {"initial_reading": 100, "final_reading": 150, "total_km": 50, "rate": 4.0, "amount": 200.0}
+            }
+        }, headers={"Authorization": f"Bearer {subadmin_ta_token}"})
+        assert save_allowed_res.status_code == 200
+
+        # Sub Admin cannot submit outside allowed district (403)
         iso_res = await ac.post("/api/ta/district-action", json={
             "month": "2026-09",
             "district": "Patna",
             "action": "submit"
-        }, headers={"Authorization": f"Bearer {mis_token}"})
+        }, headers={"Authorization": f"Bearer {subadmin_ta_token}"})
         assert iso_res.status_code == 403
 
 @pytest.mark.asyncio

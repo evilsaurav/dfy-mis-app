@@ -62,10 +62,22 @@ assert(
   "fetchTaLog must fetch full district roster without filtering by staff_key"
 );
 
-// 8. SUB_ADMIN submit permission
+// 8. Granular TA Permission & Role Hierarchy
 assert(
-  code.includes("currentUser?.role === 'SUB_ADMIN'"),
-  "Submit Roster button must allow legacy SUB_ADMIN role"
+  code.includes("can_manage_ta"),
+  "AdminDashboard must support can_manage_ta granular permission"
+);
+assert(
+  code.includes("canManageTa"),
+  "AdminDashboard must compute canManageTa permission gate"
+);
+assert(
+  !code.includes('<option value="MIS">'),
+  "MIS must NOT be an independent option in Account Role select dropdown"
+);
+assert(
+  code.includes("Manage &amp; Submit Travel Allowance (TA)") || code.includes("Manage & Submit Travel Allowance (TA)"),
+  "Admin user modal must include granular checkbox for TA management"
 );
 
 console.log("✅ Admin TA Drilldown & Hierarchy UI Verification Passed 100%!");

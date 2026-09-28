@@ -289,6 +289,7 @@ export default function AdminDashboard() {
             can_manage_staff: true,
             can_edit_patient_ids: true,
             can_export_reports: true,
+            can_manage_ta: true,
             can_view_audit_logs: true
           }
         };
@@ -701,6 +702,7 @@ export default function AdminDashboard() {
   const canManageStaff = isSuperAdmin || currentUser?.permissions?.can_manage_staff !== false;
   const canEditPatientIds = isSuperAdmin || currentUser?.permissions?.can_edit_patient_ids !== false;
   const canExportReports = isSuperAdmin || currentUser?.permissions?.can_export_reports !== false;
+  const canManageTa = isSuperAdmin || currentUser?.permissions?.can_manage_ta === true || currentUser?.role === 'MIS' || (!currentUser?.role && !currentUser?.permissions);
 
   const getAdminToken = useCallback(() => {
     return encodeURIComponent(localStorage.getItem('dfy_admin_token') || '');
@@ -4985,6 +4987,10 @@ const availableDistrictsForFeed = useMemo(() => {
   }, [authFetch, taSelectedStaffKey]);
 
   const handleSaveTaLog = async () => {
+    if (!isSuperAdmin && !canManageTa) {
+      showToast("You do not have permission to manage Travel Allowance logs. Please contact Super Admin.", "error");
+      return;
+    }
     if (!taCurrentStaff && !taSelectedStaffKey) {
       showToast("Please select a staff member first.", "error");
       return;
@@ -11202,7 +11208,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           </div>
 
                           {/* Role-Based Action Buttons */}
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MIS' || currentUser?.role === 'SUB_ADMIN' || !currentUser?.role) && (
+                          {(isSuperAdmin || canManageTa) && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11232,7 +11238,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                 onClick={() => setTaRevertModal({ isOpen: true, district: taDistrict, month: taMonth, reason: '' })}
                                 disabled={taActionLoading}
                                 className="px-3.5 py-2 rounded-xl text-xs font-black bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                                title="Revert district roster back to MIS with remarks"
+                                title="Revert district roster with remarks for corrections"
                               >
                                 <span>↩️</span>
                                 <span>Revert District</span>
@@ -11963,7 +11969,7 @@ const availableDistrictsForFeed = useMemo(() => {
             </div>
 
             <p className="text-xs text-slate-600 mb-3">
-              Please specify the reason for reverting this roster back to the District MIS for corrections. The remarks will be visible to MIS staff on the audit banner.
+              Please specify the reason for reverting this roster back for corrections. The remarks will be visible to district staff on the audit banner.
             </p>
 
             <textarea
@@ -11989,7 +11995,7 @@ const availableDistrictsForFeed = useMemo(() => {
                 className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
                 <span>{taActionLoading ? '⏳' : '↩️'}</span>
-                <span>{taActionLoading ? 'Reverting...' : 'Confirm Revert to MIS'}</span>
+                <span>{taActionLoading ? 'Reverting...' : 'Confirm Revert Roster'}</span>
               </button>
             </div>
           </div>
@@ -14078,7 +14084,8 @@ const availableDistrictsForFeed = useMemo(() => {
                         can_edit_targets: false,
                         can_manage_staff: false,
                         can_edit_patient_ids: false,
-                        can_export_reports: true
+                        can_export_reports: true,
+                        can_manage_ta: false
                       },
                       error: '',
                       loading: false
@@ -14126,12 +14133,10 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                               u.role === 'SUPER_ADMIN' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 
                               u.role === 'MAIN_INCHARGE' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
-                              u.role === 'MIS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 
                               'bg-slate-100 text-slate-700 border border-slate-200'
                             }`}>
                               {u.role === 'SUPER_ADMIN' ? '👑 Super Admin' : 
-                               u.role === 'MAIN_INCHARGE' ? '🩺 Main Incharge' : 
-                               u.role === 'MIS' ? '💻 District MIS' : '🛡️ Sub Admin'}
+                               u.role === 'MAIN_INCHARGE' ? '🩺 Main Incharge' : '🛡️ Sub Admin'}
                             </span>
                           </td>
                           <td className="py-3 px-3">
@@ -14151,6 +14156,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                   <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${u.permissions?.can_manage_staff ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-slate-100 text-slate-400 line-through border-slate-200'}`}>Staff</span>
                                   <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${u.permissions?.can_edit_patient_ids ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-400 line-through border-slate-200'}`}>Edit IDs</span>
                                   <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${u.permissions?.can_export_reports ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-100 text-slate-400 line-through border-slate-200'}`}>Exports</span>
+                                  <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${u.permissions?.can_manage_ta ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-400 line-through border-slate-200'}`}>🛵 TA</span>
                                 </>
                               )}
                             </div>
@@ -14171,11 +14177,13 @@ const availableDistrictsForFeed = useMemo(() => {
                                     password: '',
                                     role: u.role || 'SUB_ADMIN',
                                     allowed_districts: u.allowed_districts || ['All'],
-                                    permissions: u.permissions || {
+                                    permissions: {
                                       can_edit_targets: false,
                                       can_manage_staff: false,
                                       can_edit_patient_ids: false,
-                                      can_export_reports: true
+                                      can_export_reports: true,
+                                      can_manage_ta: false,
+                                      ...(u.permissions || {})
                                     },
                                     error: '',
                                     loading: false
@@ -14276,9 +14284,8 @@ const availableDistrictsForFeed = useMemo(() => {
                   onChange={(e) => setUserFormModal({ ...userFormModal, role: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  <option value="MIS">District MIS (Edit &amp; Submit TA Rosters)</option>
+                  <option value="SUB_ADMIN">Sub Admin (District Coordinator / Field Data Access)</option>
                   <option value="MAIN_INCHARGE">Main Incharge (Audit, Approve &amp; Revert TA Rosters)</option>
-                  <option value="SUB_ADMIN">Sub Admin (Legacy District Staff / Data Access)</option>
                   <option value="SUPER_ADMIN">Super Admin (Full Master Authority)</option>
                 </select>
               </div>
@@ -14378,6 +14385,18 @@ const availableDistrictsForFeed = useMemo(() => {
                         onChange={(e) => setUserFormModal({
                           ...userFormModal,
                           permissions: { ...userFormModal.permissions, can_export_reports: e.target.checked }
+                        })}
+                        className="rounded text-indigo-600"
+                      />
+                    </label>
+                    <label className="flex items-center justify-between text-xs font-bold text-slate-700 cursor-pointer">
+                      <span>🛵 Manage &amp; Submit Travel Allowance (TA)</span>
+                      <input
+                        type="checkbox"
+                        checked={userFormModal.permissions?.can_manage_ta || false}
+                        onChange={(e) => setUserFormModal({
+                          ...userFormModal,
+                          permissions: { ...userFormModal.permissions, can_manage_ta: e.target.checked }
                         })}
                         className="rounded text-indigo-600"
                       />

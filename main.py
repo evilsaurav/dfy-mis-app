@@ -323,6 +323,7 @@ def create_access_token(user_data: dict) -> str:
         "role": user_data.get("role", "SUB_ADMIN"),
         "districts": user_data.get("allowed_districts", ["All"]),
         "allowed_districts": user_data.get("allowed_districts", ["All"]),
+        "permissions": user_data.get("permissions") or {},
         "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
         "iat": datetime.utcnow()
     }
@@ -6437,6 +6438,7 @@ class AdminUserCreateReq(BaseModel):
         "can_manage_staff": False,
         "can_edit_patient_ids": False,
         "can_export_reports": True,
+        "can_manage_ta": False,
         "can_view_audit_logs": False
     }
     status: Optional[str] = "ACTIVE"
@@ -6745,6 +6747,7 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
                 "can_manage_staff": False,
                 "can_edit_patient_ids": False,
                 "can_export_reports": True,
+                "can_manage_ta": False,
                 "can_view_audit_logs": False
             },
             "status": req.status or "ACTIVE",
@@ -9820,11 +9823,14 @@ async def save_ta_log(
             raise HTTPException(status_code=400, detail="Valid district is required.")
 
         admin_role = admin.get("role", "SUB_ADMIN")
-        # Sub-Admin / District Isolation
+        user_perms = admin.get("permissions") or {}
+        # Sub-Admin / District Isolation & TA permission check
         if admin_role != "SUPER_ADMIN":
             allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
             if "all" not in allowed and clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized to modify TA logs for this district.")
+            if admin_role == "SUB_ADMIN" and user_perms.get("can_manage_ta") is False and "can_manage_ta" in user_perms:
+                raise HTTPException(status_code=403, detail="You do not have permission to manage Travel Allowance logs. Contact Super Admin.")
 
         # Recalculate daily entries deterministically
         calculated_daily = {}
@@ -9977,8 +9983,17 @@ async def ta_district_action(
         actor_id = admin.get("user_id") or admin.get("username", "admin")
 
         if action == "submit":
-            if admin_role not in ["MIS", "SUPER_ADMIN"]:
-                raise HTTPException(status_code=403, detail="Only MIS or Super Admin can submit district TA roster.")
+            user_perms = admin.get("permissions") or {}
+            is_authorized = (
+                admin_role == "SUPER_ADMIN" or
+                admin_role == "MIS" or
+                (admin_role == "SUB_ADMIN" and user_perms.get("can_manage_ta") is True)
+            )
+            if not is_authorized:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only Super Admin or Sub Admins with 'can_manage_ta' permission can submit district TA roster."
+                )
             status_val = "SUBMITTED"
             update_payload = {
                 "status": "SUBMITTED",
