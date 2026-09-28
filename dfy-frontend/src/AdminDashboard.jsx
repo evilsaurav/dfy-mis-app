@@ -11384,13 +11384,53 @@ const availableDistrictsForFeed = useMemo(() => {
                                       </span>
                                     </td>
                                     <td className="px-3 py-2.5 text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() => selectStaffForDrilldown(staff)}
-                                        className="text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer bg-slate-100 hover:bg-teal-700 hover:text-white text-slate-700 border border-slate-200 active:scale-95 shadow-2xs"
-                                      >
-                                        Inspect / Edit Now ➔
-                                      </button>
+                                      <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                                        <button
+                                          type="button"
+                                          onClick={() => selectStaffForDrilldown(staff)}
+                                          className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer bg-slate-100 hover:bg-teal-700 hover:text-white text-slate-700 border border-slate-200 active:scale-95 shadow-2xs"
+                                          title="Open day-by-day bike log audit"
+                                        >
+                                          Inspect ➔
+                                        </button>
+                                        {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                                          <>
+                                            {status !== 'APPROVED' ? (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDistrictAction('approve', '', [staff.id || staff.name])}
+                                                disabled={taActionLoading}
+                                                className="text-[11px] font-bold px-2 py-1 rounded-lg transition-all cursor-pointer bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 border border-emerald-300 active:scale-95 shadow-2xs disabled:opacity-50"
+                                                title={`Pass & Approve ${staff.name}'s claim for payment`}
+                                              >
+                                                ✅ Pass
+                                              </button>
+                                            ) : (
+                                              <span className="text-[10px] font-bold text-emerald-700 px-1.5 py-0.5 bg-emerald-50 rounded border border-emerald-200" title="Already passed">
+                                                ✓ Passed
+                                              </span>
+                                            )}
+                                            {status !== 'REVERTED' && (
+                                              <button
+                                                type="button"
+                                                onClick={() => setTaRevertModal({
+                                                  isOpen: true,
+                                                  district: taDistrict,
+                                                  month: taMonth,
+                                                  staffKey: staff.id || staff.name,
+                                                  staffName: staff.name,
+                                                  reason: ''
+                                                })}
+                                                disabled={taActionLoading}
+                                                className="text-[11px] font-bold px-2 py-1 rounded-lg transition-all cursor-pointer bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-700 border border-rose-300 active:scale-95 shadow-2xs disabled:opacity-50"
+                                                title={`Hold / Revert only ${staff.name} for correction`}
+                                              >
+                                                ⏸️ Hold
+                                              </button>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
                                     </td>
                                   </tr>
                                 );
@@ -11499,11 +11539,43 @@ const availableDistrictsForFeed = useMemo(() => {
                             type="button"
                             onClick={handleSaveTaLog}
                             disabled={taSaving || taPrefilling || !taSelectedStaffKey}
-                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                           >
                             <span>{taSaving ? '⏳' : '💾'}</span>
                             <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
                           </button>
+
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleDistrictAction('approve', '', [taSelectedStaffKey])}
+                                disabled={taActionLoading || !taSelectedStaffKey}
+                                className="px-3 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer active:scale-95"
+                                title="Pass & approve this staff's claim"
+                              >
+                                <span>{taActionLoading ? '⏳' : '✅'}</span>
+                                <span>Pass Staff</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTaRevertModal({
+                                  isOpen: true,
+                                  district: taDistrict,
+                                  month: taMonth,
+                                  staffKey: taSelectedStaffKey,
+                                  staffName: taCurrentStaff?.name || taSelectedStaffKey,
+                                  reason: ''
+                                })}
+                                disabled={taActionLoading || !taSelectedStaffKey}
+                                className="px-3 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer active:scale-95"
+                                title="Hold or revert this staff for correction"
+                              >
+                                <span>⏸️</span>
+                                <span>Hold Staff</span>
+                              </button>
+                            </>
+                          )}
 
                           {/* Discreet ••• Context Menu */}
                           <div className="relative">
@@ -11955,8 +12027,13 @@ const availableDistrictsForFeed = useMemo(() => {
                   ↩️
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-slate-800">Revert District TA Roster</h3>
-                  <p className="text-[11px] font-bold text-slate-400">District: {taRevertModal.district} &bull; {taRevertModal.month}</p>
+                  <h3 className="text-sm font-black text-slate-800">
+                    {taRevertModal.staffName ? `Hold / Revert: ${taRevertModal.staffName}` : 'Revert District TA Roster'}
+                  </h3>
+                  <p className="text-[11px] font-bold text-slate-400">
+                    District: {taRevertModal.district} &bull; {taRevertModal.month}
+                    {taRevertModal.staffName && <span className="text-rose-600"> &bull; Single Staff Hold</span>}
+                  </p>
                 </div>
               </div>
               <button
@@ -11969,14 +12046,18 @@ const availableDistrictsForFeed = useMemo(() => {
             </div>
 
             <p className="text-xs text-slate-600 mb-3">
-              Please specify the reason for reverting this roster back for corrections. The remarks will be visible to district staff on the audit banner.
+              {taRevertModal.staffName
+                ? `Specify reason for placing ${taRevertModal.staffName}'s claim on hold. The remark will be visible to district staff, while other approved officers proceed.`
+                : 'Please specify the reason for reverting this roster back for corrections. The remarks will be visible to district staff on the audit banner.'}
             </p>
 
             <textarea
               rows={4}
               value={taRevertModal.reason || ''}
               onChange={(e) => setTaRevertModal(prev => ({ ...prev, reason: e.target.value }))}
-              placeholder="e.g., Odometer reading mismatch on 14th for Amit Kumar. Please re-verify daily slips."
+              placeholder={taRevertModal.staffName
+                ? `e.g., Odometer reading mismatch on 14th for ${taRevertModal.staffName}. Please re-verify daily slips.`
+                : 'e.g., Odometer reading mismatch on 14th for Amit Kumar. Please re-verify daily slips.'}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white resize-none"
             />
 
@@ -11990,12 +12071,12 @@ const availableDistrictsForFeed = useMemo(() => {
               </button>
               <button
                 type="button"
-                onClick={() => handleDistrictAction('revert', taRevertModal.reason)}
+                onClick={() => handleDistrictAction('revert', taRevertModal.reason, taRevertModal.staffKey ? [taRevertModal.staffKey] : null)}
                 disabled={taActionLoading || !taRevertModal.reason?.trim()}
                 className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
               >
                 <span>{taActionLoading ? '⏳' : '↩️'}</span>
-                <span>{taActionLoading ? 'Reverting...' : 'Confirm Revert Roster'}</span>
+                <span>{taActionLoading ? 'Reverting...' : taRevertModal.staffKey ? 'Confirm Hold Staff' : 'Confirm Revert Roster'}</span>
               </button>
             </div>
           </div>

@@ -342,3 +342,73 @@ async def test_ta_cache_ttl_and_invalidation():
         assert cached_after is not None
         assert cached_after[0]["status"] == "SUBMITTED"
 
+@pytest.mark.asyncio
+async def test_ta_district_action_individual_staff_pass_and_hold():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        incharge_token = main.create_access_token({
+            "user_id": "test_gaya_incharge",
+            "name": "Dr. Incharge",
+            "role": "MAIN_INCHARGE",
+            "allowed_districts": ["Gaya"]
+        })
+        subadmin_ta_token = main.create_access_token({
+            "user_id": "test_gaya_subadmin_ta",
+            "name": "Gaya SubAdmin TA",
+            "role": "SUB_ADMIN",
+            "allowed_districts": ["Gaya"],
+            "permissions": {"can_manage_ta": True}
+        })
+
+        # 1. Save logs for two staff in Gaya
+        for skey in ["officer_pass", "officer_hold"]:
+            await ac.post("/api/ta-logs/save", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_key": skey,
+                "staff_name": skey.replace("_", " ").title(),
+                "daily_logs": {
+                    "2026-09-01": {"initial_reading": 100, "final_reading": 150, "total_km": 50, "rate": 4.0, "amount": 200.0}
+                }
+            }, headers={"Authorization": f"Bearer {subadmin_ta_token}"})
+
+        # 2. Sub Admin submits district roster
+        submit_res = await ac.post("/api/ta/district-action", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers={"Authorization": f"Bearer {subadmin_ta_token}"})
+        assert submit_res.status_code == 200
+
+        # 3. Incharge passes (approves) only officer_pass
+        pass_res = await ac.post("/api/ta/district-action", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "action": "approve",
+            "staff_keys": ["officer_pass"]
+        }, headers={"Authorization": f"Bearer {incharge_token}"})
+        assert pass_res.status_code == 200
+        assert "1 officer(s)" in pass_res.json().get("message", "")
+
+        # 4. Incharge holds (reverts) only officer_hold with remarks
+        hold_res = await ac.post("/api/ta/district-action", json={
+            "month": "2026-09",
+            "district": "Gaya",
+            "action": "revert",
+            "staff_keys": ["officer_hold"],
+            "revert_reason": "Meter photo blur on 1st Sept"
+        }, headers={"Authorization": f"Bearer {incharge_token}"})
+        assert hold_res.status_code == 200
+
+        # 5. Verify district roster state: officer_pass is APPROVED, officer_hold is REVERTED
+        roster_res = await ac.get("/admin/ta/log?month=2026-09&district=Gaya", headers={"Authorization": f"Bearer {incharge_token}"})
+        assert roster_res.status_code == 200
+        logs = roster_res.json().get("logs", [])
+        pass_log = next(l for l in logs if l.get("staff_key") == "officer_pass")
+        hold_log = next(l for l in logs if l.get("staff_key") == "officer_hold")
+
+        assert pass_log.get("status") == "APPROVED"
+        assert hold_log.get("status") == "REVERTED"
+        assert hold_log.get("revert_reason") == "Meter photo blur on 1st Sept"
+
+

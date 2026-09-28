@@ -10051,8 +10051,28 @@ async def ta_district_action(
 
         # Filter by staff_keys if provided
         target_skeys = set(k.strip().lower().replace(" ", "") for k in req.staff_keys) if req.staff_keys else None
-        if target_skeys and docs:
-            docs = [d for d in docs if d.to_dict().get("staff_key", "").strip().lower().replace(" ", "") in target_skeys]
+        if target_skeys:
+            existing_skeys = set(d.to_dict().get("staff_key", "").strip().lower().replace(" ", "") for d in docs) if docs else set()
+            docs = [d for d in docs if d.to_dict().get("staff_key", "").strip().lower().replace(" ", "") in target_skeys] if docs else []
+            missing_skeys = target_skeys - existing_skeys
+            if missing_skeys:
+                for ms in missing_skeys:
+                    doc_id = build_ta_doc_id(clean_month, clean_dist, ms)
+                    new_ref = db.collection("travel_allowance_logs").document(doc_id)
+                    init_data = {
+                        "month": clean_month,
+                        "district": clean_dist,
+                        "staff_key": ms,
+                        "staff_name": ms,
+                        "designation": "Field Officer",
+                        "daily_logs": {},
+                        "total_km": 0.0,
+                        "gross_amount": 0.0,
+                        "deduction_amount": 0.0,
+                        "final_payable_amount": 0.0,
+                        **update_payload
+                    }
+                    new_ref.set(init_data, merge=True)
 
         # Batch update if documents exist
         if docs:
@@ -10082,12 +10102,18 @@ async def ta_district_action(
             district=clean_dist
         )
 
+        resp_msg = (
+            f"TA claim for {len(req.staff_keys)} officer(s) marked as {status_val}."
+            if req.staff_keys
+            else f"District {clean_dist} TA roster successfully marked as {status_val}."
+        )
+
         return {
             "success": True,
             "action": action,
             "status": status_val,
-            "updated_count": len(docs),
-            "message": f"District {clean_dist} TA roster successfully marked as {status_val}."
+            "updated_count": len(docs) + (len(missing_skeys) if target_skeys else 0),
+            "message": resp_msg
         }
     except HTTPException:
         raise

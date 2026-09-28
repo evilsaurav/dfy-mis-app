@@ -80,5 +80,15 @@ assert(
   "Admin user modal must include granular checkbox for TA management"
 );
 
+// 9. Per-Staff Pass and Hold Actions
+assert(
+  code.includes("Pass") && (code.includes("Pass Staff") || code.includes("✅ Pass")),
+  "AdminDashboard must include individual Pass / Approve buttons for staff"
+);
+assert(
+  code.includes("Hold") && (code.includes("Hold Staff") || code.includes("⏸️ Hold")),
+  "AdminDashboard must include individual Hold / Revert buttons for staff"
+);
+
 console.log("✅ Admin TA Drilldown & Hierarchy UI Verification Passed 100%!");
 
