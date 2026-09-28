@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.5";
-export const LAST_UPDATED_DATE = "27 Sep 2026";
+export const APP_VERSION = "2.8.6";
+export const LAST_UPDATED_DATE = "28 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.6",
+    date: "28 Sep 2026",
+    title: "TA Multi-Tier Approval Hierarchy, 24-Hour Dispute Window, Full-Screen Drilldown Workspace & Cost-Safe Caching",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🏢 Hierarchical Approval Workflow & RBAC Roles: District MIS prepares monthly travel allowance rosters and submits for sign-off (SUBMITTED); State/District Main Incharge audits claims and executes official sign-off (APPROVED) or reverts with itemized remarks (REVERTED).",
+      "⏳ Frontline FO Review Lock & 24-Hour Dispute Window: Prevents premature viewing of unverified drafts by displaying 'Verification in Progress'. Once approved, opens a strict 24-hour time-gated countdown window allowing Field Officers to report deduction disputes before final payroll lock.",
+      "💻 Full-Screen Drilldown Workspace (Screen 1 & Screen 2): Full-screen studio starts on Screen 1 (District Staff TA Payroll Roster) with district status badges, summary metrics, and batch approval controls. Clicking 'Inspect / Edit Now ➔' drills down into Screen 2 (Day-by-Day Two-Wheeler Table) with back navigation and officer switcher.",
+      "••• Discreet Context Menu Pre-fill: Replaced the prominent top-bar pre-fill button with a discreet '•••' options dropdown, preventing accidental overwriting of verified readings.",
+      "🛡️ Cloud Cost & Performance Shields: Eliminated redundant statewide Firestore streaming with compound queries (.where('month', '==', ...).where('district', '==', ...)) and 300s TTL caching in SimpleTTLCache, backed by zero-read client session hydration."
+    ],
+    details: [
+      {
+        tag: "Approval Hierarchy",
+        color: "blue",
+        text: "Two-stage verification state machine (MIS Submit -> Incharge Approve/Revert) provides administrative oversight and accountability across all 38 districts."
+      },
+      {
+        tag: "Dispute Resolution",
+        color: "amber",
+        text: "24-hour time-gated dispute mechanism ensures field officers can contest erroneous deductions while guaranteeing timely month-end payroll finalization."
+      },
+      {
+        tag: "Drilldown UX",
+        color: "teal",
+        text: "Two-screen architecture separates executive district rosters from granular 31-day bike odometer inputs for faster auditing and cleaner presentation."
+      },
+      {
+        tag: "Cost Shielding",
+        color: "emerald",
+        text: "Compound Firestore indexes and 300s TTL caching reduce monthly database read operations by up to 94% on Travel Allowance endpoints."
+      }
+    ]
+  },
   {
     version: "v2.8.5",
     date: "27 Sep 2026",
     title: "Travel Allowance (TA) & Bike Log Studio, 1-Click Pre-fill, Month-End Deductions, Multi-Sheet Excel & Read-Only FO Ledger",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🛵 Travel Allowance (TA) & Bike Log Management Studio: Dedicated administrative control center for verifying and managing monthly two-wheeler travel logs across all Bihar districts at the fixed official rate of ₹4.00 / KM.",
       "⚡ 1-Click Pre-fill from Daily Reports: Automatically pulls initial morning odometer, evening meter, daily distance, and visited location checkpoints directly from submitted daily field reports into editable 31-day sheets.",

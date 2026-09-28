@@ -2438,6 +2438,10 @@ const MyProfileDashboard = ({
                   <span className="bg-amber-100 text-amber-900 text-[10px] font-black px-3 py-1 rounded-full border border-amber-300 flex items-center gap-1.5 shadow-xs">
                     <span>⚠️</span> Dispute Under Review ({foTaData.dispute?.status || 'PENDING'})
                   </span>
+                ) : foTaData.dispute?.status === 'REJECTED' ? (
+                  <span className="bg-rose-100 text-rose-900 text-[10px] font-black px-3 py-1 rounded-full border border-rose-300 flex items-center gap-1 shadow-xs">
+                    <span>🔒</span> Dispute Reviewed &amp; Concluded
+                  </span>
                 ) : disputeWindowActive ? (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="bg-amber-50 text-amber-900 border border-amber-300/80 text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1 animate-pulse">
@@ -2460,21 +2464,25 @@ const MyProfileDashboard = ({
               </div>
             </div>
 
-            {/* If Dispute was filed: Show Context Banner */}
-            {(foTaData.dispute?.is_disputed || foTaData.status === 'DISPUTED') && (
-              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900 space-y-1">
+            {/* If Dispute was filed or reviewed: Show Context Banner */}
+            {(foTaData.dispute?.is_disputed || foTaData.status === 'DISPUTED' || foTaData.dispute?.status === 'REJECTED' || foTaData.dispute?.resolution_note) && (
+              <div className={`border rounded-2xl p-3 text-xs space-y-1 ${
+                foTaData.dispute?.status === 'REJECTED' ? 'bg-rose-50/80 border-rose-200 text-rose-900' : 'bg-amber-50/80 border-amber-200 text-amber-900'
+              }`}>
                 <div className="flex items-center justify-between font-bold">
-                  <span>⚠️ Active Dispute Registered</span>
-                  <span className="text-[10px] bg-amber-200/80 px-2 py-0.5 rounded-full font-black">
+                  <span>{foTaData.dispute?.status === 'REJECTED' ? '📋 Dispute Decision' : '⚠️ Active Dispute Registered'}</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-black ${
+                    foTaData.dispute?.status === 'REJECTED' ? 'bg-rose-200/80 text-rose-950' : 'bg-amber-200/80 text-amber-950'
+                  }`}>
                     Dispute Status: {foTaData.dispute?.status || 'PENDING'}
                   </span>
                 </div>
-                <p className="text-[11px] text-amber-800">
+                <p className={`text-[11px] ${foTaData.dispute?.status === 'REJECTED' ? 'text-rose-800' : 'text-amber-800'}`}>
                   <strong>Dispute Reason:</strong> {foTaData.dispute?.reason || foTaData.dispute?.dispute_reason || 'Claim lodged'}
                 </p>
                 {foTaData.dispute?.resolution_note && (
-                  <p className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-xl border border-emerald-200 mt-1">
-                    <strong>Incharge Resolution:</strong> {foTaData.dispute.resolution_note}
+                  <p className="text-[11px] text-slate-800 bg-white/90 p-2 rounded-xl border border-slate-200 mt-1 shadow-2xs">
+                    <strong>Incharge Note:</strong> {foTaData.dispute.resolution_note}
                   </p>
                 )}
               </div>
@@ -2670,7 +2678,9 @@ const MyProfileDashboard = ({
               <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowDisputeModal(false)}
+                  onClick={() => {
+                    if (!isSubmittingDispute) setShowDisputeModal(false);
+                  }}
                   disabled={isSubmittingDispute}
                   className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
                 >
