@@ -14123,8 +14123,15 @@ const availableDistrictsForFeed = useMemo(() => {
                             {u.name}
                           </td>
                           <td className="py-3 px-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${u.role === 'SUPER_ADMIN' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
-                              {u.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                              u.role === 'SUPER_ADMIN' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 
+                              u.role === 'MAIN_INCHARGE' ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 
+                              u.role === 'MIS' ? 'bg-blue-100 text-blue-800 border border-blue-200' : 
+                              'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {u.role === 'SUPER_ADMIN' ? '👑 Super Admin' : 
+                               u.role === 'MAIN_INCHARGE' ? '🩺 Main Incharge' : 
+                               u.role === 'MIS' ? '💻 District MIS' : '🛡️ Sub Admin'}
                             </span>
                           </td>
                           <td className="py-3 px-3">
@@ -14269,7 +14276,9 @@ const availableDistrictsForFeed = useMemo(() => {
                   onChange={(e) => setUserFormModal({ ...userFormModal, role: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                 >
-                  <option value="SUB_ADMIN">Sub Admin / District MIS (Restricted)</option>
+                  <option value="MIS">District MIS (Edit &amp; Submit TA Rosters)</option>
+                  <option value="MAIN_INCHARGE">Main Incharge (Audit, Approve &amp; Revert TA Rosters)</option>
+                  <option value="SUB_ADMIN">Sub Admin (Legacy District Staff / Data Access)</option>
                   <option value="SUPER_ADMIN">Super Admin (Full Master Authority)</option>
                 </select>
               </div>
