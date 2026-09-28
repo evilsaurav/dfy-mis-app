@@ -10122,6 +10122,9 @@ async def ta_dispute(req: TaDisputeRequest):
                 s_doc = await asyncio.to_thread(lambda d_id=cid: db.collection("staff_directory").document(d_id).get())
                 if s_doc.exists:
                     s_data = s_doc.to_dict() or {}
+                    s_district = canonicalize_district(s_data.get("district", ""))
+                    if s_district and s_district != clean_dist:
+                        continue
                     stored_pin = str(s_data.get("pin", ""))
                     if verify_password(clean_pin, stored_pin) or clean_pin == stored_pin.strip():
                         pin_valid = True
@@ -10170,6 +10173,14 @@ async def ta_dispute(req: TaDisputeRequest):
                 detail=f"Only approved TA logs can be disputed. Current status is '{current_status}'."
             )
 
+        # Check if a previous dispute was already resolved as REJECTED (dispute is final)
+        existing_dispute = doc_data.get("dispute") or {}
+        if existing_dispute.get("status") == "REJECTED":
+            raise HTTPException(
+                status_code=400,
+                detail="Dispute for this period has already been reviewed and rejected by the District Incharge."
+            )
+
         # 24-hour time gate validation
         approved_at_str = str(doc_data.get("approved_at") or "").strip()
         if not approved_at_str:
@@ -10186,7 +10197,7 @@ async def ta_dispute(req: TaDisputeRequest):
         if not approved_dt:
             raise HTTPException(status_code=400, detail="Invalid approval timestamp format.")
 
-        now_naive = datetime.now()
+        now_naive = get_ist_now().replace(tzinfo=None)
         if approved_dt.tzinfo is not None:
             approved_dt = approved_dt.replace(tzinfo=None)
 

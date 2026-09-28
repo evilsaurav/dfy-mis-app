@@ -391,3 +391,75 @@ async def test_ta_carryover_polish_district_isolation():
         })
         assert export_res.status_code == 403
 
+
+@pytest.mark.asyncio
+async def test_ta_dispute_rejection_locking():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        incharge_token = main.create_access_token({
+            "user_id": "test_gaya_incharge",
+            "name": "Dr. Incharge",
+            "role": "MAIN_INCHARGE",
+            "allowed_districts": ["Gaya"]
+        })
+
+        month = "2026-09"
+        district = "Gaya"
+        staff_key = "fo_reject_lock_tester"
+        ta_doc_id = build_ta_doc_id(month, district, staff_key)
+
+        # Seed staff directory entry
+        db.collection("staff_directory").document("gaya_fo_reject_lock_tester").set({
+            "id": "gaya_fo_reject_lock_tester",
+            "name": "FO Reject Lock Tester",
+            "district": "Gaya",
+            "pin": "7788",
+            "status": "Active"
+        })
+
+        # Seed approved log
+        db.collection("travel_allowance_logs").document(ta_doc_id).set({
+            "month": month,
+            "district": district,
+            "staff_key": staff_key,
+            "staff_name": "FO Reject Lock Tester",
+            "status": "APPROVED",
+            "approved_at": main.get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "approved_by": "Dr. Incharge",
+            "total_km": 100,
+            "gross_amount": 400.0,
+            "deduction_amount": 50.0,
+            "final_payable_amount": 350.0
+        })
+
+        # 1. FO disputes -> 200
+        dispute_res = await ac.post("/api/ta/dispute", json={
+            "month": month,
+            "district": district,
+            "staff_key": staff_key,
+            "pin": "7788",
+            "reason": "Deduction is wrong"
+        })
+        assert dispute_res.status_code == 200
+
+        # 2. Incharge rejects dispute -> 200
+        resolve_res = await ac.post("/api/ta/resolve-dispute", json={
+            "month": month,
+            "district": district,
+            "staff_key": staff_key,
+            "resolution": "reject",
+            "resolution_note": "Deduction verified with GPS route logs"
+        }, headers={"Authorization": f"Bearer {incharge_token}"})
+        assert resolve_res.status_code == 200
+
+        # 3. FO attempts to re-dispute an already rejected dispute -> 400
+        redispute_res = await ac.post("/api/ta/dispute", json={
+            "month": month,
+            "district": district,
+            "staff_key": staff_key,
+            "pin": "7788",
+            "reason": "Trying again"
+        })
+        assert redispute_res.status_code == 400
+        assert "rejected" in redispute_res.json().get("detail", "").lower()
+
