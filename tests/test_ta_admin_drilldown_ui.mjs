@@ -51,5 +51,22 @@ assert(
   code.includes("revert_reason") || code.includes("revertReason"),
   "Day-by-Day screen must display Incharge revert remarks if rejected"
 );
+assert(
+  code.includes("dispute?.reason") || code.includes("dispute.reason"),
+  "Must support nested dispute.reason in dispute banner and roster flag"
+);
+
+// 7. District Roster Query & Session Cache
+assert(
+  !code.includes("if (sKey) params.append('staff_key', sKey);"),
+  "fetchTaLog must fetch full district roster without filtering by staff_key"
+);
+
+// 8. SUB_ADMIN submit permission
+assert(
+  code.includes("currentUser?.role === 'SUB_ADMIN'"),
+  "Submit Roster button must allow legacy SUB_ADMIN role"
+);
 
 console.log("✅ Admin TA Drilldown & Hierarchy UI Verification Passed 100%!");
+

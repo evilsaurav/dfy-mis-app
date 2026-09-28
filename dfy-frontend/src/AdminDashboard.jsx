@@ -4952,14 +4952,15 @@ const availableDistrictsForFeed = useMemo(() => {
         month: mon,
         district: dist
       });
-      if (sKey) params.append('staff_key', sKey);
+      // Do NOT filter by staff_key: load entire district roster so Screen 1 totals work and client-side session cache functions
       const res = await authFetch(`${API_BASE_URL}/api/ta-logs?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && data.logs) {
           setTaSummaryList(data.logs);
-          if (sKey) {
-            const cleanSKey = sKey.trim().toLowerCase();
+          const targetKey = sKey || taSelectedStaffKey;
+          if (targetKey) {
+            const cleanSKey = targetKey.trim().toLowerCase();
             const found = data.logs.find(l => (l.staff_key && l.staff_key.toLowerCase() === cleanSKey) || (l.staff_name && l.staff_name.toLowerCase() === cleanSKey));
             if (found) {
               setTaDailyLogs(found.daily_logs || {});
@@ -4981,7 +4982,7 @@ const availableDistrictsForFeed = useMemo(() => {
     } finally {
       setTaLoading(false);
     }
-  }, [authFetch]);
+  }, [authFetch, taSelectedStaffKey]);
 
   const handleSaveTaLog = async () => {
     if (!taCurrentStaff && !taSelectedStaffKey) {
@@ -5165,9 +5166,9 @@ const availableDistrictsForFeed = useMemo(() => {
 
   useEffect(() => {
     if (showReportsStudio && reportsStudioTab === 'ta_payout') {
-      fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
+      fetchTaLog(taDistrict, taMonth);
     }
-  }, [showReportsStudio, reportsStudioTab, taDistrict, taMonth, taSelectedStaffKey, fetchTaLog]);
+  }, [showReportsStudio, reportsStudioTab, taDistrict, taMonth, fetchTaLog]);
 
   useEffect(() => {
     if (isSubAdmin && availableKpiDistricts.length > 0) {
@@ -11201,7 +11202,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           </div>
 
                           {/* Role-Based Action Buttons */}
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MIS' || !currentUser?.role) && (
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MIS' || currentUser?.role === 'SUB_ADMIN' || !currentUser?.role) && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11351,9 +11352,9 @@ const availableDistrictsForFeed = useMemo(() => {
                                           ↩ {log.revert_reason}
                                         </div>
                                       )}
-                                      {log?.dispute_reason && (
-                                        <div className="text-[10px] text-amber-600 font-medium truncate max-w-xs" title={log.dispute_reason}>
-                                          🚩 {log.dispute_reason}
+                                      {(log?.dispute?.reason || log?.dispute_reason) && (
+                                        <div className="text-[10px] text-amber-600 font-medium truncate max-w-xs" title={log?.dispute?.reason || log?.dispute_reason}>
+                                          🚩 {log?.dispute?.reason || log?.dispute_reason}
                                         </div>
                                       )}
                                     </td>
@@ -11509,32 +11510,35 @@ const availableDistrictsForFeed = useMemo(() => {
                               •••
                             </button>
                             {taShowOptionsMenu && (
-                              <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-fade-in">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setTaShowOptionsMenu(false);
-                                    handlePrefillTaFromReports();
-                                  }}
-                                  disabled={taPrefilling || taSaving || !taSelectedStaffKey}
-                                  className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                                >
-                                  <span>{taPrefilling ? '⏳' : '⚡'}</span>
-                                  <span>{taPrefilling ? 'Syncing...' : 'Sync from Daily Submissions'}</span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setTaShowOptionsMenu(false);
-                                    handleExportTaExcel(taDistrict, taMonth);
-                                  }}
-                                  disabled={taExporting}
-                                  className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                                >
-                                  <span>📑</span>
-                                  <span>Export District TA Workbook (.xlsx)</span>
-                                </button>
-                              </div>
+                              <>
+                                <div className="fixed inset-0 z-30" onClick={() => setTaShowOptionsMenu(false)} />
+                                <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-fade-in">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTaShowOptionsMenu(false);
+                                      handlePrefillTaFromReports();
+                                    }}
+                                    disabled={taPrefilling || taSaving || !taSelectedStaffKey}
+                                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                  >
+                                    <span>{taPrefilling ? '⏳' : '⚡'}</span>
+                                    <span>{taPrefilling ? 'Syncing...' : 'Sync from Daily Submissions'}</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setTaShowOptionsMenu(false);
+                                      handleExportTaExcel(taDistrict, taMonth);
+                                    }}
+                                    disabled={taExporting}
+                                    className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                  >
+                                    <span>📑</span>
+                                    <span>Export District TA Workbook (.xlsx)</span>
+                                  </button>
+                                </div>
+                              </>
                             )}
                           </div>
                         </div>
@@ -11555,7 +11559,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                       )}
 
-                      {Boolean(taCurrentStaffLog?.dispute_reason || taCurrentStaffLog?.status === 'DISPUTED') && (
+                      {Boolean(taCurrentStaffLog?.dispute?.reason || taCurrentStaffLog?.dispute_reason || taCurrentStaffLog?.status === 'DISPUTED') && (
                         <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl flex items-start gap-3 animate-fade-in shadow-2xs">
                           <span className="text-xl">🚩</span>
                           <div>
@@ -11563,7 +11567,7 @@ const availableDistrictsForFeed = useMemo(() => {
                               Staff Dispute Raised
                             </h5>
                             <p className="text-xs text-amber-800 font-semibold mt-0.5">
-                              {taCurrentStaffLog?.dispute_reason || 'Field officer has flagged a discrepancy with this month\'s log.'}
+                              {taCurrentStaffLog?.dispute?.reason || taCurrentStaffLog?.dispute_reason || 'Field officer has flagged a discrepancy with this month\'s log.'}
                             </p>
                           </div>
                         </div>
