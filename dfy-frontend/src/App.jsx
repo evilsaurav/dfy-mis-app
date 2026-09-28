@@ -509,6 +509,33 @@ const MyProfileDashboard = ({
   const [foTaData, setFoTaData] = useState(null);
   const [foTaLoading, setFoTaLoading] = useState(false);
   const [showFoTaDetails, setShowFoTaDetails] = useState(false);
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeReason, setDisputeReason] = useState("");
+  const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTimeMs(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const remainingDisputeMs = useMemo(() => {
+    if (!foTaData?.approved_at) return 0;
+    const approvedStr = String(foTaData.approved_at).trim();
+    const isoStr = approvedStr.includes('T') ? approvedStr : approvedStr.replace(' ', 'T');
+    let approvedTime = new Date(isoStr).getTime();
+    if (isNaN(approvedTime)) {
+      approvedTime = new Date(approvedStr).getTime();
+    }
+    if (!approvedTime || isNaN(approvedTime)) return 0;
+    const deadline = approvedTime + 24 * 3600 * 1000;
+    return Math.max(0, deadline - currentTimeMs);
+  }, [foTaData?.approved_at, currentTimeMs]);
+
+  const disputeWindowActive = remainingDisputeMs > 0;
+  const disputeHoursRemaining = Math.floor(remainingDisputeMs / 3600000);
+  const disputeMinsRemaining = Math.floor((remainingDisputeMs % 3600000) / 60000);
+  const isTaApproved = Boolean(foTaData && (foTaData.status === 'APPROVED' || foTaData.status === 'DISPUTED'));
 
   useEffect(() => {
     if (!formData?.working_place || !formData?.fo_name || !formData?.pin) return;
@@ -538,10 +565,14 @@ const MyProfileDashboard = ({
         const params = new URLSearchParams({
           month: foTaMonth,
           district: formData.working_place,
+          staff_key: formData.fo_name,
           fo_name: formData.fo_name,
           pin: formData.pin
         });
-        const res = await fetch(`${API_BASE_URL}/api/ta-logs?${params.toString()}`);
+        let res = await fetch(`${API_BASE_URL}/admin/ta/log?${params.toString()}`);
+        if (!res.ok) {
+          res = await fetch(`${API_BASE_URL}/api/ta-logs?${params.toString()}`);
+        }
         if (res.ok) {
           const data = await res.json();
           if (!isCancelled && data.success && data.logs && data.logs.length > 0) {
@@ -674,6 +705,71 @@ const MyProfileDashboard = ({
       }
     } catch (err) {
       setEditingModal(prev => ({ ...prev, error: "Network error. Please try again.", loading: false }));
+    }
+  };
+
+  const handleFileTaDispute = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (isSubmittingDispute) return;
+    const cleanReason = String(disputeReason || "").trim();
+    if (!cleanReason) {
+      showToast("Kripya dispute ka karan darj karein (Please enter reason for dispute)!", "error");
+      return;
+    }
+    if (cleanReason.length < 5) {
+      showToast("Dispute reason kam se kam 5 characters ka hona chahiye!", "error");
+      return;
+    }
+    if (!formData?.working_place || !formData?.pin) {
+      showToast("Authentication details missing. Please re-login.", "error");
+      return;
+    }
+
+    setIsSubmittingDispute(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const staffKey = foTaData?.staff_key || formData.fo_name;
+      const res = await fetch(`${API_BASE_URL}/api/ta/dispute`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: foTaMonth,
+          district: formData.working_place,
+          staff_key: staffKey,
+          pin: String(formData.pin),
+          reason: cleanReason
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.message || "Failed to submit dispute");
+      }
+
+      showToast("Dispute claim darj ho gaya hai. District Incharge & MIS ko alert bhej diya gaya hai.", "success");
+      const updatedLog = {
+        ...(foTaData || {}),
+        status: "DISPUTED",
+        dispute: data.dispute || {
+          is_disputed: true,
+          reason: cleanReason,
+          disputed_at: new Date().toISOString(),
+          status: "PENDING"
+        }
+      };
+      setFoTaData(updatedLog);
+      setShowDisputeModal(false);
+      setDisputeReason("");
+
+      // Update cache in localStorage
+      try {
+        const cacheKey = `dfy_fo_ta_cache_${formData.working_place}_${formData.fo_name}_${foTaMonth}`.replace(/\s+/g, '_').toLowerCase();
+        localStorage.setItem(cacheKey, JSON.stringify({ data: updatedLog, timestamp: Date.now() }));
+      } catch (err) {}
+    } catch (err) {
+      showToast(err.message || "Dispute submit karne me samasya aayi.", "error");
+    } finally {
+      setIsSubmittingDispute(false);
     }
   };
 
@@ -2293,21 +2389,96 @@ const MyProfileDashboard = ({
           <div className="py-8 text-center text-slate-400 font-bold text-xs animate-pulse">
             ⏳ Loading verified travel allowance records...
           </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Status Indicator */}
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-400">Approval Status:</span>
-              {foTaData ? (
-                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
-                  <span>✓</span> Verified by District Coordinator
-                </span>
-              ) : (
-                <span className="bg-amber-50 text-amber-800 text-[10px] font-bold px-2.5 py-0.5 rounded-full border border-amber-200/80">
-                  Pending Verification / Draft
-                </span>
-              )}
+        ) : !isTaApproved ? (
+          /* Pre-Approval Lock State: Verification in Progress */
+          <div className="bg-amber-50/70 border border-amber-200/80 rounded-2xl p-5 text-center sm:text-left flex flex-col sm:flex-row items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center text-2xl shrink-0 shadow-inner">
+              ⏳
             </div>
+            <div className="space-y-1.5 flex-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider flex items-center justify-center sm:justify-start gap-1.5">
+                  <span>🛵 Monthly Travel Allowance (Month: {foTaMonth})</span>
+                </h4>
+                <span className="self-center sm:self-auto bg-amber-200/70 text-amber-900 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
+                  Status: {foTaData?.status ? (foTaData.status === 'SUBMITTED' ? 'Submitted to Incharge' : foTaData.status === 'REVERTED' ? 'Under Correction by MIS' : 'Draft / Unapproved') : 'Draft / Unapproved'}
+                </span>
+              </div>
+              <p className="text-sm font-bold text-amber-950">
+                ⏳ Verification in Progress by District MIS &amp; Incharge
+              </p>
+              <p className="text-xs text-amber-800/90 leading-relaxed">
+                Aapke monthly odometer readings aur route claims abhi District MIS aur Incharge dwaara audit kiye ja rahe hain. Final approved reimbursement aur verified payout official sign-off ke baad yahan display hoga.
+              </p>
+              <p className="text-[11px] text-amber-700/80 font-medium pt-0.5">
+                Monthly odometer readings and route claims are currently being audited. Final approved reimbursement will appear after sign-off.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* Post-Approval Verified Breakdown & 24h Dispute UI */
+          <div className="space-y-4">
+            {/* Status & 24-Hour Dispute Window Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-bold text-slate-500">Approval Status:</span>
+                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2.5 py-0.5 rounded-full flex items-center gap-1">
+                  <span>✓</span> Verified &amp; Approved by Incharge
+                </span>
+                {foTaData.approved_at && (
+                  <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
+                    ({foTaData.approved_at})
+                  </span>
+                )}
+              </div>
+
+              {/* 24-Hour Dispute Window Status or Countdown Action */}
+              <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                {foTaData.dispute?.is_disputed || foTaData.status === 'DISPUTED' ? (
+                  <span className="bg-amber-100 text-amber-900 text-[10px] font-black px-3 py-1 rounded-full border border-amber-300 flex items-center gap-1.5 shadow-xs">
+                    <span>⚠️</span> Dispute Under Review ({foTaData.dispute?.status || 'PENDING'})
+                  </span>
+                ) : disputeWindowActive ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="bg-amber-50 text-amber-900 border border-amber-300/80 text-[10px] font-black px-2.5 py-1 rounded-full flex items-center gap-1 animate-pulse">
+                      <span>⏱️</span> Dispute Window: {disputeHoursRemaining}h {disputeMinsRemaining}m remaining
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowDisputeModal(true)}
+                      className="bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-black px-3 py-1 rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer flex items-center gap-1"
+                    >
+                      <span>⚠️</span>
+                      <span>Report Deduction Dispute / Claim</span>
+                    </button>
+                  </div>
+                ) : (
+                  <span className="bg-slate-100 text-slate-700 text-[10px] font-black px-3 py-1 rounded-full border border-slate-200 flex items-center gap-1">
+                    <span>🔒</span> Payroll Finalized &amp; Verified
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* If Dispute was filed: Show Context Banner */}
+            {(foTaData.dispute?.is_disputed || foTaData.status === 'DISPUTED') && (
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900 space-y-1">
+                <div className="flex items-center justify-between font-bold">
+                  <span>⚠️ Active Dispute Registered</span>
+                  <span className="text-[10px] bg-amber-200/80 px-2 py-0.5 rounded-full font-black">
+                    Dispute Status: {foTaData.dispute?.status || 'PENDING'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-amber-800">
+                  <strong>Dispute Reason:</strong> {foTaData.dispute?.reason || foTaData.dispute?.dispute_reason || 'Claim lodged'}
+                </p>
+                {foTaData.dispute?.resolution_note && (
+                  <p className="text-[11px] text-emerald-800 bg-emerald-50 p-2 rounded-xl border border-emerald-200 mt-1">
+                    <strong>Incharge Resolution:</strong> {foTaData.dispute.resolution_note}
+                  </p>
+                )}
+              </div>
+            )}
 
             {/* 4 Bento Metric Cards */}
             <div className="grid grid-cols-2 gap-2.5">
@@ -2317,10 +2488,10 @@ const MyProfileDashboard = ({
                   Total Travel
                 </span>
                 <div className="text-lg font-black text-slate-800 tabular-num">
-                  {foTaData ? (foTaData.total_km || 0) : (stats?.total_km || 0)} <span className="text-xs font-bold text-slate-400">KM</span>
+                  {foTaData.total_km || 0} <span className="text-xs font-bold text-slate-400">KM</span>
                 </div>
                 <span className="text-[9px] font-bold text-slate-400">
-                  {foTaData?.daily_logs ? Object.keys(foTaData.daily_logs).length : 0} days recorded
+                  {foTaData.daily_logs ? Object.keys(foTaData.daily_logs).length : 0} days recorded
                 </span>
               </div>
 
@@ -2330,7 +2501,7 @@ const MyProfileDashboard = ({
                   Gross TA Claim
                 </span>
                 <div className="text-lg font-black text-blue-900 tabular-num">
-                  ₹ {foTaData ? Number(foTaData.gross_amount || 0).toFixed(2) : (Number((stats?.total_km || 0) * 4.0)).toFixed(2)}
+                  ₹ {Number(foTaData.gross_amount || 0).toFixed(2)}
                 </div>
                 <span className="text-[9px] font-bold text-blue-400">
                   Computed @ ₹4.00/KM
@@ -2343,14 +2514,14 @@ const MyProfileDashboard = ({
                   Deductions
                 </span>
                 <div className="text-lg font-black text-rose-700 tabular-num">
-                  {foTaData && Number(foTaData.deduction_amount) > 0 ? (
+                  {Number(foTaData.deduction_amount) > 0 ? (
                     `- ₹ ${Number(foTaData.deduction_amount).toFixed(2)}`
                   ) : (
                     '₹ 0.00'
                   )}
                 </div>
-                <p className="text-[9px] font-semibold text-rose-600 truncate" title={foTaData?.deduction_reason || ''}>
-                  {foTaData?.deduction_reason ? foTaData.deduction_reason : 'Zero deductions'}
+                <p className="text-[9px] font-semibold text-rose-600 truncate" title={foTaData.deduction_reason || ''}>
+                  {foTaData.deduction_reason ? foTaData.deduction_reason : 'Zero deductions'}
                 </p>
               </div>
 
@@ -2360,11 +2531,7 @@ const MyProfileDashboard = ({
                   Net Approved Payout
                 </span>
                 <div className="text-lg font-black text-emerald-950 tabular-num">
-                  {foTaData ? (
-                    `₹ ${Number(foTaData.final_payable_amount || 0).toFixed(2)}`
-                  ) : (
-                    'Pending DC Entry'
-                  )}
+                  ₹ {Number(foTaData.final_payable_amount || 0).toFixed(2)}
                 </div>
                 <span className="text-[9px] font-bold text-emerald-600">
                   Approved for Payroll
@@ -2373,14 +2540,14 @@ const MyProfileDashboard = ({
             </div>
 
             {/* Admin Final Remarks */}
-            {foTaData?.admin_final_remarks && (
+            {(foTaData.admin_remarks || foTaData.admin_final_remarks) && (
               <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-3 text-xs text-amber-900 font-medium">
-                💬 <strong>Admin / DC Remark:</strong> {foTaData.admin_final_remarks}
+                💬 <strong>Admin / Incharge Remark:</strong> {foTaData.admin_remarks || foTaData.admin_final_remarks}
               </div>
             )}
 
             {/* Expandable Day-by-Day Inspection */}
-            {foTaData?.daily_logs && Object.keys(foTaData.daily_logs).length > 0 && (
+            {foTaData.daily_logs && Object.keys(foTaData.daily_logs).length > 0 && (
               <div className="pt-2">
                 <button
                   type="button"
@@ -2424,6 +2591,113 @@ const MyProfileDashboard = ({
           </div>
         )}
       </div>
+
+      {/* Travel Allowance Dispute Claim Modal Dialog */}
+      {showDisputeModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in text-left">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center text-lg">
+                  ⚠️
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-800">
+                    Report Deduction Dispute / Claim
+                  </h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    Month: {foTaMonth} • {formData?.working_place || 'District'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => { if (!isSubmittingDispute) setShowDisputeModal(false); }}
+                disabled={isSubmittingDispute}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none cursor-pointer disabled:opacity-50"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Current Payout Snapshot */}
+            <div className="bg-slate-50 rounded-2xl p-3 border border-slate-200/80 mb-4 space-y-1.5 text-xs">
+              <div className="flex justify-between items-center text-slate-600">
+                <span>Verified Travel:</span>
+                <span className="font-bold text-slate-800">{foTaData?.total_km || 0} KM</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-600">
+                <span>Gross Claim (@₹4/KM):</span>
+                <span className="font-bold text-slate-800">₹{Number(foTaData?.gross_amount || 0).toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center text-rose-600">
+                <span>Admin Deductions:</span>
+                <span className="font-black">- ₹{Number(foTaData?.deduction_amount || 0).toFixed(2)}</span>
+              </div>
+              {foTaData?.deduction_reason && (
+                <div className="text-[11px] text-slate-500 italic bg-white p-2 rounded-xl border border-slate-100">
+                  Deduction note: &ldquo;{foTaData.deduction_reason}&rdquo;
+                </div>
+              )}
+              <div className="flex justify-between items-center text-emerald-800 pt-1 border-t border-slate-200 font-black">
+                <span>Net Payable:</span>
+                <span className="text-sm">₹{Number(foTaData?.final_payable_amount || 0).toFixed(2)}</span>
+              </div>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleFileTaDispute} className="space-y-4">
+              <div>
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-600 block mb-1.5">
+                  Dispute Justification &amp; Duty Remarks:
+                </label>
+                <textarea
+                  value={disputeReason}
+                  onChange={(e) => setDisputeReason(e.target.value)}
+                  placeholder="Kripya batayein ki deduction ya KM calculation me kya asuvidha ya galti hai (e.g. 50 KM deduction was an official visit to PHC; duty slip submitted)..."
+                  rows={4}
+                  required
+                  disabled={isSubmittingDispute}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-amber-500 disabled:opacity-50 resize-none"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Yeh dispute request seedhe District Incharge aur MIS ko review ke liye bhej di jayegi.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowDisputeModal(false)}
+                  disabled={isSubmittingDispute}
+                  className="px-4 py-2.5 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 cursor-pointer disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingDispute || !disputeReason.trim()}
+                  className="px-5 py-2.5 rounded-xl text-xs font-black text-white bg-amber-600 hover:bg-amber-700 shadow-md shadow-amber-600/20 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                >
+                  {isSubmittingDispute ? (
+                    <>
+                      <span>⏳</span>
+                      <span>Submitting Dispute...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>⚠️</span>
+                      <span>Report Dispute</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
         </>
       )}
     </div>
