@@ -9614,6 +9614,23 @@ class TaDistrictActionRequest(BaseModel):
     staff_keys: Optional[List[str]] = None
 
 
+class TaDisputeRequest(BaseModel):
+    month: str
+    district: str
+    staff_key: str
+    pin: str
+    reason: str
+
+
+class TaResolveDisputeRequest(BaseModel):
+    month: str
+    district: str
+    staff_key: str
+    resolution: str  # 'accept' | 'reject'
+    resolution_note: Optional[str] = ""
+
+
+
 def build_ta_doc_id(month: str, district: str, staff_key: str) -> str:
     clean_month = month.strip()
     clean_dist = canonicalize_district(district).lower().replace(" ", "")
@@ -9968,6 +9985,7 @@ async def ta_district_action(
                 "submitted_at": now_str,
                 "submitted_by": actor_name,
                 "submitted_by_id": actor_id,
+                "revert_reason": "",
                 "last_updated_at": now_str,
                 "last_updated_by": actor_name,
                 "last_updated_role": admin_role
@@ -9981,6 +9999,7 @@ async def ta_district_action(
                 "approved_at": now_str,
                 "approved_by": actor_name,
                 "approved_by_id": actor_id,
+                "revert_reason": "",
                 "last_updated_at": now_str,
                 "last_updated_by": actor_name,
                 "last_updated_role": admin_role
@@ -10061,6 +10080,308 @@ async def ta_district_action(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/ta/dispute")
+async def ta_dispute(req: TaDisputeRequest):
+    """
+    Field Officer 24-Hour Time-Gated Dispute Mechanism:
+    - Authenticates FO identity via PIN against staff_directory.
+    - Validates that the TA log is in 'APPROVED' status.
+    - Validates that fewer than 24 hours (86,400 seconds) have elapsed since approved_at.
+    - Sets log status to 'DISPUTED' with dispute details.
+    - Invalidates TA caches and alerts administrative supervisors.
+    """
+    try:
+        clean_month = req.month.strip()
+        clean_dist = canonicalize_district(req.district)
+        clean_skey = req.staff_key.strip()
+        clean_pin = str(req.pin).strip()
+        reason_text = req.reason.strip()
+
+        if not clean_month or not clean_dist or not clean_skey:
+            raise HTTPException(status_code=400, detail="Month, district, and staff_key are required.")
+        if not clean_pin:
+            raise HTTPException(status_code=401, detail="PIN is required.")
+        if not reason_text:
+            raise HTTPException(status_code=400, detail="A reason for dispute is required.")
+
+        # FO Authentication via PIN against staff_directory
+        c_dist_key = clean_dist.lower().replace(" ", "")
+        skey_norm = clean_skey.lower().replace(" ", "")
+        candidate_ids = [
+            f"{c_dist_key}_{skey_norm}",
+            skey_norm,
+            clean_skey,
+            f"{c_dist_key}_{re.sub(r'[^a-zA-Z0-9]', '', skey_norm)}"
+        ]
+        candidate_ids = [cid for cid in dict.fromkeys(candidate_ids) if cid]
+
+        pin_valid = False
+        matched_staff_name = clean_skey
+        for cid in candidate_ids:
+            try:
+                s_doc = await asyncio.to_thread(lambda d_id=cid: db.collection("staff_directory").document(d_id).get())
+                if s_doc.exists:
+                    s_data = s_doc.to_dict() or {}
+                    stored_pin = str(s_data.get("pin", ""))
+                    if verify_password(clean_pin, stored_pin) or clean_pin == stored_pin.strip():
+                        pin_valid = True
+                        matched_staff_name = s_data.get("name", clean_skey)
+                        break
+            except Exception:
+                pass
+
+        if not pin_valid:
+            try:
+                staff_query_docs = await asyncio.to_thread(lambda: list(
+                    db.collection("staff_directory")
+                    .where("district", "==", clean_dist)
+                    .stream()
+                ))
+                for sd in staff_query_docs:
+                    sdata = sd.to_dict() or {}
+                    sd_id = sd.id.lower()
+                    sd_name = str(sdata.get("name", "")).strip().lower()
+                    if skey_norm in sd_id or skey_norm == sd_name or normalize_staff_key(clean_dist, sd_name) == normalize_staff_key(clean_dist, clean_skey):
+                        stored_pin = str(sdata.get("pin", ""))
+                        if verify_password(clean_pin, stored_pin) or clean_pin == stored_pin.strip():
+                            pin_valid = True
+                            matched_staff_name = sdata.get("name", clean_skey)
+                            break
+            except Exception:
+                pass
+
+        if not pin_valid:
+            raise HTTPException(status_code=401, detail="Invalid PIN or credentials.")
+
+        # Target staff document lookup
+        doc_id = build_ta_doc_id(clean_month, clean_dist, clean_skey)
+        doc_ref = db.collection("travel_allowance_logs").document(doc_id)
+        doc_snap = await asyncio.to_thread(doc_ref.get)
+
+        if not doc_snap.exists:
+            raise HTTPException(status_code=404, detail="Travel allowance record not found for this month.")
+
+        doc_data = doc_snap.to_dict() or {}
+        current_status = doc_data.get("status", "DRAFT")
+
+        if current_status != "APPROVED":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only approved TA logs can be disputed. Current status is '{current_status}'."
+            )
+
+        # 24-hour time gate validation
+        approved_at_str = str(doc_data.get("approved_at") or "").strip()
+        if not approved_at_str:
+            raise HTTPException(status_code=400, detail="Approval timestamp missing. Cannot calculate dispute window.")
+
+        approved_dt = None
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"]:
+            try:
+                approved_dt = datetime.strptime(approved_at_str, fmt)
+                break
+            except ValueError:
+                pass
+
+        if not approved_dt:
+            raise HTTPException(status_code=400, detail="Invalid approval timestamp format.")
+
+        now_naive = datetime.now()
+        if approved_dt.tzinfo is not None:
+            approved_dt = approved_dt.replace(tzinfo=None)
+
+        elapsed_seconds = (now_naive - approved_dt).total_seconds()
+        if elapsed_seconds > 86400:  # 24 hours
+            raise HTTPException(
+                status_code=400,
+                detail="The 24-hour dispute window for this approved month has expired."
+            )
+
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        staff_display_name = doc_data.get("staff_name") or matched_staff_name or clean_skey
+        dispute_data = {
+            "is_disputed": True,
+            "reason": reason_text,
+            "dispute_reason": reason_text,
+            "disputed_at": now_str,
+            "status": "PENDING",
+            "resolution_note": "",
+            "resolved_at": "",
+            "resolved_by": ""
+        }
+
+        update_payload = {
+            "status": "DISPUTED",
+            "dispute": dispute_data,
+            "last_updated_at": now_str,
+            "last_updated_by": f"FO: {staff_display_name}",
+            "last_updated_role": "FIELD_OFFICER"
+        }
+
+        await asyncio.to_thread(lambda: doc_ref.set(update_payload, merge=True))
+
+        # Invalidate TTL cache
+        cache.delete(f"ta_roster_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_logs_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_analytics_{clean_month}_{clean_dist.lower()}")
+        cache.delete("ta_analytics_all")
+        cache.delete_prefix("ta_")
+
+        # Admin activity audit
+        await log_admin_activity(
+            action_type="TA_DISPUTE_FILED",
+            details=f"Dispute filed by {staff_display_name} ({clean_dist}) for {clean_month}. Reason: {reason_text}",
+            user_name=f"FO: {staff_display_name}",
+            user_id=clean_skey,
+            role="FIELD_OFFICER",
+            district=clean_dist
+        )
+
+        return {
+            "success": True,
+            "status": "DISPUTED",
+            "message": "Dispute submitted successfully. The District Incharge has been alerted.",
+            "dispute": dispute_data
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/ta/resolve-dispute")
+async def ta_resolve_dispute(
+    req: TaResolveDisputeRequest,
+    admin: dict = Depends(get_current_admin)
+):
+    """
+    District Incharge / Super Admin Dispute Resolution:
+    - 'accept': Transitions log to 'DRAFT' for MIS adjustment, marks dispute as 'ACCEPTED', sets revert_reason.
+    - 'reject': Transitions log back to 'APPROVED', marks dispute as 'REJECTED' with explanation note.
+    """
+    try:
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role not in ["MAIN_INCHARGE", "SUPER_ADMIN"]:
+            raise HTTPException(
+                status_code=403,
+                detail="Only Main Incharge or Super Admin can resolve TA disputes."
+            )
+
+        clean_month = req.month.strip()
+        clean_dist = canonicalize_district(req.district)
+        clean_skey = req.staff_key.strip()
+
+        if not clean_month or not clean_dist or not clean_skey:
+            raise HTTPException(status_code=400, detail="Month, district, and staff_key are required.")
+
+        # District isolation check for non-Super Admin
+        if admin_role != "SUPER_ADMIN":
+            allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
+            if "all" not in allowed and clean_dist.lower() not in allowed:
+                raise HTTPException(status_code=403, detail="Not authorized for this district.")
+
+        resolution = req.resolution.strip().lower()
+        if resolution not in ["accept", "reject"]:
+            raise HTTPException(status_code=400, detail="Resolution must be 'accept' or 'reject'.")
+
+        doc_id = build_ta_doc_id(clean_month, clean_dist, clean_skey)
+        doc_ref = db.collection("travel_allowance_logs").document(doc_id)
+        doc_snap = await asyncio.to_thread(doc_ref.get)
+
+        if not doc_snap.exists:
+            raise HTTPException(status_code=404, detail="Travel allowance record not found.")
+
+        doc_data = doc_snap.to_dict() or {}
+        current_status = doc_data.get("status", "DRAFT")
+        if current_status != "DISPUTED":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Only disputed records can be resolved. Current status is '{current_status}'."
+            )
+
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        resolution_note = (req.resolution_note or "").strip()
+
+        existing_dispute = doc_data.get("dispute") or {}
+        dispute_update = dict(existing_dispute)
+
+        if resolution == "accept":
+            new_status = "DRAFT"
+            dispute_update.update({
+                "status": "ACCEPTED",
+                "is_disputed": False,
+                "resolution": "accept",
+                "resolution_note": resolution_note,
+                "resolved_at": now_str,
+                "resolved_by": actor_name,
+                "resolved_by_id": actor_id
+            })
+            update_payload = {
+                "status": "DRAFT",
+                "revert_reason": resolution_note,
+                "reverted_at": now_str,
+                "reverted_by": actor_name,
+                "reverted_by_id": actor_id,
+                "dispute": dispute_update,
+                "last_updated_at": now_str,
+                "last_updated_by": actor_name,
+                "last_updated_role": admin_role
+            }
+        else:  # reject
+            new_status = "APPROVED"
+            dispute_update.update({
+                "status": "REJECTED",
+                "is_disputed": False,
+                "resolution": "reject",
+                "resolution_note": resolution_note,
+                "resolved_at": now_str,
+                "resolved_by": actor_name,
+                "resolved_by_id": actor_id
+            })
+            update_payload = {
+                "status": "APPROVED",
+                "dispute": dispute_update,
+                "last_updated_at": now_str,
+                "last_updated_by": actor_name,
+                "last_updated_role": admin_role
+            }
+
+        await asyncio.to_thread(lambda: doc_ref.set(update_payload, merge=True))
+
+        # Invalidate TTL cache
+        cache.delete(f"ta_roster_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_logs_{clean_month}_{clean_dist.lower()}")
+        cache.delete(f"ta_analytics_{clean_month}_{clean_dist.lower()}")
+        cache.delete("ta_analytics_all")
+        cache.delete_prefix("ta_")
+
+        # Log admin activity
+        await log_admin_activity(
+            action_type=f"TA_DISPUTE_{resolution.upper()}",
+            details=f"TA dispute for {clean_skey} ({clean_dist}) in {clean_month} resolved with '{resolution}'. Note: {resolution_note}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=admin_role,
+            district=clean_dist
+        )
+
+        return {
+            "success": True,
+            "status": new_status,
+            "resolution": resolution,
+            "resolution_note": resolution_note,
+            "dispute": dispute_update,
+            "message": f"Dispute resolved with '{resolution}'. Status updated to {new_status}."
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
 @app.post("/api/ta-logs/prefill-from-reports")
 async def prefill_ta_log_from_reports(
     month: str,
@@ -10077,10 +10398,11 @@ async def prefill_ta_log_from_reports(
         if not clean_dist:
             raise HTTPException(status_code=400, detail="Valid district is required.")
 
-        # Sub-Admin Permission Check
-        if admin.get("role") == "SUB_ADMIN":
+        # District Permission Check
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role != "SUPER_ADMIN":
             allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
-            if clean_dist.lower() not in allowed:
+            if "all" not in allowed and clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized for this district.")
 
         # Query monthly reports using shared cache engine
@@ -10187,11 +10509,11 @@ async def get_ta_analytics(
     """
     try:
         allowed_districts = []
-        if admin and admin.get("role") == "SUB_ADMIN":
+        if admin and admin.get("role") != "SUPER_ADMIN":
             allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
             if district and district != "All":
                 c_dist = canonicalize_district(district).lower()
-                if c_dist not in allowed_districts:
+                if "all" not in allowed_districts and c_dist not in allowed_districts:
                     raise HTTPException(status_code=403, detail="Not authorized for this district.")
 
         target_month = (month.strip() if month else "") or get_ist_now().strftime("%Y-%m")
@@ -10272,10 +10594,11 @@ async def export_travel_allowance_excel(
     if not clean_dist:
         raise HTTPException(status_code=400, detail="Valid district is required.")
 
-    # Sub-Admin Permission Guard
-    if admin.get("role") == "SUB_ADMIN":
+    # District Permission Guard
+    admin_role = admin.get("role", "SUB_ADMIN")
+    if admin_role != "SUPER_ADMIN":
         allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
-        if clean_dist.lower() not in allowed:
+        if "all" not in allowed and clean_dist.lower() not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized to export TA logs for this district.")
 
     async with ta_excel_semaphore:
