@@ -371,6 +371,10 @@ export default function AdminDashboard() {
   const [taSummaryList, setTaSummaryList] = useState([]);
   const [taAnalytics, setTaAnalytics] = useState(null);
   const [loadingTaAnalytics, setLoadingTaAnalytics] = useState(false);
+  const [taViewMode, setTaViewMode] = useState('roster'); // 'roster' | 'day_by_day'
+  const [taShowOptionsMenu, setTaShowOptionsMenu] = useState(false);
+  const [taRevertModal, setTaRevertModal] = useState(null); // { isOpen, district, month, reason }
+  const [taActionLoading, setTaActionLoading] = useState(false);
   const taDailyTableRef = useRef(null);
 
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
@@ -4845,6 +4849,100 @@ const availableDistrictsForFeed = useMemo(() => {
     return { totalKm: totKm, grossAmount: gross, deductionAmount: ded, netPayable: net };
   }, [taDailyLogs, taDeductionAmount]);
 
+  const taDistrictStatus = useMemo(() => {
+    if (!taSummaryList || taSummaryList.length === 0) return 'DRAFT';
+    if (taSummaryList.some(l => l.status === 'DISPUTED')) return 'DISPUTED';
+    if (taSummaryList.some(l => l.status === 'REVERTED')) return 'REVERTED';
+    if (taSummaryList.length > 0 && taSummaryList.every(l => l.status === 'APPROVED')) return 'APPROVED';
+    if (taSummaryList.some(l => l.status === 'SUBMITTED')) return 'SUBMITTED';
+    return 'DRAFT';
+  }, [taSummaryList]);
+
+  const taDistrictMetrics = useMemo(() => {
+    let totalKm = 0;
+    let grossAmount = 0;
+    let deductionAmount = 0;
+    let netPayable = 0;
+    const staffCount = taDistrictStaff.length;
+
+    taDistrictStaff.forEach(staff => {
+      const staffKey = (staff.id || staff.name || '').trim().toLowerCase();
+      const staffName = (staff.name || '').trim().toLowerCase();
+      const log = taSummaryList.find(l => 
+        (l.staff_key && l.staff_key.toLowerCase() === staffKey) || 
+        (l.staff_name && l.staff_name.toLowerCase() === staffName) ||
+        (l.staff_key && l.staff_key.toLowerCase() === staffName)
+      );
+      if (log) {
+        totalKm += (Number(log.total_km) || 0);
+        grossAmount += (Number(log.gross_amount) || 0);
+        deductionAmount += (Number(log.deduction_amount) || 0);
+        netPayable += (Number(log.final_payable_amount) || 0);
+      }
+    });
+
+    return { staffCount, totalKm, grossAmount, deductionAmount, netPayable };
+  }, [taDistrictStaff, taSummaryList]);
+
+  const taCurrentStaffLog = useMemo(() => {
+    const key = (taSelectedStaffKey || '').trim().toLowerCase();
+    const name = (taCurrentStaff?.name || '').trim().toLowerCase();
+    return taSummaryList.find(l => 
+      (key && l.staff_key && l.staff_key.toLowerCase() === key) ||
+      (name && l.staff_name && l.staff_name.toLowerCase() === name) ||
+      (key && l.staff_name && l.staff_name.toLowerCase() === key)
+    ) || null;
+  }, [taSummaryList, taSelectedStaffKey, taCurrentStaff]);
+
+  const selectStaffForDrilldown = useCallback((staff) => {
+    const sKey = staff.id || staff.name;
+    setTaSelectedStaffKey(sKey);
+    setTaDesignation(staff.designation || 'Field Officer');
+    const cleanSKey = (sKey || '').trim().toLowerCase();
+    const cleanName = (staff.name || '').trim().toLowerCase();
+    const found = taSummaryList.find(l => 
+      (l.staff_key && l.staff_key.toLowerCase() === cleanSKey) || 
+      (l.staff_name && l.staff_name.toLowerCase() === cleanName) ||
+      (l.staff_key && l.staff_key.toLowerCase() === cleanName)
+    );
+    if (found) {
+      setTaDailyLogs(found.daily_logs || {});
+      setTaDeductionAmount(found.deduction_amount || 0);
+      setTaDeductionReason(found.deduction_reason || '');
+      setTaAdminRemarks(found.admin_final_remarks || '');
+    } else {
+      setTaDailyLogs({});
+      setTaDeductionAmount(0);
+      setTaDeductionReason('');
+      setTaAdminRemarks('');
+    }
+    setTaViewMode('day_by_day');
+  }, [taSummaryList]);
+
+  const handleSelectStaff = useCallback((key) => {
+    setTaSelectedStaffKey(key);
+    const foundStaff = taDistrictStaff.find(s => (s.id === key || s.name === key));
+    if (foundStaff) setTaDesignation(foundStaff.designation || 'Field Officer');
+    const cleanSKey = (key || '').trim().toLowerCase();
+    const cleanName = (foundStaff?.name || '').trim().toLowerCase();
+    const found = taSummaryList.find(l => 
+      (l.staff_key && l.staff_key.toLowerCase() === cleanSKey) || 
+      (cleanName && l.staff_name && l.staff_name.toLowerCase() === cleanName) ||
+      (l.staff_key && cleanName && l.staff_key.toLowerCase() === cleanName)
+    );
+    if (found) {
+      setTaDailyLogs(found.daily_logs || {});
+      setTaDeductionAmount(found.deduction_amount || 0);
+      setTaDeductionReason(found.deduction_reason || '');
+      setTaAdminRemarks(found.admin_final_remarks || '');
+    } else {
+      setTaDailyLogs({});
+      setTaDeductionAmount(0);
+      setTaDeductionReason('');
+      setTaAdminRemarks('');
+    }
+  }, [taDistrictStaff, taSummaryList]);
+
   const fetchTaLog = useCallback(async (dist, mon, sKey) => {
     if (!dist || !mon) return;
     setTaLoading(true);
@@ -4991,6 +5089,43 @@ const availableDistrictsForFeed = useMemo(() => {
       showToast("Export error: " + err.message, "error");
     } finally {
       setTaExporting(false);
+    }
+  };
+
+  const handleDistrictAction = async (action, reason = '', staffKeys = null) => {
+    if (taActionLoading) return;
+    setTaActionLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = {
+        month: taMonth,
+        district: taDistrict,
+        action: action,
+        revert_reason: reason || ''
+      };
+      if (staffKeys && Array.isArray(staffKeys) && staffKeys.length > 0) {
+        payload.staff_keys = staffKeys;
+      }
+      const res = await authFetch(`${API_BASE_URL}/api/ta/district-action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
+        showToast(data.message || `District TA roster successfully ${action}ed!`, "success");
+        setTaRevertModal(null);
+        await fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
+        if (typeof fetchTaAnalytics === 'function') {
+          fetchTaAnalytics(taMonth, taDistrict);
+        }
+      } else {
+        showToast(data.detail || `Failed to ${action} district TA roster.`, "error");
+      }
+    } catch (err) {
+      showToast(`Error executing ${action}: ${err.message}`, "error");
+    } finally {
+      setTaActionLoading(false);
     }
   };
 
@@ -10102,7 +10237,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                      Month: {taMonth} &bull; District: {taDistrict} &bull; Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')} &bull; Standard Rate @ ₹4.00 / KM
+                      Month: {taMonth} &bull; District: {taDistrict} &bull; {taViewMode === 'roster' ? `Roster Overview (${taDistrictStaff.length} Officers)` : `Officer: ${taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')}`} &bull; Standard Rate @ ₹4.00 / KM
                     </p>
                   </div>
                 </div>
@@ -10125,7 +10260,10 @@ const availableDistrictsForFeed = useMemo(() => {
                         type="button"
                         onClick={() => {
                           setReportsStudioTab(tab.id);
-                          if (tab.id === 'ta_payout') setIsTaFullscreen(true);
+                          if (tab.id === 'ta_payout') {
+                            setIsTaFullscreen(true);
+                            setTaViewMode('roster');
+                          }
                         }}
                         title={tab.title}
                         className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1 cursor-pointer ${reportsStudioTab === tab.id ? 'bg-teal-700 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'}`}
@@ -10172,7 +10310,10 @@ const availableDistrictsForFeed = useMemo(() => {
                     {reportsStudioTab === 'ta_payout' && (
                       <button
                         type="button"
-                        onClick={() => setIsTaFullscreen(true)}
+                        onClick={() => {
+                          setIsTaFullscreen(true);
+                          setTaViewMode('roster');
+                        }}
                         className="px-3 py-1.5 rounded-xl text-xs font-bold bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
                         title="Expand to Full Screen Workspace"
                       >
@@ -10199,7 +10340,10 @@ const availableDistrictsForFeed = useMemo(() => {
                       key={tab.id}
                       onClick={() => {
                         setReportsStudioTab(tab.id);
-                        if (tab.id === 'ta_payout') setIsTaFullscreen(true);
+                        if (tab.id === 'ta_payout') {
+                          setIsTaFullscreen(true);
+                          setTaViewMode('roster');
+                        }
                       }}
                       className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${reportsStudioTab === tab.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
@@ -10997,155 +11141,433 @@ const availableDistrictsForFeed = useMemo(() => {
               {/* Tab: Travel Allowance & Bike Payout */}
               {reportsStudioTab === "ta_payout" && (
                 <div className="space-y-6 animate-fade-in">
-                  {/* Top Banner */}
-                  <div className="bg-amber-50/70 p-4 sm:p-5 rounded-2xl border border-amber-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-black text-amber-950 mb-0.5 flex items-center gap-2">
-                        <span>🛵</span> Official Multi-Sheet Travel Allowance &amp; Bike Log Workbooks
-                      </h4>
-                      <p className="text-xs text-amber-900/80 font-medium">
-                        Automated multi-sheet Excel generator: Sheet 1 (Summary &amp; Sign-off) + 1 dedicated sheet per verified Field Officer with odometer readings and route validation.
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-black uppercase tracking-wider bg-amber-200 text-amber-950 px-3 py-1 rounded-full shrink-0 self-start sm:self-auto border border-amber-300">
-                      Month: {taMonth}
-                    </span>
-                  </div>
+                  {taViewMode === 'roster' ? (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Screen 1 Top Control & Filter Banner */}
+                      <div className="bg-gradient-to-r from-teal-900 to-slate-900 text-white p-5 rounded-3xl shadow-sm border border-teal-800/50 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                        <div className="flex items-center gap-3.5">
+                          <div className="w-12 h-12 rounded-2xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-2xl shadow-inner shrink-0">
+                            🛵
+                          </div>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <h3 className="text-base sm:text-lg font-black tracking-tight text-white">
+                                District Staff Travel Allowance Payroll Roster
+                              </h3>
+                              <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-2xs ${
+                                taDistrictStatus === 'APPROVED' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40' :
+                                taDistrictStatus === 'SUBMITTED' ? 'bg-blue-500/20 text-blue-300 border-blue-400/40' :
+                                taDistrictStatus === 'REVERTED' ? 'bg-rose-500/20 text-rose-300 border-rose-400/40' :
+                                taDistrictStatus === 'DISPUTED' ? 'bg-amber-500/20 text-amber-300 border-amber-400/40' :
+                                'bg-slate-500/20 text-slate-300 border-slate-400/40'
+                              }`}>
+                                Status: {taDistrictStatus}
+                              </span>
+                            </div>
+                            <p className="text-xs text-teal-200/80 font-medium">
+                              Select an officer to inspect or edit their day-by-day odometer logs and fuel reimbursement calculations.
+                            </p>
+                          </div>
+                        </div>
 
-                  {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Travel Distance</span>
-                      <p className="text-2xl font-black text-slate-800 tabular-num">
-                        {(Number(taAnalytics?.month_total_km) || Number(totals.total_km) || 0).toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-bold">KM</span>
-                      </p>
-                      <span className="text-[11px] font-semibold text-amber-700 mt-1 block">Active Field Mobility</span>
-                    </div>
+                        {/* Controls & Role Actions */}
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          {/* District Selector */}
+                          <div className="flex items-center gap-1.5 bg-slate-800/90 border border-teal-500/30 rounded-xl px-3 py-1.5 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-teal-300">Dist:</span>
+                            <select
+                              value={taDistrict}
+                              onChange={(e) => {
+                                setTaDistrict(e.target.value);
+                                setTaSelectedStaffKey('');
+                              }}
+                              className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer"
+                            >
+                              {availableKpiDistricts.map(d => (
+                                <option key={d} value={d} className="bg-slate-900 text-white">{d}</option>
+                              ))}
+                            </select>
+                          </div>
 
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Verified Payout</span>
-                      <p className="text-2xl font-black text-emerald-700 tabular-num">
-                        ₹{(Number(taAnalytics?.total_ta_final_payable) || Math.round((Number(taAnalytics?.month_total_km) || Number(totals.total_km) || 0) * 4.0)).toLocaleString('en-IN')}
-                      </p>
-                      <span className="text-[11px] font-semibold text-emerald-800 mt-1 block">Standard Rate @ ₹4.00 / KM</span>
-                    </div>
+                          {/* Month Picker */}
+                          <div className="flex items-center gap-1.5 bg-slate-800/90 border border-teal-500/30 rounded-xl px-3 py-1.5 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-teal-300">Month:</span>
+                            <input
+                              type="month"
+                              value={taMonth}
+                              onChange={(e) => setTaMonth(e.target.value)}
+                              className="bg-transparent text-xs font-bold text-white outline-none cursor-pointer"
+                            />
+                          </div>
 
-                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Active Field Officers</span>
-                      <p className="text-2xl font-black text-indigo-700 tabular-num">
-                        {new Set(filteredRecords.map(r => r.fo_name).filter(Boolean)).size} <span className="text-xs text-slate-400 font-bold">Staff</span>
-                      </p>
-                      <span className="text-[11px] font-semibold text-indigo-700 mt-1 block">Reporting Across {selectedDistrict !== 'All' ? selectedDistrict : 'All Districts'}</span>
-                    </div>
-                  </div>
-
-                  {/* Studio Top Control & Filter Bar */}
-                  <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-2xl bg-teal-50 text-teal-700 flex items-center justify-center font-black text-xl shadow-inner shrink-0">
-                        🛵
-                      </div>
-                      <div>
-                        <h2 className="text-base font-black text-slate-800 tracking-tight flex items-center gap-2">
-                          <span>TA Studio Controls &amp; Verification</span>
-                          <span className="text-[10px] font-black bg-teal-100 text-teal-800 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                            RBAC Protected
-                          </span>
-                        </h2>
-                        <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                          District: {taDistrict} &bull; Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* District, Month, Staff Selectors & Actions */}
-                    <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
-                      {/* District Selector (Strict RBAC via availableKpiDistricts) */}
-                      <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Dist:</span>
-                        <select
-                          value={taDistrict}
-                          onChange={(e) => {
-                            setTaDistrict(e.target.value);
-                            setTaSelectedStaffKey('');
-                          }}
-                          className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
-                        >
-                          {availableKpiDistricts.map(d => (
-                            <option key={d} value={d}>{d}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Month Picker */}
-                      <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Month:</span>
-                        <input
-                          type="month"
-                          value={taMonth}
-                          onChange={(e) => setTaMonth(e.target.value)}
-                          className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
-                        />
-                      </div>
-
-                      {/* Staff Selector */}
-                      <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
-                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Staff:</span>
-                        <select
-                          value={taSelectedStaffKey}
-                          onChange={(e) => {
-                            setTaSelectedStaffKey(e.target.value);
-                            const found = taDistrictStaff.find(s => (s.id === e.target.value || s.name === e.target.value));
-                            if (found) setTaDesignation(found.designation || 'Field Officer');
-                          }}
-                          className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[180px]"
-                        >
-                          {taDistrictStaff.length === 0 ? (
-                            <option value="">No staff in {taDistrict}</option>
-                          ) : (
-                            taDistrictStaff.map(s => (
-                              <option key={s.id || s.name} value={s.id || s.name}>
-                                {s.name} ({s.designation || 'Field Officer'})
-                              </option>
-                            ))
+                          {/* Role-Based Action Buttons */}
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MIS' || !currentUser?.role) && (
+                            <button
+                              type="button"
+                              onClick={() => handleDistrictAction('submit')}
+                              disabled={taActionLoading || taDistrictStaff.length === 0}
+                              className="px-3.5 py-2 rounded-xl text-xs font-black bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              title="Finalize and submit district roster to State Incharge for approval"
+                            >
+                              <span>{taActionLoading ? '⏳' : '📤'}</span>
+                              <span>{taActionLoading ? 'Submitting...' : 'Submit Roster to Incharge'}</span>
+                            </button>
                           )}
-                        </select>
+
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleDistrictAction('approve')}
+                                disabled={taActionLoading || taDistrictStaff.length === 0}
+                                className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                title="Approve district travel allowance roster and publish for payroll"
+                              >
+                                <span>{taActionLoading ? '⏳' : '✅'}</span>
+                                <span>{taActionLoading ? 'Approving...' : 'Approve District & Publish'}</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setTaRevertModal({ isOpen: true, district: taDistrict, month: taMonth, reason: '' })}
+                                disabled={taActionLoading}
+                                className="px-3.5 py-2 rounded-xl text-xs font-black bg-rose-500 hover:bg-rose-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                                title="Revert district roster back to MIS with remarks"
+                              >
+                                <span>↩️</span>
+                                <span>Revert District</span>
+                              </button>
+                            </>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleExportTaExcel(taDistrict, taMonth)}
+                            disabled={taExporting}
+                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                            title="Download multi-sheet Excel workbook with Dashboard and Staff Bike Logs"
+                          >
+                            <span>{taExporting ? '⏳' : '📑'}</span>
+                            <span>{taExporting ? 'Exporting...' : 'Export District TA Workbook (.xlsx)'}</span>
+                          </button>
+                        </div>
                       </div>
 
-                      {/* Action Buttons */}
-                      <button
-                        type="button"
-                        onClick={handlePrefillTaFromReports}
-                        disabled={taPrefilling || taSaving || !taSelectedStaffKey}
-                        className="px-3 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                        title="Auto-fill meter readings and travel locations from submitted Daily Field Reports"
-                      >
-                        <span>{taPrefilling ? '⏳' : '⚡'}</span>
-                        <span>{taPrefilling ? 'Pre-filling...' : 'Pre-fill from Daily Reports'}</span>
-                      </button>
+                      {/* District Summary Metric Cards */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Travel Distance</span>
+                          <p className="text-2xl font-black text-slate-800 tabular-num">
+                            {taDistrictMetrics.totalKm.toLocaleString('en-IN')} <span className="text-xs text-slate-400 font-bold">KM</span>
+                          </p>
+                          <span className="text-[11px] font-semibold text-amber-700 mt-1 block">Active Field Mobility</span>
+                        </div>
 
-                      <button
-                        type="button"
-                        onClick={handleSaveTaLog}
-                        disabled={taSaving || taPrefilling || !taSelectedStaffKey}
-                        className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                      >
-                        <span>{taSaving ? '⏳' : '💾'}</span>
-                        <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
-                      </button>
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Total Gross Claim</span>
+                          <p className="text-2xl font-black text-blue-700 tabular-num">
+                            ₹{taDistrictMetrics.grossAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                          <span className="text-[11px] font-semibold text-blue-800 mt-1 block">Standard Rate @ ₹4.00 / KM</span>
+                        </div>
 
-                      <button
-                        type="button"
-                        onClick={() => handleExportTaExcel(taDistrict, taMonth)}
-                        disabled={taExporting}
-                        className="px-3.5 py-2 rounded-xl text-xs font-black bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                        title="Download professional multi-sheet Excel workbook with Dashboard and Staff Bike Logs"
-                      >
-                        <span>{taExporting ? '⏳' : '📑'}</span>
-                        <span>{taExporting ? 'Exporting...' : 'Export District TA Workbook (.xlsx)'}</span>
-                      </button>
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-rose-500 block mb-1">Total Deductions</span>
+                          <p className="text-2xl font-black text-rose-700 tabular-num">
+                            ₹{taDistrictMetrics.deductionAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                          <span className="text-[11px] font-semibold text-rose-600 mt-1 block">Penalties / Capping</span>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 p-4 rounded-2xl border border-emerald-200/90 shadow-2xs">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block mb-1">Net Approved Payout</span>
+                          <p className="text-2xl font-black text-emerald-950 tabular-num">
+                            ₹{taDistrictMetrics.netPayable.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </p>
+                          <span className="text-[11px] font-semibold text-emerald-800 mt-1 block">{taDistrictMetrics.staffCount} Officers in {taDistrict}</span>
+                        </div>
+                      </div>
+
+                      {/* District Staff Travel Allowance Payroll Roster Table */}
+                      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                              <span>📋</span>
+                              <span>District Staff Travel Allowance Payroll Roster — {taDistrict} ({taMonth})</span>
+                            </h3>
+                            <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                              Summary of saved and calculated monthly claims for all officers in this district
+                            </p>
+                          </div>
+                          <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                            {taDistrictStaff.length} Officers Registered
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse">
+                            <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                              <tr>
+                                <th className="px-3 py-2.5 text-center">Sl. No</th>
+                                <th className="px-3 py-2.5">Officer Name</th>
+                                <th className="px-3 py-2.5">Designation</th>
+                                <th className="px-3 py-2.5 text-center">Total KM</th>
+                                <th className="px-3 py-2.5 text-center">Gross Claim (₹)</th>
+                                <th className="px-3 py-2.5 text-center">Deductions (₹)</th>
+                                <th className="px-3 py-2.5 text-center">Net Approved (₹)</th>
+                                <th className="px-3 py-2.5 text-center">Status</th>
+                                <th className="px-3 py-2.5 text-center">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {taDistrictStaff.map((staff, idx) => {
+                                const staffKey = (staff.id || staff.name || '').trim().toLowerCase();
+                                const staffName = (staff.name || '').trim().toLowerCase();
+                                const log = taSummaryList.find(l => 
+                                  (l.staff_key && l.staff_key.toLowerCase() === staffKey) || 
+                                  (l.staff_name && l.staff_name.toLowerCase() === staffName) ||
+                                  (l.staff_key && l.staff_key.toLowerCase() === staffName)
+                                );
+                                const isCurrent = (taSelectedStaffKey === staff.id || taSelectedStaffKey === staff.name);
+
+                                const totKm = log ? (log.total_km || 0) : 0;
+                                const gross = log ? (log.gross_amount || 0) : 0;
+                                const ded = log ? (log.deduction_amount || 0) : 0;
+                                const net = log ? (log.final_payable_amount || 0) : 0;
+                                const status = log?.status || 'DRAFT';
+
+                                return (
+                                  <tr
+                                    key={staff.id || staff.name}
+                                    className={`hover:bg-slate-50 transition-colors ${
+                                      isCurrent ? 'bg-teal-50/50 font-bold' : ''
+                                    }`}
+                                  >
+                                    <td className="px-3 py-2.5 text-center text-slate-400 font-bold">{idx + 1}</td>
+                                    <td className="px-3 py-2.5 font-bold text-slate-800">
+                                      <div>{staff.name}</div>
+                                      {log?.revert_reason && (
+                                        <div className="text-[10px] text-rose-600 font-medium truncate max-w-xs" title={log.revert_reason}>
+                                          ↩ {log.revert_reason}
+                                        </div>
+                                      )}
+                                      {log?.dispute_reason && (
+                                        <div className="text-[10px] text-amber-600 font-medium truncate max-w-xs" title={log.dispute_reason}>
+                                          🚩 {log.dispute_reason}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-slate-500">{staff.designation || 'Field Officer'}</td>
+                                    <td className="px-3 py-2.5 text-center font-bold text-slate-700 tabular-num">{totKm} KM</td>
+                                    <td className="px-3 py-2.5 text-center text-slate-700 tabular-num">₹ {gross.toFixed(2)}</td>
+                                    <td className="px-3 py-2.5 text-center text-rose-600 font-semibold tabular-num">
+                                      {ded > 0 ? `- ₹ ${ded.toFixed(2)}` : '₹ 0.00'}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center font-black text-emerald-700 tabular-num">₹ {net.toFixed(2)}</td>
+                                    <td className="px-3 py-2.5 text-center">
+                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                        status === 'APPROVED' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' :
+                                        status === 'SUBMITTED' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                                        status === 'REVERTED' ? 'bg-rose-100 text-rose-800 border-rose-200' :
+                                        status === 'DISPUTED' ? 'bg-amber-100 text-amber-800 border-amber-200' :
+                                        log ? 'bg-teal-100 text-teal-800 border-teal-200' :
+                                        'bg-slate-100 text-slate-500 border-slate-200'
+                                      }`}>
+                                        {status}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center">
+                                      <button
+                                        type="button"
+                                        onClick={() => selectStaffForDrilldown(staff)}
+                                        className="text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer bg-slate-100 hover:bg-teal-700 hover:text-white text-slate-700 border border-slate-200 active:scale-95 shadow-2xs"
+                                      >
+                                        Inspect / Edit Now ➔
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-6 animate-fade-in">
+                      {/* Screen 2 Top Navigation & Control Bar */}
+                      <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          {/* Back to District Roster Button */}
+                          <button
+                            type="button"
+                            onClick={() => setTaViewMode('roster')}
+                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-slate-100 hover:bg-slate-200 text-slate-700 transition-all border border-slate-300 flex items-center gap-1.5 cursor-pointer active:scale-95 shadow-2xs"
+                            title="Return to district roster overview"
+                          >
+                            <span>←</span>
+                            <span>Back to District Roster</span>
+                          </button>
+
+                          <div className="h-6 w-px bg-slate-200 hidden sm:block"></div>
+
+                          <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-black text-lg shadow-inner shrink-0">
+                              🛵
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h2 className="text-sm sm:text-base font-black text-slate-800 tracking-tight">
+                                  {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'Select Staff')}
+                                </h2>
+                                <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                                  (taCurrentStaffLog?.status || 'DRAFT') === 'APPROVED' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                  (taCurrentStaffLog?.status || 'DRAFT') === 'SUBMITTED' ? 'bg-blue-100 text-blue-800 border-blue-300' :
+                                  (taCurrentStaffLog?.status || 'DRAFT') === 'REVERTED' ? 'bg-rose-100 text-rose-800 border-rose-300' :
+                                  (taCurrentStaffLog?.status || 'DRAFT') === 'DISPUTED' ? 'bg-amber-100 text-amber-800 border-amber-300' :
+                                  'bg-slate-100 text-slate-700 border-slate-300'
+                                }`}>
+                                  {taCurrentStaffLog?.status || 'DRAFT'}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                                District: {taDistrict} &bull; Designation: {taDesignation || 'Field Officer'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Selectors and Action Controls */}
+                        <div className="flex flex-wrap items-center gap-2 w-full xl:w-auto">
+                          {/* District Selector */}
+                          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Dist:</span>
+                            <select
+                              value={taDistrict}
+                              onChange={(e) => {
+                                setTaDistrict(e.target.value);
+                                setTaSelectedStaffKey('');
+                              }}
+                              className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                            >
+                              {availableKpiDistricts.map(d => (
+                                <option key={d} value={d}>{d}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Month Picker */}
+                          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Month:</span>
+                            <input
+                              type="month"
+                              value={taMonth}
+                              onChange={(e) => setTaMonth(e.target.value)}
+                              className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Staff Selector */}
+                          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Staff:</span>
+                            <select
+                              value={taSelectedStaffKey}
+                              onChange={(e) => handleSelectStaff(e.target.value)}
+                              className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer max-w-[180px]"
+                            >
+                              {taDistrictStaff.length === 0 ? (
+                                <option value="">No staff in {taDistrict}</option>
+                              ) : (
+                                taDistrictStaff.map(s => (
+                                  <option key={s.id || s.name} value={s.id || s.name}>
+                                    {s.name} ({s.designation || 'Field Officer'})
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                          </div>
+
+                          {/* Save TA Log Button */}
+                          <button
+                            type="button"
+                            onClick={handleSaveTaLog}
+                            disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                          >
+                            <span>{taSaving ? '⏳' : '💾'}</span>
+                            <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
+                          </button>
+
+                          {/* Discreet ••• Context Menu */}
+                          <div className="relative">
+                            <button
+                              type="button"
+                              onClick={() => setTaShowOptionsMenu(prev => !prev)}
+                              className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-sm flex items-center justify-center transition-colors border border-slate-200 cursor-pointer shadow-2xs"
+                              title="Additional Actions & Pre-fill Options"
+                            >
+                              •••
+                            </button>
+                            {taShowOptionsMenu && (
+                              <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-2xl shadow-xl border border-slate-200 py-1.5 z-40 animate-fade-in">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTaShowOptionsMenu(false);
+                                    handlePrefillTaFromReports();
+                                  }}
+                                  disabled={taPrefilling || taSaving || !taSelectedStaffKey}
+                                  className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                >
+                                  <span>{taPrefilling ? '⏳' : '⚡'}</span>
+                                  <span>{taPrefilling ? 'Syncing...' : 'Sync from Daily Submissions'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTaShowOptionsMenu(false);
+                                    handleExportTaExcel(taDistrict, taMonth);
+                                  }}
+                                  disabled={taExporting}
+                                  className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                                >
+                                  <span>📑</span>
+                                  <span>Export District TA Workbook (.xlsx)</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Revert / Dispute Alert Banners */}
+                      {Boolean(taCurrentStaffLog?.revert_reason || taCurrentStaffLog?.status === 'REVERTED') && (
+                        <div className="bg-rose-50 border-l-4 border-rose-500 p-4 rounded-xl flex items-start gap-3 animate-fade-in shadow-2xs">
+                          <span className="text-xl">⚠️</span>
+                          <div>
+                            <h5 className="text-xs font-black text-rose-900 uppercase tracking-wide">
+                              District Incharge Revert Remarks
+                            </h5>
+                            <p className="text-xs text-rose-800 font-semibold mt-0.5">
+                              {taCurrentStaffLog?.revert_reason || 'Roster was reverted by State Incharge. Please adjust entries and re-submit.'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {Boolean(taCurrentStaffLog?.dispute_reason || taCurrentStaffLog?.status === 'DISPUTED') && (
+                        <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl flex items-start gap-3 animate-fade-in shadow-2xs">
+                          <span className="text-xl">🚩</span>
+                          <div>
+                            <h5 className="text-xs font-black text-amber-900 uppercase tracking-wide">
+                              Staff Dispute Raised
+                            </h5>
+                            <p className="text-xs text-amber-800 font-semibold mt-0.5">
+                              {taCurrentStaffLog?.dispute_reason || 'Field officer has flagged a discrepancy with this month\'s log.'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
 
                   {/* Month-End Reconciliation & Payroll Accounting Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -11427,100 +11849,8 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   </div>
 
-                  {/* District Monthly Reconciliation Roster Overview */}
-                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-                          <span>📋</span>
-                          <span>District Staff Travel Allowance Payroll Roster — {taDistrict} ({taMonth})</span>
-                        </h3>
-                        <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                          Summary of saved and calculated monthly claims for all officers in this district
-                        </p>
-                      </div>
-                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                        {taDistrictStaff.length} Officers Registered
-                      </span>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
-                          <tr>
-                            <th className="px-3 py-2.5 text-center">Sl. No</th>
-                            <th className="px-3 py-2.5">Officer Name</th>
-                            <th className="px-3 py-2.5">Designation</th>
-                            <th className="px-3 py-2.5 text-center">Total KM</th>
-                            <th className="px-3 py-2.5 text-center">Gross Claim (₹)</th>
-                            <th className="px-3 py-2.5 text-center">Deductions (₹)</th>
-                            <th className="px-3 py-2.5 text-center">Net Approved (₹)</th>
-                            <th className="px-3 py-2.5 text-center">Status</th>
-                            <th className="px-3 py-2.5 text-center">Action</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {taDistrictStaff.map((staff, idx) => {
-                            const staffKey = staff.id || staff.name;
-                            const log = taSummaryList.find(l => (l.staff_key && l.staff_key.toLowerCase() === staffKey.toLowerCase()) || (l.staff_name && l.staff_name.toLowerCase() === staff.name.toLowerCase()));
-                            const isCurrent = (taSelectedStaffKey === staff.id || taSelectedStaffKey === staff.name);
-
-                            const totKm = log ? (log.total_km || 0) : 0;
-                            const gross = log ? (log.gross_amount || 0) : 0;
-                            const ded = log ? (log.deduction_amount || 0) : 0;
-                            const net = log ? (log.final_payable_amount || 0) : 0;
-
-                            return (
-                              <tr
-                                key={staff.id || staff.name}
-                                className={`hover:bg-slate-50 transition-colors ${
-                                  isCurrent ? 'bg-teal-50/50 font-bold' : ''
-                                }`}
-                              >
-                                <td className="px-3 py-2.5 text-center text-slate-400 font-bold">{idx + 1}</td>
-                                <td className="px-3 py-2.5 font-bold text-slate-800">{staff.name}</td>
-                                <td className="px-3 py-2.5 text-slate-500">{staff.designation || 'Field Officer'}</td>
-                                <td className="px-3 py-2.5 text-center font-bold text-slate-700 tabular-num">{totKm} KM</td>
-                                <td className="px-3 py-2.5 text-center text-slate-700 tabular-num">₹ {gross.toFixed(2)}</td>
-                                <td className="px-3 py-2.5 text-center text-rose-600 font-semibold tabular-num">
-                                  {ded > 0 ? `- ₹ ${ded.toFixed(2)}` : '₹ 0.00'}
-                                </td>
-                                <td className="px-3 py-2.5 text-center font-black text-emerald-700 tabular-num">₹ {net.toFixed(2)}</td>
-                                <td className="px-3 py-2.5 text-center">
-                                  {log ? (
-                                    <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                      Saved &amp; Verified
-                                    </span>
-                                  ) : (
-                                    <span className="bg-slate-100 text-slate-500 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                      Draft / Not Saved
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2.5 text-center">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setTaSelectedStaffKey(staff.id || staff.name);
-                                      setTaDesignation(staff.designation || 'Field Officer');
-                                      taDailyTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    }}
-                                    className={`text-[11px] font-bold px-3 py-1 rounded-lg transition-all cursor-pointer ${
-                                      isCurrent
-                                        ? 'bg-teal-700 text-white shadow-xs'
-                                        : 'bg-slate-100 hover:bg-teal-50 text-slate-700 hover:text-teal-800 border border-slate-200'
-                                    }`}
-                                  >
-                                    {isCurrent ? 'Editing Now' : 'Inspect / Edit ➔'}
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                                      </div>
+                  )}
                 </div>
               )}
 
@@ -11529,38 +11859,135 @@ const availableDistrictsForFeed = useMemo(() => {
             {/* Modal / Full-Screen Footer */}
             {reportsStudioTab === 'ta_payout' && isTaFullscreen ? (
               <div className="bg-white border-t border-slate-200 px-4 sm:px-8 py-3 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-xs z-30">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="font-bold text-slate-700">Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')}</span>
-                  <span>&bull;</span>
-                  <span>Total Distance: <strong className="text-teal-800 font-black">{taCalculatedTotals.totalKm} KM</strong></span>
-                  <span>&bull;</span>
-                  <span>Net Approved Payout: <strong className="text-emerald-800 font-black">₹ {taCalculatedTotals.netPayable.toFixed(2)}</strong></span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSaveTaLog}
-                    disabled={taSaving || taPrefilling || !taSelectedStaffKey}
-                    className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
-                  >
-                    <span>{taSaving ? '⏳' : '💾'}</span>
-                    <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowReportsStudio(false)}
-                    className="px-4 py-2 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-900 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer"
-                  >
-                    <span>✕ Close Studio (Esc)</span>
-                  </button>
-                </div>
+                {taViewMode === 'day_by_day' ? (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <button
+                        type="button"
+                        onClick={() => setTaViewMode('roster')}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors flex items-center gap-1 cursor-pointer mr-2 shadow-2xs"
+                      >
+                        ← Back to District Roster
+                      </button>
+                      <span className="font-bold text-slate-700">Officer: {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'None')}</span>
+                      <span>&bull;</span>
+                      <span>Total Distance: <strong className="text-teal-800 font-black">{taCalculatedTotals.totalKm} KM</strong></span>
+                      <span>&bull;</span>
+                      <span>Net Approved Payout: <strong className="text-emerald-800 font-black">₹ {taCalculatedTotals.netPayable.toFixed(2)}</strong></span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveTaLog}
+                        disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <span>{taSaving ? '⏳' : '💾'}</span>
+                        <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReportsStudio(false)}
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-900 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>✕ Close Studio (Esc)</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className="font-bold text-slate-700">District: {taDistrict} ({taMonth})</span>
+                      <span>&bull;</span>
+                      <span>Officers: <strong className="text-indigo-800 font-black">{taDistrictMetrics.staffCount}</strong></span>
+                      <span>&bull;</span>
+                      <span>Total Distance: <strong className="text-teal-800 font-black">{taDistrictMetrics.totalKm} KM</strong></span>
+                      <span>&bull;</span>
+                      <span>Net Approved: <strong className="text-emerald-800 font-black">₹ {taDistrictMetrics.netPayable.toFixed(2)}</strong></span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleExportTaExcel(taDistrict, taMonth)}
+                        disabled={taExporting}
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-teal-700 hover:bg-teal-800 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                      >
+                        <span>{taExporting ? '⏳' : '📑'}</span>
+                        <span>{taExporting ? 'Exporting...' : 'Export District TA Workbook (.xlsx)'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReportsStudio(false)}
+                        className="px-4 py-2 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-900 text-white transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>✕ Close Studio (Esc)</span>
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
-            ) : (
-              <div className="pt-3 border-t border-slate-100 flex justify-end">
+            ) : (              <div className="pt-3 border-t border-slate-100 flex justify-end">
                 <button onClick={() => setShowReportsStudio(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all cursor-pointer">Close Studio</button>
               </div>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* TA Revert Reason Modal */}
+      {taRevertModal?.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl p-6 sm:p-7 w-full max-w-lg shadow-2xl border border-rose-100 flex flex-col animate-fade-in">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center font-black text-lg">
+                  ↩️
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-800">Revert District TA Roster</h3>
+                  <p className="text-[11px] font-bold text-slate-400">District: {taRevertModal.district} &bull; {taRevertModal.month}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTaRevertModal(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 mb-3">
+              Please specify the reason for reverting this roster back to the District MIS for corrections. The remarks will be visible to MIS staff on the audit banner.
+            </p>
+
+            <textarea
+              rows={4}
+              value={taRevertModal.reason || ''}
+              onChange={(e) => setTaRevertModal(prev => ({ ...prev, reason: e.target.value }))}
+              placeholder="e.g., Odometer reading mismatch on 14th for Amit Kumar. Please re-verify daily slips."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-rose-400 focus:bg-white resize-none"
+            />
+
+            <div className="flex items-center justify-end gap-2 mt-5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setTaRevertModal(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDistrictAction('revert', taRevertModal.reason)}
+                disabled={taActionLoading || !taRevertModal.reason?.trim()}
+                className="px-4 py-2 rounded-xl text-xs font-black bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <span>{taActionLoading ? '⏳' : '↩️'}</span>
+                <span>{taActionLoading ? 'Reverting...' : 'Confirm Revert to MIS'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
