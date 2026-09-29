@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 generate_templates.py
 Master Blueprint: District KPI Multi-Tab Excel Engine Template Generator
@@ -43,7 +43,10 @@ KPI_CATEGORIES = [
     ("Presumptive", "presumptive_ids"),
     ("Documents", "documents_ids"),
     ("FDC Provided", "fdc_provided_ids"),
-    ("Kit Consumption", "kit_consumption_ids")
+    ("Kit Consumption", "kit_consumption_ids"),
+    ("DIFF TB", "differentiated_tb_ids"),
+    ("TPT START", "tpt_treatment_start_ids"),
+    ("TPT PRESUMTIVE", "tpt_presumptive_ids")
 ]
 
 def get_ordinal_tab_name(day: int) -> str:
@@ -133,14 +136,18 @@ def generate_district_template(district: str, staff_list: list, output_path: str
     ws_perf = wb.create_sheet(title="Performance sheet")
     ws_perf.views.sheetView[0].showGridLines = True
     
+    perf_headers = [
+        "Employee Name", "DESIG.", "Target", "NOTIFICATION", "% Achieved"
+    ] + [kpi[0] for kpi in KPI_CATEGORIES[1:]] # Cols 1 to 21
+    
     # Title Banner
-    ws_perf.merge_cells("A1:R2")
+    ws_perf.merge_cells(f"A1:{get_column_letter(len(perf_headers))}2")
     ws_perf["A1"] = f"DOCTORS FOR YOU (DFY) -- DISTRICT KPI PERFORMANCE SHEET ({district.upper()})"
     ws_perf["A1"].font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
     ws_perf["A1"].fill = fill_navy
     ws_perf["A1"].alignment = align_center
     for r in range(1, 3):
-        for c in range(1, 19):
+        for c in range(1, len(perf_headers) + 1):
             ws_perf.cell(row=r, column=c).border = header_border
     
     # Subtitle Row 3
@@ -148,10 +155,6 @@ def generate_district_template(district: str, staff_list: list, output_path: str
     ws_perf["A3"].font = Font(name="Calibri", size=10, italic=True, color="6B7280")
     
     # Row 4: Headers
-    perf_headers = [
-        "Employee Name", "DESIG.", "Target", "NOTIFICATION", "% Achieved"
-    ] + [kpi[0] for kpi in KPI_CATEGORIES[1:]] # HIV & DM to Kit Consumption
-    
     for c_idx, h in enumerate(perf_headers, start=1):
         cell = ws_perf.cell(row=4, column=c_idx, value=h)
         cell.font = font_header
@@ -175,7 +178,7 @@ def generate_district_template(district: str, staff_list: list, output_path: str
         cell_tgt.font = font_bold
         cell_tgt.alignment = align_center
         
-        cons_start_col = 40 + (idx * 14)
+        cons_start_col = 49 + (idx * 17)
         notif_col_letter = get_column_letter(cons_start_col)
         
         cell_notif = ws_perf.cell(row=r, column=4, value=0)
@@ -251,8 +254,8 @@ def generate_district_template(district: str, staff_list: list, output_path: str
     ws_cons = wb.create_sheet(title="CONSOLIDATED SHEET")
     ws_cons.views.sheetView[0].showGridLines = True
     
-    # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AM (Cols 1 to 39)
-    left_clusters = [kpi[0] for kpi in KPI_CATEGORIES[:13]]
+    # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AV (Cols 1 to 48)
+    left_clusters = [kpi[0] for kpi in KPI_CATEGORIES if kpi[0] != "Kit Consumption"]
     
     for c_idx, cluster_name in enumerate(left_clusters):
         start_c = 1 + (c_idx * 3)
@@ -297,10 +300,10 @@ def generate_district_template(district: str, staff_list: list, output_path: str
         ws_cons.column_dimensions[get_column_letter(start_c+1)].width = 12
         ws_cons.column_dimensions[get_column_letter(start_c+2)].width = 18
 
-    # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
+    # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AW (Col 49) onwards
     for s_idx, staff_name in enumerate(staff_list):
-        staff_start_c = 40 + (s_idx * 14)
-        staff_end_c = staff_start_c + 13
+        staff_start_c = 49 + (s_idx * 17)
+        staff_end_c = staff_start_c + 16
         
         ws_cons.merge_cells(start_row=1, start_column=staff_start_c, end_row=1, end_column=staff_end_c)
         r1_staff = ws_cons.cell(row=1, column=staff_start_c, value=staff_name)
