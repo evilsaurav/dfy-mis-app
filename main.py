@@ -2533,7 +2533,7 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
         allowed_c = [canonicalize_district(a).lower() for a in admin_allowed]
         c_dist = canonicalize_district(district).lower()
 
-        if admin_role == "SUB_ADMIN" and admin_allowed and "all" not in allowed_c:
+        if admin_role == "SUB_ADMIN" and "all" not in allowed_c:
             if c_dist not in allowed_c and district.lower() not in allowed_c:
                 raise HTTPException(
                     status_code=403, 
