@@ -2129,7 +2129,7 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 14 Standard KPI Categories Definition (Exact Master Blueprint)
+# 17 Standard KPI Categories Definition (Exact Master Blueprint)
 EXCEL_KPI_CATEGORIES = [
     ("NOTIFICATION", "notification_ids", 3),
     ("HIV & DM", "hiv_dm_ids", 4),
@@ -2144,7 +2144,10 @@ EXCEL_KPI_CATEGORIES = [
     ("Presumptive", "presumptive_ids", 13),
     ("Documents", "documents_ids", 14),
     ("FDC Provided", "fdc_provided_ids", 15),
-    ("Kit Consumption", "kit_consumption_ids", 16)
+    ("Kit Consumption", "kit_consumption_ids", 16),
+    ("DIFF TB", "differentiated_tb_ids", 17),
+    ("TPT START", "tpt_treatment_start_ids", 18),
+    ("TPT PRESUMTIVE", "tpt_presumptive_ids", 19)
 ]
 
 def get_kpi_tab_name(day: int) -> str:
@@ -2254,7 +2257,14 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     num_staff = len(staff_name_to_idx)
     num_kpis = len(EXCEL_KPI_CATEGORIES)
     staff_counts = { s_idx: { k_idx: 0 for k_idx in range(num_kpis) } for s_idx in range(num_staff) }
-    district_cluster_counts = { c_idx: 0 for c_idx in range(13) }
+    left_clusters = [kpi for kpi in EXCEL_KPI_CATEGORIES if kpi[0] != "Kit Consumption"]
+    district_cluster_counts = { c_idx: 0 for c_idx in range(len(left_clusters)) }
+    category_to_cluster_idx = {}
+    c_counter = 0
+    for k_idx, (cat_name, _, _) in enumerate(EXCEL_KPI_CATEGORIES):
+        if cat_name != "Kit Consumption":
+            category_to_cluster_idx[k_idx] = c_counter
+            c_counter += 1
 
     # 3. Populate Tabs 3 to 33 ('1ST' to '31st')
     for rep in reports:
@@ -2277,8 +2287,9 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                 if isinstance(ids, list):
                     valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
                     staff_counts[s_idx][k_idx] += len(valid_ids)
-                    if k_idx < 13:
-                        district_cluster_counts[k_idx] += len(valid_ids)
+                    c_idx = category_to_cluster_idx.get(k_idx)
+                    if c_idx is not None:
+                        district_cluster_counts[c_idx] += len(valid_ids)
 
             if actual_tab_name and actual_tab_name in wb.sheetnames:
                 ws_day = wb[actual_tab_name]
@@ -2296,11 +2307,11 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     if "CONSOLIDATED SHEET" in wb.sheetnames:
         ws_cons = wb["CONSOLIDATED SHEET"]
         
-        # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AM (Cols 1 to 39)
-        cluster_row_ptrs = { c_idx: 4 for c_idx in range(13) }
+        # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AV (Cols 1 to 48)
+        cluster_row_ptrs = { c_idx: 4 for c_idx in range(len(left_clusters)) }
         
         # Write Left Wing Row 2 Grand Totals
-        for c_idx in range(13):
+        for c_idx in range(len(left_clusters)):
             start_c = 1 + (c_idx * 3)
             # Pre-compute exact total count for immediate display across all viewers
             ws_cons.cell(row=2, column=start_c).value = district_cluster_counts[c_idx]
@@ -2309,8 +2320,7 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
             rep_date = str(rep.get("date_of_reporting", "")).strip()
             rep_fo = str(rep.get("fo_name", "")).strip()
             
-            for c_idx in range(13):
-                _, cat_key, _ = EXCEL_KPI_CATEGORIES[c_idx]
+            for c_idx, (_, cat_key, _) in enumerate(left_clusters):
                 ids = rep.get(cat_key) or []
                 if isinstance(ids, list):
                     start_c = 1 + (c_idx * 3)
@@ -2329,10 +2339,10 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                             c3.alignment = Alignment(horizontal="left", vertical="center")
                             cluster_row_ptrs[c_idx] += 1
                             
-        # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AN (Col 40) onwards
+        # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AW (Col 49) onwards
         staff_kpi_row_ptrs = {}
         for s_idx in range(num_staff):
-            staff_base_col = 40 + (s_idx * 14)
+            staff_base_col = 49 + (s_idx * 17)
             # Write Row 3 Staff Totals
             for k_idx in range(num_kpis):
                 staff_kpi_row_ptrs[(s_idx, k_idx)] = 4
@@ -2342,7 +2352,7 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
             fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
             if fo_norm in staff_name_to_idx:
                 s_idx = staff_name_to_idx[fo_norm]
-                staff_base_col = 40 + (s_idx * 14)
+                staff_base_col = 49 + (s_idx * 17)
                 
                 for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
                     ids = rep.get(cat_key) or []
@@ -2353,7 +2363,7 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                             if pid_str:
                                 r = staff_kpi_row_ptrs[(s_idx, k_idx)]
                                 c_cell = ws_cons.cell(row=r, column=col, value=pid_str)
-                                if col == staff_base_col + 13:
+                                if col == staff_base_col + 16:
                                     c_cell.border = EXCEL_CLUSTER_DIVIDER
                                 else:
                                     c_cell.border = EXCEL_THIN_BORDER
@@ -2406,12 +2416,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                             staff_cohort_counts[s_idx]['con_prev'] += 1
 
         cohort_col_defs = [
-            (19, 'HIV\n(Cur Month)', 'hiv_cur'),
-            (20, 'HIV\n(Prev Backlog)', 'hiv_prev'),
-            (21, 'UDST\n(Cur Month)', 'udst_cur'),
-            (22, 'UDST\n(Prev Backlog)', 'udst_prev'),
-            (23, 'Contact Tr\n(Cur Month)', 'con_cur'),
-            (24, 'Contact Tr\n(Prev Backlog)', 'con_prev')
+            (22, 'HIV\n(Cur Month)', 'hiv_cur'),
+            (23, 'HIV\n(Prev Backlog)', 'hiv_prev'),
+            (24, 'UDST\n(Cur Month)', 'udst_cur'),
+            (25, 'UDST\n(Prev Backlog)', 'udst_prev'),
+            (26, 'Contact Tr\n(Cur Month)', 'con_cur'),
+            (27, 'Contact Tr\n(Prev Backlog)', 'con_prev')
         ]
 
         # Populate headers in Row 4
@@ -2447,12 +2457,12 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                     cell_pct.value = f"=IF(C{r_idx}>0, D{r_idx}/C{r_idx}, 0)"
                     cell_pct.number_format = "0.0%"
                     
-                    # Cols 6 to 18: Remaining 13 KPIs
+                    # Cols 6 to 21: Remaining 16 KPIs (including DIFF TB at 19, TPT START at 20, TPT PRESUMTIVE at 21)
                     for k_idx in range(1, num_kpis):
                         kpi_val = staff_counts[s_idx][k_idx]
                         ws_perf.cell(row=r_idx, column=5 + k_idx).value = kpi_val
 
-                    # Cols 19 to 24: Cohort breakdown
+                    # Cols 22 to 27: Cohort breakdown
                     for col_idx, _, field_key in cohort_col_defs:
                         c_val = staff_cohort_counts[s_idx].get(field_key, 0)
                         cc = ws_perf.cell(row=r_idx, column=col_idx, value=c_val)
@@ -2471,14 +2481,18 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
 
         if gt_row:
             ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
-            for col_idx, _, _ in cohort_col_defs:
+            gt_fill_color = "001E3A8A"
+            if ref_gt_cell and ref_gt_cell.fill and getattr(ref_gt_cell.fill.start_color, 'rgb', None):
+                gt_fill_color = getattr(ref_gt_cell.fill.start_color, 'rgb', '001E3A8A') or '001E3A8A'
+
+            for col_idx in range(19, 28):
                 col_ltr = get_column_letter(col_idx)
                 gc = ws_perf.cell(row=gt_row, column=col_idx, value=f"=SUM({col_ltr}5:{col_ltr}{gt_row - 1})")
-                if ref_gt_cell.font:
+                if ref_gt_cell and ref_gt_cell.font:
                     gc.font = Font(name=ref_gt_cell.font.name or "Calibri", size=ref_gt_cell.font.size or 10, bold=True, color=getattr(ref_gt_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
-                if ref_gt_cell.fill:
-                    gt_fill_color = getattr(ref_gt_cell.fill.start_color, 'rgb', '001E3A8A') or '001E3A8A'
-                    gc.fill = PatternFill(fill_type="solid", start_color=gt_fill_color, end_color=gt_fill_color)
+                else:
+                    gc.font = Font(name="Calibri", size=10, bold=True, color="00FFFFFF")
+                gc.fill = PatternFill(fill_type="solid", start_color=gt_fill_color, end_color=gt_fill_color)
                 gc.border = EXCEL_THIN_BORDER
                 gc.alignment = Alignment(horizontal="center", vertical="center")
 
@@ -2490,6 +2504,9 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         wb.close()
     except Exception:
         pass
+    del wb
+    import gc
+    gc.collect()
     return res_bytes
 
 # Concurrency Semaphore to protect Render memory/CPU from multi-tap or parallel heavy Excel exports
