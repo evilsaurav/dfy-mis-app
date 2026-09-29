@@ -3452,6 +3452,152 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "top_performers_studio",
+      icon: "🏆",
+      badge: "Statewide Recognition",
+      badgeColor: "bg-amber-100 text-amber-900 border-amber-200",
+      title: "11. Bihar Statewide Top Performers Studio & Selection Criteria",
+      subtitle: "FO, TC, LT, aur SCT ke selection criteria aur ranking system ka complete visual flowchart",
+      keywords: "top performers studio ranking criteria selection field officer treatment coordinator lab technician sct home visits tests notification statewide leaderboard poster whatsapp",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          {/* Header Summary */}
+          <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/90 rounded-2xl p-3.5 space-y-1.5 shadow-2xs">
+            <strong className="text-amber-950 font-black flex items-center gap-1.5 text-xs">
+              <span>🌟</span>
+              <span>Bihar Statewide Clinical Champions Recognition:</span>
+            </strong>
+            <p className="text-amber-900 text-[11px] leading-relaxed">
+              Bihar Statewide Top Performers Studio state health leadership aur district coordinators ke samne frontline champions ko unki role-specific clinical achievements ke adhar par recognize karta hai. Har cadre ke liye transparent selection criteria nirdharit hai.
+            </p>
+          </div>
+
+          {/* Sequential 4-Step Selection Pipeline Bento Flowchart */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Step 1: Cadre Segregation & Role Mapping */}
+            <div className="bg-gradient-to-br from-blue-50/70 to-slate-50 border border-blue-200/90 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-blue-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">1</span>
+                <span className="text-[9px] font-bold text-blue-800 bg-blue-100/80 px-2 py-0.5 rounded-full border border-blue-200/60">Step 01 &bull; Cadre Mapping</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>👥</span>
+                  <span>Role-Based Performance Pools</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Har staff member ko Staff Directory ki designation ke adhar par unke specific clinical pool me categorize kiya jata hai:
+                </p>
+                <ul className="text-[10px] text-slate-700 space-y-1 mt-1.5 pl-0.5">
+                  <li>• <strong>FO / Hub Agent:</strong> Field Officers &amp; Hub Specialists</li>
+                  <li>• <strong>TC:</strong> Treatment Coordinators (Home Visits)</li>
+                  <li>• <strong>LT:</strong> Lab Technicians (Diagnostic Tests)</li>
+                  <li>• <strong>SCT:</strong> Sputum Collection &amp; Transportation Agents</li>
+                </ul>
+              </div>
+              <div className="pt-1.5 border-t border-blue-100 flex items-center justify-between text-[10px] text-blue-800 font-semibold">
+                <span>Designation Routing</span>
+                <span className="text-blue-600 font-black">➔ Step 2</span>
+              </div>
+            </div>
+
+            {/* Step 2: Metric Evaluation & Ranking Criteria */}
+            <div className="bg-gradient-to-br from-emerald-50/70 to-slate-50 border border-emerald-200/90 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">2</span>
+                <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200/60">Step 02 &bull; Core Criteria</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>📐</span>
+                  <span>Cadre Selection Criteria</span>
+                </h5>
+                <div className="space-y-1.5 mt-1 text-[10px] text-slate-700">
+                  <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
+                    <strong>📋 FO &amp; Hub Agents:</strong> Total TB Notifications. Tie-breaker: Target achievement %.
+                  </div>
+                  <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
+                    <strong>🏠 TC (Treatment Coordinator):</strong> Total Confirmed Home Visits. Tie-breaker: Notifications.
+                  </div>
+                  <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
+                    <strong>🔬 LT (Lab Technician):</strong> Total Diagnostic Tests Done. Tie-breaker: Notifications.
+                  </div>
+                  <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
+                    <strong>🧪 SCT Agent:</strong> Total Sputum Samples Collected. Tie-breaker: Notifications.
+                  </div>
+                </div>
+              </div>
+              <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                <span>Objective Metrics</span>
+                <span className="text-emerald-600 font-black">➔ Step 3</span>
+              </div>
+            </div>
+
+            {/* Step 3: Filters & Exclusion Rules */}
+            <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 border border-indigo-200/90 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">3</span>
+                <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100/80 px-2 py-0.5 rounded-full border border-indigo-200/60">Step 03 &bull; Filters</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>⏱️</span>
+                  <span>Timeframes &amp; Eligibility</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Performance studio me 3 dynamic samay-chakra uplabdh hain:
+                </p>
+                <ul className="text-[10px] text-slate-700 space-y-1 mt-1.5 pl-0.5">
+                  <li>• <strong>Weekly:</strong> Pichhle 7 dino ka live pradarshan.</li>
+                  <li>• <strong>Fortnightly:</strong> Pichhle 15 dino ka snapshot.</li>
+                  <li>• <strong>Monthly:</strong> Pure maheene ka accumulated performance.</li>
+                  <li>• <strong>Deactivated Staff Filter:</strong> Inactive staff leaderboard se automatically bahar rehte hain.</li>
+                </ul>
+              </div>
+              <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                <span>Fair Evaluation</span>
+                <span className="text-indigo-600 font-black">➔ Step 4</span>
+              </div>
+            </div>
+
+            {/* Step 4: Statewide Recognition & Posters */}
+            <div className="bg-gradient-to-br from-amber-50/70 to-slate-50 border border-amber-200/90 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">4</span>
+                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200/60">Step 04 &bull; Recognition</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🥇</span>
+                  <span>Podium, HD Poster &amp; Broadcast</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Har category ke top 5 rankers ko state health portal par Gold, Silver aur Bronze medals se sammanit kiya jata hai:
+                </p>
+                <ul className="text-[10px] text-slate-700 space-y-1 mt-1.5 pl-0.5">
+                  <li>• <strong>Top 5 Podium:</strong> 🥇 1st, 🥈 2nd, 🥉 3rd aur Top 5 display.</li>
+                  <li>• <strong>HD WhatsApp Poster:</strong> High-resolution canvas poster generated for official circulars.</li>
+                  <li>• <strong>WhatsApp Group Broadcast:</strong> Medals aur scores official groups me share kiye jaate hain.</li>
+                </ul>
+              </div>
+              <div className="pt-1.5 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                <span>Statewide Honors</span>
+                <span className="text-amber-700 font-black">✓ Live &amp; Automated</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Privacy Note */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-[11px] text-slate-700 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">🛡️</span>
+            <div>
+              <strong>Objective &amp; Automated:</strong> Leaderboard 100% system algorithms dwara calculate hota hai jisme manual tampering sambhav nahi hai. Rozana reports sham <strong>7:00 PM</strong> tak darj karein taaki aapka score sahi tarike se reflect ho.
+            </div>
+          </div>
+        </div>
+      )
     }
   ];
 

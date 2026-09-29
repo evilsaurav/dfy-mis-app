@@ -15349,35 +15349,39 @@ const availableDistrictsForFeed = useMemo(() => {
 
                     {/* 4-Card Sequential Bento Flowchart Grid */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {/* Step 1: 4 Clinical Cadre Segregation */}
+                      {/* Step 1: 5 Clinical Cadre Segregation */}
                       <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 border border-indigo-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
                         <div>
                           <div className="flex items-center justify-between mb-1.5">
                             <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
-                            <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full">Step 01 &bull; 4 Cadres</span>
+                            <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full">Step 01 &bull; 5 Cadres</span>
                           </div>
                           <h5 className="text-xs font-black text-slate-900 leading-snug">
-                            4 Clinical Cadre Segregation
+                            5 Clinical Cadres &amp; Selection Criteria
                           </h5>
                           <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
-                            Statewide leaderboard automatically segments reports into 4 specialized performance pools:
+                            Statewide leaderboard automatically segments reports into 5 specialized performance pools based on designation and objective clinical impact:
                           </p>
-                          <ul className="text-[10.5px] text-slate-700 space-y-1 mt-2 pl-0.5">
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
                             <li className="flex items-start gap-1.5">
                               <span>🏛️</span>
-                              <div><strong>Top Districts (DC):</strong> Ranks districts by notifications and target % achieved.</div>
+                              <div><strong>Top Districts (DC):</strong> Ranks districts by target achievement % (<code className="font-mono text-[9.5px]">(notifs / target) * 100</code>). Tie-breaker: Total notifications.</div>
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>📋</span>
-                              <div><strong>Top FO & Hub Agents:</strong> Notifications; Hub Agents tagged with amber <code className="bg-amber-100 text-amber-900 px-1 py-0.2 rounded font-bold text-[9px]">HUB AGENT</code> badge.</div>
+                              <div><strong>Top FO & Hub Agents:</strong> Total TB Notifications. Tie-breaker: Target % achieved. Hub Agents tagged with amber <code className="bg-amber-100 text-amber-900 px-1 py-0.2 rounded font-bold text-[9px]">HUB AGENT</code> badge.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🏠</span>
+                              <div><strong>Top Treatment Coordinators (TC):</strong> Total verified Home Visits (<code className="font-mono text-[9.5px]">home_visits</code>) conducted for patient care. Tie-breaker: Notifications.</div>
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>🔬</span>
-                              <div><strong>Top Lab Technicians (LT):</strong> Diagnostic tests performed (<code className="font-mono text-[10px]">tests</code>).</div>
+                              <div><strong>Top Lab Technicians (LT):</strong> Diagnostic tests performed (<code className="font-mono text-[9.5px]">tests</code>) across microscopy and molecular assays. Tie-breaker: Notifications.</div>
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>🧪</span>
-                              <div><strong>Top SCT Agents:</strong> Sputum sample collections (<code className="font-mono text-[10px]">samples_collected</code>).</div>
+                              <div><strong>Top SCT Agents:</strong> Sputum sample collections (<code className="font-mono text-[9.5px]">samples_collected</code>) safely transported. Tie-breaker: Notifications.</div>
                             </li>
                           </ul>
                         </div>

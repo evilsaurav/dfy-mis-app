@@ -139,4 +139,26 @@ assert(guideModalCode.includes('Progression Trend') || guideModalCode.includes('
 
 console.log("✔ Admin SOP Topic 11 successfully verified with all 4 bento steps.");
 
+// -------------------------------------------------------------
+// Test 6: FoHelpGuide Topic 11 (top_performers_studio) Flowchart & Cadres Verification
+// -------------------------------------------------------------
+console.log("\n[Test 6] Verifying Topic 11 (top_performers_studio) in FoHelpGuide...");
+
+assert(foGuideCode.includes('id: "top_performers_studio"'), "FoHelpGuide must contain topic id: 'top_performers_studio'");
+assert(foGuideCode.includes('Bihar Statewide Top Performers Studio'), "Topic 11 title must contain 'Bihar Statewide Top Performers Studio'");
+assert(foGuideCode.includes('Role-Based Performance Pools'), "Topic 11 Step 1 must have 'Role-Based Performance Pools'");
+assert(foGuideCode.includes('Cadre Selection Criteria'), "Topic 11 Step 2 must have 'Cadre Selection Criteria'");
+assert(foGuideCode.includes('Total TB Notifications'), "Topic 11 Step 2 must describe FO criteria");
+assert(foGuideCode.includes('Treatment Coordinator') && foGuideCode.includes('Home Visits'), "Topic 11 Step 2 must describe TC criteria with Home Visits");
+assert(foGuideCode.includes('Lab Technician') && foGuideCode.includes('Diagnostic Tests'), "Topic 11 Step 2 must describe LT criteria with Diagnostic Tests");
+assert(foGuideCode.includes('SCT Agent') && foGuideCode.includes('Sputum Samples Collected'), "Topic 11 Step 2 must describe SCT criteria with Samples Collected");
+assert(foGuideCode.includes('Timeframes & Eligibility') || foGuideCode.includes('Timeframes &amp; Eligibility'), "Topic 11 Step 3 must have 'Timeframes & Eligibility'");
+assert(foGuideCode.includes('Podium, HD Poster & Broadcast') || foGuideCode.includes('Podium, HD Poster &amp; Broadcast'), "Topic 11 Step 4 must have 'Podium, HD Poster & Broadcast'");
+
+// Admin SOP Step 1 updated with TC and 5 cadres
+assert(guideModalCode.includes('5 Clinical Cadres') || guideModalCode.includes('5 Cadres'), "Admin SOP Step 1 must describe 5 Clinical Cadres");
+assert(guideModalCode.includes('Top Treatment Coordinators (TC)'), "Admin SOP Step 1 must include Treatment Coordinators (TC)");
+
+console.log("✔ FO Guide Topic 11 and Admin SOP 5 Cadres successfully verified.");
+
 console.log("\n🎉 ALL NEW FEATURE FLOWCHARTS UI TESTS PASSED 100%!");
