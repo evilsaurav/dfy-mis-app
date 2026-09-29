@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
@@ -258,6 +262,20 @@ def test_statewide_top_performers_multi_metric_designation_buckets(super_admin_t
             "designation": "Field Officer",
             "is_active": False,
             "status": "inactive"
+        },
+        "bhojpur_rahulkumar": {
+            "district": "Bhojpur",
+            "name": "Rahul Kumar",
+            "designation": "Treatment Coordinator (TC)",
+            "is_active": True,
+            "target": 50
+        },
+        "begusarai_sonukumar": {
+            "district": "Begusarai",
+            "name": "Sonu Kumar",
+            "designation": "TC",
+            "is_active": True,
+            "target": 50
         }
     }
 
@@ -317,6 +335,26 @@ def test_statewide_top_performers_multi_metric_designation_buckets(super_admin_t
             "sample_collection_ids": [f"C_V_{i}" for i in range(18)]
         },
         {
+            "doc_id": "rep_rahul",
+            "working_place": "Bhojpur",
+            "fo_name": "Rahul Kumar",
+            "date_of_reporting": "2026-09-18",
+            "notification_ids": ["N_R_1"],
+            "sample_tested_ids": [],
+            "sample_collection_ids": [],
+            "home_visit_ids": [f"HV_R_{i}" for i in range(35)]
+        },
+        {
+            "doc_id": "rep_sonu",
+            "working_place": "Begusarai",
+            "fo_name": "Sonu Kumar",
+            "date_of_reporting": "2026-09-19",
+            "notification_ids": ["N_S_1"],
+            "sample_tested_ids": [],
+            "sample_collection_ids": [],
+            "home_visit_ids": [f"HV_S_{i}" for i in range(22)]
+        },
+        {
             "doc_id": "rep_inactive",
             "working_place": "Sitamarhi",
             "fo_name": "Inactive Person",
@@ -353,7 +391,25 @@ def test_statewide_top_performers_multi_metric_designation_buckets(super_admin_t
         assert top_fo[1]["notifications"] == 15
         assert top_fo[1]["rank"] == 2
 
-        # 2. Verify Top LT (Lab Technicians ranked by tests)
+        # 2. Verify Top TC (Treatment Coordinators ranked by home visits)
+        assert "top_tc" in data
+        top_tc = data["top_tc"]
+        assert len(top_tc) == 2
+        # Rank 1: Rahul Kumar with 35 home visits
+        assert top_tc[0]["fo_name"] == "Rahul Kumar"
+        assert top_tc[0]["district"] == "Bhojpur"
+        assert "TC" in top_tc[0]["designation"] or "Treatment" in top_tc[0]["designation"]
+        assert top_tc[0]["home_visits"] == 35
+        assert top_tc[0]["notifications"] == 1
+        assert top_tc[0]["rank"] == 1
+        # Rank 2: Sonu Kumar with 22 home visits
+        assert top_tc[1]["fo_name"] == "Sonu Kumar"
+        assert top_tc[1]["district"] == "Begusarai"
+        assert top_tc[1]["home_visits"] == 22
+        assert top_tc[1]["notifications"] == 1
+        assert top_tc[1]["rank"] == 2
+
+        # 3. Verify Top LT (Lab Technicians ranked by tests)
         assert "top_lt" in data
         top_lt = data["top_lt"]
         assert len(top_lt) == 2
@@ -371,7 +427,7 @@ def test_statewide_top_performers_multi_metric_designation_buckets(super_admin_t
         assert top_lt[1]["notifications"] == 1
         assert top_lt[1]["rank"] == 2
 
-        # 3. Verify Top SCT (SCT Agents ranked by samples_collected)
+        # 4. Verify Top SCT (SCT Agents ranked by samples_collected)
         assert "top_sct" in data
         top_sct = data["top_sct"]
         assert len(top_sct) == 2
@@ -388,11 +444,14 @@ def test_statewide_top_performers_multi_metric_designation_buckets(super_admin_t
         assert top_sct[1]["samples_collected"] == 18
         assert top_sct[1]["rank"] == 2
 
-        # 4. Deactivated officer must be completely excluded
-        all_staff_names = [s["fo_name"] for s in top_fo + top_lt + top_sct]
+        # 5. Deactivated officer must be completely excluded
+        all_staff_names = [s["fo_name"] for s in top_fo + top_tc + top_lt + top_sct]
         assert "Inactive Person" not in all_staff_names
+        # Ensure TC is not mixed into FO
+        assert "Rahul Kumar" not in [s["fo_name"] for s in top_fo]
+        assert "Sonu Kumar" not in [s["fo_name"] for s in top_fo]
 
-        # 5. Backward compatibility alias top_staff == top_fo
+        # 6. Backward compatibility alias top_staff == top_fo
         assert data["top_staff"] == top_fo
 
 def test_staff_designation_update_evicts_cache_and_shifts_bucket(super_admin_token):

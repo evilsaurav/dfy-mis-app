@@ -134,7 +134,7 @@ export default function AdminDashboard() {
   
   // Bihar Top Performers Studio States
   const [topPerformersPeriod, setTopPerformersPeriod] = useState('weekly'); // 'weekly' | 'fortnightly' | 'monthly'
-  const [topPerformersTab, setTopPerformersTab] = useState('districts'); // 'districts' | 'staff'
+  const [topPerformersTab, setTopPerformersTab] = useState('districts'); // 'districts' | 'fo' | 'tc' | 'lt' | 'sct'
   const [topPerformersData, setTopPerformersData] = useState(null);
   const [loadingTopPerformers, setLoadingTopPerformers] = useState(false);
   const [showTopPerformersModal, setShowTopPerformersModal] = useState(false);
@@ -2837,7 +2837,7 @@ export default function AdminDashboard() {
     if (!canvas || !topPerformersData) return;
     const ctx = canvas.getContext('2d');
     const width = 1200;
-    const height = 1350;
+    const height = 1850;
     canvas.width = width;
     canvas.height = height;
 
@@ -2911,13 +2911,14 @@ export default function AdminDashboard() {
     ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
     ctx.fillText(periodLabel, width / 2, 175);
 
-    // 4 Bento Panels in 2x2 Grid
+    // 6 Bento Panels in 3x2 Grid
     const pWidth = 535;
     const pHeight = 515;
     const col1X = 50;
     const col2X = 615;
     const row1Y = 215;
     const row2Y = 750;
+    const row3Y = 1285;
 
     const medals = ['🥇', '🥈', '🥉', '4', '5'];
     const rankColors = ['#f59e0b', '#94a3b8', '#d97706', '#64748b', '#64748b'];
@@ -3015,8 +3016,29 @@ export default function AdminDashboard() {
       ctx.fillText('notifs', startX + pWidth - 110, startY + 54);
     });
 
-    // 3. Q3: Top 5 Lab Technicians
-    drawQuadrant(col1X, row2Y, 'TOP 5 LAB TECHNICIANS', 'Diagnostic Tests Performed', '🔬', '#34d399', topPerformersData.top_lt || [], (s, startX, startY) => {
+    // 3. Q3: Top 5 Treatment Coordinators
+    drawQuadrant(col1X, row2Y, 'TOP 5 TREATMENT COORDINATORS', 'Home Visits & Patient Tracking', '🏠', '#f59e0b', topPerformersData.top_tc || [], (s, startX, startY) => {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
+      ctx.fillText(s.fo_name, startX, startY + 26);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText(`📍 ${s.district} • TC Agent`, startX, startY + 52);
+
+      ctx.textAlign = 'right';
+      ctx.fillStyle = '#f59e0b';
+      ctx.font = '900 22px system-ui, -apple-system, sans-serif';
+      const visitsCount = s.home_visits ?? s.metric_value ?? 0;
+      ctx.fillText(`${visitsCount}`, startX + pWidth - 110, startY + 36);
+      ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('visits', startX + pWidth - 110, startY + 54);
+    });
+
+    // 4. Q4: Top 5 Lab Technicians
+    drawQuadrant(col2X, row2Y, 'TOP 5 LAB TECHNICIANS', 'Diagnostic Tests Performed', '🔬', '#34d399', topPerformersData.top_lt || [], (s, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
@@ -3036,8 +3058,8 @@ export default function AdminDashboard() {
       ctx.fillText('tests', startX + pWidth - 110, startY + 54);
     });
 
-    // 4. Q4: Top 5 SCT Agents
-    drawQuadrant(col2X, row2Y, 'TOP 5 SCT AGENTS', 'Sputum Samples Collected', '🧪', '#f43f5e', topPerformersData.top_sct || [], (s, startX, startY) => {
+    // 5. Q5: Top 5 SCT Agents
+    drawQuadrant(col1X, row3Y, 'TOP 5 SCT AGENTS', 'Sputum Samples Collected', '🧪', '#f43f5e', topPerformersData.top_sct || [], (s, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 17px system-ui, -apple-system, sans-serif';
@@ -3057,12 +3079,87 @@ export default function AdminDashboard() {
       ctx.fillText('samples', startX + pWidth - 110, startY + 54);
     });
 
+    // 6. Q6: Statewide TB Mission Highlights & Clinical Summary
+    {
+      const x = col2X;
+      const y = row3Y;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(x, y, pWidth, pHeight, 20);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#38bdf8';
+      ctx.font = '900 20px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText('✨ BIHAR MISSION IMPACT', x + 20, y + 36);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Clinical Overview & Healthcare Reach', x + 20, y + 56);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+      ctx.beginPath();
+      ctx.moveTo(x + 20, y + 68);
+      ctx.lineTo(x + pWidth - 20, y + 68);
+      ctx.stroke();
+
+      const totalNotifs = (topPerformersData?.top_districts || []).reduce((acc, d) => acc + (d.notifications || 0), 0);
+      const activeDistCount = (topPerformersData?.top_districts || []).length;
+      const totalVisits = (topPerformersData?.top_tc || []).reduce((acc, s) => acc + (s.home_visits || s.metric_value || 0), 0);
+      const totalTests = (topPerformersData?.top_lt || []).reduce((acc, s) => acc + (s.tests || s.metric_value || 0), 0);
+      const totalSamples = (topPerformersData?.top_sct || []).reduce((acc, s) => acc + (s.samples_collected || s.metric_value || 0), 0);
+
+      const impactMetrics = [
+        { label: 'Districts Monitored', value: `${activeDistCount} Districts`, icon: '🏛️', color: '#38bdf8', sub: 'Active statewide coverage' },
+        { label: 'Champion TB Notifs', value: `${totalNotifs}`, icon: '📋', color: '#a78bfa', sub: 'Clinical TB notifications' },
+        { label: 'TC Patient Home Visits', value: `${totalVisits}`, icon: '🏠', color: '#f59e0b', sub: 'Direct household visits' },
+        { label: 'Diagnostic Tests & Sputum', value: `${totalTests + totalSamples}`, icon: '🔬', color: '#34d399', sub: 'Lab tests & sputum collections' },
+      ];
+
+      impactMetrics.forEach((m, idx) => {
+        const cardY = y + 80 + (idx * 83);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)';
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.07)';
+        ctx.beginPath();
+        ctx.roundRect(x + 14, cardY, pWidth - 28, 73, 14);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = '26px system-ui';
+        ctx.textAlign = 'center';
+        ctx.fillText(m.icon, x + 44, cardY + 44);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px system-ui, -apple-system, sans-serif';
+        ctx.fillText(m.label, x + 76, cardY + 28);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+        ctx.fillText(m.sub, x + 76, cardY + 50);
+
+        ctx.textAlign = 'right';
+        ctx.fillStyle = m.color;
+        ctx.font = '900 20px system-ui, -apple-system, sans-serif';
+        ctx.fillText(m.value, x + pWidth - 30, cardY + 40);
+      });
+
+      // Bottom mission tag
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#64748b';
+      ctx.font = 'italic 11px system-ui, -apple-system, sans-serif';
+      ctx.fillText('Doctors For You • Dedicated to a TB-Free Bihar by 2026', x + pWidth / 2, y + pHeight - 14);
+    }
+
     // Footer
     const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1315);
+    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1815);
   }, [topPerformersData, topPerformersPeriod, month]);
 
   const handleDownloadTopPerformersPoster = useCallback(async () => {
@@ -3111,7 +3208,19 @@ export default function AdminDashboard() {
       });
     }
 
-    // 3. Top 5 Lab Technicians
+    // 3. Top 5 Treatment Coordinators
+    text += `\n*🏠 TOP 5 TREATMENT COORDINATORS (TC HOME VISITS):*\n`;
+    const tcList = topPerformersData?.top_tc || [];
+    if (tcList.length === 0) {
+      text += `_No TC home visit records recorded_\n`;
+    } else {
+      tcList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.home_visits ?? s.metric_value ?? 0} Home Visits\n`;
+      });
+    }
+
+    // 4. Top 5 Lab Technicians
     text += `\n*🔬 TOP 5 LAB TECHNICIANS (LT TESTS):*\n`;
     const ltList = topPerformersData?.top_lt || [];
     if (ltList.length === 0) {
@@ -6055,7 +6164,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   </div>
 
-                  {/* 4 Clinical Role Tabs */}
+                  {/* 5 Clinical Role Tabs */}
                   <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3 mb-4">
                     <button
                       type="button"
@@ -6080,6 +6189,18 @@ const availableDistrictsForFeed = useMemo(() => {
                     >
                       <span>📋</span>
                       <span>Top FO &amp; Hub Agents</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('tc')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'tc'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🏠</span>
+                      <span>Top Treatment Coordinators (TC)</span>
                     </button>
                     <button
                       type="button"
@@ -6206,6 +6327,48 @@ const availableDistrictsForFeed = useMemo(() => {
                             </div>
                           );
                         })
+                      )
+                    ) : topPerformersTab === 'tc' ? (
+                      (topPerformersData?.top_tc || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Treatment Coordinator records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_tc || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">
+                                  Treatment Coordinator
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-amber-300 font-black">{staff.home_visits ?? staff.metric_value ?? 0} visits</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                            </div>
+                          </div>
+                        ))
                       )
                     ) : topPerformersTab === 'lt' ? (
                       (topPerformersData?.top_lt || []).length === 0 ? (
@@ -16791,8 +16954,8 @@ const availableDistrictsForFeed = useMemo(() => {
                   </div>
                 </div>
 
-                {/* Poster Columns: 4 Clinical Quadrants */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+                {/* Poster Columns: 5 Clinical Quadrants + Mission Impact */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 relative z-10">
                   {/* Q1: Top 5 Districts */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
@@ -16903,7 +17066,57 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   </div>
 
-                  {/* Q3: Top 5 Lab Technicians */}
+                  {/* Q3: Top 5 Treatment Coordinators */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🏠</span>
+                        <div>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-amber-400">Top 5 Treatment Coordinators</h4>
+                          <p className="text-[10px] text-slate-400">Home Visits &amp; Patient Tracking</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">Visits</span>
+                    </div>
+
+                    <div className="space-y-2">
+                      {loadingTopPerformers ? (
+                        <div className="py-8 text-center text-xs text-slate-400 animate-pulse">Loading rankings...</div>
+                      ) : (topPerformersData?.top_tc || []).length === 0 ? (
+                        <div className="py-8 text-center text-xs text-slate-400">No records available</div>
+                      ) : (
+                        (topPerformersData?.top_tc || []).slice(0, 5).map((s, i) => (
+                          <div 
+                            key={i} 
+                            className={`flex items-center justify-between p-2.5 rounded-xl border transition-all ${
+                              i === 0 
+                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-100' 
+                                : i === 1 
+                                ? 'bg-slate-300/10 border-slate-300/20 text-slate-100' 
+                                : i === 2 
+                                ? 'bg-amber-700/15 border-amber-700/30 text-amber-200' 
+                                : 'bg-white/5 border-white/5 text-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-6 text-center text-base font-black shrink-0">
+                                {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                              </span>
+                              <div className="truncate">
+                                <span className="font-bold text-sm text-white block truncate">{s.fo_name}</span>
+                                <span className="text-[10px] text-amber-300 font-medium">📍 {s.district}</span>
+                              </div>
+                            </div>
+                            <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono shrink-0">
+                              {s.home_visits ?? s.metric_value ?? 0} visits
+                            </span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Q4: Top 5 Lab Technicians */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
                       <div className="flex items-center gap-2">
@@ -16953,7 +17166,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   </div>
 
-                  {/* Q4: Top 5 SCT Agents */}
+                  {/* Q5: Top 5 SCT Agents */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md">
                     <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
                       <div className="flex items-center gap-2">
@@ -17002,6 +17215,56 @@ const availableDistrictsForFeed = useMemo(() => {
                       )}
                     </div>
                   </div>
+
+                  {/* Q6: Statewide Mission Highlights */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 backdrop-blur-md flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-center justify-between border-b border-white/10 pb-2 mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">✨</span>
+                          <div>
+                            <h4 className="text-xs font-black uppercase tracking-wider text-sky-400">Bihar Mission Impact</h4>
+                            <p className="text-[10px] text-slate-400">Clinical Overview &amp; Reach</p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-mono text-emerald-400">Live Totals</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 text-center">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">Districts</div>
+                          <div className="text-base font-black text-sky-300 font-mono">{(topPerformersData?.top_districts || []).length}</div>
+                          <div className="text-[9px] text-slate-500">Tracked</div>
+                        </div>
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 text-center">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">Notifs</div>
+                          <div className="text-base font-black text-purple-300 font-mono">
+                            {(topPerformersData?.top_districts || []).reduce((acc, d) => acc + (d.notifications || 0), 0)}
+                          </div>
+                          <div className="text-[9px] text-slate-500">Target Volume</div>
+                        </div>
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 text-center">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">TC Visits</div>
+                          <div className="text-base font-black text-amber-300 font-mono">
+                            {(topPerformersData?.top_tc || []).reduce((acc, s) => acc + (s.home_visits || s.metric_value || 0), 0)}
+                          </div>
+                          <div className="text-[9px] text-slate-500">Home Visits</div>
+                        </div>
+                        <div className="bg-white/5 border border-white/10 rounded-xl p-2.5 text-center">
+                          <div className="text-[10px] text-slate-400 font-bold uppercase">Tests &amp; Samples</div>
+                          <div className="text-base font-black text-emerald-300 font-mono">
+                            {((topPerformersData?.top_lt || []).reduce((acc, s) => acc + (s.tests || s.metric_value || 0), 0)) + 
+                             ((topPerformersData?.top_sct || []).reduce((acc, s) => acc + (s.samples_collected || s.metric_value || 0), 0))}
+                          </div>
+                          <div className="text-[9px] text-slate-500">Laboratory</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-500/10 to-teal-500/10 border border-teal-500/20 text-center text-[10px] text-slate-300 font-medium">
+                      Saluting all dedicated healthcare heroes across Bihar! 🏥
+                    </div>
+                  </div>
                 </div>
 
                 {/* Poster Preview Footer */}
@@ -17010,14 +17273,14 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* Hidden 1200x1350 Canvas for HD PNG Export */}
+              {/* Hidden 1200x1850 Canvas for HD PNG Export */}
               <canvas ref={topPerformersCanvasRef} className="hidden" />
             </div>
 
             {/* Modal Actions Footer */}
             <div className="p-4 sm:p-5 border-t border-white/10 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
               <span className="text-[11px] text-slate-400">
-                HD 1200x1350 PNG card generated on-the-fly via client HTML5 canvas. Zero server memory load.
+                HD 1200x1850 PNG card generated on-the-fly via client HTML5 canvas. Zero server memory load.
               </span>
 
               <div className="flex items-center gap-2.5 ml-auto">

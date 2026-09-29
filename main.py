@@ -1147,6 +1147,7 @@ async def get_statewide_top_performers(
         fo_counts = {}
         lt_counts = {}
         sct_counts = {}
+        tc_counts = {}
 
         for r in filtered_reports:
             c_dist = canonicalize_district(r.get("working_place") or r.get("district") or "")
@@ -1167,6 +1168,10 @@ async def get_statewide_top_performers(
             samples_collected = len(r.get("sample_collection_ids") or [])
             if samples_collected == 0:
                 samples_collected = int(r.get("sample_collection") or r.get("samples_collected") or 0)
+
+            home_visits = len(r.get("home_visit_ids") or [])
+            if home_visits == 0:
+                home_visits = int(r.get("home_visits") or r.get("home_visit") or 0)
 
             # District aggregate
             if c_dist not in district_counts:
@@ -1194,6 +1199,8 @@ async def get_statewide_top_performers(
             desig_upper = desig.upper()
             staff_key = f"{c_dist}_{c_fo}"
 
+            is_tc = bool(re.search(r'\bTC\b', desig_upper) or "TREATMENT COORDINATOR" in desig_upper)
+
             if "LT" in desig_upper or "LAB TECHNICIAN" in desig_upper:
                 if staff_key not in lt_counts:
                     lt_counts[staff_key] = {
@@ -1216,6 +1223,17 @@ async def get_statewide_top_performers(
                     }
                 sct_counts[staff_key]["samples_collected"] += samples_collected
                 sct_counts[staff_key]["notifications"] += notifs
+            elif is_tc:
+                if staff_key not in tc_counts:
+                    tc_counts[staff_key] = {
+                        "fo_name": display_name,
+                        "district": c_dist,
+                        "designation": desig or "Treatment Coordinator (TC)",
+                        "home_visits": 0,
+                        "notifications": 0
+                    }
+                tc_counts[staff_key]["home_visits"] += home_visits
+                tc_counts[staff_key]["notifications"] += notifs
             else:
                 if staff_key not in fo_counts:
                     fo_counts[staff_key] = {
@@ -1316,6 +1334,22 @@ async def get_statewide_top_performers(
                 "metric_label": "collections"
             })
 
+        # Sort Treatment Coordinators (ranked by home_visits, then notifications)
+        sorted_tc = list(tc_counts.values())
+        sorted_tc.sort(key=lambda x: (x["home_visits"], x["notifications"]), reverse=True)
+        top_tc = []
+        for i, s in enumerate(sorted_tc[:5]):
+            top_tc.append({
+                "rank": i + 1,
+                "fo_name": s["fo_name"],
+                "district": s["district"],
+                "designation": s.get("designation") or "Treatment Coordinator (TC)",
+                "home_visits": s["home_visits"],
+                "notifications": s["notifications"],
+                "metric_value": s["home_visits"],
+                "metric_label": "home visits"
+            })
+
         result = {
             "success": True,
             "month": month,
@@ -1324,6 +1358,7 @@ async def get_statewide_top_performers(
             "end_date": today_str,
             "top_districts": top_districts,
             "top_fo": top_fo,
+            "top_tc": top_tc,
             "top_lt": top_lt,
             "top_sct": top_sct,
             "top_staff": top_fo
@@ -1337,6 +1372,7 @@ async def get_statewide_top_performers(
             "error": str(e),
             "top_districts": [],
             "top_fo": [],
+            "top_tc": [],
             "top_lt": [],
             "top_sct": [],
             "top_staff": []
