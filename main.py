@@ -1187,6 +1187,14 @@ async def get_statewide_top_performers(
             if home_visits == 0:
                 home_visits = int(r.get("home_visits") or r.get("home_visit") or 0)
 
+            hiv_dm = len(r.get("hiv_dm_ids") or [])
+            if hiv_dm == 0:
+                hiv_dm = int(r.get("hiv_dm") or r.get("hiv") or 0)
+
+            dbt = len(r.get("dbt_ids") or [])
+            if dbt == 0:
+                dbt = int(r.get("dbt") or 0)
+
             # District aggregate
             if c_dist not in district_counts:
                 district_counts[c_dist] = {
@@ -1244,10 +1252,18 @@ async def get_statewide_top_performers(
                         "district": c_dist,
                         "designation": desig or "Treatment Coordinator (TC)",
                         "home_visits": 0,
-                        "notifications": 0
+                        "notifications": 0,
+                        "hiv_dm": 0,
+                        "dbt": 0,
+                        "samples_collected": 0,
+                        "tests": 0
                     }
                 tc_counts[staff_key]["home_visits"] += home_visits
                 tc_counts[staff_key]["notifications"] += notifs
+                tc_counts[staff_key]["hiv_dm"] += hiv_dm
+                tc_counts[staff_key]["dbt"] += dbt
+                tc_counts[staff_key]["samples_collected"] += samples_collected
+                tc_counts[staff_key]["tests"] += tests
             else:
                 if staff_key not in fo_counts:
                     fo_counts[staff_key] = {
@@ -1282,12 +1298,9 @@ async def get_statewide_top_performers(
                 eff_target = max(1.0, float(s_target))
             s["percentage"] = round((s["notifications"] / eff_target) * 100, 1)
 
-        # Sort districts
+        # Sort districts (1. District Champions (DC): Rank Target % se banegi, tie-breaker: notifications)
         sorted_districts = list(district_counts.values())
-        if period == "monthly":
-            sorted_districts.sort(key=lambda x: (x["percentage"], x["notifications"]), reverse=True)
-        else:
-            sorted_districts.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
+        sorted_districts.sort(key=lambda x: (x["percentage"], x["notifications"]), reverse=True)
 
         # Assign rank and take top 5
         top_districts = []
@@ -1300,7 +1313,7 @@ async def get_statewide_top_performers(
                 "percentage": d["percentage"]
             })
 
-        # Sort FO & Hub Agents (ranked by notifications)
+        # Sort FO & Hub Agents (2. Top FO & Hub Agents: Rank TB Notification se banegi, tie-breaker: Target %)
         sorted_fo = list(fo_counts.values())
         sorted_fo.sort(key=lambda x: (x["notifications"], x["percentage"]), reverse=True)
         top_fo = []
@@ -1316,7 +1329,7 @@ async def get_statewide_top_performers(
                 "metric_label": "notifications"
             })
 
-        # Sort Lab Technicians (ranked by tests)
+        # Sort Lab Technicians (4. Top Lab Technicians (LT): Rank Diagnostic Tests se banegi, tie-breaker: Notification)
         sorted_lt = list(lt_counts.values())
         sorted_lt.sort(key=lambda x: (x["tests"], x["notifications"]), reverse=True)
         top_lt = []
@@ -1332,7 +1345,7 @@ async def get_statewide_top_performers(
                 "metric_label": "tests"
             })
 
-        # Sort SCT Agents (ranked by samples_collected)
+        # Sort SCT Agents (5. Top SCT Agents: Rank Sputum Samples Collected se banegi, tie-breaker: Notification)
         sorted_sct = list(sct_counts.values())
         sorted_sct.sort(key=lambda x: (x["samples_collected"], x["notifications"]), reverse=True)
         top_sct = []
@@ -1348,9 +1361,18 @@ async def get_statewide_top_performers(
                 "metric_label": "collections"
             })
 
-        # Sort Treatment Coordinators (ranked by home_visits, then notifications)
+        # Calculate composite other clinical indicators score for TC (3. Top TC: Rank Verified Home Visits se banegi, tie-breaker: HIV, DM, DBT, Samples, Tests)
+        for s in tc_counts.values():
+            s["other_clinical_score"] = (
+                s.get("hiv_dm", 0) + 
+                s.get("dbt", 0) + 
+                s.get("samples_collected", 0) + 
+                s.get("tests", 0)
+            )
+
+        # Sort Treatment Coordinators (Ranked by home_visits, tie-breaker: other clinical indicators, tertiary: notifications)
         sorted_tc = list(tc_counts.values())
-        sorted_tc.sort(key=lambda x: (x["home_visits"], x["notifications"]), reverse=True)
+        sorted_tc.sort(key=lambda x: (x["home_visits"], x["other_clinical_score"], x["notifications"]), reverse=True)
         top_tc = []
         for i, s in enumerate(sorted_tc[:5]):
             top_tc.append({
@@ -1360,6 +1382,11 @@ async def get_statewide_top_performers(
                 "designation": s.get("designation") or "Treatment Coordinator (TC)",
                 "home_visits": s["home_visits"],
                 "notifications": s["notifications"],
+                "hiv_dm": s.get("hiv_dm", 0),
+                "dbt": s.get("dbt", 0),
+                "samples_collected": s.get("samples_collected", 0),
+                "tests": s.get("tests", 0),
+                "other_clinical_score": s.get("other_clinical_score", 0),
                 "metric_value": s["home_visits"],
                 "metric_label": "home visits"
             })

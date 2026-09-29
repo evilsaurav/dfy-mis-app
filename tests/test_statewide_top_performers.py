@@ -521,3 +521,118 @@ def test_staff_designation_update_evicts_cache_and_shifts_bucket(super_admin_tok
         assert any(s["fo_name"] == "Rohan Das" and s["tests"] == 35 for s in d2["top_lt"])
         lt_entry = [s for s in d2["top_lt"] if s["fo_name"] == "Rohan Das"][0]
         assert "LT" in lt_entry["designation"] or "Lab Technician" in lt_entry["designation"]
+
+
+def test_statewide_top_performers_tie_breaker_rules(super_admin_token):
+    """
+    Asserts exact studio tie-breaking specifications:
+    1. DC: Target %, tie-breaker notifications
+    2. FO: Notifications, tie-breaker target %
+    3. TC: Home visits, tie-breaker composite other clinical indicators (HIV, DM, DBT, Samples, Tests), tertiary notifications
+    4. LT: Tests, tie-breaker notifications
+    5. SCT: Samples collected, tie-breaker notifications
+    """
+    mock_db = MockFirestore()
+    mock_db.store["staff_directory"] = {
+        # FOs with tied notifications
+        "patna_foone": {"district": "Patna", "name": "FO One", "designation": "Field Officer", "is_active": True, "target": 100},
+        "patna_fotwo": {"district": "Patna", "name": "FO Two", "designation": "Field Officer", "is_active": True, "target": 50},
+
+        # TCs with tied home visits
+        "gaya_tcone": {"district": "Gaya", "name": "TC One", "designation": "Treatment Coordinator (TC)", "is_active": True, "target": 50},
+        "gaya_tctwo": {"district": "Gaya", "name": "TC Two", "designation": "Treatment Coordinator (TC)", "is_active": True, "target": 50},
+
+        # LTs with tied tests
+        "jamui_ltone": {"district": "Jamui", "name": "LT One", "designation": "Lab Technician (LT)", "is_active": True, "target": 50},
+        "jamui_lttwo": {"district": "Jamui", "name": "LT Two", "designation": "Lab Technician (LT)", "is_active": True, "target": 50},
+
+        # SCTs with tied sample collections
+        "siwan_sctone": {"district": "Siwan", "name": "SCT One", "designation": "SCT Agent", "is_active": True, "target": 50},
+        "siwan_scttwo": {"district": "Siwan", "name": "SCT Two", "designation": "SCT Agent", "is_active": True, "target": 50},
+    }
+
+    mock_reports = [
+        # FO 1: 50 notifs, target 100 (50%)
+        {"working_place": "Patna", "fo_name": "FO One", "notification_ids": [f"N1_{i}" for i in range(50)]},
+        # FO 2: 50 notifs, target 50 (100%) -> Should beat FO 1 on tie-breaker
+        {"working_place": "Patna", "fo_name": "FO Two", "notification_ids": [f"N2_{i}" for i in range(50)]},
+
+        # TC 1: 20 home visits, 6 HIV/DM, 4 DBT, 5 samples, 5 tests -> other_clinical = 20
+        {
+            "working_place": "Gaya", "fo_name": "TC One",
+            "home_visit_ids": [f"HV1_{i}" for i in range(20)],
+            "hiv_dm_ids": [f"H1_{i}" for i in range(6)],
+            "dbt_ids": [f"D1_{i}" for i in range(4)],
+            "sample_collection_ids": [f"SC1_{i}" for i in range(5)],
+            "sample_tested_ids": [f"ST1_{i}" for i in range(5)],
+            "notification_ids": ["N_TC1"]
+        },
+        # TC 2: 20 home visits, 1 HIV/DM, 1 DBT, 1 samples, 1 tests -> other_clinical = 4
+        {
+            "working_place": "Gaya", "fo_name": "TC Two",
+            "home_visit_ids": [f"HV2_{i}" for i in range(20)],
+            "hiv_dm_ids": ["H2_0"],
+            "dbt_ids": ["D2_0"],
+            "sample_collection_ids": ["SC2_0"],
+            "sample_tested_ids": ["ST2_0"],
+            "notification_ids": ["N_TC2"]
+        },
+
+        # LT 1: 30 tests, 10 notifs -> Should beat LT 2 on tie-breaker
+        {"working_place": "Jamui", "fo_name": "LT One", "sample_tested_ids": [f"T1_{i}" for i in range(30)], "notification_ids": [f"N_LT1_{i}" for i in range(10)]},
+        # LT 2: 30 tests, 2 notifs
+        {"working_place": "Jamui", "fo_name": "LT Two", "sample_tested_ids": [f"T2_{i}" for i in range(30)], "notification_ids": [f"N_LT2_{i}" for i in range(2)]},
+
+        # SCT 1: 25 samples, 8 notifs -> Should beat SCT 2 on tie-breaker
+        {"working_place": "Siwan", "fo_name": "SCT One", "sample_collection_ids": [f"C1_{i}" for i in range(25)], "notification_ids": [f"N_S1_{i}" for i in range(8)]},
+        # SCT 2: 25 samples, 1 notifs
+        {"working_place": "Siwan", "fo_name": "SCT Two", "sample_collection_ids": [f"C2_{i}" for i in range(25)], "notification_ids": ["N_S2_0"]},
+    ]
+
+    mock_targets = {
+        "targets": [
+            {"district": "Jamui", "target": 100},  # Jamui notifs: 12 -> 12%
+            {"district": "Siwan", "target": 50},   # Siwan notifs: 9 -> 18%
+            {"district": "Patna", "target": 100},  # Patna notifs: 100 -> 100%
+            {"district": "Gaya", "target": 2},     # Gaya notifs: 2 -> 100% (tied % with Patna, but Patna has 100 notifs vs Gaya 2)
+        ]
+    }
+
+    with patch("main.db", mock_db), \
+         patch("main.get_raw_monthly_reports", new=AsyncMock(return_value=mock_reports)), \
+         patch("main.get_targets", new=AsyncMock(return_value=mock_targets)):
+
+        res = client.get(
+            "/api/statewide-top-performers?month=2026-09&period=monthly",
+            headers={"Authorization": f"Bearer {super_admin_token}"}
+        )
+        assert res.status_code == 200, res.text
+        data = res.json()
+
+        # 1. District tie-breaker: Patna (100 notifs, 100%) vs Gaya (2 notifs, 100%)
+        dists = data["top_districts"]
+        assert dists[0]["district"] == "Patna", "Patna must rank #1 over Gaya due to higher notification volume tie-breaker"
+        assert dists[1]["district"] == "Gaya", "Gaya must rank #2"
+
+        # 2. FO tie-breaker: FO Two (50 notifs, 100%) vs FO One (50 notifs, 50%)
+        top_fo = data["top_fo"]
+        assert top_fo[0]["fo_name"] == "FO Two", "FO Two must rank #1 on target % tie-breaker"
+        assert top_fo[1]["fo_name"] == "FO One", "FO One must rank #2"
+
+        # 3. TC tie-breaker: TC One (20 visits, other_clinical=20) vs TC Two (20 visits, other_clinical=4)
+        top_tc = data["top_tc"]
+        assert top_tc[0]["fo_name"] == "TC One", "TC One must rank #1 on other clinical indicators tie-breaker"
+        assert top_tc[0]["other_clinical_score"] == 20
+        assert top_tc[1]["fo_name"] == "TC Two"
+        assert top_tc[1]["other_clinical_score"] == 4
+
+        # 4. LT tie-breaker: LT One (30 tests, 10 notifs) vs LT Two (30 tests, 2 notifs)
+        top_lt = data["top_lt"]
+        assert top_lt[0]["fo_name"] == "LT One", "LT One must rank #1 on notification tie-breaker"
+        assert top_lt[1]["fo_name"] == "LT Two"
+
+        # 5. SCT tie-breaker: SCT One (25 samples, 8 notifs) vs SCT Two (25 samples, 1 notifs)
+        top_sct = data["top_sct"]
+        assert top_sct[0]["fo_name"] == "SCT One", "SCT One must rank #1 on notification tie-breaker"
+        assert top_sct[1]["fo_name"] == "SCT Two"
+

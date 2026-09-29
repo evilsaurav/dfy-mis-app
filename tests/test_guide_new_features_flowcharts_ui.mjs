@@ -128,9 +128,9 @@ assert(guideModalCode.includes('Top SCT Agents') || guideModalCode.includes('�
 assert(guideModalCode.includes('Dynamic Designation Shift') || guideModalCode.includes('Designation Shift'), "Topic 11 Step 2 must describe Dynamic Designation Shift");
 assert(guideModalCode.includes('cache eviction') || guideModalCode.includes('invalidation') || guideModalCode.includes('cache'), "Topic 11 Step 2 must describe cache eviction on designation change");
 
-// Step 3: HD WhatsApp Poster Studio (1200x1350)
-assert(guideModalCode.includes('1200x1350'), "Topic 11 Step 3 must mention 1200x1350 canvas poster resolution");
-assert(guideModalCode.includes('4-quadrant') || guideModalCode.includes('4 quadrant') || guideModalCode.includes('quadrant'), "Topic 11 Step 3 must describe 4-quadrant layout");
+// Step 3: HD WhatsApp Poster Studio
+assert(guideModalCode.includes('1200x1350') || guideModalCode.includes('1200x1960'), "Topic 11 Step 3 must mention canvas poster resolution");
+assert(guideModalCode.includes('4-quadrant') || guideModalCode.includes('4 quadrant') || guideModalCode.includes('quadrant') || guideModalCode.includes('6-Panel') || guideModalCode.includes('6-panel'), "Topic 11 Step 3 must describe poster layout");
 assert(guideModalCode.includes('WhatsApp') || guideModalCode.includes('broadcast'), "Topic 11 Step 3 must describe WhatsApp broadcast");
 
 // Step 4: Full-Width 30-Day Daily Progression Trend
@@ -158,7 +158,17 @@ assert(foGuideCode.includes('Podium, HD Poster & Broadcast') || foGuideCode.incl
 // Admin SOP Step 1 updated with TC and 5 cadres
 assert(guideModalCode.includes('5 Clinical Cadres') || guideModalCode.includes('5 Cadres'), "Admin SOP Step 1 must describe 5 Clinical Cadres");
 assert(guideModalCode.includes('Top Treatment Coordinators (TC)'), "Admin SOP Step 1 must include Treatment Coordinators (TC)");
+assert(guideModalCode.includes('HIV/DM') && guideModalCode.includes('DBT'), "Admin SOP Step 1 must specify TC tie-breaker on composite indicators");
 
-console.log("✔ FO Guide Topic 11 and Admin SOP 5 Cadres successfully verified.");
+// Test 7: Verify Random Top Performer Commendations and Poster Canvas
+console.log("\n[Test 7] Verifying Random Top Performer Commendation and 1200x1960 Poster Canvas in AdminDashboard.jsx...");
+assert(adminCode.includes('TOP_PERFORMER_MESSAGES'), "AdminDashboard.jsx must export TOP_PERFORMER_MESSAGES array");
+assert(adminCode.includes('topPerformerRandomMsg'), "AdminDashboard.jsx must maintain topPerformerRandomMsg state");
+assert(adminCode.includes('SPECIAL COMMENDATION & TRIBUTE') || adminCode.includes('SPECIAL COMMENDATION'), "Admin poster canvas must render commendation banner");
+assert(adminCode.includes('height = 1960'), "Admin poster canvas must use height = 1960");
+assert(adminCode.includes('Shuffle'), "Admin preview modal must provide shuffle button for random quote");
+
+console.log("✔ Random Top Performer Commendations and HD Canvas Poster successfully verified.");
 
 console.log("\n🎉 ALL NEW FEATURE FLOWCHARTS UI TESTS PASSED 100%!");
+

@@ -112,6 +112,17 @@ const DEFAULT_BIHAR_DISTRICTS = [
   "Sitamarhi", "Vaishali"
 ];
 
+const TOP_PERFORMER_MESSAGES = [
+  "🌟 Bihar TB Warriors: Aapka asadharan samarpan aur kadi mehnat Bihar ko TB-mukt banane ki disha me ek nayi kranti la rahi hai!",
+  "🔥 Salute to Real Heroes: Har ek notification, home visit aur diagnostic test se kisi pariwar ki zindagi sawar rahi hai. Shandar pradarshan!",
+  "🏆 Pride of Doctors For You: Aapki nishtha aur zameeni karyashaili poore Bihar ke sabhi swasthya karmio ke liye prernasrot hai!",
+  "🚀 Champions of Frontline Care: Zameen par utarkar har marij tak pahuchna hi sacche seva-bhav ki pehchan hai. Bahut-bahut badhaai!",
+  "👏 Exemplary Healthcare Leadership: Aapke atoot sankalp aur parishram ne naye kirtiman sthapit kiye hain. We are immensely proud of you!",
+  "💎 Pillars of TB Eradication: Har din naye utsah aur zimmedari ke sath har ek marij tak dava aur dekhbhal pahunchana hi aapki asali taqat hai!",
+  "🎯 Mission TB-Free Bihar: Zila star se lekar block tak aapka pradarshan misaal ban chuka hai. Isi josh aur lagan ke sath aage badhte rahein!",
+  "🌈 Excellence in Public Health: Aapka yogdan na keval pradarshan me sarvochha hai, balki hazaron pariwaron me nayi umeed jaga raha hai!"
+];
+
 export default function AdminDashboard() {
   const [password, setPassword] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -139,6 +150,9 @@ export default function AdminDashboard() {
   const [topPerformersData, setTopPerformersData] = useState(null);
   const [loadingTopPerformers, setLoadingTopPerformers] = useState(false);
   const [showTopPerformersModal, setShowTopPerformersModal] = useState(false);
+  const [topPerformerRandomMsg, setTopPerformerRandomMsg] = useState(() => 
+    TOP_PERFORMER_MESSAGES[Math.floor(Math.random() * TOP_PERFORMER_MESSAGES.length)]
+  );
   const topPerformersCanvasRef = useRef(null);
 
   const [showTargetModal, setShowTargetModal] = useState(false);
@@ -2855,7 +2869,7 @@ export default function AdminDashboard() {
     if (!canvas || !topPerformersData) return;
     const ctx = canvas.getContext('2d');
     const width = 1200;
-    const height = 1850;
+    const height = 1960;
     canvas.width = width;
     canvas.height = height;
 
@@ -3172,16 +3186,48 @@ export default function AdminDashboard() {
       ctx.fillText('Doctors For You • Dedicated to a TB-Free Bihar by 2026', x + pWidth / 2, y + pHeight - 14);
     }
 
+    // Commendation & Tribute Banner for Champions (Randomized Inspiring Message)
+    const bannerX = 50;
+    const bannerY = 1820;
+    const bannerW = 1100;
+    const bannerH = 86;
+
+    const bannerGrad = ctx.createLinearGradient(bannerX, bannerY, bannerX + bannerW, bannerY + bannerH);
+    bannerGrad.addColorStop(0, 'rgba(245, 158, 11, 0.18)');
+    bannerGrad.addColorStop(0.5, 'rgba(99, 102, 241, 0.22)');
+    bannerGrad.addColorStop(1, 'rgba(20, 184, 166, 0.18)');
+
+    ctx.fillStyle = bannerGrad;
+    ctx.strokeStyle = 'rgba(251, 191, 36, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(bannerX, bannerY, bannerW, bannerH, 16);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#fbbf24';
+    ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
+    ctx.fillText('✨ SPECIAL COMMENDATION & TRIBUTE TO BIHAR TB WARRIORS ✨', width / 2, bannerY + 28);
+
+    const randomMsg = topPerformerRandomMsg || TOP_PERFORMER_MESSAGES[0];
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = 'italic bold 15px system-ui, -apple-system, sans-serif';
+    ctx.fillText(`"${randomMsg}"`, width / 2, bannerY + 58);
+
     // Footer
     const nowStr = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
-    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1815);
-  }, [topPerformersData, topPerformersPeriod, month]);
+    ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1935);
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
 
   const handleDownloadTopPerformersPoster = useCallback(async () => {
     try {
+      // Pick a fresh random congratulatory message on each export
+      const nextMsg = TOP_PERFORMER_MESSAGES[Math.floor(Math.random() * TOP_PERFORMER_MESSAGES.length)];
+      setTopPerformerRandomMsg(nextMsg);
       await generateTopPerformersPosterCanvas();
       const canvas = topPerformersCanvasRef.current;
       if (!canvas) return;
@@ -3200,6 +3246,9 @@ export default function AdminDashboard() {
     const periodName = topPerformersPeriod === 'weekly' ? 'Weekly Sprint (Last 7 Days)' : topPerformersPeriod === 'fortnightly' ? '15-Day Drive' : `Monthly (${month})`;
     let text = `*🏆 DOCTORS FOR YOU — BIHAR TB MISSION*\n`;
     text += `*🌟 STATEWIDE TOP PERFORMERS LEADERBOARD (${periodName})*\n\n`;
+
+    const activeTribute = topPerformerRandomMsg || TOP_PERFORMER_MESSAGES[0];
+    text += `*✨ STATEWIDE LEADERSHIP TRIBUTE:*\n_"${activeTribute}"_\n\n`;
 
     // 1. Top 5 Districts
     text += `*🏛️ TOP 5 DISTRICTS (DC TARGET & VOLUME):*\n`;
@@ -3265,7 +3314,7 @@ export default function AdminDashboard() {
     text += `\n_Congratulations to all clinical champions leading Bihar's TB elimination drive! 🏥_`;
 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  }, [topPerformersData, topPerformersPeriod, month]);
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
 
   useEffect(() => {
     if (isAuthenticated) { 
@@ -15373,7 +15422,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>🏠</span>
-                              <div><strong>Top Treatment Coordinators (TC):</strong> Total verified Home Visits (<code className="font-mono text-[9.5px]">home_visits</code>) conducted for patient care. Tie-breaker: Notifications.</div>
+                              <div><strong>Top Treatment Coordinators (TC):</strong> Total verified Home Visits (<code className="font-mono text-[9.5px]">home_visits</code>) conducted for patient care. Tie-breaker: Baaki clinical indicators (HIV/DM screening, DBT, Sputum Sample Collection aur Diagnostic Tests) ka composite score (tertiary: Notifications).</div>
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>🔬</span>
@@ -15425,7 +15474,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                       </div>
 
-                      {/* Step 3: HD WhatsApp Poster Studio (1200x1350) */}
+                      {/* Step 3: HD WhatsApp Poster Studio (1200x1960) */}
                       <div className="bg-gradient-to-br from-amber-50/70 to-slate-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
                         <div>
                           <div className="flex items-center justify-between mb-1.5">
@@ -15433,7 +15482,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Step 03 &bull; Poster Studio</span>
                           </div>
                           <h5 className="text-xs font-black text-slate-900 leading-snug">
-                            HD WhatsApp Poster Studio (1200x1350)
+                            HD WhatsApp Poster Studio (1200x1960) &amp; Random Commendations
                           </h5>
                           <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
                             High-impact statewide recognition poster generated completely on the client side:
@@ -15441,7 +15490,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
                             <li className="flex items-start gap-1.5">
                               <span>🎨</span>
-                              <div><strong>4-Quadrant Layout:</strong> Generates 4-quadrant high-resolution canvas poster (1200x1350) featuring official Doctors For You (DFY logo), Bihar TB mission branding, and gold medal podium styling.</div>
+                              <div><strong>6-Panel Layout &amp; Random Commendation:</strong> Generates high-resolution canvas poster (1200x1960) featuring official Doctors For You (DFY logo), 6 performance panels, and a rotating randomized congratulatory leadership tribute.</div>
                             </li>
                             <li className="flex items-start gap-1.5">
                               <span>⬇️</span>
@@ -15454,7 +15503,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           </ul>
                         </div>
                         <div className="pt-2 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
-                          <span>1200x1350 Canvas</span>
+                          <span>1200x1960 Canvas</span>
                           <span className="text-amber-600 font-black">➔ Step 4</span>
                         </div>
                       </div>
@@ -17284,8 +17333,25 @@ const availableDistrictsForFeed = useMemo(() => {
                       </div>
                     </div>
 
-                    <div className="p-2.5 rounded-xl bg-gradient-to-r from-indigo-500/10 to-teal-500/10 border border-teal-500/20 text-center text-[10px] text-slate-300 font-medium">
-                      Saluting all dedicated healthcare heroes across Bihar! 🏥
+                    <div className="p-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-indigo-500/10 to-teal-500/10 border border-amber-500/25 text-center space-y-1">
+                      <div className="flex items-center justify-center gap-1.5 text-[10px] font-bold text-amber-400">
+                        <span>✨</span>
+                        <span>Statewide Commendation Tribute</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newMsg = TOP_PERFORMER_MESSAGES[Math.floor(Math.random() * TOP_PERFORMER_MESSAGES.length)];
+                            setTopPerformerRandomMsg(newMsg);
+                          }}
+                          className="ml-1 text-[9px] text-slate-400 hover:text-amber-300 underline cursor-pointer"
+                          title="Shuffle random congratulatory quote"
+                        >
+                          🎲 Shuffle
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-200 font-medium italic">
+                        &ldquo;{topPerformerRandomMsg || TOP_PERFORMER_MESSAGES[0]}&rdquo;
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -17296,14 +17362,14 @@ const availableDistrictsForFeed = useMemo(() => {
                 </div>
               </div>
 
-              {/* Hidden 1200x1850 Canvas for HD PNG Export */}
+              {/* Hidden 1200x1960 Canvas for HD PNG Export */}
               <canvas ref={topPerformersCanvasRef} className="hidden" />
             </div>
 
             {/* Modal Actions Footer */}
             <div className="p-4 sm:p-5 border-t border-white/10 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
               <span className="text-[11px] text-slate-400">
-                HD 1200x1850 PNG card generated on-the-fly via client HTML5 canvas. Zero server memory load.
+                HD 1200x1960 PNG card generated on-the-fly via client HTML5 canvas with random commendation. Zero server memory load.
               </span>
 
               <div className="flex items-center gap-2.5 ml-auto">

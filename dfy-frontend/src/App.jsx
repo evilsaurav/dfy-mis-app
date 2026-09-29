@@ -3519,7 +3519,7 @@ const FoHelpGuide = () => {
                     <strong>📋 FO &amp; Hub Agents:</strong> Total TB Notifications. Tie-breaker: Target achievement %.
                   </div>
                   <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
-                    <strong>🏠 TC (Treatment Coordinator):</strong> Total Confirmed Home Visits. Tie-breaker: Notifications.
+                    <strong>🏠 TC (Treatment Coordinator):</strong> Total Confirmed Home Visits. Tie-breaker: Baaki clinical indicators (HIV, DM, DBT, Sample collection, Sample tested).
                   </div>
                   <div className="bg-white/80 p-1.5 rounded-xl border border-emerald-200/60">
                     <strong>🔬 LT (Lab Technician):</strong> Total Diagnostic Tests Done. Tie-breaker: Notifications.
@@ -3578,7 +3578,7 @@ const FoHelpGuide = () => {
                 </p>
                 <ul className="text-[10px] text-slate-700 space-y-1 mt-1.5 pl-0.5">
                   <li>• <strong>Top 5 Podium:</strong> 🥇 1st, 🥈 2nd, 🥉 3rd aur Top 5 display.</li>
-                  <li>• <strong>HD WhatsApp Poster:</strong> High-resolution canvas poster generated for official circulars.</li>
+                  <li>• <strong>HD WhatsApp Poster:</strong> High-resolution canvas poster generated with dynamic congratulatory leadership tributes.</li>
                   <li>• <strong>WhatsApp Group Broadcast:</strong> Medals aur scores official groups me share kiye jaate hain.</li>
                 </ul>
               </div>
