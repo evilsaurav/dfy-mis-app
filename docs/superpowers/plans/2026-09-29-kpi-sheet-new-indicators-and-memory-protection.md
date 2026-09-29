@@ -487,15 +487,17 @@ git commit -m "feat(security): enforce rbac download gates and anti-oom tempfile
 
 ---
 
-### Task 4: Frontend Reports Studio RBAC Gate & UI Updates
+### Task 4: Frontend Reports Studio RBAC Gate & Anti-Double-Tap Download Locks
 
 **Files:**
-- Modify: `dfy-frontend/src/AdminDashboard.jsx:13000-13200`
+- Modify: `dfy-frontend/src/AdminDashboard.jsx:3260-3500, 9750-9870`
 - Test: `tests/test_reports_studio_kpi_rbac_ui.mjs`
 
 **Interfaces:**
-- Consumes: `currentUser` role and `allowed_districts`.
-- Produces: Reports Studio KPI download panel where "📦 Download All District KPI Workbooks (ZIP)" is only displayed if `canDownloadBulkZip` is true.
+- Consumes: `currentUser` role and `allowed_districts`, `authFetch`.
+- Produces: Reports Studio KPI download panel where:
+  1. "📦 Download All District KPI Workbooks (ZIP)" is only displayed if `canDownloadBulkZip` is true.
+  2. Single district download and bulk ZIP download buttons enforce **strict Anti-Double-Tap locks** (`disabled={isDownloadingKpi}` / `disabled={isDownloadingAllKpi}`) using `authFetch` blob streaming with `try ... finally` release, preventing rapid repeated clicks from spawning parallel server jobs.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -519,15 +521,21 @@ assert(
   'Bulk ZIP button must be conditionally rendered based on canDownloadBulkZip'
 );
 
-console.log('✅ Reports Studio KPI RBAC UI test passed');
+// 3. Verify anti-double-tap lock with finally block in handleDownloadKpi
+assert(
+  adminCode.includes('isDownloadingKpi') && adminCode.includes('finally'),
+  'handleDownloadKpi must maintain a locked loading state until the download completes or errors'
+);
+
+console.log('✅ Reports Studio KPI RBAC & Anti-Double-Tap UI test passed');
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `node tests/test_reports_studio_kpi_rbac_ui.mjs`  
-Expected: FAIL (because `canDownloadBulkZip` is not yet defined).
+Expected: FAIL.
 
-- [ ] **Step 3: Implement `canDownloadBulkZip` guard in `AdminDashboard.jsx`**
+- [ ] **Step 3: Implement `canDownloadBulkZip` guard & Anti-Double-Tap locks in `AdminDashboard.jsx`**
 
 1. In `AdminDashboard.jsx`, compute:
 ```javascript
@@ -537,19 +545,57 @@ const canDownloadBulkZip = currentUser?.role === 'SUPER_ADMIN' ||
     currentUser.allowed_districts.length > 1
   ));
 ```
-2. Locate the "📦 Download All District KPI Workbooks (ZIP)" button in Reports Studio (around lines 13050-13100) and wrap it:
+2. Refactor `handleDownloadKpi` and `handleDownloadAllKpiZip` to use blob download with `try ... finally`:
+```javascript
+const handleDownloadKpi = async () => {
+  if (isDownloadingKpi) return;
+  setIsDownloadingKpi(true);
+  try {
+    const targetDist = selectedDistrict === 'All' ? (availableKpiDistricts[0] || 'Buxar') : selectedDistrict;
+    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+    const res = await authFetch(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Download failed');
+    }
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `KPI_Report_${targetDist}_${month}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  } catch (err) {
+    alert("KPI Download Error: " + err.message);
+  } finally {
+    setIsDownloadingKpi(false);
+  }
+};
+```
+3. Wrap bulk ZIP button with `canDownloadBulkZip &&`:
 ```jsx
 {canDownloadBulkZip && (
   <button
     onClick={handleDownloadAllKpiZip}
-    disabled={isDownloadingAllKpi}
-    className="..."
+    disabled={isDownloadingKpi || isDownloadingAllKpi}
+    className="... disabled:opacity-50 disabled:cursor-not-allowed"
   >
-    {isDownloadingAllKpi ? 'Generating Workbooks (ZIP)...' : '📦 Download All District KPI Workbooks (ZIP)'}
+    {isDownloadingAllKpi ? '⏳ Generating Archive (Please wait)...' : '📦 Download All District KPI Workbooks (ZIP)'}
   </button>
 )}
 ```
-3. For single-district Sub-Admins, ensure a helpful note or single district download button is clearly presented without visual regressions.
+And on the single district download button, show:
+```jsx
+<button
+  onClick={handleDownloadKpi}
+  disabled={isDownloadingKpi}
+  className="... disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  {isDownloadingKpi ? '⏳ Preparing Excel (Please wait)...' : '📥 Download District KPI Workbook'}
+</button>
+```
 
 - [ ] **Step 4: Run test to verify it passes**
 
