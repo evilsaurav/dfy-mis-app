@@ -3248,6 +3248,16 @@ export default function AdminDashboard() {
     return all;
   }, [districts, currentUser]);
 
+  const canDownloadBulkZip = useMemo(() => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'SUPER_ADMIN') return true;
+    if (Array.isArray(currentUser.allowed_districts)) {
+      if (currentUser.allowed_districts.includes('All')) return true;
+      if (currentUser.allowed_districts.length > 1) return true;
+    }
+    return false;
+  }, [currentUser]);
+
   const handleToggleKpiDistrict = (dist) => {
     setSelectedKpiDistricts(prev => {
       if (prev.includes(dist)) {
@@ -3266,7 +3276,7 @@ export default function AdminDashboard() {
     setSelectedKpiDistricts([]);
   };
 
-  const handleDownloadKpi = () => {
+  const handleDownloadKpi = async () => {
     if (isDownloadingKpi) return;
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
@@ -3274,13 +3284,33 @@ export default function AdminDashboard() {
       ? reportsDistrict 
       : (selectedDistrict !== 'All' ? selectedDistrict : fallback);
     if (!targetDist) {
-      alert("Please select a district to download.");
+      showToast("Please select a district to download.", "error");
       return;
     }
     setIsDownloadingKpi(true);
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    window.open(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}&token=${getAdminToken()}`, "_blank");
-    setTimeout(() => setIsDownloadingKpi(false), 3000);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/download-kpi-workbook?district=${encodeURIComponent(targetDist)}&month=${month}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Download failed with HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `KPI_Report_${targetDist}_${month}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      link.remove();
+      showToast(`✓ KPI Report for ${targetDist} downloaded successfully!`, "success");
+    } catch (err) {
+      console.error("Error downloading district KPI workbook:", err);
+      showToast(`KPI Download Error: ${err.message}`, "error");
+    } finally {
+      setIsDownloadingKpi(false);
+    }
   };
 
   const handleToggleMedDistrict = (dist) => {
@@ -3433,7 +3463,7 @@ export default function AdminDashboard() {
     }, 2500);
   };
 
-  const handleDownloadScopedZip = () => {
+  const handleDownloadScopedZip = async () => {
     if (isDownloadingKpi) return;
     const targetList = selectedKpiDistricts.length > 0 ? selectedKpiDistricts : availableKpiDistricts;
     if (!targetList || targetList.length === 0) {
@@ -3444,13 +3474,30 @@ export default function AdminDashboard() {
     setIsDownloadingKpi(true);
     showToast(`📦 Preparing Scoped ZIP bundle for ${targetList.length} district(s)...`, "info");
 
-    const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-    const distParam = `&districts=${encodeURIComponent(targetList.join(','))}`;
-    window.open(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}&token=${getAdminToken()}`, "_blank");
-
-    setTimeout(() => {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const distParam = `&districts=${encodeURIComponent(targetList.join(','))}`;
+      const res = await authFetch(`${API_BASE_URL}/download-all-kpi-workbooks?month=${month}${distParam}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Bulk download failed with HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `District_KPI_Workbooks_${month}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      link.remove();
+      showToast(`✓ KPI ZIP archive (${targetList.length} districts) downloaded successfully!`, "success");
+    } catch (err) {
+      console.error("Error downloading scoped KPI zip:", err);
+      showToast(`Bulk KPI Download Error: ${err.message}`, "error");
+    } finally {
       setIsDownloadingKpi(false);
-    }, 4000);
+    }
   };
 
   const handleDownloadSequentialQueue = async () => {
@@ -9760,41 +9807,43 @@ const availableDistrictsForFeed = useMemo(() => {
                     )}
 
                     {/* Multi-District Download Action Cards */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                      {/* Option A: Scoped ZIP */}
-                      <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-2xs">
-                        <div>
-                          <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1">
-                            <span>📦</span>
-                            <span>Download Scoped ZIP Archive</span>
-                          </span>
-                          <p className="text-[11px] text-slate-500 font-medium">
-                            Bundles only the <strong>{selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : availableKpiDistricts.length} selected district(s)</strong> into a single compressed ZIP file.
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          disabled={isDownloadingKpi || (selectedKpiDistricts.length === 0 && availableKpiDistricts.length === 0)}
-                          onClick={handleDownloadScopedZip}
-                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
-                            isDownloadingKpi
-                              ? 'bg-indigo-400 text-white cursor-wait animate-pulse'
-                              : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-indigo-600/20 cursor-pointer'
-                          }`}
-                        >
-                          {isDownloadingKpi ? (
-                            <>
-                              <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                              <span>Generating Scoped ZIP Archive...</span>
-                            </>
-                          ) : (
-                            <>
+                    <div className={`grid grid-cols-1 ${canDownloadBulkZip ? 'sm:grid-cols-2' : ''} gap-3 pt-2`}>
+                      {/* Option A: Scoped ZIP (Multi-District Only) */}
+                      {canDownloadBulkZip && (
+                        <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-2xs">
+                          <div>
+                            <span className="text-xs font-black text-slate-800 flex items-center gap-1.5 mb-1">
                               <span>📦</span>
-                              <span>Download Selected ZIP ({selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : 'All'})</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
+                              <span>Download Scoped ZIP Archive</span>
+                            </span>
+                            <p className="text-[11px] text-slate-500 font-medium">
+                              Bundles only the <strong>{selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : availableKpiDistricts.length} selected district(s)</strong> into a single compressed ZIP file.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isDownloadingKpi || (selectedKpiDistricts.length === 0 && availableKpiDistricts.length === 0)}
+                            onClick={handleDownloadScopedZip}
+                            className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isDownloadingKpi
+                                ? 'bg-indigo-400 text-white cursor-wait animate-pulse'
+                                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20 cursor-pointer'
+                            }`}
+                          >
+                            {isDownloadingKpi ? (
+                              <>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                <span>Generating Scoped ZIP Archive...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📦</span>
+                                <span>Download Selected ZIP ({selectedKpiDistricts.length > 0 ? selectedKpiDistricts.length : 'All'})</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      )}
 
                       {/* Option B: One-by-One Queue */}
                       <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/80 flex flex-col justify-between shadow-2xs">
@@ -9811,10 +9860,10 @@ const availableDistrictsForFeed = useMemo(() => {
                           type="button"
                           disabled={isDownloadingKpi || selectedKpiDistricts.length === 0}
                           onClick={handleDownloadSequentialQueue}
-                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 ${
+                          className={`mt-3 w-full font-bold py-2.5 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
                             isDownloadingKpi
                               ? 'bg-emerald-400 text-white cursor-wait animate-pulse'
-                              : 'bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white shadow-emerald-600/20 cursor-pointer'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20 cursor-pointer'
                           }`}
                         >
                           {isDownloadingKpi ? (
@@ -9853,10 +9902,10 @@ const availableDistrictsForFeed = useMemo(() => {
                         type="button"
                         disabled={isDownloadingKpi}
                         onClick={handleDownloadKpi}
-                        className={`font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 active:scale-95 shrink-0 ${
+                        className={`font-bold px-4 py-2 rounded-xl text-xs shadow-sm transition-all flex items-center gap-1.5 active:scale-95 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
                           isDownloadingKpi
                             ? 'bg-indigo-400 text-white cursor-wait animate-pulse'
-                            : 'bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white cursor-pointer'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer'
                         }`}
                       >
                         {isDownloadingKpi ? (
