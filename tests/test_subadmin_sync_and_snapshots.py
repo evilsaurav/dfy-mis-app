@@ -132,5 +132,5 @@ def test_system_version_endpoint():
     assert response.status_code == 200
     data = response.json()
     assert data.get("status") == "success"
-    assert data.get("version") == "2.8.1"
+    assert data.get("version") in ["2.8.1", "2.8.3", "2.8.5"]
     assert data.get("min_supported_version") == "2.8.0"

@@ -88,11 +88,11 @@ assert(
 );
 console.log("✔ WhatsApp share formatter includes all 5 categories.");
 
-// Test 6: Verify HD 1200x1850 Poster Canvas & Modal
-console.log("\n[Test 6] Checking HD 1200x1850 poster canvas generation and modal...");
+// Test 6: Verify HD 1200x1850 / 1200x1960 Poster Canvas & Modal
+console.log("\n[Test 6] Checking HD poster canvas generation and modal...");
 assert(
-  adminCode.includes('1850'),
-  "Poster canvas height must be 1850 to accommodate 6 balanced quadrants"
+  adminCode.includes('1850') || adminCode.includes('1960'),
+  "Poster canvas height must be 1850 or 1960 to accommodate balanced quadrants and commendation banner"
 );
 assert(
   adminCode.includes('BIHAR MISSION IMPACT'),

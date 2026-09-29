@@ -3316,6 +3316,7 @@ export default function AdminDashboard() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
 
+  // Global & Session Data Fetching (runs on month change, auth, or period toggle)
   useEffect(() => {
     if (isAuthenticated) { 
       fetchData(false); 
@@ -3324,10 +3325,16 @@ export default function AdminDashboard() {
       loadTargets('All'); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
-      fetchPacingSettings(month, selectedDistrict);
       fetchTopPerformers(topPerformersPeriod);
     }
-  }, [month, selectedDistrict, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
+  }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
+
+  // District-Specific Settings (runs only when selected district changes)
+  useEffect(() => {
+    if (isAuthenticated && selectedDistrict) {
+      fetchPacingSettings(month, selectedDistrict);
+    }
+  }, [selectedDistrict, isAuthenticated, month]);
 
   // Lazy Tab Loading: Fetch Duplicate Audit & Duplicate Scan when modal is opened
   useEffect(() => {
@@ -3348,8 +3355,9 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    // 1. Silent interval every 45 seconds
+    // 1. Silent interval every 45 seconds (sleeps when tab is backgrounded/hidden)
     const intervalId = setInterval(() => {
+      if (document.hidden) return;
       fetchData(false, true); // forceRefresh = false, silent = true
     }, 45000);
 

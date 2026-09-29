@@ -1,3 +1,10 @@
+import sys
+import os
+from pathlib import Path
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 import pytest
 from fastapi.testclient import TestClient
 from main import app, db

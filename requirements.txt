@@ -6,5 +6,4 @@ openpyxl
 python-multipart
 pyjwt
 bcrypt
-passlib
 slowapi

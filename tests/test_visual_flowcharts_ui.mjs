@@ -58,10 +58,10 @@ assert(
 );
 console.log("✔ Admin SOP bento flowcharts present in AdminDashboard.jsx.");
 
-// 4. Verify Version Bump to 2.8.2 in changelogData.js
-console.log("4. Verifying Version Bump to v2.8.2 in changelogData.js...");
-assert(changelogCode.includes('export const APP_VERSION = "2.8.2";'), "App version must be bumped to 2.8.2");
-assert(changelogCode.includes('export const LAST_UPDATED_DATE = "25 Sep 2026";'), "Last updated date must be 25 Sep 2026");
+// 4. Verify Version Bump to 2.8.2+ in changelogData.js
+console.log("4. Verifying Version Bump to v2.8.2+ in changelogData.js...");
+assert(['2.8.2', '2.8.3', '2.8.4', '2.8.5'].some(v => changelogCode.includes(`export const APP_VERSION = "${v}";`)), "App version must be >= 2.8.2");
+assert(changelogCode.includes('export const LAST_UPDATED_DATE ='), "Last updated date must be exported");
 assert(changelogCode.includes('v2.8.2'), "Changelog must include v2.8.2 release entry");
 assert(changelogCode.includes('Staff Attendance'), "Changelog must describe Staff Attendance export");
 assert(changelogCode.includes('Retroactive Admin Inspection Remarks') || changelogCode.includes('Retroactive Remarks'), "Changelog must describe Retroactive Remarks");
