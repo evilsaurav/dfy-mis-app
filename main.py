@@ -141,17 +141,22 @@ class SimpleTTLCache:
         try:
             os.makedirs(self._disk_dir, exist_ok=True)
             now = time.time()
-            data_to_save = {}
+            items_to_save = []
             with self._lock:
                 for k, (exp, val) in self._cache.items():
                     if exp > now:
-                        # Only persist key collections to keep disk cache small and fast
-                        if any(k.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_", "shared_raw_month_"]):
-                            try:
-                                json.dumps(val, default=str)
-                                data_to_save[k] = {"exp": exp, "val": val}
-                            except Exception:
-                                pass
+                        # Only persist lightweight directory and registry entries (exclude massive monthly raw reports to protect Render RAM)
+                        if any(k.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_"]):
+                            items_to_save.append((k, exp, val))
+            
+            # Serialize OUTSIDE lock so other requests never stall waiting for lock
+            data_to_save = {}
+            for k, exp, val in items_to_save:
+                try:
+                    data_to_save[k] = {"exp": exp, "val": val}
+                except Exception:
+                    pass
+
             if data_to_save:
                 import uuid
                 tmp_file = os.path.join(self._disk_dir, f"l2_cache_{uuid.uuid4().hex[:8]}.tmp")
@@ -187,7 +192,7 @@ class SimpleTTLCache:
         t = ttl if ttl is not None else self.default_ttl
         with self._lock:
             self._cache[key] = (time.time() + t, val)
-        if persist or any(key.startswith(p) for p in ["staff_directory", "dist_notif_registry_", "shared_raw_month_"]):
+        if persist or any(key.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_"]):
             try:
                 threading.Thread(target=self._flush_to_disk_sync, daemon=True).start()
             except Exception:
@@ -919,133 +924,142 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
 def normalize_timestamp_str(val: Any) -> str:
     if not val:
         return ""
+    ist_tz = timezone(timedelta(hours=5, minutes=30))
+    if hasattr(val, "astimezone"):
+        try:
+            val = val.astimezone(ist_tz)
+        except Exception:
+            pass
+    elif isinstance(val, str) and ("+" in val or val.endswith("Z")):
+        try:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            val = dt.astimezone(ist_tz)
+        except Exception:
+            pass
     if hasattr(val, "isoformat"):
         val = val.isoformat()
     return str(val).strip().replace("T", " ")[:19]
 
+DASHBOARD_DATA_SEMAPHORE = asyncio.Semaphore(2)
+
 @app.post("/admin/dashboard-data")
 async def get_dashboard_data(req: DashboardRequest, admin: dict = Depends(get_current_admin)):
-    try:
-        user_tag = admin.get("user_id") or admin.get("username") or "admin"
-        cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
-        last_mut_str = get_last_mutation_str()
-
-        allowed_dist_set = None
-        if req.districts and req.districts.strip() and req.districts.strip() != "All":
-            allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
-
-        # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
-        if admin.get("role") == "SUB_ADMIN":
-            raw_dists = admin.get("allowed_districts") or admin.get("districts") or []
-            user_allowed = set([canonicalize_district(d) for d in raw_dists])
-            if "All" not in user_allowed:
-                if allowed_dist_set:
-                    allowed_dist_set = allowed_dist_set.intersection(user_allowed)
-                else:
-                    allowed_dist_set = user_allowed
-
-        # Delta Sync Guard: Check if client has existing valid cache
-        if req.since and req.cached_count and not req.force_refresh:
-            since_str = normalize_timestamp_str(req.since)
-            recent_deletions = [
-                t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES 
-                if normalize_timestamp_str(t.get("deleted_at", "")) > since_str
-                and (not allowed_dist_set or not t.get("district") or t.get("district") in allowed_dist_set)
-            ]
-
-            if since_str >= last_mut_str:
-                # 0 Firestore reads!
-                return {
-                    "status": "success",
-                    "mode": "NO_CHANGE",
-                    "records": [],
-                    "synced_at": last_mut_str,
-                    "deleted_ids": recent_deletions
-                }
-
-            # Mutations occurred since timestamp: Try serving DELTA from in-memory raw reports
-            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False, district_filter=allowed_dist_set)
-            if raw_docs is not None:
-                delta_records = []
-                for d in raw_docs:
-                    mod_ts = normalize_timestamp_str(d.get("last_edited_at") or d.get("timestamp_completed") or d.get("submitted_at") or d.get("timestamp") or "")
-                    if mod_ts > since_str:
-                        formatted = format_dashboard_record(d, allowed_dist_set)
-                        if formatted:
-                            delta_records.append(formatted)
-
-                return {
-                    "status": "success",
-                    "mode": "DELTA",
-                    "records": delta_records,
-                    "synced_at": last_mut_str,
-                    "deleted_ids": recent_deletions
-                }
-
-        if req.force_refresh:
-            record_report_mutation("force_refresh")
-            cache.delete_prefix("dist_notif_registry_")
-            cache.delete_prefix("dash_")
-            cache.delete_prefix("shared_raw_month_")
-            cache.delete_prefix("attendance_")
-            cache.delete_prefix("dupe_audit_")
-            cache.delete_prefix("cascade_alerts_")
-            if not allowed_dist_set:
-                try:
-                    snap_path = f"cache/dash_{req.month_prefix}.json"
-                    if os.path.exists(snap_path):
-                        os.remove(snap_path)
-                except Exception:
-                    pass
-        else:
-            cached = cache.get(cache_key)
-            if cached is not None:
-                if isinstance(cached, dict) and "records" in cached:
-                    cached["synced_at"] = last_mut_str
-                    cached["mode"] = "FULL"
-                return cached
-
-        # Load from shared monthly reports cache
-        records = []
+    async with DASHBOARD_DATA_SEMAPHORE:
         try:
-            raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh), district_filter=allowed_dist_set)
-            for data in raw_docs:
-                rec = format_dashboard_record(data, allowed_dist_set)
-                if rec:
-                    records.append(rec)
-            
-            if not allowed_dist_set and records:
-                try:
-                    os.makedirs("cache", exist_ok=True)
-                    with open(f"cache/dash_{req.month_prefix}.json", "w", encoding="utf-8") as f:
-                        json.dump(records, f)
-                except Exception:
-                    pass
-        except Exception as fe:
-            print(f"Firestore dashboard-data query notice (quota/network): {fe}")
-            snap_path = f"cache/dash_{req.month_prefix}.json"
-            if os.path.exists(snap_path):
-                try:
-                    with open(snap_path, "r", encoding="utf-8") as f:
-                        records = json.load(f)
-                        if allowed_dist_set:
-                            records = [r for r in records if canonicalize_district(r.get("working_place") or r.get("district", "")) in allowed_dist_set]
-                except Exception:
-                    pass
+            user_tag = admin.get("user_id") or admin.get("username") or "admin"
+            cache_key = f"dash_{req.month_prefix}_{req.districts or 'all'}_{user_tag}"
+            last_mut_str = get_last_mutation_str()
 
-        res = {
-            "status": "success",
-            "mode": "FULL",
-            "records": records,
-            "synced_at": last_mut_str,
-            "deleted_ids": []
-        }
-        cache.set(cache_key, res, ttl=3600) # 1-hour cache
-        return res
-    except HTTPException:
-        raise
-    except Exception as e:
-        return {"records": [], "notice": "Firestore quota fallback"}
+            allowed_dist_set = None
+            if req.districts and req.districts.strip() and req.districts.strip() != "All":
+                allowed_dist_set = set([canonicalize_district(d.strip()) for d in req.districts.split(",") if d.strip()])
+
+            # Strict RBAC: Intercept Sub-Admin queries to enforce assigned districts
+            if admin.get("role") == "SUB_ADMIN":
+                raw_dists = admin.get("allowed_districts") or admin.get("districts") or []
+                user_allowed = set([canonicalize_district(d) for d in raw_dists])
+                if "All" not in user_allowed:
+                    if allowed_dist_set:
+                        allowed_dist_set = allowed_dist_set.intersection(user_allowed)
+                    else:
+                        allowed_dist_set = user_allowed
+
+            # Delta Sync Guard: Check if client has existing valid cache
+            if req.since and req.cached_count and not req.force_refresh:
+                since_str = normalize_timestamp_str(req.since)
+                recent_deletions = [
+                    t["doc_id"] for t in DELETED_REPORTS_TOMBSTONES 
+                    if normalize_timestamp_str(t.get("deleted_at", "")) > since_str
+                    and (not allowed_dist_set or not t.get("district") or t.get("district") in allowed_dist_set)
+                ]
+
+                if since_str >= last_mut_str:
+                    # 0 Firestore reads!
+                    return {
+                        "status": "success",
+                        "mode": "NO_CHANGE",
+                        "records": [],
+                        "synced_at": last_mut_str,
+                        "deleted_ids": recent_deletions
+                    }
+
+                # Mutations occurred since timestamp: Try serving DELTA from in-memory raw reports
+                raw_docs = await get_raw_monthly_reports(req.month_prefix, force=False, district_filter=allowed_dist_set)
+                if raw_docs is not None:
+                    delta_records = []
+                    for d in raw_docs:
+                        mod_ts = normalize_timestamp_str(d.get("last_edited_at") or d.get("timestamp_completed") or d.get("submitted_at") or d.get("timestamp") or "")
+                        if mod_ts > since_str:
+                            formatted = format_dashboard_record(d, allowed_dist_set)
+                            if formatted:
+                                delta_records.append(formatted)
+
+                    return {
+                        "status": "success",
+                        "mode": "DELTA",
+                        "records": delta_records,
+                        "synced_at": last_mut_str,
+                        "deleted_ids": recent_deletions
+                    }
+
+            if req.force_refresh:
+                record_report_mutation("force_refresh")
+                cache.delete_prefix("dist_notif_registry_")
+                cache.delete_prefix("dash_")
+                cache.delete_prefix("shared_raw_month_")
+                cache.delete_prefix("attendance_")
+                cache.delete_prefix("dupe_audit_")
+                cache.delete_prefix("cascade_alerts_")
+                if not allowed_dist_set:
+                    try:
+                        snap_path = f"cache/dash_{req.month_prefix}.json"
+                        if os.path.exists(snap_path):
+                            os.remove(snap_path)
+                    except Exception:
+                        pass
+            else:
+                cached = cache.get(cache_key)
+                if cached is not None:
+                    if isinstance(cached, dict) and "records" in cached:
+                        cached["synced_at"] = last_mut_str
+                        cached["mode"] = "FULL"
+                    return cached
+
+            # Load from shared monthly reports cache
+            records = []
+            try:
+                raw_docs = await get_raw_monthly_reports(req.month_prefix, force=bool(req.force_refresh), district_filter=allowed_dist_set)
+                for data in raw_docs:
+                    rec = format_dashboard_record(data, allowed_dist_set)
+                    if rec:
+                        records.append(rec)
+            except Exception as fe:
+                print(f"Firestore dashboard-data query notice (quota/network): {fe}")
+                snap_path = f"cache/dash_{req.month_prefix}.json"
+                if os.path.exists(snap_path):
+                    try:
+                        with open(snap_path, "r", encoding="utf-8") as f:
+                            records = json.load(f)
+                            if allowed_dist_set:
+                                records = [r for r in records if canonicalize_district(r.get("working_place") or r.get("district", "")) in allowed_dist_set]
+                    except Exception:
+                        pass
+            finally:
+                gc.collect()
+
+            res = {
+                "status": "success",
+                "mode": "FULL",
+                "records": records,
+                "synced_at": last_mut_str,
+                "deleted_ids": []
+            }
+            cache.set(cache_key, res, ttl=3600) # 1-hour cache
+            return res
+        except HTTPException:
+            raise
+        except Exception as e:
+            return {"records": [], "notice": "Firestore quota fallback"}
 
 @app.get("/api/system-version")
 async def get_system_version():

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 import { downloadOrShareCanvas } from './canvasShare';
+import { getCachedDashboardData, setCachedDashboardData, clearCachedDashboardData, clearAllAdminCache } from './adminCache';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -2646,9 +2647,18 @@ export default function AdminDashboard() {
       try {
         const rawCache = localStorage.getItem(cacheKey);
         if (rawCache) cachedData = JSON.parse(rawCache);
+        if (!cachedData) {
+          cachedData = await getCachedDashboardData(cacheKey);
+        }
       } catch (e) {
-        cachedData = null;
+        try {
+          cachedData = await getCachedDashboardData(cacheKey);
+        } catch (err) {
+          cachedData = null;
+        }
       }
+    } else {
+      await clearCachedDashboardData(cacheKey);
     }
 
     // Zero-lag instant render: show cached records immediately if available
@@ -2720,6 +2730,10 @@ export default function AdminDashboard() {
           const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
           const syncStamp = data.synced_at || fallbackStamp;
           try {
+            setCachedDashboardData(cacheKey, {
+              synced_at: syncStamp,
+              records: updated
+            });
             localStorage.setItem(cacheKey, JSON.stringify({
               synced_at: syncStamp,
               records: updated
@@ -2742,6 +2756,10 @@ export default function AdminDashboard() {
         setLastSyncedTime(syncStamp);
         setSyncStatus('LIVE');
         try {
+          setCachedDashboardData(cacheKey, {
+            synced_at: syncStamp,
+            records: newRecords
+          });
           localStorage.setItem(cacheKey, JSON.stringify({
             synced_at: syncStamp,
             records: newRecords
@@ -4877,6 +4895,7 @@ const availableDistrictsForFeed = useMemo(() => {
   const handleHardAppReset = async () => {
     if (!window.confirm("App cache clear karke fresh version reload karein?")) return;
     try {
+      await clearAllAdminCache();
       if ('serviceWorker' in navigator) {
         const regs = await navigator.serviceWorker.getRegistrations();
         for (const r of regs) await r.unregister();
@@ -4951,7 +4970,7 @@ const availableDistrictsForFeed = useMemo(() => {
   return (
     <div className="min-h-screen bg-slate-50/50 p-2 sm:p-4 md:p-6 font-sans text-slate-800">
       <div className="max-w-[1720px] w-full mx-auto space-y-4">
-        {isColdStarting && (
+        {isColdStarting && (!rawRecords || rawRecords.length === 0) && (
           <div className="bg-amber-500 text-white px-4 py-3 rounded-2xl font-bold text-xs sm:text-sm text-center shadow-md animate-pulse flex items-center justify-center gap-2">
             <span>⚡ Server wake-up ho raha hai (Render spin-up), kripya thoda intezar karein...</span>
           </div>
