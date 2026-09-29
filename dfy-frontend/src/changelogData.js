@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.4";
-export const LAST_UPDATED_DATE = "26 Sep 2026";
+export const APP_VERSION = "2.8.5";
+export const LAST_UPDATED_DATE = "29 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.5",
+    date: "29 Sep 2026",
+    title: "17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Disk Spooling & Strict RBAC Download Security",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📊 17-Indicator District KPI Excel Architecture: Extended the 33-sheet workbook generator across all sheets (Performance Sheet, Consolidated Sheet, and Daily Sheets 1st–31st) to support 3 new clinical indicators: Differentiated TB Care (DIFF TB), Preventive Therapy Treatment (TPT START), and Presumptive TPT (TPT PRESUMTIVE).",
+      "🛡️ Render 512MB RAM Anti-OOM Engine: Completely eliminated in-memory bulk ZIP buffers by introducing disk-spooled temporary archive generation (tempfile.NamedTemporaryFile), 750ms queue pacing between district workbooks, and deterministic garbage collection (gc.collect()) under concurrency semaphores.",
+      "🔒 Strict Sub-Admin RBAC Download Gates: Enforced district isolation security across all KPI endpoints (HTTP 403 Forbidden). Sub-admins can only download workbooks for their assigned districts, and bulk ZIP bundling is strictly restricted to multi-district coordinators and Super Admins.",
+      "🚫 Anti-Double-Tap & Concurrency Guards: Replaced fragile window.open triggers with authenticated authFetch blob streaming inside try...finally blocks, locking download buttons (disabled, spinner, and loading text) until downloads complete to prevent duplicate server tasks.",
+      "📑 Dynamic Formula & Shifted Cohort Preservation: Automatically shifted cohort breakdown columns (HIV, UDST, Contact Tracing) to columns 22–27 on the Performance Sheet and updated dynamic =SUM() formulas on the Grand Total row with zero template corruption."
+    ],
+    details: [
+      {
+        tag: "KPI Architecture",
+        color: "indigo",
+        text: "Full 17-indicator clinical parity across 22 district workbooks, covering daily logs, left-wing patient cluster tracking, and right-wing staff breakdowns."
+      },
+      {
+        tag: "Memory & Performance",
+        color: "teal",
+        text: "Disk-spooled zip generation and 750ms pacing keep Render RAM usage safely below 150MB during full statewide 22-district exports."
+      },
+      {
+        tag: "Security & RBAC",
+        color: "rose",
+        text: "Backend and frontend authorization gates guarantee cross-district isolation and restrict heavy bulk exports to authorized state coordinators."
+      },
+      {
+        tag: "UX Reliability",
+        color: "emerald",
+        text: "Blob-based stream downloads with anti-double-tap locking eliminate browser timeout glitches and redundant requests."
+      }
+    ]
+  },
   {
     version: "v2.8.4",
     date: "26 Sep 2026",
     title: "FO Profile Honors & Badges Showcase, HD Shareable Card Studio, 4-Role Statewide Leaderboard & Full-Width Layout",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🌟 Field Officer Profile Honors & Badges Showcase: Unlocked 4 dynamic clinical achievement badges (Target Achiever, Punctuality Streak, Cascade Champion, and Field Trail Blazer) recognizing field dedication across milestone tiers with zero performance overhead.",
       "📲 HD Shareable Achievement Card Studio: Frontline officers can now launch an interactive achievement card studio featuring live preview, 1080x1350 HD Canvas PNG download, and 1-click WhatsApp celebration messaging.",
