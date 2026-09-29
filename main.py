@@ -56,8 +56,8 @@ import zipfile
 import gzip
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, Query, Request, BackgroundTasks
+from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
@@ -66,6 +66,7 @@ from datetime import datetime, timedelta, timezone, date
 import pandas as pd
 import io
 import os
+import tempfile
 import json
 import urllib.request
 import re
@@ -2188,326 +2189,329 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     if not os.path.exists(template_path):
         return None
         
-    # Load workbook preserving all formulas
-    wb = openpyxl.load_workbook(template_path, data_only=False)
-    sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
-    
-    # Configure auto-recalculation
+    wb = None
     try:
-        wb.calculation.calcMode = 'auto'
-        wb.calculation.fullCalcOnLoad = True
-    except Exception:
-        pass
-    
-    # 1. Fetch Targets (Prioritizing Month-Scoped Target)
-    target_map = {}
-    try:
-        t_docs = db.collection("staff_targets").where("district", "==", district).stream()
-        for td in t_docs:
-            t_data = td.to_dict()
-            f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
-            if f_name:
-                if t_data.get("month") == month_prefix:
-                    target_map[f_name] = int(t_data.get("target", 50))
-                elif f_name not in target_map:
-                    target_map[f_name] = int(t_data.get("target", 50))
-    except Exception as e:
-        print(f"Target fetch notice for {district}: {e}")
-                    
-    # 2. Fetch and Sort Daily Field Reports for this District and Month
-    c_dist = canonicalize_district(district)
-    alias_queries = [c_dist, district]
-    if "aurangabad" in c_dist.lower():
-        alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
-    elif "champaran" in c_dist.lower():
-        alias_queries.extend(["Purba Champaran", "East Champaran"])
-    elif "bhojpur" in c_dist.lower():
-        alias_queries.extend(["BHOJPUR", "Bhojpur"])
-    alias_queries = list(dict.fromkeys(alias_queries))
+        # Load workbook preserving all formulas
+        wb = openpyxl.load_workbook(template_path, data_only=False)
+        sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
 
-    seen_report_ids = set()
-    reports = []
-    start_date = f"{month_prefix}-01"
-    end_date = f"{month_prefix}-31"
-    for aq in alias_queries:
-        docs = db.collection("daily_field_reports")\
-            .where("working_place", "==", aq)\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)\
-            .stream()
-        for doc in docs:
-            if doc.id not in seen_report_ids:
-                seen_report_ids.add(doc.id)
-                reports.append(doc.to_dict())
-            
-    reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
-    
-    # Map staff names to their index in this template
-    staff_name_to_idx = {}
-    ws_day1 = wb["1ST"] if "1ST" in wb.sheetnames else wb[sheet_map.get("1st")] if "1st" in sheet_map else None
-    if ws_day1:
-        s_idx = 0
-        for r in range(2, ws_day1.max_row + 1, 40):
-            val = ws_day1.cell(row=r, column=1).value
-            if val and str(val).strip():
-                staff_name_to_idx[re.sub(r'\s+', ' ', str(val)).strip().lower()] = s_idx
-                s_idx += 1
-
-    # Pre-calculate counts for each FO and each KPI
-    num_staff = len(staff_name_to_idx)
-    num_kpis = len(EXCEL_KPI_CATEGORIES)
-    staff_counts = { s_idx: { k_idx: 0 for k_idx in range(num_kpis) } for s_idx in range(num_staff) }
-    left_clusters = [kpi for kpi in EXCEL_KPI_CATEGORIES if kpi[0] != "Kit Consumption"]
-    district_cluster_counts = { c_idx: 0 for c_idx in range(len(left_clusters)) }
-    category_to_cluster_idx = {}
-    c_counter = 0
-    for k_idx, (cat_name, _, _) in enumerate(EXCEL_KPI_CATEGORIES):
-        if cat_name != "Kit Consumption":
-            category_to_cluster_idx[k_idx] = c_counter
-            c_counter += 1
-
-    # 3. Populate Tabs 3 to 33 ('1ST' to '31st')
-    for rep in reports:
-        date_str = str(rep.get("date_of_reporting", "")).strip()
+        # Configure auto-recalculation
         try:
-            day_int = int(date_str.split('-')[2])
+            wb.calculation.calcMode = 'auto'
+            wb.calculation.fullCalcOnLoad = True
         except Exception:
-            continue
-            
-        raw_tab_key = get_kpi_tab_name(day_int).lower()
-        actual_tab_name = sheet_map.get(raw_tab_key)
-        fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
-        
-        if fo_norm in staff_name_to_idx:
-            s_idx = staff_name_to_idx[fo_norm]
-            
-            # Accumulate staff and district counts
-            for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
-                ids = rep.get(cat_key) or []
-                if isinstance(ids, list):
-                    valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
-                    staff_counts[s_idx][k_idx] += len(valid_ids)
-                    c_idx = category_to_cluster_idx.get(k_idx)
-                    if c_idx is not None:
-                        district_cluster_counts[c_idx] += len(valid_ids)
+            pass
 
-            if actual_tab_name and actual_tab_name in wb.sheetnames:
-                ws_day = wb[actual_tab_name]
-                start_row = 2 + (s_idx * 40)
-                
-                # Populate IDs vertically within 40-row bounds
-                for kpi_name, cat_key, col_idx in EXCEL_KPI_CATEGORIES:
-                    ids = rep.get(cat_key) or []
-                    if isinstance(ids, list):
-                        valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
-                        for i in range(min(40, len(valid_ids))):
-                            ws_day.cell(row=start_row + i, column=col_idx).value = valid_ids[i]
+        # 1. Fetch Targets (Prioritizing Month-Scoped Target)
+        target_map = {}
+        try:
+            t_docs = db.collection("staff_targets").where("district", "==", district).stream()
+            for td in t_docs:
+                t_data = td.to_dict()
+                f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
+                if f_name:
+                    if t_data.get("month") == month_prefix:
+                        target_map[f_name] = int(t_data.get("target", 50))
+                    elif f_name not in target_map:
+                        target_map[f_name] = int(t_data.get("target", 50))
+        except Exception as e:
+            print(f"Target fetch notice for {district}: {e}")
 
-    # 4. Populate Tab 2: 'CONSOLIDATED SHEET'
-    if "CONSOLIDATED SHEET" in wb.sheetnames:
-        ws_cons = wb["CONSOLIDATED SHEET"]
-        
-        # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AV (Cols 1 to 48)
-        cluster_row_ptrs = { c_idx: 4 for c_idx in range(len(left_clusters)) }
-        
-        # Write Left Wing Row 2 Grand Totals
-        for c_idx in range(len(left_clusters)):
-            start_c = 1 + (c_idx * 3)
-            # Pre-compute exact total count for immediate display across all viewers
-            ws_cons.cell(row=2, column=start_c).value = district_cluster_counts[c_idx]
+        # 2. Fetch and Sort Daily Field Reports for this District and Month
+        c_dist = canonicalize_district(district)
+        alias_queries = [c_dist, district]
+        if "aurangabad" in c_dist.lower():
+            alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
+        elif "champaran" in c_dist.lower():
+            alias_queries.extend(["Purba Champaran", "East Champaran"])
+        elif "bhojpur" in c_dist.lower():
+            alias_queries.extend(["BHOJPUR", "Bhojpur"])
+        alias_queries = list(dict.fromkeys(alias_queries))
 
+        seen_report_ids = set()
+        reports = []
+        start_date = f"{month_prefix}-01"
+        end_date = f"{month_prefix}-31"
+        for aq in alias_queries:
+            docs = db.collection("daily_field_reports")\
+                .where("working_place", "==", aq)\
+                .where("date_of_reporting", ">=", start_date)\
+                .where("date_of_reporting", "<=", end_date)\
+                .stream()
+            for doc in docs:
+                if doc.id not in seen_report_ids:
+                    seen_report_ids.add(doc.id)
+                    reports.append(doc.to_dict())
+
+        reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
+
+        # Map staff names to their index in this template
+        staff_name_to_idx = {}
+        ws_day1 = wb["1ST"] if "1ST" in wb.sheetnames else wb[sheet_map.get("1st")] if "1st" in sheet_map else None
+        if ws_day1:
+            s_idx = 0
+            for r in range(2, ws_day1.max_row + 1, 40):
+                val = ws_day1.cell(row=r, column=1).value
+                if val and str(val).strip():
+                    staff_name_to_idx[re.sub(r'\s+', ' ', str(val)).strip().lower()] = s_idx
+                    s_idx += 1
+
+        # Pre-calculate counts for each FO and each KPI
+        num_staff = len(staff_name_to_idx)
+        num_kpis = len(EXCEL_KPI_CATEGORIES)
+        staff_counts = { s_idx: { k_idx: 0 for k_idx in range(num_kpis) } for s_idx in range(num_staff) }
+        left_clusters = [kpi for kpi in EXCEL_KPI_CATEGORIES if kpi[0] != "Kit Consumption"]
+        district_cluster_counts = { c_idx: 0 for c_idx in range(len(left_clusters)) }
+        category_to_cluster_idx = {}
+        c_counter = 0
+        for k_idx, (cat_name, _, _) in enumerate(EXCEL_KPI_CATEGORIES):
+            if cat_name != "Kit Consumption":
+                category_to_cluster_idx[k_idx] = c_counter
+                c_counter += 1
+
+        # 3. Populate Tabs 3 to 33 ('1ST' to '31st')
         for rep in reports:
-            rep_date = str(rep.get("date_of_reporting", "")).strip()
-            rep_fo = str(rep.get("fo_name", "")).strip()
-            
-            for c_idx, (_, cat_key, _) in enumerate(left_clusters):
-                ids = rep.get(cat_key) or []
-                if isinstance(ids, list):
-                    start_c = 1 + (c_idx * 3)
-                    for patient_id in ids:
-                        pid_str = str(patient_id).strip()
-                        if pid_str:
-                            r = cluster_row_ptrs[c_idx]
-                            c1 = ws_cons.cell(row=r, column=start_c, value=pid_str)
-                            c2 = ws_cons.cell(row=r, column=start_c + 1, value=rep_date)
-                            c3 = ws_cons.cell(row=r, column=start_c + 2, value=rep_fo)
-                            c1.border = EXCEL_THIN_BORDER
-                            c2.border = EXCEL_THIN_BORDER
-                            c3.border = EXCEL_CLUSTER_DIVIDER
-                            c1.alignment = Alignment(horizontal="center", vertical="center")
-                            c2.alignment = Alignment(horizontal="center", vertical="center")
-                            c3.alignment = Alignment(horizontal="left", vertical="center")
-                            cluster_row_ptrs[c_idx] += 1
-                            
-        # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AW (Col 49) onwards
-        staff_kpi_row_ptrs = {}
-        for s_idx in range(num_staff):
-            staff_base_col = 49 + (s_idx * 17)
-            # Write Row 3 Staff Totals
-            for k_idx in range(num_kpis):
-                staff_kpi_row_ptrs[(s_idx, k_idx)] = 4
-                ws_cons.cell(row=3, column=staff_base_col + k_idx).value = staff_counts[s_idx][k_idx]
-                
-        for rep in reports:
+            date_str = str(rep.get("date_of_reporting", "")).strip()
+            try:
+                day_int = int(date_str.split('-')[2])
+            except Exception:
+                continue
+
+            raw_tab_key = get_kpi_tab_name(day_int).lower()
+            actual_tab_name = sheet_map.get(raw_tab_key)
             fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+
             if fo_norm in staff_name_to_idx:
                 s_idx = staff_name_to_idx[fo_norm]
-                staff_base_col = 49 + (s_idx * 17)
-                
+
+                # Accumulate staff and district counts
                 for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
                     ids = rep.get(cat_key) or []
                     if isinstance(ids, list):
-                        col = staff_base_col + k_idx
+                        valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
+                        staff_counts[s_idx][k_idx] += len(valid_ids)
+                        c_idx = category_to_cluster_idx.get(k_idx)
+                        if c_idx is not None:
+                            district_cluster_counts[c_idx] += len(valid_ids)
+
+                if actual_tab_name and actual_tab_name in wb.sheetnames:
+                    ws_day = wb[actual_tab_name]
+                    start_row = 2 + (s_idx * 40)
+
+                    # Populate IDs vertically within 40-row bounds
+                    for kpi_name, cat_key, col_idx in EXCEL_KPI_CATEGORIES:
+                        ids = rep.get(cat_key) or []
+                        if isinstance(ids, list):
+                            valid_ids = [str(pid).strip() for pid in ids if str(pid).strip()]
+                            for i in range(min(40, len(valid_ids))):
+                                ws_day.cell(row=start_row + i, column=col_idx).value = valid_ids[i]
+
+        # 4. Populate Tab 2: 'CONSOLIDATED SHEET'
+        if "CONSOLIDATED SHEET" in wb.sheetnames:
+            ws_cons = wb["CONSOLIDATED SHEET"]
+
+            # Wing 1: Left Side (District Master Rollup & Master Log) -- Columns A to AV (Cols 1 to 48)
+            cluster_row_ptrs = { c_idx: 4 for c_idx in range(len(left_clusters)) }
+
+            # Write Left Wing Row 2 Grand Totals
+            for c_idx in range(len(left_clusters)):
+                start_c = 1 + (c_idx * 3)
+                # Pre-compute exact total count for immediate display across all viewers
+                ws_cons.cell(row=2, column=start_c).value = district_cluster_counts[c_idx]
+
+            for rep in reports:
+                rep_date = str(rep.get("date_of_reporting", "")).strip()
+                rep_fo = str(rep.get("fo_name", "")).strip()
+
+                for c_idx, (_, cat_key, _) in enumerate(left_clusters):
+                    ids = rep.get(cat_key) or []
+                    if isinstance(ids, list):
+                        start_c = 1 + (c_idx * 3)
                         for patient_id in ids:
                             pid_str = str(patient_id).strip()
                             if pid_str:
-                                r = staff_kpi_row_ptrs[(s_idx, k_idx)]
-                                c_cell = ws_cons.cell(row=r, column=col, value=pid_str)
-                                if col == staff_base_col + 16:
-                                    c_cell.border = EXCEL_CLUSTER_DIVIDER
-                                else:
-                                    c_cell.border = EXCEL_THIN_BORDER
-                                c_cell.alignment = Alignment(horizontal="center", vertical="center")
-                                staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
+                                r = cluster_row_ptrs[c_idx]
+                                c1 = ws_cons.cell(row=r, column=start_c, value=pid_str)
+                                c2 = ws_cons.cell(row=r, column=start_c + 1, value=rep_date)
+                                c3 = ws_cons.cell(row=r, column=start_c + 2, value=rep_fo)
+                                c1.border = EXCEL_THIN_BORDER
+                                c2.border = EXCEL_THIN_BORDER
+                                c3.border = EXCEL_CLUSTER_DIVIDER
+                                c1.alignment = Alignment(horizontal="center", vertical="center")
+                                c2.alignment = Alignment(horizontal="center", vertical="center")
+                                c3.alignment = Alignment(horizontal="left", vertical="center")
+                                cluster_row_ptrs[c_idx] += 1
 
-    # 5. Populate Tab 1: 'Performance sheet' with Cohort Breakdown
-    if "Performance sheet" in wb.sheetnames:
-        ws_perf = wb["Performance sheet"]
-        ref_h_cell = ws_perf.cell(row=4, column=6)
-        ref_data_cell = ws_perf.cell(row=5, column=6)
+            # Wing 2: Right Side (Staff-Wise Performance & Indicator Wing) -- Column AW (Col 49) onwards
+            staff_kpi_row_ptrs = {}
+            for s_idx in range(num_staff):
+                staff_base_col = 49 + (s_idx * 17)
+                # Write Row 3 Staff Totals
+                for k_idx in range(num_kpis):
+                    staff_kpi_row_ptrs[(s_idx, k_idx)] = 4
+                    ws_cons.cell(row=3, column=staff_base_col + k_idx).value = staff_counts[s_idx][k_idx]
 
-        # Pre-calculate staff cohort breakdown for key cascade indicators
-        current_month_notif_ids = set()
-        for rep in reports:
-            for nid in (rep.get("notification_ids") or []):
-                nid_clean = str(nid).strip()
-                if nid_clean:
-                    current_month_notif_ids.add(nid_clean)
+            for rep in reports:
+                fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+                if fo_norm in staff_name_to_idx:
+                    s_idx = staff_name_to_idx[fo_norm]
+                    staff_base_col = 49 + (s_idx * 17)
 
-        staff_cohort_counts = {
-            s_idx: { 'hiv_cur': 0, 'hiv_prev': 0, 'udst_cur': 0, 'udst_prev': 0, 'con_cur': 0, 'con_prev': 0 }
-            for s_idx in range(num_staff)
-        }
+                    for k_idx, (_, cat_key, _) in enumerate(EXCEL_KPI_CATEGORIES):
+                        ids = rep.get(cat_key) or []
+                        if isinstance(ids, list):
+                            col = staff_base_col + k_idx
+                            for patient_id in ids:
+                                pid_str = str(patient_id).strip()
+                                if pid_str:
+                                    r = staff_kpi_row_ptrs[(s_idx, k_idx)]
+                                    c_cell = ws_cons.cell(row=r, column=col, value=pid_str)
+                                    if col == staff_base_col + 16:
+                                        c_cell.border = EXCEL_CLUSTER_DIVIDER
+                                    else:
+                                        c_cell.border = EXCEL_THIN_BORDER
+                                    c_cell.alignment = Alignment(horizontal="center", vertical="center")
+                                    staff_kpi_row_ptrs[(s_idx, k_idx)] += 1
 
-        for rep in reports:
-            fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
-            if fo_norm in staff_name_to_idx:
-                s_idx = staff_name_to_idx[fo_norm]
-                for pid in (rep.get("hiv_dm_ids") or []):
-                    pid_clean = str(pid).strip()
-                    if pid_clean:
-                        if pid_clean in current_month_notif_ids:
-                            staff_cohort_counts[s_idx]['hiv_cur'] += 1
-                        else:
-                            staff_cohort_counts[s_idx]['hiv_prev'] += 1
-                for pid in (rep.get("sample_tested_ids") or []):
-                    pid_clean = str(pid).strip()
-                    if pid_clean:
-                        if pid_clean in current_month_notif_ids:
-                            staff_cohort_counts[s_idx]['udst_cur'] += 1
-                        else:
-                            staff_cohort_counts[s_idx]['udst_prev'] += 1
-                for pid in (rep.get("contact_tracing_ids") or []):
-                    pid_clean = str(pid).strip()
-                    if pid_clean:
-                        if pid_clean in current_month_notif_ids:
-                            staff_cohort_counts[s_idx]['con_cur'] += 1
-                        else:
-                            staff_cohort_counts[s_idx]['con_prev'] += 1
+        # 5. Populate Tab 1: 'Performance sheet' with Cohort Breakdown
+        if "Performance sheet" in wb.sheetnames:
+            ws_perf = wb["Performance sheet"]
+            ref_h_cell = ws_perf.cell(row=4, column=6)
+            ref_data_cell = ws_perf.cell(row=5, column=6)
 
-        cohort_col_defs = [
-            (22, 'HIV\n(Cur Month)', 'hiv_cur'),
-            (23, 'HIV\n(Prev Backlog)', 'hiv_prev'),
-            (24, 'UDST\n(Cur Month)', 'udst_cur'),
-            (25, 'UDST\n(Prev Backlog)', 'udst_prev'),
-            (26, 'Contact Tr\n(Cur Month)', 'con_cur'),
-            (27, 'Contact Tr\n(Prev Backlog)', 'con_prev')
-        ]
+            # Pre-calculate staff cohort breakdown for key cascade indicators
+            current_month_notif_ids = set()
+            for rep in reports:
+                for nid in (rep.get("notification_ids") or []):
+                    nid_clean = str(nid).strip()
+                    if nid_clean:
+                        current_month_notif_ids.add(nid_clean)
 
-        # Populate headers in Row 4
-        for col_idx, header_title, _ in cohort_col_defs:
-            c = ws_perf.cell(row=4, column=col_idx, value=header_title)
-            if ref_h_cell.font:
-                c.font = Font(name=ref_h_cell.font.name or "Calibri", size=ref_h_cell.font.size or 10, bold=True, color=getattr(ref_h_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
-            if ref_h_cell.fill:
-                fill_color = getattr(ref_h_cell.fill.start_color, 'rgb', '00374151') or '00374151'
-                c.fill = PatternFill(fill_type="solid", start_color=fill_color, end_color=fill_color)
-            c.border = EXCEL_THIN_BORDER
-            c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            col_letter = get_column_letter(col_idx)
-            ws_perf.column_dimensions[col_letter].width = 14
+            staff_cohort_counts = {
+                s_idx: { 'hiv_cur': 0, 'hiv_prev': 0, 'udst_cur': 0, 'udst_prev': 0, 'con_cur': 0, 'con_prev': 0 }
+                for s_idx in range(num_staff)
+            }
 
-        for r_idx in range(5, 5 + num_staff):
-            cell_name = ws_perf.cell(row=r_idx, column=1).value
-            if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
-                norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
-                if norm_name in staff_name_to_idx:
-                    s_idx = staff_name_to_idx[norm_name]
-                    
-                    # Col 3: Target
-                    target_val = target_map.get(norm_name, 50)
-                    ws_perf.cell(row=r_idx, column=3).value = target_val
-                    
-                    # Col 4: NOTIFICATION
-                    notif_count = staff_counts[s_idx][0]
-                    ws_perf.cell(row=r_idx, column=4).value = notif_count
-                    
-                    # Col 5: % Achieved (Formula)
-                    cell_pct = ws_perf.cell(row=r_idx, column=5)
-                    cell_pct.value = f"=IF(C{r_idx}>0, D{r_idx}/C{r_idx}, 0)"
-                    cell_pct.number_format = "0.0%"
-                    
-                    # Cols 6 to 21: Remaining 16 KPIs (including DIFF TB at 19, TPT START at 20, TPT PRESUMTIVE at 21)
-                    for k_idx in range(1, num_kpis):
-                        kpi_val = staff_counts[s_idx][k_idx]
-                        ws_perf.cell(row=r_idx, column=5 + k_idx).value = kpi_val
+            for rep in reports:
+                fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+                if fo_norm in staff_name_to_idx:
+                    s_idx = staff_name_to_idx[fo_norm]
+                    for pid in (rep.get("hiv_dm_ids") or []):
+                        pid_clean = str(pid).strip()
+                        if pid_clean:
+                            if pid_clean in current_month_notif_ids:
+                                staff_cohort_counts[s_idx]['hiv_cur'] += 1
+                            else:
+                                staff_cohort_counts[s_idx]['hiv_prev'] += 1
+                    for pid in (rep.get("sample_tested_ids") or []):
+                        pid_clean = str(pid).strip()
+                        if pid_clean:
+                            if pid_clean in current_month_notif_ids:
+                                staff_cohort_counts[s_idx]['udst_cur'] += 1
+                            else:
+                                staff_cohort_counts[s_idx]['udst_prev'] += 1
+                    for pid in (rep.get("contact_tracing_ids") or []):
+                        pid_clean = str(pid).strip()
+                        if pid_clean:
+                            if pid_clean in current_month_notif_ids:
+                                staff_cohort_counts[s_idx]['con_cur'] += 1
+                            else:
+                                staff_cohort_counts[s_idx]['con_prev'] += 1
 
-                    # Cols 22 to 27: Cohort breakdown
-                    for col_idx, _, field_key in cohort_col_defs:
-                        c_val = staff_cohort_counts[s_idx].get(field_key, 0)
-                        cc = ws_perf.cell(row=r_idx, column=col_idx, value=c_val)
-                        if ref_data_cell.font:
-                            cc.font = Font(name=ref_data_cell.font.name or "Calibri", size=ref_data_cell.font.size or 10, bold=False)
-                        cc.alignment = Alignment(horizontal="center", vertical="center")
-                        cc.border = EXCEL_THIN_BORDER
+            cohort_col_defs = [
+                (22, 'HIV\n(Cur Month)', 'hiv_cur'),
+                (23, 'HIV\n(Prev Backlog)', 'hiv_prev'),
+                (24, 'UDST\n(Cur Month)', 'udst_cur'),
+                (25, 'UDST\n(Prev Backlog)', 'udst_prev'),
+                (26, 'Contact Tr\n(Cur Month)', 'con_cur'),
+                (27, 'Contact Tr\n(Prev Backlog)', 'con_prev')
+            ]
 
-        # Locate GRAND TOTAL row and set formulas
-        gt_row = None
-        for r in range(5, ws_perf.max_row + 1):
-            val = ws_perf.cell(row=r, column=1).value
-            if val and "GRAND TOTAL" in str(val).upper():
-                gt_row = r
-                break
+            # Populate headers in Row 4
+            for col_idx, header_title, _ in cohort_col_defs:
+                c = ws_perf.cell(row=4, column=col_idx, value=header_title)
+                if ref_h_cell.font:
+                    c.font = Font(name=ref_h_cell.font.name or "Calibri", size=ref_h_cell.font.size or 10, bold=True, color=getattr(ref_h_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
+                if ref_h_cell.fill:
+                    fill_color = getattr(ref_h_cell.fill.start_color, 'rgb', '00374151') or '00374151'
+                    c.fill = PatternFill(fill_type="solid", start_color=fill_color, end_color=fill_color)
+                c.border = EXCEL_THIN_BORDER
+                c.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                col_letter = get_column_letter(col_idx)
+                ws_perf.column_dimensions[col_letter].width = 14
 
-        if gt_row:
-            ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
-            gt_fill_color = "001E3A8A"
-            if ref_gt_cell and ref_gt_cell.fill and getattr(ref_gt_cell.fill.start_color, 'rgb', None):
-                gt_fill_color = getattr(ref_gt_cell.fill.start_color, 'rgb', '001E3A8A') or '001E3A8A'
+            for r_idx in range(5, 5 + num_staff):
+                cell_name = ws_perf.cell(row=r_idx, column=1).value
+                if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
+                    norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
+                    if norm_name in staff_name_to_idx:
+                        s_idx = staff_name_to_idx[norm_name]
 
-            for col_idx in range(19, 28):
-                col_ltr = get_column_letter(col_idx)
-                gc = ws_perf.cell(row=gt_row, column=col_idx, value=f"=SUM({col_ltr}5:{col_ltr}{gt_row - 1})")
-                if ref_gt_cell and ref_gt_cell.font:
-                    gc.font = Font(name=ref_gt_cell.font.name or "Calibri", size=ref_gt_cell.font.size or 10, bold=True, color=getattr(ref_gt_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
-                else:
-                    gc.font = Font(name="Calibri", size=10, bold=True, color="00FFFFFF")
-                gc.fill = PatternFill(fill_type="solid", start_color=gt_fill_color, end_color=gt_fill_color)
-                gc.border = EXCEL_THIN_BORDER
-                gc.alignment = Alignment(horizontal="center", vertical="center")
+                        # Col 3: Target
+                        target_val = target_map.get(norm_name, 50)
+                        ws_perf.cell(row=r_idx, column=3).value = target_val
 
-    output = io.BytesIO()
-    wb.save(output)
-    output.seek(0)
-    res_bytes = output.getvalue()
-    try:
-        wb.close()
-    except Exception:
-        pass
-    del wb
-    import gc
-    gc.collect()
-    return res_bytes
+                        # Col 4: NOTIFICATION
+                        notif_count = staff_counts[s_idx][0]
+                        ws_perf.cell(row=r_idx, column=4).value = notif_count
+
+                        # Col 5: % Achieved (Formula)
+                        cell_pct = ws_perf.cell(row=r_idx, column=5)
+                        cell_pct.value = f"=IF(C{r_idx}>0, D{r_idx}/C{r_idx}, 0)"
+                        cell_pct.number_format = "0.0%"
+
+                        # Cols 6 to 21: Remaining 16 KPIs (including DIFF TB at 19, TPT START at 20, TPT PRESUMTIVE at 21)
+                        for k_idx in range(1, num_kpis):
+                            kpi_val = staff_counts[s_idx][k_idx]
+                            ws_perf.cell(row=r_idx, column=5 + k_idx).value = kpi_val
+
+                        # Cols 22 to 27: Cohort breakdown
+                        for col_idx, _, field_key in cohort_col_defs:
+                            c_val = staff_cohort_counts[s_idx].get(field_key, 0)
+                            cc = ws_perf.cell(row=r_idx, column=col_idx, value=c_val)
+                            if ref_data_cell.font:
+                                cc.font = Font(name=ref_data_cell.font.name or "Calibri", size=ref_data_cell.font.size or 10, bold=False)
+                            cc.alignment = Alignment(horizontal="center", vertical="center")
+                            cc.border = EXCEL_THIN_BORDER
+
+            # Locate GRAND TOTAL row and set formulas
+            gt_row = None
+            for r in range(5, ws_perf.max_row + 1):
+                val = ws_perf.cell(row=r, column=1).value
+                if val and "GRAND TOTAL" in str(val).upper():
+                    gt_row = r
+                    break
+
+            if gt_row:
+                ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
+                gt_fill_color = "001E3A8A"
+                if ref_gt_cell and ref_gt_cell.fill and getattr(ref_gt_cell.fill.start_color, 'rgb', None):
+                    gt_fill_color = getattr(ref_gt_cell.fill.start_color, 'rgb', '001E3A8A') or '001E3A8A'
+
+                for col_idx in range(19, 28):
+                    col_ltr = get_column_letter(col_idx)
+                    gt_c = ws_perf.cell(row=gt_row, column=col_idx, value=f"=SUM({col_ltr}5:{col_ltr}{gt_row - 1})")
+                    if ref_gt_cell and ref_gt_cell.font:
+                        gt_c.font = Font(name=ref_gt_cell.font.name or "Calibri", size=ref_gt_cell.font.size or 10, bold=True, color=getattr(ref_gt_cell.font.color, 'rgb', '00FFFFFF') or '00FFFFFF')
+                    else:
+                        gt_c.font = Font(name="Calibri", size=10, bold=True, color="00FFFFFF")
+                    gt_c.fill = PatternFill(fill_type="solid", start_color=gt_fill_color, end_color=gt_fill_color)
+                    gt_c.border = EXCEL_THIN_BORDER
+                    gt_c.alignment = Alignment(horizontal="center", vertical="center")
+
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        res_bytes = output.getvalue()
+        return res_bytes
+    finally:
+        if wb is not None:
+            try:
+                wb.close()
+            except Exception:
+                pass
+            del wb
+        gc.collect()
 
 # Concurrency Semaphore to protect Render memory/CPU from multi-tap or parallel heavy Excel exports
 KPI_EXCEL_SEMAPHORE = asyncio.Semaphore(1)
@@ -2523,14 +2527,18 @@ class ExcelStreamingResponse(StreamingResponse):
 @app.get("/download-kpi-workbook")
 async def download_kpi_workbook(district: str, month: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
-        c_wp = canonicalize_district(district)
         # Sub-Admin RBAC check
         admin_role = admin.get("role", "SUB_ADMIN")
-        allowed = admin.get("allowed_districts", [])
-        if admin_role == "SUB_ADMIN" and allowed and "All" not in allowed:
-            allowed_c = [canonicalize_district(a).lower() for a in allowed]
-            if c_wp.lower() not in allowed_c and district.lower() not in allowed_c:
-                raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+        admin_allowed = admin.get("allowed_districts", [])
+        allowed_c = [canonicalize_district(a).lower() for a in admin_allowed]
+        c_dist = canonicalize_district(district).lower()
+
+        if admin_role == "SUB_ADMIN" and admin_allowed and "all" not in allowed_c:
+            if c_dist not in allowed_c and district.lower() not in allowed_c:
+                raise HTTPException(
+                    status_code=403, 
+                    detail="Access denied: You do not have permission to download KPI reports for this district."
+                )
 
         async with KPI_EXCEL_SEMAPHORE:
             excel_bytes = await asyncio.to_thread(lambda: generate_district_kpi_bytes(district, month))
@@ -2542,7 +2550,6 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
             headers = {
                 'Content-Disposition': f'attachment; filename="KPI_Report_{safe_dist}_{month_tag}.xlsx"'
             }
-            import gc
             gc.collect()
             return StreamingResponse(
                 io.BytesIO(excel_bytes), 
@@ -2725,11 +2732,17 @@ async def download_medicine_consumption(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/download-all-kpi-workbooks")
-async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
+async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
         admin_role = admin.get("role", "SUB_ADMIN")
         admin_allowed = admin.get("allowed_districts", [])
         allowed_c = [canonicalize_district(a).lower() for a in admin_allowed]
+
+        if admin_role == "SUB_ADMIN" and "all" not in allowed_c and len(admin_allowed) <= 1:
+            raise HTTPException(
+                status_code=403, 
+                detail="Bulk ZIP download is restricted to multi-district administrators. Please download your individual district KPI workbook."
+            )
 
         all_bihar = DEFAULT_BIHAR_DISTRICTS
         if districts and districts.strip() and districts.strip() != "All":
@@ -2739,37 +2752,51 @@ async def download_all_kpi_workbooks(month: Optional[str] = None, districts: Opt
             bihar_districts = all_bihar
 
         # Enforce Sub-Admin permission filter
-        if admin_role == "SUB_ADMIN" and admin_allowed and "All" not in admin_allowed:
+        if admin_role == "SUB_ADMIN" and admin_allowed and "all" not in allowed_c:
             bihar_districts = [d for d in bihar_districts if canonicalize_district(d).lower() in allowed_c or d.lower() in allowed_c]
 
         if not bihar_districts:
             raise HTTPException(status_code=400, detail="No valid districts selected or permitted.")
 
-        async with KPI_EXCEL_SEMAPHORE:
-            zip_buffer = io.BytesIO()
-            month_tag = month or datetime.now().strftime("%Y-%m")
-            
-            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                for dist in bihar_districts:
-                    excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
-                    if excel_bytes:
-                        zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
-                        del excel_bytes
-                        import gc
-                        gc.collect()
-                    # Small 50ms pause to yield event loop and keep Render CPU cool
-                    await asyncio.sleep(0.05)
-                        
-            zip_buffer.seek(0)
-            archive_name = "DFY_KPI_Selected_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
-            headers = {
-                'Content-Disposition': f'attachment; filename="{archive_name}_{month_tag}.zip"'
-            }
-            return StreamingResponse(
-                zip_buffer,
-                headers=headers,
-                media_type="application/zip"
-            )
+        month_tag = month or datetime.now().strftime("%Y-%m")
+        archive_name = "DFY_KPI_Selected_Districts" if (districts and districts != "All") else "DFY_Master_KPI_All_Districts"
+
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
+            tmp_zip_path = tmp_file.name
+
+        try:
+            async with KPI_EXCEL_SEMAPHORE:
+                with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                    for dist in bihar_districts:
+                        excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
+                        if excel_bytes:
+                            zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
+                            del excel_bytes
+                            gc.collect()
+                        # 750ms queue relaxation to let Render CPU and event loop breathe
+                        await asyncio.sleep(0.75)
+        except Exception as e:
+            if os.path.exists(tmp_zip_path):
+                try:
+                    os.remove(tmp_zip_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=500, detail=str(e))
+
+        def cleanup_tmp():
+            try:
+                if os.path.exists(tmp_zip_path):
+                    os.remove(tmp_zip_path)
+            except Exception:
+                pass
+
+        background_tasks.add_task(cleanup_tmp)
+
+        return FileResponse(
+            tmp_zip_path,
+            media_type="application/zip",
+            filename=f"{archive_name}_{month_tag}.zip"
+        )
     except HTTPException:
         raise
     except Exception as e:
