@@ -76,6 +76,8 @@ import bcrypt
 import calendar
 import gc
 
+ENABLE_IN_MEMORY_DERIVATION: bool = os.getenv("ENABLE_IN_MEMORY_DERIVATION", "true").lower() in ("true", "1", "yes")
+
 firebase_creds_env = os.environ.get("FIREBASE_CREDENTIALS")
 if firebase_creds_env:
     cred_dict = json.loads(firebase_creds_env)
@@ -527,6 +529,23 @@ def canonicalize_fo_name(name: str, district: str = None) -> str:
                     return official_name.strip()
                     
     return clean.title()
+
+def get_profile_cache_key(district: str, fo_name: str, month: str) -> str:
+    clean_wp = canonicalize_district(district)
+    clean_fo = re.sub(r'[^a-zA-Z0-9]', '', str(fo_name or "")).lower()
+    clean_m = str(month or "").strip()[:7]
+    return f"profile_{clean_wp}_{clean_fo}_{clean_m}".replace(" ", "_").lower()
+
+def evict_officer_profile_cache(district: str, fo_name: str, date_str: str = "", old_district: Optional[str] = None):
+    try:
+        month = str(date_str or "").strip()[:7]
+        if not month:
+            month = get_ist_now().strftime("%Y-%m")
+        cache.delete(get_profile_cache_key(district, fo_name, month))
+        if old_district:
+            cache.delete(get_profile_cache_key(old_district, fo_name, month))
+    except Exception as e:
+        print(f"[Profile Eviction Notice] {e}")
 
 STAFF_CACHE_KEY_RAW = "staff_directory_raw_records"
 
@@ -2184,11 +2203,9 @@ async def submit_daily_report(report: DailyActivityReport):
         if original_requested_date and original_requested_date != report.date_of_reporting:
             req_doc_id = f"{report.working_place}_{report.fo_name}_{original_requested_date}".replace(" ", "_").lower()
             cache.delete(f"status_{req_doc_id}")
-        clean_wp_tag = re.sub(r'[^a-zA-Z0-9]', '', str(report.working_place)).lower()
-        clean_fo_tag = re.sub(r'[^a-zA-Z0-9]', '', str(report.fo_name)).lower()
-        month_tag = str(report.date_of_reporting)[:7]
-        cache.delete(f"profile_{clean_wp_tag}_{clean_fo_tag}_{month_tag}")
-        cache.delete(f"profile_{report.working_place}_{report.fo_name}_{month_tag}".replace(" ", "_").lower())
+        evict_officer_profile_cache(report.working_place, report.fo_name, report.date_of_reporting)
+        if original_requested_date and original_requested_date != report.date_of_reporting:
+            evict_officer_profile_cache(report.working_place, report.fo_name, original_requested_date)
         return {
             "message": "Daily report submitted successfully",
             "pruned_duplicate_notifications": pruned_duplicates,
@@ -2457,7 +2474,7 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_dist, clean_name, month)
         cache.delete_prefix("statewide_top_")
         invalidate_staff_directory_cache()
         actor_name = admin.get("name") or admin.get("username", "Admin")
@@ -3271,177 +3288,75 @@ class ProfileStatsRequest(BaseModel):
     pin: str
     month: str # format YYYY-MM
 
-@app.post("/my-profile-stats")
-async def my_profile_stats(req: ProfileStatsRequest):
-    try:
-        cache_key = f"profile_{req.working_place}_{req.fo_name}_{req.month}".replace(" ", "_").lower()
-        cached = cache.get(cache_key)
-        if cached is not None:
-            return cached
+async def compute_profile_response(
+    reports: List[dict],
+    target_val: int,
+    req_month: str,
+    c_wp: str,
+    clean_fo: str
+) -> dict:
+    stats = {
+        "notification": 0,
+        "hiv_dm": 0,
+        "dbt": 0,
+        "sample_collection": 0,
+        "sample_tested": 0,
+        "outcome_assigned": 0,
+        "home_visit": 0,
+        "contact_tracing": 0,
+        "follow_up": 0,
+        "face_to_face": 0,
+        "presumptive": 0,
+        "fdc_provided": 0,
+        "kit_consumption": 0,
+        "differentiated_tb": 0,
+        "tpt_treatment_start": 0,
+        "tpt_presumptive": 0,
+        "adhar_face_authentication": 0,
+        "consent_with_id": 0,
+        "culture_dst": 0
+    }
+    
+    daily_history = {}
+    for rep in reports:
+        data = rep.to_dict() if hasattr(rep, "to_dict") else rep
+        date_str = str(data.get("date_of_reporting") or data.get("date") or "").strip()
+        if date_str and date_str.startswith(req_month):
+            day_total = 0
+            for k in stats.keys():
+                arr = data.get(k + "_ids", [])
+                if isinstance(arr, list):
+                    stats[k] += len(arr)
+                    day_total += len(arr)
+            day_categories = {}
+            for k in stats.keys():
+                arr = data.get(k + "_ids", [])
+                if isinstance(arr, list) and len(arr) > 0:
+                    day_categories[k] = arr
+                    
+            daily_history[date_str] = {
+                "submitted": True,
+                "count": data.get("submission_count", 1),
+                "total_ids": day_total,
+                "categories": day_categories,
+                "visited_names": data.get("visited_names", []),
+                "total_km": data.get("total_km", 0),
+                "remark": data.get("remark", ""),
+                "fdc_details": data.get("fdc_details", []),
+                "admin_remark": data.get("admin_remark") or "",
+                "admin_remark_by": data.get("admin_remark_by") or ""
+            }
+                    
+    total_achieved = sum(stats.values())
 
-        c_wp = canonicalize_district(req.working_place)
-        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
-        candidate_ids = [
-            f"{c_wp}_{req.fo_name}".replace(" ", "").lower(),
-            f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
-            f"{c_wp.replace(' ', '')}_{clean_fo}".lower()
-        ]
-        if "aurangabad" in c_wp.lower():
-            candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
-        if "champaran" in c_wp.lower():
-            candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
-        if "bhojpur" in c_wp.lower():
-            candidate_ids.extend([f"bhojpur_{clean_fo}"])
-        candidate_ids = list(dict.fromkeys(candidate_ids))
-
-        # Step 1: Verify PIN in background thread
-        pin_valid = False
-        for doc_id in candidate_ids:
-            try:
-                pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
-                if pin_doc.exists:
-                    real_pin = pin_doc.to_dict().get("pin", "")
-                    if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
-                        pin_valid = True
-                        break
-            except Exception:
-                pass
-        if not pin_valid:
-            # Check fallback if offline/quota
-            if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
-                raise HTTPException(status_code=401, detail="Invalid PIN")
-            
-        # Step 2: Fetch Target (Month-Scoped with Fallback)
-        req_month = (req.month.strip() if req.month else "") or get_ist_now().strftime("%Y-%m")
-        target_val = 50
-        try:
-            for tid in [f"{req_month}_{c_wp}_{req.fo_name}".replace(" ", "").lower(), f"{c_wp}_{req.fo_name}".replace(" ", "").lower()]:
-                m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
-                if m_doc.exists:
-                    target_val = int(m_doc.to_dict().get("target", 50))
-                    break
-        except Exception:
-            target_val = 50
-            
-        # Step 3: Fetch all reports for the month asynchronously
+    # Hydrate leave records from daily_staff_leaves with in-memory caching
+    leave_cache_key = f"daily_leaves_{c_wp}_{req_month}"
+    cached_leaves = cache.get(leave_cache_key)
+    if cached_leaves is not None and isinstance(cached_leaves, list):
+        leave_records = cached_leaves
+    else:
         start_date = f"{req_month}-01"
         end_date = f"{req_month}-31"
-        reports = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("fo_name", "==", req.fo_name)
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
-        # Fallback to trimmed FO name if no reports found
-        if not reports and req.fo_name.strip() != req.fo_name:
-            reports = await asyncio.to_thread(lambda: list(
-                db.collection("daily_field_reports")
-                .where("fo_name", "==", req.fo_name.strip())
-                .where("date_of_reporting", ">=", start_date)
-                .where("date_of_reporting", "<=", end_date)
-                .stream()
-            ))
-
-        # Strict District Isolation Guard:
-        # Prevents cross-district data contamination when multiple officers across Bihar share the same name (e.g. Deepak Kumar in Sitamarhi vs Darbhanga)
-        clean_target_wp = c_wp.lower()
-        clean_target_fo = re.sub(r'[^a-zA-Z0-9]', '', req.fo_name).lower()
-
-        filtered_reports = []
-        for rep in reports:
-            rep_data = rep.to_dict() if hasattr(rep, "to_dict") else rep
-            rep_wp = canonicalize_district(rep_data.get("working_place", "")).lower()
-            doc_id_lower = getattr(rep, "id", "").lower()
-            if rep_wp == clean_target_wp or doc_id_lower.startswith(f"{clean_target_wp}_"):
-                filtered_reports.append(rep)
-        reports = filtered_reports
-
-        # Fallback if direct query was empty due to casing or punctuation differences in Firestore
-        if not reports:
-            cached_monthly = cache.get(f"shared_raw_month_{req_month}")
-            fallback_matches = []
-            if cached_monthly and isinstance(cached_monthly, list):
-                for r in cached_monthly:
-                    r_wp = canonicalize_district(r.get("working_place", "")).lower()
-                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
-                    if (r_wp == clean_target_wp or r.get("id", "").lower().startswith(f"{clean_target_wp}_")) and r_fo == clean_target_fo:
-                        fallback_matches.append(r)
-            else:
-                # Targeted district query only (avoids full state scan)
-                target_places = list(dict.fromkeys([
-                    c_wp, c_wp.title(), c_wp.lower(), c_wp.upper()
-                ]))[:10]
-                dist_reports = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_field_reports")
-                    .where("working_place", "in", target_places)
-                    .where("date_of_reporting", ">=", start_date)
-                    .where("date_of_reporting", "<=", end_date)
-                    .stream()
-                ))
-                for r_doc in dist_reports:
-                    r = r_doc.to_dict() if hasattr(r_doc, "to_dict") else r_doc
-                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
-                    if r_fo == clean_target_fo:
-                        fallback_matches.append(r)
-            if fallback_matches:
-                reports = fallback_matches
-        
-        stats = {
-            "notification": 0,
-            "hiv_dm": 0,
-            "dbt": 0,
-            "sample_collection": 0,
-            "sample_tested": 0,
-            "outcome_assigned": 0,
-            "home_visit": 0,
-            "contact_tracing": 0,
-            "follow_up": 0,
-            "face_to_face": 0,
-            "presumptive": 0,
-            "fdc_provided": 0,
-            "kit_consumption": 0,
-            "differentiated_tb": 0,
-            "tpt_treatment_start": 0,
-            "tpt_presumptive": 0,
-            "adhar_face_authentication": 0,
-            "consent_with_id": 0,
-            "culture_dst": 0
-        }
-        
-        daily_history = {}
-        for rep in reports:
-            data = rep.to_dict() if hasattr(rep, "to_dict") else rep
-            date_str = data.get("date_of_reporting") or data.get("date", "")
-            if date_str and date_str.startswith(req.month):
-                day_total = 0
-                for k in stats.keys():
-                    arr = data.get(k + "_ids", [])
-                    if isinstance(arr, list):
-                        stats[k] += len(arr)
-                        day_total += len(arr)
-                day_categories = {}
-                for k in stats.keys():
-                    arr = data.get(k + "_ids", [])
-                    if isinstance(arr, list) and len(arr) > 0:
-                        day_categories[k] = arr
-                        
-                daily_history[date_str] = {
-                    "submitted": True,
-                    "count": data.get("submission_count", 1),
-                    "total_ids": day_total,
-                    "categories": day_categories,
-                    "visited_names": data.get("visited_names", []),
-                    "total_km": data.get("total_km", 0),
-                    "remark": data.get("remark", ""),
-                    "fdc_details": data.get("fdc_details", []),
-                    "admin_remark": data.get("admin_remark") or "",
-                    "admin_remark_by": data.get("admin_remark_by") or ""
-                }
-                        
-        total_achieved = sum(stats.values())
-
-        # Hydrate leave records from daily_staff_leaves
         try:
             leave_docs = await asyncio.to_thread(lambda: list(
                 db.collection("daily_staff_leaves")
@@ -3462,180 +3377,399 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 print(f"Notice: Fallback daily_staff_leaves query failed: {l_err2}")
                 leave_docs = []
 
-        for l_doc in leave_docs:
-            l_data = l_doc.to_dict() if hasattr(l_doc, "to_dict") else l_doc
-            if not isinstance(l_data, dict):
-                continue
-            l_fo = re.sub(r'[^a-zA-Z0-9]', '', l_data.get("fo_name", "")).lower()
-            doc_id = getattr(l_doc, "id", "")
-            if l_fo != clean_fo and not (doc_id and doc_id.endswith(f"_{clean_fo}")):
-                continue
+        leave_records = []
+        for l_doc in (leave_docs or []):
+            l_data = l_doc.to_dict() if hasattr(l_doc, "to_dict") else (l_doc if isinstance(l_doc, dict) else {})
+            if isinstance(l_data, dict) and l_data:
+                rec = dict(l_data)
+                rec["id"] = getattr(l_doc, "id", rec.get("id", ""))
+                leave_records.append(rec)
+        cache.set(leave_cache_key, leave_records, ttl=1800)
 
-            l_date = l_data.get("date", "")
-            if l_date and (l_date.startswith(req.month) if req.month else l_date.startswith(req_month)):
-                leave_remark = l_data.get("remark") or l_data.get("admin_remark") or ""
-                leave_marked_by = l_data.get("marked_by_name") or "Admin"
-                is_actual_leave = bool(l_data.get("is_override") or not l_data.get("is_inspection_remark"))
-                if l_date not in daily_history:
-                    daily_history[l_date] = {
-                        "submitted": False,
-                        "count": 0,
-                        "total_ids": 0,
-                        "categories": {},
-                        "is_leave": is_actual_leave,
-                        "status": l_data.get("status", "leave") if is_actual_leave else "unsubmitted",
-                        "reason_type": l_data.get("reason_type", "Casual") if is_actual_leave else "",
-                        "remark": l_data.get("remark", ""),
-                        "admin_remark": leave_remark,
-                        "marked_by": leave_marked_by,
-                        "admin_remark_by": leave_marked_by,
-                        "marked_at": l_data.get("marked_at", "")
-                    }
-                else:
-                    if leave_remark:
-                        daily_history[l_date]["admin_remark"] = leave_remark
-                    if leave_marked_by:
-                        daily_history[l_date]["admin_remark_by"] = leave_marked_by
-                    if l_data.get("is_override") and not l_data.get("is_inspection_remark"):
-                        daily_history[l_date]["is_leave"] = True
-                        daily_history[l_date]["status"] = l_data.get("status", "leave")
-                        daily_history[l_date]["reason_type"] = l_data.get("reason_type", "Casual")
-                        daily_history[l_date]["leave_info"] = {
-                            "status": l_data.get("status", "leave"),
-                            "reason_type": l_data.get("reason_type", "Casual"),
-                            "remark": l_data.get("remark", ""),
-                            "marked_by": leave_marked_by
-                        }
-                    elif l_data.get("is_inspection_remark"):
-                        daily_history[l_date]["is_leave"] = False
-                        if "leave_info" in daily_history[l_date]:
-                            del daily_history[l_date]["leave_info"]
-                    elif not l_data.get("is_inspection_remark"):
-                        daily_history[l_date]["is_leave"] = True
-                        daily_history[l_date]["leave_info"] = {
-                            "status": l_data.get("status", "leave"),
-                            "reason_type": l_data.get("reason_type", "Casual"),
-                            "remark": l_data.get("remark", ""),
-                            "marked_by": leave_marked_by
-                        }
-        
-        # Calculate Reporting Streak (Preserves streaks across Sundays, approved leaves & declared holidays)
-        streak_days = calculate_reporting_streak(daily_history, today=get_ist_now().date())
+    for l_data in leave_records:
+        if not isinstance(l_data, dict):
+            continue
+        l_fo = re.sub(r'[^a-zA-Z0-9]', '', str(l_data.get("fo_name", ""))).lower()
+        doc_id = str(l_data.get("id", ""))
+        if l_fo != clean_fo and not (doc_id and doc_id.endswith(f"_{clean_fo}")):
+            continue
 
-        total_km_month = sum(d.get("total_km", 0) for d in daily_history.values())
-        
-        badges = []
-        if stats.get("notification", 0) >= 100:
-            badges.append({"id": "century", "title": "Century Club", "icon": "??", "desc": "100+ Notifications logged"})
-        if target_val > 0 and stats.get("notification", 0) >= target_val:
-            badges.append({"id": "crusher", "title": "Target Crusher", "icon": "??", "desc": "100% Monthly Target reached"})
-        if total_km_month >= 300:
-            badges.append({"id": "warrior", "title": "Road Warrior", "icon": "??", "desc": "300+ KM logged this month"})
-        if streak_days >= 5:
-            badges.append({"id": "streak", "title": "Streak Master", "icon": "??", "desc": f"{streak_days} days continuous reporting"})
-        
-        # Step 4: Resolve Declared Holidays & Working Days Pacing Info
-        declared_holidays = 1
-        try:
-            p_cache_key = f"pacing_settings_{req_month}_{c_wp}"
-            cached_pacing = cache.get(p_cache_key)
-            if cached_pacing and isinstance(cached_pacing, dict):
-                declared_holidays = int(cached_pacing.get("declared_holidays", 1))
+        l_date = str(l_data.get("date", "")).strip()
+        if l_date and l_date.startswith(req_month):
+            leave_remark = l_data.get("remark") or l_data.get("admin_remark") or ""
+            leave_marked_by = l_data.get("marked_by_name") or "Admin"
+            is_actual_leave = bool(l_data.get("is_override") or not l_data.get("is_inspection_remark"))
+            if l_date not in daily_history:
+                daily_history[l_date] = {
+                    "submitted": False,
+                    "count": 0,
+                    "total_ids": 0,
+                    "categories": {},
+                    "is_leave": is_actual_leave,
+                    "status": l_data.get("status", "leave") if is_actual_leave else "unsubmitted",
+                    "reason_type": l_data.get("reason_type", "Casual") if is_actual_leave else "",
+                    "remark": l_data.get("remark", ""),
+                    "admin_remark": leave_remark,
+                    "marked_by": leave_marked_by,
+                    "admin_remark_by": leave_marked_by,
+                    "marked_at": l_data.get("marked_at", "")
+                }
             else:
-                dist_doc_id = f"{req_month}_{c_wp}"
-                doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(dist_doc_id).get())
-                if doc_snap.exists:
-                    declared_holidays = int(doc_snap.to_dict().get("declared_holidays", 1))
-                    cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
+                if leave_remark:
+                    daily_history[l_date]["admin_remark"] = leave_remark
+                if leave_marked_by:
+                    daily_history[l_date]["admin_remark_by"] = leave_marked_by
+                if l_data.get("is_override") and not l_data.get("is_inspection_remark"):
+                    daily_history[l_date]["is_leave"] = True
+                    daily_history[l_date]["status"] = l_data.get("status", "leave")
+                    daily_history[l_date]["reason_type"] = l_data.get("reason_type", "Casual")
+                    daily_history[l_date]["leave_info"] = {
+                        "status": l_data.get("status", "leave"),
+                        "reason_type": l_data.get("reason_type", "Casual"),
+                        "remark": l_data.get("remark", ""),
+                        "marked_by": leave_marked_by
+                    }
+                elif l_data.get("is_inspection_remark"):
+                    daily_history[l_date]["is_leave"] = False
+                    if "leave_info" in daily_history[l_date]:
+                        del daily_history[l_date]["leave_info"]
+                elif not l_data.get("is_inspection_remark"):
+                    daily_history[l_date]["is_leave"] = True
+                    daily_history[l_date]["leave_info"] = {
+                        "status": l_data.get("status", "leave"),
+                        "reason_type": l_data.get("reason_type", "Casual"),
+                        "remark": l_data.get("remark", ""),
+                        "marked_by": leave_marked_by
+                    }
+    
+    # Calculate Reporting Streak (Preserves streaks across Sundays, approved leaves & declared holidays)
+    streak_days = calculate_reporting_streak(daily_history, today=get_ist_now().date())
+    total_km_month = sum(d.get("total_km", 0) for d in daily_history.values())
+    
+    badges = []
+    if stats.get("notification", 0) >= 100:
+        badges.append({"id": "century", "title": "Century Club", "icon": "🏅", "desc": "100+ Notifications logged"})
+    if target_val > 0 and stats.get("notification", 0) >= target_val:
+        badges.append({"id": "crusher", "title": "Target Crusher", "icon": "🎯", "desc": "100% Monthly Target reached"})
+    if total_km_month >= 300:
+        badges.append({"id": "warrior", "title": "Road Warrior", "icon": "🛵", "desc": "300+ KM logged this month"})
+    if streak_days >= 5:
+        badges.append({"id": "streak", "title": "Streak Master", "icon": "🔥", "desc": f"{streak_days} days continuous reporting"})
+    
+    # Step 4: Resolve Declared Holidays & Working Days Pacing Info
+    declared_holidays = 1
+    try:
+        p_cache_key = f"pacing_settings_{req_month}_{c_wp}"
+        cached_pacing = cache.get(p_cache_key)
+        if cached_pacing and isinstance(cached_pacing, dict):
+            declared_holidays = int(cached_pacing.get("declared_holidays", 1))
+        else:
+            dist_doc_id = f"{req_month}_{c_wp}"
+            doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(dist_doc_id).get())
+            if doc_snap.exists:
+                declared_holidays = int(doc_snap.to_dict().get("declared_holidays", 1))
+                cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
+            else:
+                state_doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(req_month).get())
+                if state_doc_snap.exists:
+                    declared_holidays = int(state_doc_snap.to_dict().get("declared_holidays", 1))
                 else:
-                    state_doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(req_month).get())
-                    if state_doc_snap.exists:
-                        declared_holidays = int(state_doc_snap.to_dict().get("declared_holidays", 1))
-                    else:
-                        declared_holidays = 1
-                    cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
-        except Exception as p_err:
-            print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
-            declared_holidays = 1
+                    declared_holidays = 1
+                cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
+    except Exception as p_err:
+        print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
+        declared_holidays = 1
+
+    try:
+        y_str, m_str = req_month.split("-")
+        year_val, month_val = int(y_str), int(m_str)
+        _, total_days = calendar.monthrange(year_val, month_val)
+    except Exception:
+        now_d = get_ist_now().date()
+        year_val, month_val = now_d.year, now_d.month
+        _, total_days = calendar.monthrange(year_val, month_val)
+
+    ist_today = get_ist_now().date()
+    today_month_str = ist_today.strftime("%Y-%m")
+    if req_month == today_month_str:
+        day_of_month = ist_today.day
+    elif req_month < today_month_str:
+        day_of_month = total_days
+    else:
+        day_of_month = 0
+
+    sundays_in_month = 0
+    elapsed_sundays = 0
+    for d_idx in range(1, total_days + 1):
+        dt_cur = datetime(year_val, month_val, d_idx).date()
+        if dt_cur.weekday() == 6:  # Sunday
+            sundays_in_month += 1
+            if d_idx <= day_of_month:
+                elapsed_sundays += 1
+
+    total_working_days = max(1, total_days - sundays_in_month - declared_holidays)
+    if req_month < today_month_str:
+        elapsed_working_days = total_working_days
+        remaining_working_days = 0
+    elif req_month > today_month_str:
+        elapsed_working_days = 0
+        remaining_working_days = total_working_days
+    else:
+        elapsed_working_days = max(0, min(total_working_days, day_of_month - elapsed_sundays - min(declared_holidays, int((day_of_month / total_days) * declared_holidays))))
+        remaining_working_days = max(0, total_working_days - elapsed_working_days)
+
+    notif_achieved = stats.get("notification", 0)
+    remaining_target = max(0, target_val - notif_achieved)
+    if req_month < today_month_str:
+        required_run_rate = 0.0
+    elif remaining_working_days > 0:
+        required_run_rate = round(remaining_target / remaining_working_days, 1)
+    else:
+        required_run_rate = float(remaining_target)
+
+    current_run_rate = round(notif_achieved / max(1, elapsed_working_days), 1)
+    expected_to_date = round((target_val * elapsed_working_days) / total_working_days)
+    pace_diff = notif_achieved - expected_to_date
+
+    working_days_info = {
+        "month": req_month,
+        "total_days": total_days,
+        "sundays": sundays_in_month,
+        "declared_holidays": declared_holidays,
+        "total_working_days": total_working_days,
+        "elapsed_working_days": elapsed_working_days,
+        "remaining_working_days": remaining_working_days,
+        "required_run_rate": required_run_rate,
+        "current_run_rate": current_run_rate,
+        "expected_to_date": expected_to_date,
+        "pace_diff": pace_diff
+    }
+
+    return {
+        "success": True,
+        "target": target_val,
+        "total_achieved": total_achieved,
+        "breakdown": stats,
+        "daily_history": daily_history,
+        "streak_days": streak_days,
+        "total_km": total_km_month,
+        "badges": badges,
+        "working_days_info": working_days_info
+    }
+
+
+async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean_fo: str, req_month: str, cache_key: str) -> dict:
+    try:
+        candidate_ids = [
+            f"{clean_wp}_{req.fo_name}".replace(" ", "").lower(),
+            f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
+            f"{clean_wp.replace(' ', '')}_{clean_fo}".lower()
+        ]
+        if "aurangabad" in clean_wp.lower():
+            candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
+        if "champaran" in clean_wp.lower():
+            candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+        if "bhojpur" in clean_wp.lower():
+            candidate_ids.extend([f"bhojpur_{clean_fo}"])
+        candidate_ids = list(dict.fromkeys(candidate_ids))
+
+        # Step 1: Verify PIN in background thread
+        pin_valid = False
+        for doc_id in candidate_ids:
+            try:
+                pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
+                if pin_doc.exists:
+                    real_pin = pin_doc.to_dict().get("pin", "")
+                    if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
+                        pin_valid = True
+                        break
+            except Exception:
+                pass
+        if not pin_valid:
+            if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
+                raise HTTPException(status_code=401, detail="Invalid PIN")
+            
+        # Step 2: Fetch Target (Month-Scoped with Fallback)
+        target_val = 50
+        try:
+            for tid in [f"{req_month}_{clean_wp}_{req.fo_name}".replace(" ", "").lower(), f"{clean_wp}_{req.fo_name}".replace(" ", "").lower()]:
+                m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
+                if m_doc.exists:
+                    target_val = int(m_doc.to_dict().get("target", 50))
+                    break
+        except Exception:
+            target_val = 50
+            
+        # Step 3: Fetch all reports for the month asynchronously
+        start_date = f"{req_month}-01"
+        end_date = f"{req_month}-31"
+        reports = await asyncio.to_thread(lambda: list(
+            db.collection("daily_field_reports")
+            .where("fo_name", "==", req.fo_name)
+            .where("date_of_reporting", ">=", start_date)
+            .where("date_of_reporting", "<=", end_date)
+            .stream()
+        ))
+        if not reports and req.fo_name.strip() != req.fo_name:
+            reports = await asyncio.to_thread(lambda: list(
+                db.collection("daily_field_reports")
+                .where("fo_name", "==", req.fo_name.strip())
+                .where("date_of_reporting", ">=", start_date)
+                .where("date_of_reporting", "<=", end_date)
+                .stream()
+            ))
+
+        clean_target_wp = clean_wp.lower()
+        clean_target_fo = clean_fo
+
+        filtered_reports = []
+        for rep in reports:
+            rep_data = rep.to_dict() if hasattr(rep, "to_dict") else rep
+            rep_wp = canonicalize_district(rep_data.get("working_place", "")).lower()
+            doc_id_lower = getattr(rep, "id", "").lower()
+            if rep_wp == clean_target_wp or doc_id_lower.startswith(f"{clean_target_wp}_"):
+                filtered_reports.append(rep)
+        reports = filtered_reports
+
+        if not reports:
+            cached_monthly = cache.get(f"shared_raw_month_{req_month}")
+            fallback_matches = []
+            if cached_monthly and isinstance(cached_monthly, list):
+                for r in cached_monthly:
+                    r_wp = canonicalize_district(r.get("working_place", "")).lower()
+                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                    if (r_wp == clean_target_wp or r.get("id", "").lower().startswith(f"{clean_target_wp}_")) and r_fo == clean_target_fo:
+                        fallback_matches.append(r)
+            else:
+                target_places = list(dict.fromkeys([
+                    clean_wp, clean_wp.title(), clean_wp.lower(), clean_wp.upper()
+                ]))[:10]
+                dist_reports = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_field_reports")
+                    .where("working_place", "in", target_places)
+                    .where("date_of_reporting", ">=", start_date)
+                    .where("date_of_reporting", "<=", end_date)
+                    .stream()
+                ))
+                for r_doc in dist_reports:
+                    r = r_doc.to_dict() if hasattr(r_doc, "to_dict") else r_doc
+                    r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
+                    if r_fo == clean_target_fo:
+                        fallback_matches.append(r)
+            if fallback_matches:
+                reports = fallback_matches
+
+        res = await compute_profile_response(reports, target_val, req_month, clean_wp, clean_fo)
+        cache.set(cache_key, res, ttl=1800)
+        return res
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/my-profile-stats")
+async def my_profile_stats(req: ProfileStatsRequest):
+    try:
+        clean_wp = canonicalize_district(req.working_place)
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', str(req.fo_name or "")).lower()
+        req_month = (req.month.strip() if req.month else "") or get_active_operational_month(get_ist_now())
+        cache_key = get_profile_cache_key(clean_wp, req.fo_name, req_month)
+
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        # Check Kill Switch
+        if not ENABLE_IN_MEMORY_DERIVATION:
+            return await legacy_my_profile_stats(req, clean_wp, clean_fo, req_month, cache_key)
 
         try:
-            y_str, m_str = req_month.split("-")
-            year_val, month_val = int(y_str), int(m_str)
-            _, total_days = calendar.monthrange(year_val, month_val)
-        except Exception:
-            now_d = get_ist_now().date()
-            year_val, month_val = now_d.year, now_d.month
-            _, total_days = calendar.monthrange(year_val, month_val)
+            # 1. In-Memory PIN Verification from Cached Directory
+            raw_staff = await get_cached_staff_directory_raw()
+            pin_valid = False
+            found_officer = False
+            for s in (raw_staff or []):
+                s_wp = canonicalize_district(s.get("district", ""))
+                s_name = re.sub(r'[^a-zA-Z0-9]', '', str(s.get("name") or s.get("fo_name") or "")).lower()
+                if s_wp == clean_wp and s_name == clean_fo:
+                    found_officer = True
+                    real_pin = s.get("pin", "")
+                    if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
+                        pin_valid = True
+                        break
+            
+            # New Staff Zero-Latency Fallback: If not in memory, check Firestore document directly
+            if not found_officer:
+                candidate_ids = [
+                    f"{clean_wp}_{req.fo_name}".replace(" ", "").lower(),
+                    f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
+                    f"{clean_wp.replace(' ', '')}_{clean_fo}".lower()
+                ]
+                if "aurangabad" in clean_wp.lower():
+                    candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
+                if "champaran" in clean_wp.lower():
+                    candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
+                if "bhojpur" in clean_wp.lower():
+                    candidate_ids.extend([f"bhojpur_{clean_fo}"])
+                candidate_ids = list(dict.fromkeys(candidate_ids))
 
-        ist_today = get_ist_now().date()
-        today_month_str = ist_today.strftime("%Y-%m")
-        if req_month == today_month_str:
-            day_of_month = ist_today.day
-        elif req_month < today_month_str:
-            day_of_month = total_days
-        else:
-            day_of_month = 0
+                for doc_id in candidate_ids:
+                    try:
+                        pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
+                        if pin_doc.exists:
+                            doc_d = pin_doc.to_dict() or {}
+                            real_pin = doc_d.get("pin", "")
+                            if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
+                                pin_valid = True
+                                # Warm up staff directory cache with new officer
+                                if raw_staff is not None and isinstance(raw_staff, list):
+                                    raw_staff.append({
+                                        "id": doc_id,
+                                        "district": clean_wp,
+                                        "name": req.fo_name,
+                                        "pin": real_pin,
+                                        "is_active": True
+                                    })
+                                break
+                    except Exception:
+                        pass
 
-        sundays_in_month = 0
-        elapsed_sundays = 0
-        for d_idx in range(1, total_days + 1):
-            dt_cur = datetime(year_val, month_val, d_idx).date()
-            if dt_cur.weekday() == 6:  # Sunday
-                sundays_in_month += 1
-                if d_idx <= day_of_month:
-                    elapsed_sundays += 1
+            if not pin_valid:
+                if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
+                    raise HTTPException(status_code=401, detail="Invalid PIN")
 
-        total_working_days = max(1, total_days - sundays_in_month - declared_holidays)
-        if req_month < today_month_str:
-            elapsed_working_days = total_working_days
-            remaining_working_days = 0
-        elif req_month > today_month_str:
-            elapsed_working_days = 0
-            remaining_working_days = total_working_days
-        else:
-            elapsed_working_days = max(0, min(total_working_days, day_of_month - elapsed_sundays - min(declared_holidays, int((day_of_month / total_days) * declared_holidays))))
-            remaining_working_days = max(0, total_working_days - elapsed_working_days)
+            # 2. In-Memory Target Lookup
+            target_val = 50
+            cached_targets = await get_cached_staff_targets_for_month(req_month)
+            for t in (cached_targets or []):
+                t_wp = canonicalize_district(t.get("district", ""))
+                t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
+                if t_wp == clean_wp and t_fo == clean_fo:
+                    try:
+                        target_val = int(t.get("target", 50))
+                    except Exception:
+                        target_val = 50
+                    break
 
-        notif_achieved = stats.get("notification", 0)
-        remaining_target = max(0, target_val - notif_achieved)
-        if req_month < today_month_str:
-            required_run_rate = 0.0
-        elif remaining_working_days > 0:
-            required_run_rate = round(remaining_target / remaining_working_days, 1)
-        else:
-            required_run_rate = float(remaining_target)
+            # 3. In-Memory Monthly Reports Lookup from Master Ledger
+            raw_docs = await get_raw_monthly_reports(req_month, district_filter={clean_wp})
+            reports = []
+            for d in (raw_docs or []):
+                d_wp = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+                d_fo = re.sub(r'[^a-zA-Z0-9]', '', str(d.get("fo_name", ""))).lower()
+                if d_wp == clean_wp and d_fo == clean_fo:
+                    reports.append(d)
 
-        current_run_rate = round(notif_achieved / max(1, elapsed_working_days), 1)
-        expected_to_date = round((target_val * elapsed_working_days) / total_working_days)
-        pace_diff = notif_achieved - expected_to_date
-
-        working_days_info = {
-            "month": req_month,
-            "total_days": total_days,
-            "sundays": sundays_in_month,
-            "declared_holidays": declared_holidays,
-            "total_working_days": total_working_days,
-            "elapsed_working_days": elapsed_working_days,
-            "remaining_working_days": remaining_working_days,
-            "required_run_rate": required_run_rate,
-            "current_run_rate": current_run_rate,
-            "expected_to_date": expected_to_date,
-            "pace_diff": pace_diff
-        }
-
-        res = {
-            "success": True,
-            "target": target_val,
-            "total_achieved": total_achieved,
-            "breakdown": stats,
-            "daily_history": daily_history,
-            "streak_days": streak_days,
-            "total_km": total_km_month,
-            "badges": badges,
-            "working_days_info": working_days_info
-        }
-        cache.set(cache_key, res, ttl=20)
-        return res
+            # Compute profile stats using calculation helper
+            result = await compute_profile_response(reports, target_val, req_month, clean_wp, clean_fo)
+            cache.set(cache_key, result, ttl=1800)
+            return result
+        except HTTPException:
+            raise
+        except Exception as derivation_err:
+            print(f"[Profile Derivation Failover Notice] In-memory derivation failed, falling back to legacy: {derivation_err}")
+            return await legacy_my_profile_stats(req, clean_wp, clean_fo, req_month, cache_key)
     except HTTPException:
         raise
     except Exception as e:
@@ -5150,7 +5284,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
         record_report_mutation("edit", doc_id, district=c_wp, date=req.date, report_data=data)
         cache.delete(f"status_{doc_id}")
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(c_wp, req.fo_name, req.date)
 
         try:
             month_pfx = req.date[:7]
@@ -5466,7 +5600,7 @@ async def admin_feed_officer_data(
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_wp, clean_fo, clean_date)
 
         return {
             "success": True,
@@ -5595,7 +5729,7 @@ async def admin_delete_day_report(
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_wp, clean_fo, clean_date)
 
         month_pfx = clean_date[:7]
         try:
@@ -5846,7 +5980,7 @@ async def admin_edit_day_report(
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_wp, clean_fo, clean_date, old_district=old_wp)
         cache.delete_prefix("recent_id_edits_")
 
         month_pfx = clean_date[:7]
@@ -6129,7 +6263,7 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_dist, clean_name, get_ist_now().strftime("%Y-%m"))
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -6209,6 +6343,7 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
             if "All" not in allowed and clean_dist not in allowed:
                 raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update staff in district '{clean_dist}'.")
         clean_name = req.name.strip()
+        current_month = get_ist_now().strftime("%Y-%m")
         
         doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
         doc_ref = db.collection("staff_directory").document(doc_id)
@@ -6287,7 +6422,7 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
-        cache.delete_prefix("profile_")
+        evict_officer_profile_cache(clean_dist, clean_name, current_month)
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -9528,7 +9663,7 @@ async def repair_duplicate_notifications(
             report_data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
             record_report_mutation("repair", clean_doc_id, district=doc_district, date=report_date, report_data=report_data)
             cache.delete(f"status_{clean_doc_id}")
-            cache.delete_prefix("profile_")
+            evict_officer_profile_cache(doc_district, report_data.get("fo_name", ""), report_date)
 
         # 9. Return response
         return {
@@ -9602,7 +9737,8 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
         await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
 
         cache.delete_prefix(f"attendance_{clean_date}")
-        cache.delete_prefix("profile_")
+        cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         await log_admin_activity(
             action_type="LEAVE_MARKED",
@@ -9650,7 +9786,8 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
         await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).delete())
 
         cache.delete_prefix(f"attendance_{clean_date}")
-        cache.delete_prefix("profile_")
+        cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         actor_name = admin.get("name") or admin.get("username") or "Admin"
         actor_id = admin.get("user_id") or admin.get("username") or "admin"
@@ -9800,9 +9937,9 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
             details = f"Overrode attendance to {req.status or 'leave'} ({req.reason_type or 'Casual'}) for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
             msg = "Leave status overridden successfully."
 
-        # Cache Eviction
         cache.delete_prefix(f"attendance_{clean_date}")
-        cache.delete_prefix("profile_")
+        cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         # Update in-memory shared raw month cache if present
         month_prefix = clean_date[:7]
@@ -9978,7 +10115,9 @@ async def update_pacing_settings(
         cache.delete(f"pacing_settings_{clean_month}_all")
         if clean_dist == "all":
             cache.delete_prefix(f"pacing_settings_{clean_month}")
-        cache.delete_prefix("profile_")
+            cache.delete_prefix("profile_")
+        else:
+            cache.delete_prefix(f"profile_{clean_dist.lower()}_")
 
         # Log admin activity
         await log_admin_activity(
