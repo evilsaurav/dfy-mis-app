@@ -70,6 +70,24 @@ const normalizeStaffKey = (dist, name) => {
   return `${d}_${n}`;
 };
 
+const isOfficerNameMatch = (nameA, nameB, dist = '') => {
+  if (!nameA || !nameB) return false;
+  const a = String(nameA).trim().toLowerCase();
+  const b = String(nameB).trim().toLowerCase();
+  if (a === b) return true;
+  // Proven legacy alias: Ashwani Kumar <-> Ashwani Kr Keshri (Bhojpur)
+  if ((a === 'ashwani kumar' || a === 'ashwani kr keshri') && (b === 'ashwani kumar' || b === 'ashwani kr keshri')) return true;
+  // Targeted alias: Vinay Prakash <-> Vinay Kumar / Vinay Kumar LT (Muzaffarpur LT)
+  const cDist = canonicalizeDistrict(dist || '').toLowerCase();
+  if (!dist || cDist === 'muzaffarpur') {
+    if ((a === 'vinay prakash' || a === 'vinay kumar' || a === 'vinay kumar lt') &&
+        (b === 'vinay prakash' || b === 'vinay kumar' || b === 'vinay kumar lt')) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const formatAuditTimestamp = (ts, tsFormatted) => {
   if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
     return tsFormatted;
@@ -1932,7 +1950,7 @@ export default function AdminDashboard() {
   const loadTargets = async (dist = 'All', monthVal = null) => {
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-          const targetMonth = monthVal || targetModalMonth || month || new Date().toISOString().slice(0, 7);
+          const targetMonth = monthVal || month || targetModalMonth || new Date().toISOString().slice(0, 7);
           let q = `?month=${targetMonth}`;
           if (dist && dist !== 'All') {
             q += `&district=${encodeURIComponent(dist)}`;
@@ -2247,7 +2265,7 @@ export default function AdminDashboard() {
   const handleExecuteUpdatePin = async (e) => {
     e.preventDefault();
     if (!pinChangeModal) return;
-    const { name, district, newPin, designation } = pinChangeModal;
+    const { name, district, newPin, designation, target } = pinChangeModal;
     if (!newPin || newPin.trim().length !== 4 || !/^\d+$/.test(newPin.trim())) {
       setPinChangeModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits (numbers only)." }));
       return;
@@ -2255,15 +2273,19 @@ export default function AdminDashboard() {
     setPinChangeModal(prev => ({ ...prev, loading: true, error: "" }));
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = {
+        district,
+        name,
+        new_pin: newPin.trim(),
+        designation: designation || "Field Officer"
+      };
+      if (target !== undefined && target !== null && !isNaN(Number(target))) {
+        payload.target = Number(target);
+      }
       const res = await authFetch(`${API_BASE_URL}/admin/staff/update-details`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          district,
-          name,
-          new_pin: newPin.trim(),
-          designation: designation || "Field Officer"
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (res.ok) {
@@ -2273,6 +2295,7 @@ export default function AdminDashboard() {
           designation: designation || s.designation
         } : s)));
         fetchDirectory();
+        loadTargets('All', month);
         if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
         setPinChangeModal(null);
       } else {
@@ -2314,6 +2337,7 @@ export default function AdminDashboard() {
         fetchStaffList();
         fetchDirectory();
         fetchAttendance(true);
+        loadTargets('All', month);
         if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
         setAddStaffModal(null);
       } else {
@@ -4256,7 +4280,11 @@ const availableDistrictsForFeed = useMemo(() => {
     const list = allFos.map(fo => {
       const foRecs = distRecs.filter(r => canonicalizeFo(r.fo_name, targetDist, staffDirectory) === fo);
       const notif = foRecs.reduce((sum, r) => sum + (r.notifications || 0), 0);
-      const targetObj = targetsData.find(t => canonicalizeFo(t.fo_name, targetDist, staffDirectory) === fo && canonicalizeDistrict(t.district) === targetDist);
+      const targetObj = (targetsData || []).find(t => 
+        canonicalizeDistrict(t.district) === targetDist && 
+        (isOfficerNameMatch(canonicalizeFo(t.fo_name, targetDist, staffDirectory), fo, targetDist) ||
+         isOfficerNameMatch(t.fo_name, fo, targetDist))
+      );
       const target = targetObj ? (Number(targetObj.target) || 0) : 0;
       const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
       return {
@@ -4427,10 +4455,11 @@ const availableDistrictsForFeed = useMemo(() => {
         map[key].target = tSum;
       } else {
         const cDist = canonicalizeDistrict(selectedDistrict);
-        const tObj = (targetsData || []).find(t => 
-          canonicalizeDistrict(t.district) === cDist && 
-          canonicalizeFo(t.fo_name, cDist, staffDirectory).toLowerCase() === key.toLowerCase()
-        );
+        const tObj = (targetsData || []).find(t => {
+          if (canonicalizeDistrict(t.district) !== cDist) return false;
+          const tCanonical = canonicalizeFo(t.fo_name, cDist, staffDirectory);
+          return isOfficerNameMatch(tCanonical, key, cDist) || isOfficerNameMatch(t.fo_name, key, cDist);
+        });
         map[key].target = tObj ? (Number(tObj.target) || 50) : 50;
       }
     });
@@ -4660,9 +4689,9 @@ const availableDistrictsForFeed = useMemo(() => {
       const officerLower = c.name.trim().toLowerCase();
 
       // Find target with normalized matching
-      const tObj = targetsData.find(t => {
+      const tObj = (targetsData || []).find(t => {
         if (!t.fo_name || !t.district) return false;
-        return canonicalizeDistrict(t.district) === cDist && t.fo_name.trim().toLowerCase() === officerLower;
+        return canonicalizeDistrict(t.district) === cDist && isOfficerNameMatch(t.fo_name, c.name, cDist);
       });
       const target = tObj ? (Number(tObj.target) || 0) : 50;
 
@@ -4670,11 +4699,7 @@ const availableDistrictsForFeed = useMemo(() => {
       const officerRecords = rawRecords.filter(r => {
         if (!r.working_place || !r.fo_name) return false;
         if (canonicalizeDistrict(r.working_place) !== cDist) return false;
-        const rName = r.fo_name.trim().toLowerCase();
-        if (rName === officerLower) return true;
-        // Legacy alias resolution (Ashwani Kumar -> Ashwani Kr Keshri)
-        if (officerLower === 'ashwani kr keshri' && (rName === 'ashwani kumar' || rName === 'ashwani kr keshri')) return true;
-        return false;
+        return isOfficerNameMatch(r.fo_name, c.name, cDist);
       });
       const achieved = officerRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
       const activeDaysCount = new Set(officerRecords.map(r => r.date_of_reporting || r.date).filter(Boolean)).size;
@@ -8947,13 +8972,21 @@ const availableDistrictsForFeed = useMemo(() => {
                                 </td>
                                 <td className="p-3 text-right space-x-2">
                                   <button
-                                    onClick={() => setPinChangeModal({
-                                      name: s.name,
-                                      district: s.district,
-                                      newPin: s.pin,
-                                      designation: s.designation || 'Field Officer',
-                                      error: ''
-                                    })}
+                                    onClick={() => {
+                                      const cDist = canonicalizeDistrict(s.district);
+                                      const tObj = (targetsData || []).find(t => 
+                                        canonicalizeDistrict(t.district) === cDist && 
+                                        isOfficerNameMatch(t.fo_name, s.name, cDist)
+                                      );
+                                      setPinChangeModal({
+                                        name: s.name,
+                                        district: s.district,
+                                        newPin: s.pin,
+                                        designation: s.designation || 'Field Officer',
+                                        target: tObj ? tObj.target : 50,
+                                        error: ''
+                                      });
+                                    }}
                                     className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                                   >
                                     ✏️ Edit Details
@@ -9038,6 +9071,18 @@ const availableDistrictsForFeed = useMemo(() => {
                     🎲
                   </button>
                 </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Monthly Target</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={pinChangeModal.target ?? 50}
+                  onChange={(e) => setPinChangeModal(prev => ({ ...prev, target: e.target.value }))}
+                  placeholder="e.g. 50"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
 
               {pinChangeModal.error && (
@@ -11004,7 +11049,9 @@ const availableDistrictsForFeed = useMemo(() => {
       {inspectingFO && (() => {
         const foRecords = rawRecords.filter(r => {
           if (!r.fo_name || !inspectingFO || !inspectingFO.fo_name) return false;
-          const matchName = canonicalizeFo(r.fo_name, r.working_place, staffDirectory) === canonicalizeFo(inspectingFO.fo_name, inspectingFO.district, staffDirectory);
+          const cDist = canonicalizeDistrict(inspectingFO.district || r.working_place);
+          const matchName = isOfficerNameMatch(r.fo_name, inspectingFO.fo_name, cDist) ||
+            canonicalizeFo(r.fo_name, r.working_place, staffDirectory) === canonicalizeFo(inspectingFO.fo_name, inspectingFO.district, staffDirectory);
           if (!matchName) return false;
           if (!inspectingFO.district || inspectingFO.district === 'All') return true;
           return canonicalizeDistrict(r.working_place) === canonicalizeDistrict(inspectingFO.district);
@@ -11014,7 +11061,11 @@ const availableDistrictsForFeed = useMemo(() => {
           return dateB.localeCompare(dateA); // Latest date first (e.g. 2026-09-09 before 2026-09-05)
         });
         const totalNotif = foRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
-        const targetObj = targetsData.find(t => t.fo_name === inspectingFO.fo_name && (t.district === inspectingFO.district));
+        const targetObj = (targetsData || []).find(t => 
+          canonicalizeDistrict(t.district) === canonicalizeDistrict(inspectingFO.district) &&
+          (isOfficerNameMatch(t.fo_name, inspectingFO.fo_name, inspectingFO.district) ||
+           isOfficerNameMatch(canonicalizeFo(t.fo_name, inspectingFO.district, staffDirectory), inspectingFO.fo_name, inspectingFO.district))
+        );
         const targetNum = targetObj ? Number(targetObj.target) : 0;
         const pct = targetNum > 0 ? Math.min(100, Math.round((totalNotif / targetNum) * 100)) : 0;
 

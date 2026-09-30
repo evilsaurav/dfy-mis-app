@@ -1670,16 +1670,27 @@ async def verify_pin(data: PinCheck):
             return {"valid": True, "fallback": True}
         return {"valid": False}
 
+def get_reporting_cutoff_hour(now_ist: datetime) -> int:
+    """
+    Returns cutoff hour for next-day grace reporting:
+    - 12 PM (Noon) on 1st of month for month-end close reconciliation.
+    - 11 AM IST on all other days.
+    """
+    if hasattr(now_ist, 'day') and now_ist.day == 1:
+        return 12
+    return 11
+
 async def resolve_effective_reporting_date(
     fo_name: str, 
     working_place: str, 
     requested_date: Optional[str] = None
 ) -> str:
     """
-    Stealth 10:00 AM Reporting Cutoff Engine:
-    Submissions before 10:00 AM IST unconditionally map to yesterday (D - 1),
-    regardless of whether yesterday's report already exists in daily_field_reports.
-    Submissions at or after 10:00 AM IST strictly map to today.
+    Stealth Reporting Cutoff Engine:
+    Submissions before cutoff hour (11:00 AM IST daily, 12:00 PM Noon on 1st of month)
+    unconditionally map to yesterday (D - 1), regardless of whether yesterday's report
+    already exists in daily_field_reports.
+    Submissions at or after cutoff hour strictly map to today.
     Explicit historical edits older than yesterday (< yesterday_str) are strictly respected.
     """
     now_ist = get_ist_now()
@@ -1690,8 +1701,9 @@ async def resolve_effective_reporting_date(
     if requested_date and requested_date < yesterday_str:
         return requested_date
 
-    # Unconditional cutoff: submissions before 10:00 AM IST strictly map to yesterday
-    if now_ist.hour < 10:
+    # Unconditional cutoff: submissions before cutoff hour strictly map to yesterday
+    cutoff_hour = get_reporting_cutoff_hour(now_ist)
+    if now_ist.hour < cutoff_hour:
         return yesterday_str
 
     return requested_date or today_str
@@ -1970,10 +1982,11 @@ async def submit_daily_report(report: DailyActivityReport):
         if report.evening_km_photo_url and len(report.evening_km_photo_url) > 1000:
             payload["evening_km_photo_url"] = ""
 
-        # Stealth 10 AM Cutoff: stamp next-day morning metadata if submitted before 10:00 AM IST for yesterday
+        # Stealth Cutoff: stamp next-day morning metadata if submitted before cutoff for yesterday
         now_ist = get_ist_now()
         yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
-        if now_ist.hour < 10 and report.date_of_reporting == yesterday_str:
+        cutoff_hour = get_reporting_cutoff_hour(now_ist)
+        if now_ist.hour < cutoff_hour and report.date_of_reporting == yesterday_str:
             morning_time = format_to_ist_time(now_ist)
             payload["is_next_day_submission"] = True
             payload["submitted_morning_time"] = morning_time
@@ -3723,19 +3736,21 @@ async def get_today_attendance(
             rep_date = d.get("date_of_reporting") or d.get("date") or ""
             is_next_day_flag = bool(d.get("is_next_day_submission"))
 
-            # Stealth 10 AM Cutoff Segregation Rules:
-            # Rule 1: Submissions on target_date before 10:00 AM IST strictly belong to target_date - 1.
+            # Stealth Cutoff Segregation Rules:
+            # Rule 1: Submissions on target_date before cutoff hour strictly belong to target_date - 1.
             # Exclude from target_date's submitted list.
-            if dt_ist and dt_ist.date().strftime("%Y-%m-%d") == target_date and dt_ist.hour < 10:
+            target_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
+            if dt_ist and dt_ist.date().strftime("%Y-%m-%d") == target_date and dt_ist.hour < target_cutoff:
                 continue
 
-            # Rule 2: Submissions on next_date (target_date + 1) before 10:00 AM IST,
+            # Rule 2: Submissions on next_date (target_date + 1) before next_date cutoff hour,
             # or reports with is_next_day_submission == True and date_of_reporting == target_date,
             # strictly belong to target_date as next-day morning submissions.
             is_next_day = False
+            next_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
             if is_next_day_flag and rep_date == target_date:
                 is_next_day = True
-            elif dt_ist and next_date and dt_ist.date().strftime("%Y-%m-%d") == next_date and dt_ist.hour < 10:
+            elif dt_ist and next_date and dt_ist.date().strftime("%Y-%m-%d") == next_date and dt_ist.hour < next_cutoff:
                 is_next_day = True
             elif rep_date != target_date:
                 continue
@@ -5943,11 +5958,24 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         }
         await asyncio.to_thread(lambda: doc_ref.set(payload))
         
+        target_val = int(req.target or 50)
+        current_month = get_ist_now().strftime("%Y-%m")
+        # 1. Month-scoped document
+        month_doc_id = f"{current_month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("staff_targets").document(month_doc_id).set({
+            "month": current_month,
+            "district": clean_dist,
+            "fo_name": clean_name,
+            "target": target_val,
+            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }, merge=True))
+
+        # 2. General fallback document
         target_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
         await asyncio.to_thread(lambda: db.collection("staff_targets").document(target_doc_id).set({
             "district": clean_dist,
             "fo_name": clean_name,
-            "target": req.target or 50,
+            "target": target_val,
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }, merge=True))
 
@@ -5971,6 +5999,8 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("profile_")
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -6078,20 +6108,36 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
         await asyncio.to_thread(lambda: doc_ref.update(update_data))
         
         if req.target is not None and req.target > 0:
+            target_val = int(req.target)
+            current_month = get_ist_now().strftime("%Y-%m")
+            # 1. Month-scoped document
+            month_doc_id = f"{current_month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
+            await asyncio.to_thread(lambda: db.collection("staff_targets").document(month_doc_id).set({
+                "month": current_month,
+                "district": clean_dist,
+                "fo_name": clean_name,
+                "target": target_val,
+                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }, merge=True))
+
+            # 2. General fallback document
             target_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
             await asyncio.to_thread(lambda: db.collection("staff_targets").document(target_doc_id).set({
                 "district": clean_dist,
                 "fo_name": clean_name,
-                "target": req.target,
+                "target": target_val,
                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }, merge=True))
-            diff_info["target"] = req.target
+            diff_info["target"] = target_val
+            diff_info["month"] = current_month
             
         cache.delete(f"pin_{doc_id}")
         invalidate_staff_directory_cache()
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("attendance_")
         cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("profile_")
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
