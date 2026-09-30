@@ -867,10 +867,15 @@ def record_report_mutation(
             cache.delete_prefix(f"shared_raw_month_{month_prefix}")
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
-        else:
             cache.delete_prefix("shared_raw_month_")
             cache.delete_prefix("dash_")
             cache.delete_prefix("dupe_scan_")
+
+        # 3. Statewide Top Performers Cache (Real-time Leaderboard sync)
+        if month_prefix:
+            cache.delete_prefix(f"statewide_top_{month_prefix}")
+        else:
+            cache.delete_prefix("statewide_top_")
 
         # 3. Attendance Cache (Scoped by Date)
         if date and len(str(date).strip()) >= 10:
@@ -1281,10 +1286,18 @@ async def get_statewide_top_performers(
                     if dist and fo_name:
                         k = normalize_staff_key(dist, fo_name)
                         is_active = (d.get("is_active") is not False) and (d.get("status") != "inactive")
+                        raw_t = d.get("target")
+                        if raw_t is not None and str(raw_t).strip() != "":
+                            try:
+                                t_val = float(raw_t)
+                            except (ValueError, TypeError):
+                                t_val = 50.0
+                        else:
+                            t_val = 50.0
                         staff_meta[k] = {
                             "name": fo_name,
                             "designation": (d.get("designation") or "Field Officer").strip(),
-                            "target": float(d.get("target", 50) or 50),
+                            "target": t_val,
                             "is_active": is_active
                         }
                 cache.set("staff_directory_map", staff_meta, ttl=3600)
@@ -1301,15 +1314,27 @@ async def get_statewide_top_performers(
             if inactive_keys:
                 cache.set("inactive_staff_keys", list(inactive_keys), ttl=300)
 
-        # Load district targets
+        # Load district targets and staff month-specific targets
         dist_targets = {}
+        staff_month_targets = {}
         try:
             target_res = await get_targets(district=None, month=month)
             if target_res and "targets" in target_res:
                 for t in target_res["targets"]:
                     d_clean = canonicalize_district(t.get("district") or "")
-                    t_num = float(t.get("target") or 50)
-                    dist_targets[d_clean] = dist_targets.get(d_clean, 0) + t_num
+                    raw_t = t.get("target")
+                    if raw_t is not None and str(raw_t).strip() != "":
+                        try:
+                            t_num = float(raw_t)
+                        except (ValueError, TypeError):
+                            t_num = 50.0
+                    else:
+                        t_num = 50.0
+                    dist_targets[d_clean] = dist_targets.get(d_clean, 0.0) + t_num
+                    fo_raw = (t.get("fo_name") or t.get("name") or "").strip()
+                    if d_clean and fo_raw:
+                        norm_k = normalize_staff_key(d_clean, fo_raw)
+                        staff_month_targets[norm_k] = t_num
         except Exception:
             pass
 
@@ -1357,7 +1382,7 @@ async def get_statewide_top_performers(
                 district_counts[c_dist] = {
                     "district": c_dist,
                     "notifications": 0,
-                    "target": dist_targets.get(c_dist, 50),
+                    "target": dist_targets[c_dist] if c_dist in dist_targets else 50.0,
                     "percentage": 0.0
                 }
             district_counts[c_dist]["notifications"] += notifs
@@ -1423,20 +1448,33 @@ async def get_statewide_top_performers(
                 tc_counts[staff_key]["tests"] += tests
             else:
                 if staff_key not in fo_counts:
+                    # Check month-specific target first, then fallback to directory metadata
+                    assigned_target = staff_month_targets.get(norm_key)
+                    if assigned_target is None:
+                        raw_t = meta.get("target")
+                        if raw_t is not None and str(raw_t).strip() != "":
+                            try:
+                                assigned_target = float(raw_t)
+                            except (ValueError, TypeError):
+                                assigned_target = 50.0
+                        else:
+                            assigned_target = 50.0
                     fo_counts[staff_key] = {
                         "fo_name": display_name,
                         "district": c_dist,
                         "designation": desig or "Field Officer",
                         "notifications": 0,
-                        "target": float(meta.get("target", 50) or 50),
+                        "target": float(assigned_target),
                         "percentage": 0.0
                     }
                 fo_counts[staff_key]["notifications"] += notifs
 
         # Compute percentages for districts
         for d in district_counts.values():
-            t_val = d["target"]
-            if period == "weekly":
+            t_val = float(d.get("target", 50.0))
+            if t_val <= 0:
+                eff_target = 1.0
+            elif period == "weekly":
                 eff_target = max(1.0, float(round(t_val * 7 / 24)))
             elif period == "fortnightly":
                 eff_target = max(1.0, float(round(t_val * 15 / 24)))
@@ -1446,8 +1484,10 @@ async def get_statewide_top_performers(
 
         # Compute percentages for FO staff
         for s in fo_counts.values():
-            s_target = float(s.get("target") or 50.0)
-            if period == "weekly":
+            s_target = float(s.get("target", 50.0))
+            if s_target <= 0:
+                eff_target = 1.0
+            elif period == "weekly":
                 eff_target = max(1.0, float(round(s_target * 7 / 24)))
             elif period == "fortnightly":
                 eff_target = max(1.0, float(round(s_target * 15 / 24)))
@@ -2402,6 +2442,8 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
         cache.delete_prefix("profile_")
+        cache.delete_prefix("statewide_top_")
+        invalidate_staff_directory_cache()
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         actor_role = admin.get("role", "SUB_ADMIN")
