@@ -12,6 +12,7 @@ import {
   isPatientIdNotified 
 } from './offlineQueue'
 import { downloadOrShareCanvas } from './canvasShare'
+import { getOperationalMonth } from './utils/operationalMonth'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
 const getLocalYMD = (d = new Date()) => {
@@ -509,8 +510,7 @@ const MyProfileDashboard = ({
     const fetchStats = async () => {
       try {
         setLoading(true);
-        const today = new Date();
-        const monthStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
+        const monthStr = getOperationalMonth().operationalMonth;
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const res = await fetch(`${API_BASE_URL}/my-profile-stats`, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -5298,8 +5298,7 @@ function App() {
   const fetchFoMonthlyHistory = async (district, fo_name, pin) => {
     if (!district || !fo_name) return;
     try {
-      const today = new Date();
-      const monthStr = today.getFullYear() + "-" + String(today.getMonth() + 1).padStart(2, '0');
+      const monthStr = getOperationalMonth().operationalMonth;
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await fetch(`${API_BASE_URL}/my-profile-stats`, {
         method: "POST",
@@ -6729,6 +6728,14 @@ function App() {
           ) : (
             /* Main Dashboard */
             <div className="animate-fade-in w-full max-w-md mx-auto overflow-x-hidden">
+              {/* Day 1 Morning Reassurance Notice for Field Officers */}
+              {getOperationalMonth().isMonthEndGracePeriod && (
+                <div className="mb-4 p-3.5 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl flex items-center gap-2.5 text-xs text-amber-900 font-semibold shadow-2xs">
+                  <span className="text-base">📋</span>
+                  <span><strong>Notice:</strong> Subah 12:00 PM se pehle darj ki gayi report aapke pichhle mahine ({getOperationalMonth().graceClosingMonth}) ke target me judegi.</span>
+                </div>
+              )}
+
               {/* Top Urgent Notice Banner for Field Officers */}
               {activeFoBroadcasts.length > 0 && (
                 <div className="mb-5 space-y-3">
