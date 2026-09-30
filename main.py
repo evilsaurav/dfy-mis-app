@@ -10117,7 +10117,8 @@ async def update_pacing_settings(
             cache.delete_prefix(f"pacing_settings_{clean_month}")
             cache.delete_prefix("profile_")
         else:
-            cache.delete_prefix(f"profile_{clean_dist.lower()}_")
+            clean_dist_tag = clean_dist.replace(" ", "_").lower()
+            cache.delete_prefix(f"profile_{clean_dist_tag}_")
 
         # Log admin activity
         await log_admin_activity(

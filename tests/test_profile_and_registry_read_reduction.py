@@ -14,6 +14,7 @@ from main import (
     ENABLE_IN_MEMORY_DERIVATION,
     get_profile_cache_key,
     evict_officer_profile_cache,
+    create_access_token,
 )
 
 client = TestClient(app)
@@ -205,3 +206,40 @@ def test_my_profile_stats_kill_switch_disabled():
         assert resp.status_code == 200, resp.text
         assert resp.json()["source"] == "kill_switch_legacy"
         assert mock_legacy.called
+
+def test_update_pacing_settings_multi_word_district_profile_eviction():
+    """Verify updating pacing settings for multi-word district (e.g. East Champaran) evicts profile cache."""
+    # Officer in East Champaran (multi-word with space)
+    key_east_champ = get_profile_cache_key("East Champaran", "Arun Kumar", "2026-10")
+    # Officer in Patna
+    key_patna = get_profile_cache_key("Patna", "Alok Kumar", "2026-10")
+
+    cache.set(key_east_champ, {"data": "east_champaran_officer"})
+    cache.set(key_patna, {"data": "patna_officer"})
+
+    token = create_access_token({
+        "user_id": "super_admin",
+        "username": "super_admin",
+        "role": "SUPER_ADMIN",
+        "allowed_districts": ["All"]
+    })
+
+    with patch("main.db") as mock_db:
+        mock_db.collection.return_value.document.return_value.set = MagicMock()
+
+        resp = client.post(
+            "/admin/pacing/settings",
+            json={
+                "month": "2026-10",
+                "district": "East Champaran",
+                "declared_holidays": 3
+            },
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["success"] is True
+
+        # Key for East Champaran officer must be evicted
+        assert cache.get(key_east_champ) is None, "East Champaran profile cache should have been evicted!"
+        # Key for Patna officer must NOT be evicted (scoped district isolation)
+        assert cache.get(key_patna) == {"data": "patna_officer"}, "Patna profile cache should be preserved!"
