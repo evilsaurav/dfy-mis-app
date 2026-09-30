@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Firestore load)
 
-export const APP_VERSION = "2.8.5";
-export const LAST_UPDATED_DATE = "29 Sep 2026";
+export const APP_VERSION = "2.8.6";
+export const LAST_UPDATED_DATE = "30 Sep 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.8.6",
+    date: "30 Sep 2026",
+    title: "Staff Target Synchronization Across Admin Tools, Resilient Master Table Matching & Smart 12 PM Month-End Reporting Cutoff",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🎯 Unified Staff Target Synchronization: Synchronized staff target persistence across 'Set Targets' and 'Staff & PINs' admin suites. Target mutations now atomically write both month-scoped documents and general fallback documents with full cache invalidation.",
+      "👥 Staff & PINs Target Management: Added a dedicated Monthly Target input field inside the 'Edit Staff Details' modal, allowing supervisors to adjust designations, PINs, and monthly targets in a single unified form with automatic real-time dashboard refresh.",
+      "🔗 Resilient Master Table & Pacing Matching: Replaced rigid canonical matching with an alias-resilient matching engine, seamlessly linking field names and designations (e.g. Vinay Prakash ↔ Vinay Kumar / LT in Muzaffarpur) without dropping to default 50.",
+      "⏱️ Smart Month-End Reporting Cutoff: Enhanced the daily stealth cutoff to 11:00 AM IST on regular days, and extended the cutoff to 12:00 PM (Noon) on the 1st of every month for comprehensive month-end field reconciliation.",
+      "🛡️ Zero-Leakage Privacy & Cost Protection: Preserved strict 7:00 PM evening deadline messaging in the frontline mobile app with zero leak of internal grace cutoffs, while keeping Firestore reads and writes at zero additional cost."
+    ],
+    details: [
+      {
+        tag: "Target Architecture",
+        color: "indigo",
+        text: "Dual-write synchronization guarantees targets are instantly accessible by month-scoped queries and historical fallback engines."
+      },
+      {
+        tag: "Admin Suite UX",
+        color: "teal",
+        text: "Staff & PINs modal combines PIN reset, designation changes, and monthly target updates in one fast atomic operation."
+      },
+      {
+        tag: "Data Integrity",
+        color: "emerald",
+        text: "Resilient name matching eliminates fallback drops in Detailed Master Table, Performance Cards, and Staff Pacing Radar."
+      },
+      {
+        tag: "Reporting Grace",
+        color: "amber",
+        text: "Special 12:00 PM Noon closing grace on day 1 ensures all late month-end reports map accurately to the closing month."
+      }
+    ]
+  },
   {
     version: "v2.8.5",
     date: "29 Sep 2026",
     title: "17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Disk Spooling & Strict RBAC Download Security",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "📊 17-Indicator District KPI Excel Architecture: Extended the 33-sheet workbook generator across all sheets (Performance Sheet, Consolidated Sheet, and Daily Sheets 1st–31st) to support 3 new clinical indicators: Differentiated TB Care (DIFF TB), Preventive Therapy Treatment (TPT START), and Presumptive TPT (TPT PRESUMTIVE).",
       "🛡️ Render 512MB RAM Anti-OOM Engine: Completely eliminated in-memory bulk ZIP buffers by introducing disk-spooled temporary archive generation (tempfile.NamedTemporaryFile), 750ms queue pacing between district workbooks, and deterministic garbage collection (gc.collect()) under concurrency semaphores.",

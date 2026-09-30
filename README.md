@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.8.4-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.8.6-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -49,6 +49,8 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [20. Smart Reporting Streak Preservation (Sundays, Approved Leaves & Holidays)](#20--smart-reporting-streak-preservation-sundays-approved-leaves--holidays)
   - [21. Bihar Statewide 4-Role Top Performers Studio & Full-Width Analytics](#21--bihar-statewide-4-role-top-performers-studio--full-width-analytics)
   - [22. Official Doctors For You Branding & Visual Overhaul](#22--official-doctors-for-you-branding--visual-overhaul)
+  - [23. 17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Spooling & RBAC Security](#23--17-indicator-33-sheet-district-kpi-excel-engine-render-anti-oom-spooling--rbac-security)
+  - [24. Staff Target Synchronization Across Admin Tools, Resilient Master Matching & 12 PM Cutoff](#24--staff-target-synchronization-across-admin-tools-resilient-master-matching--12-pm-cutoff)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -389,6 +391,35 @@ flowchart TD
   - **Admin Leadership Dashboard**: Main navigation bar, Admin Login security card, and SOP Help Modal header.
   - **Browser & PWA Manifests**: High-resolution `favicon.png`, `favicon.ico`, `pwa-192x192.png`, and `pwa-512x512.png`.
   - **Export Posters**: Pre-cached cross-origin image decoding for instant inclusion in Canvas poster and card downloads.
+
+---
+
+### 23. 📊 17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Spooling & RBAC Security
+- **17 Clinical Indicator Spectrum**:
+  - Upgraded the 33-sheet monthly district KPI workbook generator to encompass 17 distinct clinical indicators, incorporating Differentiated TB Care (`DIFF TB`), Preventive Therapy Treatment (`TPT START`), and Presumptive TPT (`TPT PRESUMTIVE`).
+  - Populates Performance Sheet (Cols 1-21), Consolidated Sheet (Left Wing: 16 patient clusters in Cols 1-48; Right Wing: 17 indicators per staff starting at Col 49), and 31 Daily Tabs (Cols 3-19) with validated Nikshay and patient IDs.
+- **Render 512MB RAM Anti-OOM Protection**:
+  - Replaced in-memory ZIP streaming with disk-spooled temporary files (`tempfile.NamedTemporaryFile`) and explicit garbage collection (`gc.collect()`).
+  - Implements 750ms queue relaxation and concurrency semaphores to cap memory usage well below 150MB during full statewide 22-district bulk exports.
+- **Strict Sub-Admin RBAC Download Gates**:
+  - Restricts single-district workbook downloads to permitted districts with HTTP 403 enforcement.
+  - Multi-district bulk ZIP bundling is strictly restricted to statewide coordinators and Super Admins.
+- **Anti-Double-Tap & Concurrency Guards**:
+  - Replaced native `window.open` with authenticated blob streaming (`authFetch`), disabling export buttons with active spinners and feedback text to prevent duplicate execution.
+
+---
+
+### 24. 🎯 Staff Target Synchronization Across Admin Tools, Resilient Master Matching & 12 PM Cutoff
+- **Dual-Write Target Synchronization (`staff_targets`)**:
+  - Synchronizes target persistence across "Set Targets" and "Staff & PINs" admin tools. Mutations write both month-scoped documents (`{month}_{district}_{name}`) and fallback documents (`{district}_{name}`) with atomic multi-cache eviction (`targets_`, `staff_targets_raw_`, `profile_`, `attendance_`).
+- **Unified Staff & PINs Target Management**:
+  - Integrated Monthly Target editing directly within the "Edit Staff Details" modal in Admin Dashboard, allowing supervisors to adjust designations, PIN credentials, and monthly targets in a single atomic submission.
+- **Resilient Master Table & Pacing Name Matching (`isOfficerNameMatch`)**:
+  - Deployed an alias-resilient matching engine resolving naming variations (e.g. `Vinay Prakash` $\leftrightarrow$ `Vinay Kumar` / `LT` in Muzaffarpur) across the Detailed Master Table, Performance Cards, and Staff Pacing Radar, preventing erroneous fallbacks to default targets (50).
+- **Smart 12:00 PM Month-End Reporting Cutoff**:
+  - Extended daily stealth cutoff to 11:00 AM IST on regular days, and provides an extended 12:00 PM (Noon) cutoff on Day 1 of every month to accommodate late month-end field reconciliation and prevent premature date shifts.
+- **Strict Zero-Leakage Privacy & Cost Defense**:
+  - Preserved strict 7:00 PM evening deadline messaging in frontline mobile app UI with zero disclosure of internal cutoff thresholds, maintaining zero additional Firestore read/write costs.
 
 ---
 
