@@ -83,16 +83,40 @@ flowchart TD
 
 #### 4.1.1 Attendance Radar Derivation (`get_today_attendance`)
 Instead of streaming `daily_field_reports` for `target_date` and `next_date`, `get_today_attendance` will:
-1. Call `raw_docs = await get_raw_monthly_reports(target_month)`.
-2. Filter records entirely in-memory:
+1. Parse `target_date` and `target_month` (`target_month = target_date[:7]`).
+2. **Month-End Boundary Transition Guard (Loophole 2 Fix):**
+   - Submissions on Day 1 or Day 2 of a month before the stealth cutoff hour belong to the last day of the previous month.
+   - Similarly, Day 28+ reports can be submitted on Day 1 of the next month.
+   - To guarantee zero missed morning submissions across month boundaries:
+     ```python
+     raw_docs = list(await get_raw_monthly_reports(target_month))
+     target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
+     prev_month_str = (target_dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+     next_month_str = (target_dt.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
+
+     if target_dt.day <= 2:
+         prev_docs = await get_raw_monthly_reports(prev_month_str)
+         raw_docs.extend(prev_docs)
+     elif target_dt.day >= 28:
+         next_docs = await get_raw_monthly_reports(next_month_str)
+         raw_docs.extend(next_docs)
+     ```
+3. Filter records entirely in-memory:
    - Identify candidate reports where `date_of_reporting == target_date` or `date_of_reporting == next_date`.
    - Apply Stealth Cutoff rules:
      - If submitted on `target_date` before cutoff hour (11 AM), exclude (belongs to `target_date - 1`).
      - If submitted on `next_date` before cutoff hour (or marked `is_next_day_submission`), include as morning submission for `target_date`.
-3. Read `daily_staff_leaves` with a date-bounded query or from an in-memory leave cache (`leaves_{clean_month}`).
-4. Map officers against `get_cached_staff_directory_raw()`.
-5. Cache the final result in `cache.set(f"attendance_{target_date}_{effective_dist}", res, ttl=600)` (10 minutes instead of 60 seconds).
-6. **Firestore Reads per Call: 0.**
+4. Read `daily_staff_leaves` with a date-bounded query or from an in-memory leave cache (`leaves_{clean_month}`).
+5. Map officers against `get_cached_staff_directory_raw()`.
+6. **Sub-Admin RBAC Cache Collision Guard (Loophole 3 Fix):**
+   - To prevent cache poisoning or unauthorized data leakage between Super Admin and Sub-Admin queries, bind user role and ID into the cache key:
+     ```python
+     user_scope = "super" if admin.get("role") == "SUPER_ADMIN" else f"sub_{admin.get('user_id') or admin.get('username')}"
+     cache_key = f"attendance_{target_date}_{effective_dist}_{user_scope}"
+     ```
+   - Enforce strict Sub-Admin in-memory district boundary filtering before returning `res`.
+7. Cache the final result with `ttl=600` (10 minutes instead of 60 seconds).
+8. **Firestore Reads per Call: 0.**
 
 #### 4.1.2 FO Profile Stats Derivation (`my_profile_stats`)
 1. **Target and PIN Lookups:**
@@ -125,22 +149,28 @@ Instead of streaming `daily_field_reports` for `target_date` and `next_date`, `g
 3. Populate performance, consolidated, and daily sheets using existing logic.
 4. **Firestore Reads per Bulk Zip Generation: 0 (reduced from 4,400).**
 
-#### 4.1.4 In-Place Notification Registry Append
+#### 4.1.4 In-Place Notification Registry Append & Warm-up Fallback (Loophole 1 Fix)
 1. In `submit_daily_report`, do NOT delete `dist_notif_registry_{clean_dist}_`.
-2. Instead, load the existing in-memory registry object:
-   ```python
-   reg_cache_key = f"dist_notif_registry_{clean_wp}_{cur_month_str}_3"
-   cached_reg = cache.get(reg_cache_key)
-   if cached_reg and isinstance(cached_reg, dict) and "registry" in cached_reg:
-       for nid in valid_new_notifs:
-           cached_reg["registry"][nid] = {
-               "date": report.date_of_reporting,
-               "fo_name": report.fo_name,
-               "doc_id": doc_id
-           }
-       cached_reg["total_count"] = len(cached_reg["registry"])
-       cache.set(reg_cache_key, cached_reg, ttl=7200)
-   ```
+2. **Empty Cache Trap Defense:**
+   - If container restart or TTL expiry occurred, `cache.get(reg_cache_key)` returns `None`.
+   - Guard against silent ID dropping by fetching/caching a fresh snapshot before appending:
+     ```python
+     reg_cache_key = f"dist_notif_registry_{clean_wp}_{cur_month_str}_3"
+     cached_reg = cache.get(reg_cache_key)
+     if cached_reg is None or not isinstance(cached_reg, dict) or "registry" not in cached_reg:
+         # Cache miss fallback: Cold fetch to warm up registry cache
+         cached_reg = await fetch_district_notification_registry(clean_wp, months=3)
+
+     if cached_reg and isinstance(cached_reg, dict) and "registry" in cached_reg:
+         for nid in valid_new_notifs:
+             cached_reg["registry"][nid] = {
+                 "date": report.date_of_reporting,
+                 "fo_name": report.fo_name,
+                 "doc_id": doc_id
+             }
+         cached_reg["total_count"] = len(cached_reg["registry"])
+         cache.set(reg_cache_key, cached_reg, ttl=7200)
+     ```
 3. Avoid triggering the 90-day 500-doc Firestore scan on every submit.
 4. **Firestore Reads per Submit: 0 (reduced from 400).**
 
@@ -148,9 +178,16 @@ Instead of streaming `daily_field_reports` for `target_date` and `next_date`, `g
 
 ## 5. Frontend Implementation Specifications
 
-### 5.1 On-Demand Lazy Tab Loading (`AdminDashboard.jsx`)
+### 5.1 On-Demand Lazy Tab Loading (`AdminDashboard.jsx`) & TDZ Order Safety (Loophole 4 Fix)
 
-#### 5.1.1 Main Mount Optimization
+#### 5.1.1 Temporal Dead Zone (TDZ) Lexical Architecture
+To prevent runtime crashes (`ReferenceError: Cannot access 'fetchAttendance' before initialization`):
+1. **Tier 1:** Base state declarations (`useState`, `useRef`).
+2. **Tier 2:** Derived state collections (`useMemo`).
+3. **Tier 3:** Helper functions and data fetchers (`useCallback` for `fetchData`, `fetchAttendance`, `loadTargets`, `fetchTopPerformers`, etc.).
+4. **Tier 4:** Tab and modal trigger `useEffect` hooks declared **strictly after** the fetchers they invoke!
+
+#### 5.1.2 Main Mount Optimization
 In `AdminDashboard.jsx`, the primary `useEffect` will be restricted to:
 ```javascript
 // Clean Initial Mount: ONLY core data and directory lookup
@@ -164,7 +201,7 @@ useEffect(() => {
 ```
 Remove `fetchAttendance()`, `loadTargets('All')`, `fetchStaffList()`, `fetchTopPerformers()`, and `fetchPacingSettings()` from eager mount!
 
-#### 5.1.2 Tab / Modal Triggers
+#### 5.1.3 Tab / Modal Triggers (Declared after fetchers)
 1. **Attendance Radar:**
    ```javascript
    useEffect(() => {
@@ -201,19 +238,44 @@ Remove `fetchAttendance()`, `loadTargets('All')`, `fetchStaffList()`, `fetchTopP
    }, [showPacingModal, selectedDistrict, month]);
    ```
 
-### 5.2 Real-Time Delta Sync Engine (+1, +3, +20)
+### 5.2 Real-Time Delta Sync Engine (+1, +3, +20) & Deletion Sync (Loophole 5 Fix)
 
-#### 5.2.1 Client Delta State Management
+#### 5.2.1 Client Delta State Management with Tombstone Deletions
 When `fetchData(false, true)` runs on the 60s background interval or window focus:
 1. Send `{ month_prefix: month, since: lastSyncedTime, cached_count: rawRecords.length }`.
-2. If `mode === 'NO_CHANGE'`:
-   - Keep current records intact.
-   - Do not trigger any re-render or state changes.
-   - 0 network transfer, 0 Firestore reads.
-3. If `mode === 'DELTA'`:
-   - Merge `data.records` into existing `rawRecords` using `Map(id => record)`.
-   - Update `lastSyncedTime` to `data.synced_at`.
-   - If Attendance Radar or Top Performers modal is open, invalidate or update its state derived from the new records.
+2. Backend returns `deleted_ids` alongside new records:
+   ```python
+   return {
+       "status": "success",
+       "mode": "DELTA",
+       "synced_at": last_mut_str,
+       "records": delta_records,
+       "deleted_ids": recent_deletions
+   }
+   ```
+3. Frontend delta merge logic updates both deletions and upserts:
+   ```javascript
+   setRawRecords(prev => {
+     const currentList = (prev && prev.length > 0) ? prev : (cachedData?.records || []);
+     const recordMap = new Map(currentList.map(r => [r.id || r.doc_id, r]));
+
+     // 1. Remove deleted items
+     if (Array.isArray(data.deleted_ids)) {
+       data.deleted_ids.forEach(delId => recordMap.delete(delId));
+     }
+
+     // 2. Upsert updated / new items
+     if (Array.isArray(data.records)) {
+       data.records.forEach(newRec => {
+         const id = newRec.id || newRec.doc_id;
+         if (id) recordMap.set(id, newRec);
+       });
+     }
+
+     const updated = Array.from(recordMap.values());
+     return updated;
+   });
+   ```
 
 #### 5.2.2 Visibility Guard
 ```javascript
