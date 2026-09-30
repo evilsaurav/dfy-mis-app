@@ -536,14 +536,6 @@ const MyProfileDashboard = ({
     fetchStats();
   }, [formData, stats, setStats]);
 
-  useEffect(() => {
-    if (showFoAchievementModal && !stats) {
-      if (typeof onRefreshStats === 'function') {
-        onRefreshStats();
-      }
-    }
-  }, [showFoAchievementModal, stats, onRefreshStats]);
-
 
   const handleExecuteIdEdit = async (e) => {
     e.preventDefault();
@@ -5384,16 +5376,10 @@ function App() {
       fetchAndStoreDistrictRegistry(formData.working_place);
       if (formData.fo_name) {
         fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+        fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
       }
     }
   }, [isLoggedIn, formData.working_place, formData.fo_name, fetchAndStoreDistrictRegistry]);
-
-  // Lazy Profile & Monthly History Loading (0 initial mount reads, loads only on-demand when visiting Profile view)
-  useEffect(() => {
-    if (currentView === 'profile' && isLoggedIn && formData.working_place && formData.fo_name) {
-      fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
-    }
-  }, [currentView, isLoggedIn, formData.working_place, formData.fo_name, formData.pin]);
 
   const fetchFoBroadcasts = async (district) => {
     if (!district) return;

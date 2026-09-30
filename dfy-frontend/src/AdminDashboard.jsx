@@ -180,7 +180,6 @@ export default function AdminDashboard() {
   const topPerformersCanvasRef = useRef(null);
 
   const [showTargetModal, setShowTargetModal] = useState(false);
-  const [showTargetsModal, setShowTargetsModal] = useState(false);
   const [targetModalMonth, setTargetModalMonth] = useState(new Date().toISOString().slice(0, 7));
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
@@ -236,8 +235,6 @@ export default function AdminDashboard() {
     }
   });
   const [showStaffSuite, setShowStaffSuite] = useState(false);
-  const [showStaffModal, setShowStaffModal] = useState(false);
-  const [showPacingModal, setShowPacingModal] = useState(false);
   const [staffList, setStaffList] = useState([]);
   const [staffSearchQuery, setStaffSearchQuery] = useState("");
   const [staffFilterDistrict, setStaffFilterDistrict] = useState("All");
@@ -879,7 +876,7 @@ export default function AdminDashboard() {
   };
 
   // Zero-Firestore In-Memory Derivation: Instantly computes attendance from loaded rawRecords (0 reads, 0 Render load)
-  const deriveAttendanceFromRecords = useCallback((targetDate) => {
+  const deriveAttendanceFromRecords = (targetDate) => {
     if (!staffDirectory || Object.keys(staffDirectory).length === 0 || !rawRecords) return null;
 
     const allowedDistSet = (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All'))
@@ -1055,9 +1052,9 @@ export default function AdminDashboard() {
       missing_fos: missingFos,
       is_derived: true
     };
-  }, [staffDirectory, rawRecords, currentUser, staffList, attendance]);
+  };
 
-  const fetchAttendance = useCallback(async (force = false, targetDate = attendanceDate) => {
+  const fetchAttendance = async (force = false, targetDate = attendanceDate) => {
     const isWithinLoadedMonth = targetDate && targetDate.slice(0, 7) === month;
     const todayStr = new Date().toISOString().slice(0, 10);
     const isPastDateInMonth = isWithinLoadedMonth && targetDate !== todayStr;
@@ -1100,7 +1097,7 @@ export default function AdminDashboard() {
     } finally {
       setIsAttendanceLoading(false);
     }
-  }, [attendanceDate, month, rawRecords, deriveAttendanceFromRecords, currentUser, authFetch]);
+  };
 
   const fetchBackupStatus = async () => {
     setBackupLoading(true);
@@ -1403,7 +1400,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchPacingSettings = useCallback(async (targetMonth = month, targetDistrict = selectedDistrict) => {
+  const fetchPacingSettings = async (targetMonth = month, targetDistrict = selectedDistrict) => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       let distParam = "all";
@@ -1422,7 +1419,7 @@ export default function AdminDashboard() {
     } catch (err) {
       console.error("Fetch pacing settings error:", err);
     }
-  }, [month, selectedDistrict, currentUser, authFetch]);
+  };
 
   const handleUpdatePacingHolidays = async (delta) => {
     const newCount = Math.max(0, Math.min(15, (Number(pacingHolidaysCount) || 0) + delta));
@@ -1956,7 +1953,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const loadTargets = useCallback(async (dist = 'All', monthVal = null) => {
+  const loadTargets = async (dist = 'All', monthVal = null) => {
       try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const targetMonth = monthVal || month || targetModalMonth || new Date().toISOString().slice(0, 7);
@@ -1972,7 +1969,7 @@ export default function AdminDashboard() {
       } catch(err) {
           console.error("loadTargets error", err);
       }
-  }, [month, targetModalMonth, currentUser]);
+  };
 
   const handleTargetChange = (district, fo_name, value) => {
       setTargetsData(prev => {
@@ -2257,7 +2254,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchStaffList = useCallback(async () => {
+  const fetchStaffList = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const params = new URLSearchParams();
@@ -2273,7 +2270,7 @@ export default function AdminDashboard() {
     } catch (e) {
       console.error("Failed to fetch staff list", e);
     }
-  }, [currentUser, authFetch]);
+  };
 
   const handleExecuteUpdatePin = async (e) => {
     e.preventDefault();
@@ -3353,49 +3350,25 @@ export default function AdminDashboard() {
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
 
-  // Global & Session Data Fetching (runs on month change, auth)
+  // Global & Session Data Fetching (runs on month change, auth, or period toggle)
   useEffect(() => {
     if (isAuthenticated) { 
       fetchData(false); 
+      fetchAttendance(); 
       fetchDirectory(); 
+      loadTargets('All'); 
+      fetchStaffList(); 
       fetchActiveBroadcasts();
-    }
-  }, [month, isAuthenticated]);
-
-  // Lazy Tab Loading: Attendance Radar (fires only on-demand when modal is opened)
-  useEffect(() => {
-    if (showAttendanceModal) {
-      fetchAttendance();
-    }
-  }, [showAttendanceModal, fetchAttendance]);
-
-  // Lazy Tab Loading: Top Performers Studio (fires only on-demand when modal is opened or period toggled)
-  useEffect(() => {
-    if (showTopPerformersModal) {
       fetchTopPerformers(topPerformersPeriod);
     }
-  }, [showTopPerformersModal, topPerformersPeriod, fetchTopPerformers]);
+  }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
 
-  // Lazy Tab Loading: Staff Management (fires only on-demand when modal is opened)
+  // District-Specific Settings (runs only when selected district changes)
   useEffect(() => {
-    if (showStaffModal || showStaffSuite) {
-      fetchStaffList();
-    }
-  }, [showStaffModal, showStaffSuite, fetchStaffList]);
-
-  // Lazy Tab Loading: Staff Pacing & Targets (fires only on-demand when tab or modal is opened)
-  useEffect(() => {
-    if (showPacingModal || showTargetModal || showTargetsModal || activeMainTab === 'staff_pacing') {
-      loadTargets('All');
-    }
-  }, [showPacingModal, showTargetModal, showTargetsModal, activeMainTab, loadTargets]);
-
-  // District-Specific Settings (runs only when selected district changes and pacing is active)
-  useEffect(() => {
-    if (isAuthenticated && selectedDistrict && (showPacingModal || activeMainTab === 'staff_pacing')) {
+    if (isAuthenticated && selectedDistrict) {
       fetchPacingSettings(month, selectedDistrict);
     }
-  }, [selectedDistrict, isAuthenticated, month, showPacingModal, activeMainTab, fetchPacingSettings]);
+  }, [selectedDistrict, isAuthenticated, month]);
 
   // Lazy Tab Loading: Fetch Duplicate Audit & Duplicate Scan when modal is opened
   useEffect(() => {
