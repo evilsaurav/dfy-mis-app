@@ -301,3 +301,34 @@ def test_download_excel_derives_from_get_raw_monthly_reports():
         assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         assert len(resp.content) > 0
         mock_raw.assert_awaited_once_with("2026-09")
+
+
+def test_download_kpi_workbook_endpoint_uses_async_master_ledger():
+    """Verify calling /download-kpi-workbook routes through generate_district_kpi_bytes_async with zero raw report firestore streams."""
+    dummy_bytes = b"PK\x03\x04mockkpibytes"
+    token = make_admin_token()
+
+    with patch("main.generate_district_kpi_bytes_async", AsyncMock(return_value=dummy_bytes)) as mock_async_gen, \
+         patch.object(main, "db") as mock_db:
+
+        def forbidden_coll(name):
+            if name in ("daily_field_reports", "staff_targets"):
+                raise AssertionError(f"Collection '{name}' must NOT be streamed directly during /download-kpi-workbook!")
+            col = MagicMock()
+            col.where.return_value = col
+            col.stream.return_value = []
+            return col
+
+        mock_db.collection.side_effect = forbidden_coll
+
+        resp = client.get(
+            "/download-kpi-workbook?district=Patna&month=2026-09",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.content == dummy_bytes
+        assert "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" in resp.headers["content-type"]
+        assert "KPI_Report_Patna_2026-09.xlsx" in resp.headers["content-disposition"]
+        mock_async_gen.assert_awaited_once_with("Patna", "2026-09")
+

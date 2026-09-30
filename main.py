@@ -2595,8 +2595,6 @@ def generate_district_kpi_bytes(
 
         # 1. Fetch Targets (Prioritizing Month-Scoped Target)
         target_map = {}
-        if target_records is None and month_prefix:
-            target_records = cache.get(f"staff_targets_raw_{month_prefix}")
 
         c_dist = canonicalize_district(district)
         alias_dists = {c_dist.lower(), district.lower()}
@@ -2636,9 +2634,6 @@ def generate_district_kpi_bytes(
                 print(f"Target fetch notice for {district}: {e}")
 
         # 2. Fetch and Sort Daily Field Reports for this District and Month
-        if raw_reports is None and month_prefix:
-            raw_reports = cache.get(f"shared_raw_month_{month_prefix}")
-
         reports = []
         if raw_reports is not None:
             seen_report_ids = set()
@@ -2991,7 +2986,7 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
                 )
 
         async with KPI_EXCEL_SEMAPHORE:
-            excel_bytes = await asyncio.to_thread(lambda: generate_district_kpi_bytes(district, month))
+            excel_bytes = await generate_district_kpi_bytes_async(district, month)
             if not excel_bytes:
                 raise HTTPException(status_code=404, detail=f"Template for {district} not found on server.")
                 
