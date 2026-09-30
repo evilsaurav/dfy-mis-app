@@ -19,7 +19,7 @@ def make_admin_token(role: str = "SUPER_ADMIN", allowed_districts=None, user_id=
         "username": username,
         "name": "Test Admin",
         "role": role,
-        "allowed_districts": allowed_districts or ["All"]
+        "allowed_districts": allowed_districts if allowed_districts is not None else ["All"]
     })
 
 class MockDocRef:
@@ -330,3 +330,80 @@ async def test_sub_admin_rbac_cache_key_isolation_and_boundary_enforcement():
             assert cache.get(sub_cache_key) is not None, f"Expected cache key {sub_cache_key} to be set"
             # Ensure super cache was NOT overwritten by sub-admin
             assert cache.get(super_cache_key)["total_staff"] == 2
+
+
+@pytest.mark.asyncio
+async def test_sub_admin_empty_allowed_districts_isolation_and_403():
+    """
+    Sub-Admin with empty allowed_districts ([]):
+    1. Querying without districts param must return 0 staff and 0 submissions (zero leakage).
+    2. Cache key must use '_none_' instead of '_all_'.
+    3. Querying with ?districts=Patna must raise HTTP 403 Forbidden.
+    """
+    mock_db = MockFirestore()
+    mock_db.store["staff_directory"] = {
+        "patna_vikas": {
+            "name": "Vikas Verma",
+            "district": "Patna",
+            "designation": "Field Officer",
+            "is_active": True
+        }
+    }
+    ts_patna = datetime(2026, 9, 25, 15, 0, tzinfo=IST_TIMEZONE)
+    mock_db.store["daily_field_reports"] = {
+        "patna_vikas_verma_2026-09-25": {
+            "fo_name": "Vikas Verma",
+            "working_place": "Patna",
+            "date_of_reporting": "2026-09-25",
+            "timestamp_completed": ts_patna,
+            "submission_count": 1,
+            "notification_ids": ["P1"]
+        }
+    }
+    mock_db.store["daily_staff_leaves"] = {}
+
+    sub_empty_token = make_admin_token(
+        role="SUB_ADMIN",
+        allowed_districts=[],
+        user_id="sub_empty_99",
+        username="sub_empty"
+    )
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            # 1. Querying without params
+            res = await ac.get(
+                "/admin/today-attendance?date=2026-09-25",
+                headers={"Authorization": f"Bearer {sub_empty_token}"}
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["total_staff"] == 0
+            assert data["submitted_count"] == 0
+            assert data["submitted_fos"] == []
+            assert data["missing_fos"] == []
+
+            # Check cache key has 'none'
+            expected_key = "attendance_2026-09-25_none_sub_sub_empty_99"
+            assert cache.get(expected_key) is not None
+
+            # 2. Querying forbidden district ?districts=Patna
+            res_forbidden = await ac.get(
+                "/admin/today-attendance?date=2026-09-25&districts=Patna",
+                headers={"Authorization": f"Bearer {sub_empty_token}"}
+            )
+            assert res_forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_get_raw_monthly_reports_empty_filter():
+    """
+    get_raw_monthly_reports with district_filter=set() must immediately return [] without querying Firestore.
+    """
+    mock_db = MockFirestore()
+    with patch("main.db", mock_db):
+        res = await main.get_raw_monthly_reports("2026-09", district_filter=set())
+        assert res == []
+        assert len(mock_db.stream_calls) == 0
+

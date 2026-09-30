@@ -924,6 +924,9 @@ async def get_raw_monthly_reports(
     /admin/duplicate-audit, and pacing queries run concurrently.
     Queries Firestore by monthly date range and performs in-memory canonical district filtering.
     """
+    if district_filter is not None and len(district_filter) == 0:
+        return []
+
     clean_dists = set()
     if district_filter:
         clean_dists = {canonicalize_district(d).lower() for d in district_filter if d and str(d).strip().lower() != "all"}
@@ -3602,20 +3605,18 @@ async def get_today_attendance(
         subadmin_allowed = None
         if admin_role == "SUB_ADMIN":
             admin_allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
-            if admin_allowed and "All" not in admin_allowed:
-                subadmin_allowed = set([canonicalize_district(d.strip()).lower() for d in admin_allowed if d.strip()])
+            if not admin_allowed or "All" not in admin_allowed:
+                subadmin_allowed = set([canonicalize_district(d.strip()).lower() for d in (admin_allowed or []) if d and d.strip()])
                 if allowed_dist_set is not None:
                     forbidden = allowed_dist_set - subadmin_allowed
                     if forbidden:
                         raise HTTPException(status_code=403, detail="Permission denied. You do not have access to the requested district(s).")
                     allowed_dist_set = allowed_dist_set.intersection(subadmin_allowed)
                 else:
-                    allowed_dist_set = subadmin_allowed
-            elif not admin_allowed or "All" not in admin_allowed:
-                allowed_dist_set = set()
+                    allowed_dist_set = set(subadmin_allowed)
 
         user_scope = "super" if admin_role == "SUPER_ADMIN" else f"sub_{admin.get('user_id') or admin.get('sub') or admin.get('username')}"
-        effective_dist = ",".join(sorted(allowed_dist_set)) if allowed_dist_set else (districts or 'all').lower()
+        effective_dist = (",".join(sorted(allowed_dist_set)) or 'none') if allowed_dist_set is not None else (districts or 'all').lower()
         cache_key = f"attendance_{target_date}_{effective_dist}_{user_scope}"
         if force_refresh:
             cache.delete(cache_key)
@@ -3678,7 +3679,7 @@ async def get_today_attendance(
                 fo_name = (d.get("name") or "").strip()
                 if not dist or not fo_name:
                     continue
-                if allowed_dist_set and dist.lower() not in allowed_dist_set:
+                if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
                     continue
 
                 norm_key = normalize_staff_key(dist, fo_name)
@@ -3720,7 +3721,7 @@ async def get_today_attendance(
             if cached_dir and isinstance(cached_dir, dict):
                 for dist, names in cached_dir.items():
                     c_dist = canonicalize_district(dist)
-                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                    if allowed_dist_set is not None and c_dist.lower() not in allowed_dist_set:
                         continue
                     for clean_fo in names:
                         if clean_fo and str(clean_fo).strip():
@@ -3740,7 +3741,7 @@ async def get_today_attendance(
                 cached_dir = load_baseline_staff_directory()
                 for dist, names in (cached_dir or {}).items():
                     c_dist = canonicalize_district(dist)
-                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
+                    if allowed_dist_set is not None and c_dist.lower() not in allowed_dist_set:
                         continue
                     for clean_fo in names:
                         if clean_fo and str(clean_fo).strip():
@@ -3801,7 +3802,7 @@ async def get_today_attendance(
             if not d:
                 continue
             dist = canonicalize_district(d.get('working_place', '') or d.get('district', ''))
-            if allowed_dist_set and dist.lower() not in allowed_dist_set:
+            if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
                 continue
             fo_raw_name = d.get('fo_name', '').strip()
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', fo_raw_name).lower()
@@ -3899,7 +3900,7 @@ async def get_today_attendance(
             if not ld:
                 continue
             dist = canonicalize_district(ld.get("district", ""))
-            if allowed_dist_set and dist.lower() not in allowed_dist_set:
+            if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
                 continue
             clean_fo = re.sub(r'[^a-zA-Z0-9]', '', ld.get("fo_name", "")).lower()
             lkey = f"{dist}_{clean_fo}".replace(" ", "").lower()
