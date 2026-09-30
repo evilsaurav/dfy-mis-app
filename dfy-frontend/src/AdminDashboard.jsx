@@ -88,6 +88,12 @@ const isOfficerNameMatch = (nameA, nameB, dist = '') => {
   return false;
 };
 
+const parseTargetVal = (tObj, fallback = 50) => {
+  if (!tObj || tObj.target === undefined || tObj.target === null || tObj.target === '') return fallback;
+  const num = Number(tObj.target);
+  return isNaN(num) ? fallback : num;
+};
+
 const formatAuditTimestamp = (ts, tsFormatted) => {
   if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
     return tsFormatted;
@@ -1952,15 +1958,12 @@ export default function AdminDashboard() {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const targetMonth = monthVal || month || targetModalMonth || new Date().toISOString().slice(0, 7);
           let q = `?month=${targetMonth}`;
-          if (dist && dist !== 'All') {
-            q += `&district=${encodeURIComponent(dist)}`;
-          }
           if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
             q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
           }
           const res = await fetch(`${API_BASE_URL}/get-targets${q}`);
           const data = await res.json();
-          if(data.success) {
+          if(data.success && Array.isArray(data.targets)) {
               setTargetsData(data.targets);
           }
       } catch(err) {
@@ -1970,11 +1973,18 @@ export default function AdminDashboard() {
 
   const handleTargetChange = (district, fo_name, value) => {
       setTargetsData(prev => {
-          const exists = prev.find(t => t.fo_name === fo_name && t.district === district);
-          if (exists) {
-              return prev.map(t => (t.fo_name === fo_name && t.district === district) ? { ...t, target: Number(value) } : t);
+          const cDist = canonicalizeDistrict(district);
+          const parsed = value === '' ? '' : Number(value);
+          const idx = (prev || []).findIndex(t => 
+            canonicalizeDistrict(t.district) === cDist && 
+            isOfficerNameMatch(t.fo_name, fo_name, cDist)
+          );
+          if (idx >= 0) {
+              const updated = [...prev];
+              updated[idx] = { ...updated[idx], target: parsed };
+              return updated;
           } else {
-              return [...prev, { fo_name, district, target: Number(value) }];
+              return [...(prev || []), { fo_name, district, target: parsed }];
           }
       });
   };
@@ -4285,7 +4295,7 @@ const availableDistrictsForFeed = useMemo(() => {
         (isOfficerNameMatch(canonicalizeFo(t.fo_name, targetDist, staffDirectory), fo, targetDist) ||
          isOfficerNameMatch(t.fo_name, fo, targetDist))
       );
-      const target = targetObj ? (Number(targetObj.target) || 0) : 0;
+      const target = parseTargetVal(targetObj, foRecs.length > 0 ? 50 : 0);
       const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
       return {
         name: fo,
@@ -4460,7 +4470,7 @@ const availableDistrictsForFeed = useMemo(() => {
           const tCanonical = canonicalizeFo(t.fo_name, cDist, staffDirectory);
           return isOfficerNameMatch(tCanonical, key, cDist) || isOfficerNameMatch(t.fo_name, key, cDist);
         });
-        map[key].target = tObj ? (Number(tObj.target) || 50) : 50;
+        map[key].target = parseTargetVal(tObj, 50);
       }
     });
 
@@ -4693,7 +4703,7 @@ const availableDistrictsForFeed = useMemo(() => {
         if (!t.fo_name || !t.district) return false;
         return canonicalizeDistrict(t.district) === cDist && isOfficerNameMatch(t.fo_name, c.name, cDist);
       });
-      const target = tObj ? (Number(tObj.target) || 0) : 50;
+      const target = parseTargetVal(tObj, 50);
 
       // Find monthly records with normalized trimmed matching
       const officerRecords = rawRecords.filter(r => {
@@ -8983,7 +8993,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                         district: s.district,
                                         newPin: s.pin,
                                         designation: s.designation || 'Field Officer',
-                                        target: tObj ? tObj.target : 50,
+                                        target: parseTargetVal(tObj, 50),
                                         error: ''
                                       });
                                     }}
@@ -11066,7 +11076,7 @@ const availableDistrictsForFeed = useMemo(() => {
           (isOfficerNameMatch(t.fo_name, inspectingFO.fo_name, inspectingFO.district) ||
            isOfficerNameMatch(canonicalizeFo(t.fo_name, inspectingFO.district, staffDirectory), inspectingFO.fo_name, inspectingFO.district))
         );
-        const targetNum = targetObj ? Number(targetObj.target) : 0;
+        const targetNum = parseTargetVal(targetObj, 0);
         const pct = targetNum > 0 ? Math.min(100, Math.round((totalNotif / targetNum) * 100)) : 0;
 
         const categoriesConfig = [
@@ -12719,7 +12729,7 @@ const availableDistrictsForFeed = useMemo(() => {
                     onChange={(e) => {
                       const newM = e.target.value;
                       setTargetModalMonth(newM);
-                      loadTargets(targetModalDistrict, newM);
+                      loadTargets('All', newM);
                     }}
                     className="text-xs font-black text-slate-800 outline-none bg-transparent cursor-pointer"
                   />
@@ -12730,7 +12740,6 @@ const availableDistrictsForFeed = useMemo(() => {
                   value={targetModalDistrict} 
                   onChange={(e) => {
                     setTargetModalDistrict(e.target.value);
-                    loadTargets(e.target.value, targetModalMonth);
                   }}
                   className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 shadow-xs"
                 >
@@ -12781,9 +12790,13 @@ const availableDistrictsForFeed = useMemo(() => {
             <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
               {(targetModalDistrict === 'All' ? targetModalDistricts : [targetModalDistrict]).map(dist => {
                 const officers = staffDirectory[dist] || [];
+                const cDist = canonicalizeDistrict(dist);
                 const distTotal = officers.reduce((sum, fo) => {
-                  const tData = targetsData.find(t => t.fo_name === fo && t.district === dist);
-                  return sum + (tData ? (Number(tData.target) || 0) : 50);
+                  const tData = targetsData.find(t => 
+                    canonicalizeDistrict(t.district) === cDist && 
+                    (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                  );
+                  return sum + parseTargetVal(tData, 50);
                 }, 0);
 
                 return (
@@ -12802,8 +12815,11 @@ const availableDistrictsForFeed = useMemo(() => {
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {officers.map(fo => {
-                        const tData = targetsData.find(t => t.fo_name === fo && t.district === dist);
-                        const currentTarget = tData ? tData.target : 50;
+                        const tData = targetsData.find(t => 
+                          canonicalizeDistrict(t.district) === cDist && 
+                          (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                        );
+                        const currentTarget = parseTargetVal(tData, 50);
                         return (
                           <div key={fo} className="flex justify-between items-center bg-white border border-slate-100 hover:border-purple-200 p-3 rounded-xl transition-colors shadow-2xs">
                             <div className="truncate mr-2">

@@ -188,3 +188,57 @@ async def test_update_staff_details_syncs_month_and_fallback_targets():
 
             assert fallback_target_key in targets_store, "Fallback target doc must be written"
             assert targets_store[fallback_target_key]["target"] == 75
+
+            # Verify alias documents also synced
+            alias_month_key = f"{current_month}_muzaffarpur_vinaykumar"
+            alias_fallback_key = "muzaffarpur_vinaykumar"
+            assert alias_month_key in targets_store, "Alias month target must be synced"
+            assert targets_store[alias_month_key]["target"] == 75
+            assert alias_fallback_key in targets_store, "Alias fallback target must be synced"
+            assert targets_store[alias_fallback_key]["target"] == 75
+
+@pytest.mark.asyncio
+async def test_update_staff_details_allows_zero_target():
+    """
+    Verify that updating an officer's target to 0 (e.g. for Lab Technicians)
+    is properly accepted and persisted without dropping to default 50.
+    """
+    mock_db = MockFirestore()
+    doc_id = "muzaffarpur_vinayprakash"
+    mock_db.store["staff_directory"] = {
+        doc_id: {
+            "name": "Vinay Prakash",
+            "district": "Muzaffarpur",
+            "pin": "1234",
+            "designation": "Lab Technician (LT)",
+            "status": "active"
+        }
+    }
+    token = create_access_token({
+        "sub": "admin",
+        "name": "Super Admin",
+        "role": "SUPER_ADMIN",
+        "allowed_districts": ["All"]
+    })
+    headers = {"Authorization": f"Bearer {token}"}
+    current_month = datetime.now().strftime("%Y-%m")
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post(
+                "/admin/staff/update-details",
+                headers=headers,
+                json={
+                    "district": "Muzaffarpur",
+                    "name": "Vinay Prakash",
+                    "new_pin": "7276",
+                    "designation": "Lab Technician (LT)",
+                    "target": 0
+                }
+            )
+            assert res.status_code == 200
+            targets_store = mock_db.store["staff_targets"]
+            month_key = f"{current_month}_muzaffarpur_vinayprakash"
+            assert targets_store[month_key]["target"] == 0, "Target of 0 must be persisted in month-scoped target"
+            assert targets_store["muzaffarpur_vinayprakash"]["target"] == 0, "Target of 0 must be persisted in fallback target"

@@ -455,6 +455,24 @@ def normalize_staff_key(dist_str: str, name_str: str) -> str:
     collapsed = re.sub(r'(.)\1+', r'\1', n)
     return f"{d}_{collapsed}"
 
+def is_officer_name_match(name_a: str, name_b: str, district: str = "") -> bool:
+    if not name_a or not name_b:
+        return False
+    a = str(name_a).strip().lower()
+    b = str(name_b).strip().lower()
+    if a == b:
+        return True
+    # Proven legacy alias: Ashwani Kumar <-> Ashwani Kr Keshri (Bhojpur)
+    if (a in ("ashwani kumar", "ashwani kr keshri")) and (b in ("ashwani kumar", "ashwani kr keshri")):
+        return True
+    # Targeted alias: Vinay Prakash <-> Vinay Kumar / Vinay Kumar LT (Muzaffarpur LT)
+    c_dist = canonicalize_district(district).lower() if district else ""
+    if not district or c_dist == "muzaffarpur":
+        aliases = ("vinay prakash", "vinay kumar", "vinay kumar lt")
+        if a in aliases and b in aliases:
+            return True
+    return False
+
 def load_baseline_staff_directory():
     directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
     if os.path.exists("staff_directory_snapshot.json"):
@@ -2297,7 +2315,19 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                 elif key in default_targets:
                     t_val = default_targets[key]["target"]
                 else:
-                    t_val = 50
+                    # Resilient alias lookup
+                    t_val = None
+                    for mt_key, mt_obj in month_targets.items():
+                        if canonicalize_district(mt_obj.get("district", "")) == canonicalize_district(s_dist) and is_officer_name_match(mt_obj.get("fo_name"), s_name, s_dist):
+                            t_val = mt_obj.get("target")
+                            break
+                    if t_val is None:
+                        for dt_key, dt_obj in default_targets.items():
+                            if canonicalize_district(dt_obj.get("district", "")) == canonicalize_district(s_dist) and is_officer_name_match(dt_obj.get("fo_name"), s_name, s_dist):
+                                t_val = dt_obj.get("target")
+                                break
+                    if t_val is None:
+                        t_val = 50
                     
                 targets.append({
                     "fo_name": s_name,
@@ -2345,7 +2375,28 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }, merge=True))
         
+        # 3. Synchronize alias documents if applicable (e.g. Vinay Prakash <-> Vinay Kumar in Muzaffarpur)
+        if clean_dist.lower() == "muzaffarpur" and clean_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
+            for alias in ("Vinay Prakash", "Vinay Kumar"):
+                if alias.lower() != clean_name.lower():
+                    a_mid = f"{month}_{clean_dist}_{alias}".replace(" ", "").lower()
+                    a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
+                    await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_mid).set({
+                        "month": month,
+                        "district": clean_dist,
+                        "fo_name": alias,
+                        "target": int(data.target),
+                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }, merge=True))
+                    await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_fid).set({
+                        "district": clean_dist,
+                        "fo_name": alias,
+                        "target": int(data.target),
+                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    }, merge=True))
+        
         cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
         cache.delete_prefix("profile_")
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -5958,7 +6009,7 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         }
         await asyncio.to_thread(lambda: doc_ref.set(payload))
         
-        target_val = int(req.target or 50)
+        target_val = int(req.target) if req.target is not None and str(req.target).strip() != "" else 50
         current_month = get_ist_now().strftime("%Y-%m")
         # 1. Month-scoped document
         month_doc_id = f"{current_month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
@@ -6107,7 +6158,7 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
             
         await asyncio.to_thread(lambda: doc_ref.update(update_data))
         
-        if req.target is not None and req.target > 0:
+        if req.target is not None and str(req.target).strip() != "" and int(req.target) >= 0:
             target_val = int(req.target)
             current_month = get_ist_now().strftime("%Y-%m")
             # 1. Month-scoped document
@@ -6128,6 +6179,27 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
                 "target": target_val,
                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }, merge=True))
+
+            # 3. Synchronize alias documents if applicable (e.g. Vinay Prakash <-> Vinay Kumar in Muzaffarpur)
+            if clean_dist.lower() == "muzaffarpur" and clean_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
+                for alias in ("Vinay Prakash", "Vinay Kumar"):
+                    if alias.lower() != clean_name.lower():
+                        a_mid = f"{current_month}_{clean_dist}_{alias}".replace(" ", "").lower()
+                        a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
+                        await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_mid).set({
+                            "month": current_month,
+                            "district": clean_dist,
+                            "fo_name": alias,
+                            "target": target_val,
+                            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }, merge=True))
+                        await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_fid).set({
+                            "district": clean_dist,
+                            "fo_name": alias,
+                            "target": target_val,
+                            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        }, merge=True))
+
             diff_info["target"] = target_val
             diff_info["month"] = current_month
             

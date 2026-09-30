@@ -68,4 +68,28 @@ assert(
   "handleExecuteUpdatePin must send target and call loadTargets('All', month)"
 );
 
+// Test 8: Verify parseTargetVal helper is defined and correctly preserves 0 targets
+assert(
+  adminCode.includes('const parseTargetVal = (tObj, fallback = 50) => {'),
+  "parseTargetVal helper function must be defined"
+);
+
+const parseTargetVal = (tObj, fallback = 50) => {
+  if (!tObj || tObj.target === undefined || tObj.target === null || tObj.target === '') return fallback;
+  const num = Number(tObj.target);
+  return isNaN(num) ? fallback : num;
+};
+
+assert.strictEqual(parseTargetVal({ target: 0 }), 0, 'Target of 0 must be preserved as 0, not defaulted to 50');
+assert.strictEqual(parseTargetVal({ target: "0" }), 0, 'Target of "0" string must be parsed as 0');
+assert.strictEqual(parseTargetVal({ target: 60 }), 60, 'Target of 60 must be returned as 60');
+assert.strictEqual(parseTargetVal(undefined), 50, 'Undefined target must fallback to 50');
+assert.strictEqual(parseTargetVal({ target: null }), 50, 'Null target must fallback to 50');
+
+// Test 9: Verify Detailed Master Table uses parseTargetVal
+assert(
+  adminCode.includes('map[key].target = parseTargetVal(tObj, 50);'),
+  "Detailed Master Table must use parseTargetVal(tObj, 50)"
+);
+
 console.log("✓ All Staff Target Sync & Master Table Resilient Matching Tests Passed!");
