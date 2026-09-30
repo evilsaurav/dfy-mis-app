@@ -1243,7 +1243,7 @@ async def get_statewide_top_performers(
         now_dt = datetime.utcnow() + timedelta(hours=5, minutes=30)
         today_str = now_dt.strftime("%Y-%m-%d")
         if not month:
-            month = now_dt.strftime("%Y-%m")
+            month = get_active_operational_month(now_dt)
             
         period = (period or "monthly").lower().strip()
         if period not in ("weekly", "fortnightly", "monthly"):
@@ -1728,15 +1728,30 @@ async def verify_pin(data: PinCheck):
             return {"valid": True, "fallback": True}
         return {"valid": False}
 
-def get_reporting_cutoff_hour(now_ist: datetime) -> int:
+def get_reporting_cutoff_hour(now_ist: Optional[datetime] = None) -> int:
     """
     Returns cutoff hour for next-day grace reporting:
     - 12 PM (Noon) on 1st of month for month-end close reconciliation.
     - 11 AM IST on all other days.
     """
+    if now_ist is None:
+        now_ist = get_ist_now()
     if hasattr(now_ist, 'day') and now_ist.day == 1:
         return 12
     return 11
+
+def get_active_operational_month(now_ist: Optional[datetime] = None) -> str:
+    """
+    Returns the active operational reporting month:
+    - On 1st of month before 12:00 PM Noon, returns previous month (YYYY-MM).
+    - Otherwise returns current calendar month (YYYY-MM).
+    """
+    if now_ist is None:
+        now_ist = get_ist_now()
+    if hasattr(now_ist, 'day') and now_ist.day == 1 and now_ist.hour < 12:
+        prev_month_dt = now_ist.replace(day=1) - timedelta(days=1)
+        return prev_month_dt.strftime("%Y-%m")
+    return now_ist.strftime("%Y-%m")
 
 async def resolve_effective_reporting_date(
     fo_name: str, 
@@ -1809,7 +1824,8 @@ async def check_today_status(req: CheckStatusRequest):
 
         now_ist = get_ist_now()
         today_str = now_ist.strftime("%Y-%m-%d")
-        if res.get("status") != "completed" and now_ist.hour < 10 and req.date == today_str:
+        cutoff_hour = get_reporting_cutoff_hour(now_ist)
+        if res.get("status") != "completed" and now_ist.hour < cutoff_hour and req.date == today_str:
             yesterday_str = (now_ist - timedelta(days=1)).strftime("%Y-%m-%d")
             yesterday_candidate_ids = [
                 f"{c_wp}_{req.fo_name}_{yesterday_str}".replace(" ", "_").lower(),
@@ -3552,10 +3568,13 @@ async def my_profile_stats(req: ProfileStatsRequest):
             _, total_days = calendar.monthrange(year_val, month_val)
 
         ist_today = get_ist_now().date()
-        if req_month == ist_today.strftime("%Y-%m"):
+        today_month_str = ist_today.strftime("%Y-%m")
+        if req_month == today_month_str:
             day_of_month = ist_today.day
-        else:
+        elif req_month < today_month_str:
             day_of_month = total_days
+        else:
+            day_of_month = 0
 
         sundays_in_month = 0
         elapsed_sundays = 0
@@ -3567,12 +3586,25 @@ async def my_profile_stats(req: ProfileStatsRequest):
                     elapsed_sundays += 1
 
         total_working_days = max(1, total_days - sundays_in_month - declared_holidays)
-        elapsed_working_days = max(0, min(total_working_days, day_of_month - elapsed_sundays - min(declared_holidays, int((day_of_month / total_days) * declared_holidays))))
-        remaining_working_days = max(0, total_working_days - elapsed_working_days)
+        if req_month < today_month_str:
+            elapsed_working_days = total_working_days
+            remaining_working_days = 0
+        elif req_month > today_month_str:
+            elapsed_working_days = 0
+            remaining_working_days = total_working_days
+        else:
+            elapsed_working_days = max(0, min(total_working_days, day_of_month - elapsed_sundays - min(declared_holidays, int((day_of_month / total_days) * declared_holidays))))
+            remaining_working_days = max(0, total_working_days - elapsed_working_days)
 
         notif_achieved = stats.get("notification", 0)
         remaining_target = max(0, target_val - notif_achieved)
-        required_run_rate = round(remaining_target / remaining_working_days, 1) if remaining_working_days > 0 else float(remaining_target)
+        if req_month < today_month_str:
+            required_run_rate = 0.0
+        elif remaining_working_days > 0:
+            required_run_rate = round(remaining_target / remaining_working_days, 1)
+        else:
+            required_run_rate = float(remaining_target)
+
         current_run_rate = round(notif_achieved / max(1, elapsed_working_days), 1)
         expected_to_date = round((target_val * elapsed_working_days) / total_working_days)
         pace_diff = notif_achieved - expected_to_date
