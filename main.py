@@ -75,6 +75,9 @@ import jwt
 import bcrypt
 import calendar
 import gc
+import logging
+
+logger = logging.getLogger("dfy_mis")
 
 ENABLE_IN_MEMORY_DERIVATION: bool = os.getenv("ENABLE_IN_MEMORY_DERIVATION", "true").lower() in ("true", "1", "yes")
 
@@ -886,6 +889,7 @@ def record_report_mutation(
             cache.delete_prefix(f"shared_raw_month_{month_prefix}")
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
+        else:
             cache.delete_prefix("shared_raw_month_")
             cache.delete_prefix("dash_")
             cache.delete_prefix("dupe_scan_")
@@ -3776,6 +3780,403 @@ async def my_profile_stats(req: ProfileStatsRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def get_attendance_staff_roster(target_date: str, allowed_dist_set: Optional[set] = None) -> Tuple[list, set]:
+    staff_list = []
+    raw_staff_records = await get_cached_staff_directory_raw()
+
+    inactive_staff_keys = set()
+    if raw_staff_records:
+        for d in raw_staff_records:
+            if not d:
+                continue
+            raw_dist = d.get("district") or ""
+            dist = canonicalize_district(raw_dist)
+            fo_name = (d.get("name") or "").strip()
+            doc_id = d.get("id", "")
+
+            is_active = d.get("is_active") is not False and d.get("status") != "inactive"
+            inactive_since = (d.get("inactive_since") or "").strip()[:10]
+
+            is_inactive = False
+            if not is_active:
+                if not inactive_since or target_date >= inactive_since:
+                    is_inactive = True
+            elif inactive_since and target_date >= inactive_since:
+                is_inactive = True
+
+            if is_inactive:
+                if dist and fo_name:
+                    inactive_staff_keys.add(normalize_staff_key(dist, fo_name))
+                    clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
+                    clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
+                    inactive_staff_keys.add(f"{clean_d}_{clean_n}")
+                if doc_id:
+                    clean_id = re.sub(r'[^a-z0-9_]', '', doc_id.lower())
+                    inactive_staff_keys.add(clean_id)
+                    inactive_staff_keys.add(re.sub(r'(.)\1+', r'\1', clean_id))
+                    if "_" in clean_id:
+                        p_dist, p_name = clean_id.split("_", 1)
+                        inactive_staff_keys.add(f"{p_dist}_{re.sub(r'(.)\1+', r'\1', p_name)}")
+
+        if inactive_staff_keys:
+            cache.set("inactive_staff_keys", list(inactive_staff_keys), ttl=3600)
+    else:
+        cached_inactive = cache.get("inactive_staff_keys")
+        if cached_inactive:
+            inactive_staff_keys.update(cached_inactive)
+
+    if raw_staff_records:
+        for d in raw_staff_records:
+            if not d:
+                continue
+            raw_dist = d.get("district") or ""
+            dist = canonicalize_district(raw_dist)
+            fo_name = (d.get("name") or "").strip()
+            if not dist or not fo_name:
+                continue
+            if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
+                continue
+
+            norm_key = normalize_staff_key(dist, fo_name)
+            clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
+            clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
+            exact_key = f"{clean_d}_{clean_n}"
+            doc_id = d.get("id", "")
+            doc_norm_key = re.sub(r'(.)\1+', r'\1', re.sub(r'[^a-z0-9_]', '', doc_id.lower())) if doc_id else ""
+
+            if norm_key in inactive_staff_keys or exact_key in inactive_staff_keys:
+                continue
+            if doc_id and (doc_id.lower() in inactive_staff_keys or doc_norm_key in inactive_staff_keys):
+                continue
+
+            is_active = d.get("is_active") is not False and d.get("status") != "inactive"
+            inactive_since = (d.get("inactive_since") or "").strip()[:10]
+
+            is_included = False
+            if is_active:
+                if not inactive_since or target_date < inactive_since:
+                    is_included = True
+            else:
+                if inactive_since and target_date < inactive_since:
+                    is_included = True
+
+            if not is_included:
+                continue
+
+            staff_list.append({
+                "district": dist,
+                "fo_name": fo_name,
+                "designation": d.get("designation", "Field Officer"),
+                "status": "active" if is_active else "inactive",
+                "is_active": is_active,
+                "inactive_since": inactive_since or None
+            })
+    else:
+        cached_dir = cache.get("staff_directory_dict") or await get_directory()
+        if cached_dir and isinstance(cached_dir, dict):
+            for dist, names in cached_dir.items():
+                c_dist = canonicalize_district(dist)
+                if allowed_dist_set is not None and c_dist.lower() not in allowed_dist_set:
+                    continue
+                for clean_fo in names:
+                    if clean_fo and str(clean_fo).strip():
+                        fo_str = str(clean_fo).strip()
+                        norm_k = normalize_staff_key(c_dist, fo_str)
+                        clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
+                        clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
+                        exact_k = f"{clean_d}_{clean_n}"
+                        if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
+                            continue
+                        staff_list.append({
+                            "district": c_dist,
+                            "fo_name": fo_str,
+                            "designation": "Field Officer"
+                        })
+        else:
+            cached_dir = load_baseline_staff_directory()
+            for dist, names in (cached_dir or {}).items():
+                c_dist = canonicalize_district(dist)
+                if allowed_dist_set is not None and c_dist.lower() not in allowed_dist_set:
+                    continue
+                for clean_fo in names:
+                    if clean_fo and str(clean_fo).strip():
+                        fo_str = str(clean_fo).strip()
+                        norm_k = normalize_staff_key(c_dist, fo_str)
+                        clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
+                        clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
+                        exact_k = f"{clean_d}_{clean_n}"
+                        if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
+                            continue
+                        staff_list.append({
+                            "district": c_dist,
+                            "fo_name": fo_str,
+                            "designation": "Field Officer"
+                        })
+    return staff_list, inactive_staff_keys
+
+
+def format_attendance_response(
+    staff_list: list,
+    all_candidate_docs: list,
+    leave_docs: list,
+    target_date: str,
+    next_date: str,
+    allowed_dist_set: Optional[set] = None,
+    inactive_staff_keys: Optional[set] = None
+) -> dict:
+    reports_map = {}
+    for doc in all_candidate_docs:
+        d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+        if not d:
+            continue
+        dist = canonicalize_district(d.get('working_place', '') or d.get('district', ''))
+        if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
+            continue
+        fo_raw_name = d.get('fo_name', '').strip()
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', fo_raw_name).lower()
+        if not clean_fo:
+            continue
+        key = f"{dist}_{clean_fo}".replace(" ", "").lower()
+        
+        raw_ts = d.get("timestamp_completed") or d.get("timestamp") or d.get("submitted_at")
+        submitted_time = format_to_ist_time(raw_ts)
+        dt_ist = parse_to_ist_datetime(raw_ts)
+        iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
+        
+        rep_date = d.get("date_of_reporting") or d.get("date") or ""
+        is_next_day_flag = bool(d.get("is_next_day_submission"))
+
+        # Stealth Cutoff Segregation Rules:
+        # Rule 1: Submissions on target_date before cutoff hour strictly belong to target_date - 1.
+        # Exclude from target_date's submitted list.
+        target_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
+        if dt_ist and dt_ist.date().strftime("%Y-%m-%d") == target_date and dt_ist.hour < target_cutoff:
+            continue
+
+        # Rule 2: Submissions on next_date (target_date + 1) before next_date cutoff hour,
+        # or reports with is_next_day_submission == True and date_of_reporting == target_date,
+        # strictly belong to target_date as next-day morning submissions.
+        is_next_day = False
+        next_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
+        if is_next_day_flag and rep_date == target_date:
+            is_next_day = True
+        elif dt_ist and next_date and dt_ist.date().strftime("%Y-%m-%d") == next_date and dt_ist.hour < next_cutoff:
+            is_next_day = True
+        elif rep_date != target_date:
+            continue
+
+        total_km = 0
+        if d.get("total_km"):
+            try: total_km = int(d.get("total_km"))
+            except: pass
+        elif d.get("morning_km") is not None and d.get("evening_km") is not None:
+            try: total_km = max(0, int(d.get("evening_km")) - int(d.get("morning_km")))
+            except: pass
+
+        morning_time = d.get("submitted_morning_time") or submitted_time
+        if is_next_day:
+            submitted_time = morning_time or submitted_time
+            submitted_label = d.get("morning_submission_label") or f"Next day morning {submitted_time}"
+            time_classification = "Next Day Morning (< 10 AM)"
+        else:
+            submitted_label = submitted_time or "Submitted"
+            if dt_ist:
+                if dt_ist.hour < 17:
+                    time_classification = "Mid-Day (< 5 PM)"
+                elif dt_ist.hour < 20:
+                    time_classification = "Evening (< 8 PM)"
+                else:
+                    time_classification = "Night (8 PM+)"
+            else:
+                time_classification = "On Time"
+
+        if key in reports_map:
+            existing = reports_map[key]
+            existing["submission_count"] = max(existing.get("submission_count", 1), d.get("submission_count", 1))
+            existing["total_ids"] += sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+            existing["total_km"] = max(existing.get("total_km", 0), total_km)
+            if is_next_day:
+                existing["is_next_day"] = True
+                existing["submitted_time"] = submitted_time
+                existing["submitted_label"] = submitted_label
+                existing["time_classification"] = time_classification
+        else:
+            reports_map[key] = {
+                "district": dist,
+                "fo_name": fo_raw_name,
+                "submission_count": d.get("submission_count", 1),
+                "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
+                "submitted_time": submitted_time or "Submitted",
+                "timestamp_raw": iso_ts,
+                "total_km": total_km,
+                "is_next_day": is_next_day,
+                "submitted_label": submitted_label,
+                "time_classification": time_classification
+            }
+
+    leaves_map = {}
+    for ldoc in leave_docs:
+        ld = ldoc.to_dict() if hasattr(ldoc, "to_dict") else (ldoc if isinstance(ldoc, dict) else {})
+        if not ld:
+            continue
+        dist = canonicalize_district(ld.get("district", ""))
+        if allowed_dist_set is not None and dist.lower() not in allowed_dist_set:
+            continue
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', ld.get("fo_name", "")).lower()
+        lkey = f"{dist}_{clean_fo}".replace(" ", "").lower()
+        leaves_map[lkey] = {
+            "district": dist,
+            "fo_name": ld.get("fo_name", "").strip(),
+            "status": ld.get("status", "leave"),
+            "reason_type": ld.get("reason_type", "Casual"),
+            "remark": ld.get("remark", ""),
+            "marked_by_name": ld.get("marked_by_name", "Admin"),
+            "marked_at": ld.get("marked_at", "")
+        }
+
+    submitted_full = []
+    submitted_partial = []
+    on_leave_fos = []
+    missing_fos = []
+    matched_report_keys = set()
+    
+    for s in (staff_list or []):
+        norm_s_key = normalize_staff_key(s['district'], s['fo_name'])
+        clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
+        key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
+        if inactive_staff_keys and (norm_s_key in inactive_staff_keys or key in inactive_staff_keys):
+            continue
+        
+        alias_key = None
+        if "ashwanikrkeshri" in key:
+            alias_key = f"{s['district']}_ashwanikumar".replace(" ", "").lower()
+        elif "ashwanikumar" in key:
+            alias_key = f"{s['district']}_ashwanikrkeshri".replace(" ", "").lower()
+
+        matched_rkey = None
+        if key in reports_map:
+            matched_rkey = key
+        elif alias_key and alias_key in reports_map:
+            matched_rkey = alias_key
+
+        if matched_rkey:
+            matched_report_keys.add(matched_rkey)
+            rep = reports_map[matched_rkey]
+            info = {**s, **rep}
+            if rep["submission_count"] >= 2:
+                submitted_full.append(info)
+            else:
+                submitted_partial.append(info)
+        else:
+            matched_lkey = None
+            if key in leaves_map:
+                matched_lkey = key
+            elif alias_key and alias_key in leaves_map:
+                matched_lkey = alias_key
+
+            if matched_lkey:
+                on_leave_fos.append({**s, **leaves_map[matched_lkey]})
+            else:
+                missing_fos.append(s)
+
+    # In case an officer submitted whose name is not in staff_list, also include them in submitted list
+    for rkey, rinfo in reports_map.items():
+        if rkey not in matched_report_keys:
+            orphan_info = {
+                "district": rinfo["district"],
+                "fo_name": rinfo["fo_name"],
+                "designation": "Field Officer",
+                **rinfo
+            }
+            submitted_partial.append(orphan_info)
+
+    submitted_fos = submitted_full + submitted_partial
+    submitted_fos.sort(key=lambda x: (x.get("timestamp_raw") or "", x["district"], x["fo_name"]), reverse=True)
+    missing_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
+    submitted_full.sort(key=lambda x: (x["district"], x["fo_name"]))
+    submitted_partial.sort(key=lambda x: (x["district"], x["fo_name"]))
+    on_leave_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
+
+    return {
+        "date": target_date,
+        "total_staff": len(staff_list or []),
+        "submitted_count": len(submitted_fos),
+        "submitted_full_count": len(submitted_full),
+        "submitted_partial_count": len(submitted_partial),
+        "on_leave_count": len(on_leave_fos),
+        "missing_count": len(missing_fos),
+        "submitted_fos": submitted_fos,
+        "submitted_full": submitted_full,
+        "submitted_partial": submitted_partial,
+        "on_leave_fos": on_leave_fos,
+        "missing_fos": missing_fos
+    }
+
+
+async def legacy_get_today_attendance(
+    target_date: str,
+    next_date: str,
+    allowed_dist_set: Optional[set],
+    staff_list: Optional[list] = None,
+    effective_dist: str = "all",
+    cache_key: Optional[str] = None,
+    admin: Optional[dict] = None,
+    force_refresh: bool = False,
+    inactive_staff_keys: Optional[set] = None
+) -> dict:
+    if staff_list is None:
+        staff_list, inactive_staff_keys = await get_attendance_staff_roster(target_date, allowed_dist_set)
+    if not next_date:
+        try:
+            target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
+            next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            next_date = ""
+
+    report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
+    if not report_docs:
+        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
+
+    all_candidate_docs = list(report_docs)
+    seen_doc_ids = set()
+    for doc in report_docs:
+        doc_id = getattr(doc, "id", None)
+        if doc_id:
+            seen_doc_ids.add(doc_id)
+
+    if next_date:
+        try:
+            next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", next_date).stream()))
+            if not next_day_docs:
+                next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", next_date).stream()))
+            for ndoc in next_day_docs:
+                ndoc_id = getattr(ndoc, "id", None)
+                if not ndoc_id or ndoc_id not in seen_doc_ids:
+                    all_candidate_docs.append(ndoc)
+        except Exception as e:
+            print(f"Notice fetching next_day_docs in today-attendance: {e}")
+
+    leave_docs = []
+    try:
+        leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
+    except Exception as le:
+        print(f"Firestore daily_staff_leaves stream notice: {le}")
+        leave_docs = []
+
+    res = format_attendance_response(
+        staff_list=staff_list,
+        all_candidate_docs=all_candidate_docs,
+        leave_docs=leave_docs,
+        target_date=target_date,
+        next_date=next_date,
+        allowed_dist_set=allowed_dist_set,
+        inactive_staff_keys=inactive_staff_keys
+    )
+    if cache_key:
+        cache.set(cache_key, res, ttl=600)
+    return res
+
+
 @app.get("/admin/today-attendance")
 async def get_today_attendance(
     date: Optional[str] = None, 
@@ -3795,18 +4196,23 @@ async def get_today_attendance(
         admin_role = admin.get("role", "SUB_ADMIN")
         if admin_role == "SUB_ADMIN":
             admin_allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
-            if admin_allowed and "All" not in admin_allowed:
-                subadmin_allowed = set([canonicalize_district(d.strip()).lower() for d in admin_allowed if d.strip()])
-                if allowed_dist_set is not None:
-                    forbidden = allowed_dist_set - subadmin_allowed
-                    if forbidden:
-                        raise HTTPException(status_code=403, detail="Permission denied. You do not have access to the requested district(s).")
-                    allowed_dist_set = allowed_dist_set.intersection(subadmin_allowed)
+            if admin_allowed is not None:
+                if "All" in admin_allowed or "all" in admin_allowed:
+                    pass
                 else:
-                    allowed_dist_set = subadmin_allowed
+                    subadmin_allowed = set([canonicalize_district(d.strip()).lower() for d in admin_allowed if d.strip()])
+                    if allowed_dist_set is not None:
+                        forbidden = allowed_dist_set - subadmin_allowed
+                        if forbidden:
+                            raise HTTPException(status_code=403, detail="Permission denied. You do not have access to the requested district(s).")
+                        allowed_dist_set = allowed_dist_set.intersection(subadmin_allowed)
+                    else:
+                        allowed_dist_set = subadmin_allowed
 
-        effective_dist = ",".join(sorted(allowed_dist_set)) if allowed_dist_set else (districts or 'all')
-        cache_key = f"attendance_{target_date}_{effective_dist}"
+        effective_dist = ",".join(sorted(allowed_dist_set)) if (allowed_dist_set is not None and len(allowed_dist_set) > 0) else ("none" if allowed_dist_set is not None else (districts or 'all'))
+        user_scope = admin.get("user_id") or admin.get("username") or admin.get("role", "admin")
+        cache_key = f"attendance_{target_date}_{effective_dist}_{user_scope}"
+
         if force_refresh:
             cache.delete(cache_key)
         else:
@@ -3814,370 +4220,100 @@ async def get_today_attendance(
             if cached is not None:
                 return cached
 
-        # 1. Fetch staff roster applying inactive_since cutoff and consonant-collapsed defense
-        staff_list = []
-        raw_staff_records = await get_cached_staff_directory_raw()
-
-        inactive_staff_keys = set()
-        if raw_staff_records:
-            for d in raw_staff_records:
-                if not d:
-                    continue
-                raw_dist = d.get("district") or ""
-                dist = canonicalize_district(raw_dist)
-                fo_name = (d.get("name") or "").strip()
-                doc_id = d.get("id", "")
-
-                is_active = d.get("is_active") is not False and d.get("status") != "inactive"
-                inactive_since = (d.get("inactive_since") or "").strip()[:10]
-
-                is_inactive = False
-                if not is_active:
-                    if not inactive_since or target_date >= inactive_since:
-                        is_inactive = True
-                elif inactive_since and target_date >= inactive_since:
-                    is_inactive = True
-
-                if is_inactive:
-                    if dist and fo_name:
-                        inactive_staff_keys.add(normalize_staff_key(dist, fo_name))
-                        clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
-                        clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
-                        inactive_staff_keys.add(f"{clean_d}_{clean_n}")
-                    if doc_id:
-                        clean_id = re.sub(r'[^a-z0-9_]', '', doc_id.lower())
-                        inactive_staff_keys.add(clean_id)
-                        inactive_staff_keys.add(re.sub(r'(.)\1+', r'\1', clean_id))
-                        if "_" in clean_id:
-                            p_dist, p_name = clean_id.split("_", 1)
-                            inactive_staff_keys.add(f"{p_dist}_{re.sub(r'(.)\1+', r'\1', p_name)}")
-
-            if inactive_staff_keys:
-                cache.set("inactive_staff_keys", list(inactive_staff_keys), ttl=3600)
-        else:
-            cached_inactive = cache.get("inactive_staff_keys")
-            if cached_inactive:
-                inactive_staff_keys.update(cached_inactive)
-
-        if raw_staff_records:
-            for d in raw_staff_records:
-                if not d:
-                    continue
-                raw_dist = d.get("district") or ""
-                dist = canonicalize_district(raw_dist)
-                fo_name = (d.get("name") or "").strip()
-                if not dist or not fo_name:
-                    continue
-                if allowed_dist_set and dist.lower() not in allowed_dist_set:
-                    continue
-
-                norm_key = normalize_staff_key(dist, fo_name)
-                clean_d = re.sub(r'[^a-z0-9]', '', dist.lower())
-                clean_n = re.sub(r'[^a-z0-9]', '', fo_name.lower())
-                exact_key = f"{clean_d}_{clean_n}"
-                doc_id = d.get("id", "")
-                doc_norm_key = re.sub(r'(.)\1+', r'\1', re.sub(r'[^a-z0-9_]', '', doc_id.lower())) if doc_id else ""
-
-                if norm_key in inactive_staff_keys or exact_key in inactive_staff_keys:
-                    continue
-                if doc_id and (doc_id.lower() in inactive_staff_keys or doc_norm_key in inactive_staff_keys):
-                    continue
-
-                is_active = d.get("is_active") is not False and d.get("status") != "inactive"
-                inactive_since = (d.get("inactive_since") or "").strip()[:10]
-
-                is_included = False
-                if is_active:
-                    if not inactive_since or target_date < inactive_since:
-                        is_included = True
-                else:
-                    if inactive_since and target_date < inactive_since:
-                        is_included = True
-
-                if not is_included:
-                    continue
-
-                staff_list.append({
-                    "district": dist,
-                    "fo_name": fo_name,
-                    "designation": d.get("designation", "Field Officer"),
-                    "status": "active" if is_active else "inactive",
-                    "is_active": is_active,
-                    "inactive_since": inactive_since or None
-                })
-        else:
-            cached_dir = cache.get("staff_directory_dict") or await get_directory()
-            if cached_dir and isinstance(cached_dir, dict):
-                for dist, names in cached_dir.items():
-                    c_dist = canonicalize_district(dist)
-                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
-                        continue
-                    for clean_fo in names:
-                        if clean_fo and str(clean_fo).strip():
-                            fo_str = str(clean_fo).strip()
-                            norm_k = normalize_staff_key(c_dist, fo_str)
-                            clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
-                            clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
-                            exact_k = f"{clean_d}_{clean_n}"
-                            if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
-                                continue
-                            staff_list.append({
-                                "district": c_dist,
-                                "fo_name": fo_str,
-                                "designation": "Field Officer"
-                            })
-            else:
-                cached_dir = load_baseline_staff_directory()
-                for dist, names in (cached_dir or {}).items():
-                    c_dist = canonicalize_district(dist)
-                    if allowed_dist_set and c_dist.lower() not in allowed_dist_set:
-                        continue
-                    for clean_fo in names:
-                        if clean_fo and str(clean_fo).strip():
-                            fo_str = str(clean_fo).strip()
-                            norm_k = normalize_staff_key(c_dist, fo_str)
-                            clean_d = re.sub(r'[^a-z0-9]', '', c_dist.lower())
-                            clean_n = re.sub(r'[^a-z0-9]', '', fo_str.lower())
-                            exact_k = f"{clean_d}_{clean_n}"
-                            if norm_k in inactive_staff_keys or exact_k in inactive_staff_keys:
-                                continue
-                            staff_list.append({
-                                "district": c_dist,
-                                "fo_name": fo_str,
-                                "designation": "Field Officer"
-                            })
-
-        # 2. Fetch daily field reports for this date applying 10:00 AM Cutoff Segregation
         try:
             target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
             next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
         except Exception:
-            next_date = ""
+            target_dt = get_ist_now().date()
+            next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
-        if not report_docs:
-            report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
+        staff_list = None
+        inactive_staff_keys = None
 
-        all_candidate_docs = list(report_docs)
-        seen_doc_ids = set()
-        for doc in report_docs:
-            doc_id = getattr(doc, "id", None)
-            if doc_id:
-                seen_doc_ids.add(doc_id)
+        # Master Kill Switch
+        if not ENABLE_IN_MEMORY_DERIVATION:
+            return await legacy_get_today_attendance(
+                target_date=target_date,
+                next_date=next_date,
+                allowed_dist_set=allowed_dist_set,
+                staff_list=staff_list,
+                effective_dist=effective_dist,
+                cache_key=cache_key,
+                admin=admin,
+                force_refresh=bool(force_refresh),
+                inactive_staff_keys=inactive_staff_keys
+            )
 
-        if next_date:
-            try:
-                next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", next_date).stream()))
-                if not next_day_docs:
-                    next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", next_date).stream()))
-                for ndoc in next_day_docs:
-                    ndoc_id = getattr(ndoc, "id", None)
-                    if not ndoc_id or ndoc_id not in seen_doc_ids:
-                        all_candidate_docs.append(ndoc)
-            except Exception as e:
-                print(f"Notice fetching next_day_docs in today-attendance: {e}")
-
-        reports_map = {}
-        for doc in all_candidate_docs:
-            d = doc.to_dict() if hasattr(doc, "to_dict") else {}
-            if not d:
-                continue
-            dist = canonicalize_district(d.get('working_place', ''))
-            if allowed_dist_set and dist.lower() not in allowed_dist_set:
-                continue
-            fo_raw_name = d.get('fo_name', '').strip()
-            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', fo_raw_name).lower()
-            if not clean_fo:
-                continue
-            key = f"{dist}_{clean_fo}".replace(" ", "").lower()
-            
-            raw_ts = d.get("timestamp_completed") or d.get("timestamp") or d.get("submitted_at")
-            submitted_time = format_to_ist_time(raw_ts)
-            dt_ist = parse_to_ist_datetime(raw_ts)
-            iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
-            
-            rep_date = d.get("date_of_reporting") or d.get("date") or ""
-            is_next_day_flag = bool(d.get("is_next_day_submission"))
-
-            # Stealth Cutoff Segregation Rules:
-            # Rule 1: Submissions on target_date before cutoff hour strictly belong to target_date - 1.
-            # Exclude from target_date's submitted list.
-            target_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
-            if dt_ist and dt_ist.date().strftime("%Y-%m-%d") == target_date and dt_ist.hour < target_cutoff:
-                continue
-
-            # Rule 2: Submissions on next_date (target_date + 1) before next_date cutoff hour,
-            # or reports with is_next_day_submission == True and date_of_reporting == target_date,
-            # strictly belong to target_date as next-day morning submissions.
-            is_next_day = False
-            next_cutoff = get_reporting_cutoff_hour(dt_ist) if dt_ist else 11
-            if is_next_day_flag and rep_date == target_date:
-                is_next_day = True
-            elif dt_ist and next_date and dt_ist.date().strftime("%Y-%m-%d") == next_date and dt_ist.hour < next_cutoff:
-                is_next_day = True
-            elif rep_date != target_date:
-                continue
-
-            total_km = 0
-            if d.get("total_km"):
-                try: total_km = int(d.get("total_km"))
-                except: pass
-            elif d.get("morning_km") is not None and d.get("evening_km") is not None:
-                try: total_km = max(0, int(d.get("evening_km")) - int(d.get("morning_km")))
-                except: pass
-
-            morning_time = d.get("submitted_morning_time") or submitted_time
-            if is_next_day:
-                submitted_time = morning_time or submitted_time
-                submitted_label = d.get("morning_submission_label") or f"Next day morning {submitted_time}"
-                time_classification = "Next Day Morning (< 10 AM)"
-            else:
-                submitted_label = submitted_time or "Submitted"
-                if dt_ist:
-                    if dt_ist.hour < 17:
-                        time_classification = "Mid-Day (< 5 PM)"
-                    elif dt_ist.hour < 20:
-                        time_classification = "Evening (< 8 PM)"
-                    else:
-                        time_classification = "Night (8 PM+)"
-                else:
-                    time_classification = "On Time"
-
-            if key in reports_map:
-                existing = reports_map[key]
-                existing["submission_count"] = max(existing.get("submission_count", 1), d.get("submission_count", 1))
-                existing["total_ids"] += sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
-                existing["total_km"] = max(existing.get("total_km", 0), total_km)
-                if is_next_day:
-                    existing["is_next_day"] = True
-                    existing["submitted_time"] = submitted_time
-                    existing["submitted_label"] = submitted_label
-                    existing["time_classification"] = time_classification
-            else:
-                reports_map[key] = {
-                    "district": dist,
-                    "fo_name": fo_raw_name,
-                    "submission_count": d.get("submission_count", 1),
-                    "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
-                    "submitted_time": submitted_time or "Submitted",
-                    "timestamp_raw": iso_ts,
-                    "total_km": total_km,
-                    "is_next_day": is_next_day,
-                    "submitted_label": submitted_label,
-                    "time_classification": time_classification
-                }
-
-        # 3. Query daily_staff_leaves for target_date
-        leave_docs = []
+        # In-Memory Master Ledger Fast-Path
         try:
-            leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
-        except Exception as le:
-            print(f"Firestore daily_staff_leaves stream notice: {le}")
-            leave_docs = []
+            staff_list, inactive_staff_keys = await get_attendance_staff_roster(target_date, allowed_dist_set)
 
-        leaves_map = {}
-        for ldoc in leave_docs:
-            ld = ldoc.to_dict() if hasattr(ldoc, "to_dict") else {}
-            if not ld:
-                continue
-            dist = canonicalize_district(ld.get("district", ""))
-            if allowed_dist_set and dist.lower() not in allowed_dist_set:
-                continue
-            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', ld.get("fo_name", "")).lower()
-            lkey = f"{dist}_{clean_fo}".replace(" ", "").lower()
-            leaves_map[lkey] = {
-                "district": dist,
-                "fo_name": ld.get("fo_name", "").strip(),
-                "status": ld.get("status", "leave"),
-                "reason_type": ld.get("reason_type", "Casual"),
-                "remark": ld.get("remark", ""),
-                "marked_by_name": ld.get("marked_by_name", "Admin"),
-                "marked_at": ld.get("marked_at", "")
-            }
+            target_month = target_date[:7]
+            raw_docs = await get_raw_monthly_reports(target_month)
 
-        # 4. Segregate staff into submitted_full, submitted_partial, on_leave_fos, and missing_fos
-        submitted_full = []
-        submitted_partial = []
-        on_leave_fos = []
-        missing_fos = []
-        matched_report_keys = set()
-        
-        for s in staff_list:
-            norm_s_key = normalize_staff_key(s['district'], s['fo_name'])
-            clean_fo = re.sub(r'[^a-zA-Z0-9]', '', s['fo_name']).lower()
-            key = f"{s['district']}_{clean_fo}".replace(" ", "").lower()
-            if norm_s_key in inactive_staff_keys or key in inactive_staff_keys:
-                continue
-            
-            # Helper for alias matching (e.g. Ashwani Kumar vs Ashwani Kr Keshri)
-            alias_key = None
-            if "ashwanikrkeshri" in key:
-                alias_key = f"{s['district']}_ashwanikumar".replace(" ", "").lower()
-            elif "ashwanikumar" in key:
-                alias_key = f"{s['district']}_ashwanikrkeshri".replace(" ", "").lower()
+            extended_raw_docs = list(raw_docs or [])
+            if target_dt.day <= 2:
+                prev_month = (target_dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+                prev_docs = await get_raw_monthly_reports(prev_month)
+                if prev_docs:
+                    extended_raw_docs.extend(prev_docs)
+            elif target_dt.day >= 28:
+                next_month = (target_dt.replace(day=28) + timedelta(days=5)).strftime("%Y-%m")
+                next_docs = await get_raw_monthly_reports(next_month)
+                if next_docs:
+                    extended_raw_docs.extend(next_docs)
 
-            matched_rkey = None
-            if key in reports_map:
-                matched_rkey = key
-            elif alias_key and alias_key in reports_map:
-                matched_rkey = alias_key
+            all_candidate_docs = []
+            seen_doc_ids = set()
+            for d in extended_raw_docs:
+                r_date = str(d.get("date_of_reporting") or d.get("date") or "").strip()
+                if r_date == target_date or (next_date and r_date == next_date):
+                    did = d.get("id") or d.get("doc_id")
+                    if did:
+                        if did in seen_doc_ids:
+                            continue
+                        seen_doc_ids.add(did)
+                    all_candidate_docs.append(d)
 
-            if matched_rkey:
-                matched_report_keys.add(matched_rkey)
-                rep = reports_map[matched_rkey]
-                info = {**s, **rep}
-                if rep["submission_count"] >= 2:
-                    submitted_full.append(info)
-                else:
-                    submitted_partial.append(info)
+            leave_cache_key = f"daily_leaves_date_{target_date}"
+            cached_leaves = cache.get(leave_cache_key)
+            if cached_leaves is not None and isinstance(cached_leaves, list):
+                leave_docs = cached_leaves
             else:
-                matched_lkey = None
-                if key in leaves_map:
-                    matched_lkey = key
-                elif alias_key and alias_key in leaves_map:
-                    matched_lkey = alias_key
+                try:
+                    leave_docs_raw = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
+                    leave_docs = [ld.to_dict() if hasattr(ld, "to_dict") else dict(ld) for ld in leave_docs_raw]
+                    cache.set(leave_cache_key, leave_docs, ttl=300)
+                except Exception as le:
+                    print(f"Firestore daily_staff_leaves stream notice: {le}")
+                    leave_docs = []
 
-                if matched_lkey:
-                    on_leave_fos.append({**s, **leaves_map[matched_lkey]})
-                else:
-                    missing_fos.append(s)
-
-        # In case an officer submitted whose name is not in staff_list, also include them in submitted list
-        for rkey, rinfo in reports_map.items():
-            if rkey not in matched_report_keys:
-                orphan_info = {
-                    "district": rinfo["district"],
-                    "fo_name": rinfo["fo_name"],
-                    "designation": "Field Officer",
-                    **rinfo
-                }
-                submitted_partial.append(orphan_info)
-
-        # Combine all submitted officers
-        submitted_fos = submitted_full + submitted_partial
-        # Sort submitted_fos by timestamp descending (latest submissions first)
-        submitted_fos.sort(key=lambda x: (x.get("timestamp_raw") or "", x["district"], x["fo_name"]), reverse=True)
-        missing_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
-        submitted_full.sort(key=lambda x: (x["district"], x["fo_name"]))
-        submitted_partial.sort(key=lambda x: (x["district"], x["fo_name"]))
-        on_leave_fos.sort(key=lambda x: (x["district"], x["fo_name"]))
-
-        res = {
-            "date": target_date,
-            "total_staff": len(staff_list),
-            "submitted_count": len(submitted_fos),
-            "submitted_full_count": len(submitted_full),
-            "submitted_partial_count": len(submitted_partial),
-            "on_leave_count": len(on_leave_fos),
-            "missing_count": len(missing_fos),
-            "submitted_fos": submitted_fos,
-            "submitted_full": submitted_full,
-            "submitted_partial": submitted_partial,
-            "on_leave_fos": on_leave_fos,
-            "missing_fos": missing_fos
-        }
-        cache.set(cache_key, res, ttl=60)
-        return res
+            result = format_attendance_response(
+                staff_list=staff_list,
+                all_candidate_docs=all_candidate_docs,
+                leave_docs=leave_docs,
+                target_date=target_date,
+                next_date=next_date,
+                allowed_dist_set=allowed_dist_set,
+                inactive_staff_keys=inactive_staff_keys
+            )
+            cache.set(cache_key, result, ttl=600)
+            return result
+        except HTTPException:
+            raise
+        except Exception as derivation_err:
+            logger.warning(f"[Attendance Failover] In-memory derivation failed, falling back to legacy: {derivation_err}")
+            return await legacy_get_today_attendance(
+                target_date=target_date,
+                next_date=next_date,
+                allowed_dist_set=allowed_dist_set,
+                staff_list=staff_list,
+                effective_dist=effective_dist,
+                cache_key=cache_key,
+                admin=admin,
+                force_refresh=bool(force_refresh),
+                inactive_staff_keys=inactive_staff_keys
+            )
     except HTTPException:
         raise
     except Exception as e:
@@ -9738,6 +9874,7 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        cache.delete(f"daily_leaves_date_{clean_date}")
         evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         await log_admin_activity(
@@ -9787,6 +9924,7 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        cache.delete(f"daily_leaves_date_{clean_date}")
         evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         actor_name = admin.get("name") or admin.get("username") or "Admin"
@@ -9939,6 +10077,7 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
+        cache.delete(f"daily_leaves_date_{clean_date}")
         evict_officer_profile_cache(clean_dist, req.fo_name.strip(), clean_date)
 
         # Update in-memory shared raw month cache if present
