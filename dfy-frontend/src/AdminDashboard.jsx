@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 import { downloadOrShareCanvas } from './canvasShare';
 import { getCachedDashboardData, setCachedDashboardData, clearCachedDashboardData, clearAllAdminCache } from './adminCache';
+import { getOperationalMonth } from './utils/operationalMonth';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -156,7 +157,7 @@ export default function AdminDashboard() {
       return false;
     }
   });
-  const [month, setMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [month, setMonth] = useState(() => getOperationalMonth().operationalMonth);
   const [rawRecords, setRawRecords] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isColdStarting, setIsColdStarting] = useState(false);
@@ -5313,6 +5314,21 @@ const availableDistrictsForFeed = useMemo(() => {
           </div>
         </header>
 
+        {/* Day 1 Month-End Grace Period Alert Banner */}
+        {getOperationalMonth().isMonthEndGracePeriod && (
+          <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30 rounded-2xl p-3 flex items-center justify-between text-xs text-amber-900">
+            <div className="flex items-center gap-2 font-bold">
+              <span className="text-base">⏳</span>
+              <span><strong>Month-End Close Window Active:</strong> Reporting for {getOperationalMonth().graceClosingMonth} remains open until 12:00 PM Noon today. Showing {month} data.</span>
+            </div>
+            {month !== getOperationalMonth().activeCalendarMonth && (
+              <button onClick={() => setMonth(getOperationalMonth().activeCalendarMonth)} className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs transition-colors shrink-0">
+                Switch to {getOperationalMonth().activeCalendarMonth}
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ========================================================================= */}
         {/* --- TIER 2: COMMAND DECK (ORGANIZED FUNCTIONAL CLUSTERS) --- */}
         {/* ========================================================================= */}
@@ -7002,10 +7018,8 @@ const availableDistrictsForFeed = useMemo(() => {
 
                 <div className="space-y-3">
                   {(() => {
-                    const daysInMonth = 30;
-                    const todayDate = new Date().getDate();
-                    const daysRemaining = Math.max(1, daysInMonth - todayDate);
-                    
+                    const { totalWorkingDays, elapsedWorkingDays, remainingWorkingDays, isCurrentMonth, isPastMonth } = workingDaysInfo;
+
                     let scopedTarget = 0;
                     if (selectedDistrict !== 'All') {
                       scopedTarget = targetsData.filter(t => t.district === selectedDistrict).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
@@ -7014,24 +7028,55 @@ const availableDistrictsForFeed = useMemo(() => {
                     } else {
                       scopedTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
                     }
-                    
+
                     const totalScopeNotif = totals.notifications || 0;
                     const pendingScopeNotif = Math.max(0, scopedTarget - totalScopeNotif);
-                    const requiredDailyRate = (pendingScopeNotif / daysRemaining).toFixed(1);
-                    const currentDailyRate = todayDate > 0 ? (totalScopeNotif / todayDate).toFixed(1) : 0;
-                    const projectedTotal = Math.round(Number(currentDailyRate) * daysInMonth);
-                    const projectedPct = scopedTarget > 0 ? Math.round((projectedTotal / scopedTarget) * 100) : 100;
+
+                    let currentDailyRate = '0.0';
+                    let requiredDailyRate = '0.0';
+                    let projectedTotal = totalScopeNotif;
+                    let projectedPct = scopedTarget > 0 ? Math.round((totalScopeNotif / scopedTarget) * 100) : 100;
+                    let daysRemainingDisplay = 0;
+
+                    if (isPastMonth) {
+                      // Mode 1: Past Month (Completed Month Final View)
+                      currentDailyRate = totalWorkingDays > 0 ? (totalScopeNotif / totalWorkingDays).toFixed(1) : '0.0';
+                      requiredDailyRate = '0.0';
+                      projectedTotal = totalScopeNotif;
+                      projectedPct = scopedTarget > 0 ? Math.round((totalScopeNotif / scopedTarget) * 100) : 100;
+                      daysRemainingDisplay = 0;
+                    } else if (isCurrentMonth) {
+                      // Mode 2: Live In-Flight Pacing
+                      currentDailyRate = elapsedWorkingDays > 0 ? (totalScopeNotif / elapsedWorkingDays).toFixed(1) : totalScopeNotif.toFixed(1);
+                      requiredDailyRate = remainingWorkingDays > 0 ? (pendingScopeNotif / remainingWorkingDays).toFixed(1) : '0.0';
+                      projectedTotal = Math.round(totalScopeNotif + (Number(currentDailyRate) * remainingWorkingDays));
+                      projectedPct = scopedTarget > 0 ? Math.round((projectedTotal / scopedTarget) * 100) : 100;
+                      daysRemainingDisplay = remainingWorkingDays;
+                    } else {
+                      // Mode 3: Future Month
+                      currentDailyRate = '0.0';
+                      requiredDailyRate = totalWorkingDays > 0 ? (scopedTarget / totalWorkingDays).toFixed(1) : '0.0';
+                      projectedTotal = 0;
+                      projectedPct = 0;
+                      daysRemainingDisplay = totalWorkingDays;
+                    }
 
                     return (
                       <>
                         <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 flex justify-between items-center">
                           <div>
-                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Current Daily Pace</span>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-400">
+                              {isPastMonth ? 'Final Daily Velocity' : 'Current Daily Pace'}
+                            </span>
                             <p className="text-xl font-black text-indigo-700">{currentDailyRate} <span className="text-xs font-bold text-indigo-500">Notif/Day</span></p>
                           </div>
                           <div className="text-right">
-                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Required Pace</span>
-                            <p className="text-xl font-black text-slate-800">{requiredDailyRate} <span className="text-xs font-bold text-slate-500">Notif/Day</span></p>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                              {isPastMonth ? 'Pacing Status' : 'Required Pace'}
+                            </span>
+                            <p className="text-xl font-black text-slate-800">
+                              {isPastMonth ? (projectedPct >= 100 ? '✅ Achieved' : '🏁 Completed') : `${requiredDailyRate} Notif/Day`}
+                            </p>
                           </div>
                         </div>
 
@@ -7041,12 +7086,14 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span className="font-black text-slate-800">{totalScopeNotif} / {scopedTarget} Notif</span>
                           </div>
                           <div className="flex justify-between font-bold">
-                            <span className="text-slate-500">Month-End Projection:</span>
+                            <span className="text-slate-500">{isPastMonth ? 'Final Achievement:' : 'Month-End Projection:'}</span>
                             <span className="font-black text-indigo-600">{projectedTotal} Notifications ({projectedPct}%)</span>
                           </div>
                           <div className="flex justify-between font-bold">
-                            <span className="text-slate-500">Days Remaining:</span>
-                            <span className="text-slate-700">{daysRemaining} Days</span>
+                            <span className="text-slate-500">Working Days Remaining:</span>
+                            <span className="text-slate-700 font-mono font-bold">
+                              {isPastMonth ? '0 Days (Month Closed)' : `${daysRemainingDisplay} Days (${totalWorkingDays} Total Working Days)`}
+                            </span>
                           </div>
                           <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden mt-1">
                             <div className="h-full bg-indigo-600 rounded-full transition-all duration-700" style={{ width: `${Math.min(100, projectedPct)}%` }}></div>
