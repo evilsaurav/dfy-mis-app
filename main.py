@@ -935,6 +935,8 @@ def get_last_mutation_str() -> str:
     dt = datetime.fromtimestamp(LAST_REPORTS_MODIFIED_TS, timezone(timedelta(hours=5, minutes=30)))
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+ACTIVE_MONTHLY_CACHE_KEYS: List[str] = []
+
 async def get_raw_monthly_reports(
     month_prefix: str, 
     force: bool = False, 
@@ -959,6 +961,16 @@ async def get_raw_monthly_reports(
     if not force:
         cached_full = cache.get(full_cache_key)
         if cached_full is not None and isinstance(cached_full, list):
+            # LRU update: promote accessed month to most-recently-used
+            if full_cache_key in ACTIVE_MONTHLY_CACHE_KEYS:
+                ACTIVE_MONTHLY_CACHE_KEYS.remove(full_cache_key)
+            ACTIVE_MONTHLY_CACHE_KEYS.append(full_cache_key)
+            if len(ACTIVE_MONTHLY_CACHE_KEYS) > 2:
+                evicted_key = ACTIVE_MONTHLY_CACHE_KEYS.pop(0)
+                cache.delete(evicted_key)
+                cache.delete_prefix(f"{evicted_key}_")
+                gc.collect()
+
             if clean_dists:
                 return [d for d in cached_full if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
             return cached_full
@@ -997,6 +1009,16 @@ async def get_raw_monthly_reports(
 
     # Save statewide monthly cache
     cache.set(full_cache_key, raw_list, ttl=3600) # 1-hour shared cache
+
+    # Enforce LRU 2-Month Bound & RAM Watchdog
+    if full_cache_key in ACTIVE_MONTHLY_CACHE_KEYS:
+        ACTIVE_MONTHLY_CACHE_KEYS.remove(full_cache_key)
+    ACTIVE_MONTHLY_CACHE_KEYS.append(full_cache_key)
+    if len(ACTIVE_MONTHLY_CACHE_KEYS) > 2:
+        evicted_key = ACTIVE_MONTHLY_CACHE_KEYS.pop(0)
+        cache.delete(evicted_key)
+        cache.delete_prefix(f"{evicted_key}_")
+        gc.collect()
 
     if clean_dists:
         filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
@@ -2224,14 +2246,7 @@ async def submit_daily_report(report: DailyActivityReport):
 async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
         target_month = month.strip() if month and month.strip() else get_ist_now().strftime("%Y-%m")
-        start_date = f"{target_month}-01"
-        end_date = f"{target_month}-31"
-        docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
+        docs = await get_raw_monthly_reports(target_month)
         consolidated_data = []
         
         list_fields_mapping = {
@@ -2256,8 +2271,8 @@ async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_
             "consent_with_id_ids": "Consent with ID"
         }
         
-        for doc in docs:
-            data = doc.to_dict()
+        for doc in (docs or []):
+            data = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else dict(doc))
             
             # Find the maximum length among all ID arrays
             max_len = 1  # At least 1 row per report
@@ -2538,7 +2553,12 @@ def get_kpi_tab_name(day: int) -> str:
     else:
         return f"{day}th"
 
-def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = None) -> Optional[bytes]:
+def generate_district_kpi_bytes(
+    district: str, 
+    month_prefix: Optional[str] = None, 
+    raw_reports: Optional[list] = None, 
+    target_records: Optional[list] = None
+) -> Optional[bytes]:
     if not month_prefix:
         month_prefix = datetime.now().strftime("%Y-%m")
         
@@ -2575,44 +2595,91 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
 
         # 1. Fetch Targets (Prioritizing Month-Scoped Target)
         target_map = {}
-        try:
-            t_docs = db.collection("staff_targets").where("district", "==", district).stream()
-            for td in t_docs:
-                t_data = td.to_dict()
-                f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
-                if f_name:
-                    if t_data.get("month") == month_prefix:
-                        target_map[f_name] = int(t_data.get("target", 50))
-                    elif f_name not in target_map:
-                        target_map[f_name] = int(t_data.get("target", 50))
-        except Exception as e:
-            print(f"Target fetch notice for {district}: {e}")
+        if target_records is None and month_prefix:
+            target_records = cache.get(f"staff_targets_raw_{month_prefix}")
+
+        c_dist = canonicalize_district(district)
+        alias_dists = {c_dist.lower(), district.lower()}
+        if "aurangabad" in c_dist.lower():
+            alias_dists.update(["aurangabad-bi", "aurangabad"])
+        elif "champaran" in c_dist.lower():
+            alias_dists.update(["purba champaran", "east champaran"])
+        elif "bhojpur" in c_dist.lower():
+            alias_dists.update(["bhojpur"])
+
+        if target_records is not None:
+            for td in target_records:
+                t_data = td if isinstance(td, dict) else (td.to_dict() if hasattr(td, "to_dict") else dict(td))
+                td_dist = canonicalize_district(t_data.get("district", "")).lower()
+                raw_td_dist = str(t_data.get("district", "")).strip().lower()
+                if td_dist in alias_dists or raw_td_dist in alias_dists:
+                    f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name") or t_data.get("name") or "")).strip().lower()
+                    if f_name:
+                        t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
+                        if t_data.get("month") == month_prefix:
+                            target_map[f_name] = t_val
+                        elif f_name not in target_map:
+                            target_map[f_name] = t_val
+        else:
+            try:
+                t_docs = db.collection("staff_targets").where("district", "==", district).stream()
+                for td in t_docs:
+                    t_data = td.to_dict() if hasattr(td, "to_dict") else dict(td)
+                    f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
+                    if f_name:
+                        t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
+                        if t_data.get("month") == month_prefix:
+                            target_map[f_name] = t_val
+                        elif f_name not in target_map:
+                            target_map[f_name] = t_val
+            except Exception as e:
+                print(f"Target fetch notice for {district}: {e}")
 
         # 2. Fetch and Sort Daily Field Reports for this District and Month
-        c_dist = canonicalize_district(district)
-        alias_queries = [c_dist, district]
-        if "aurangabad" in c_dist.lower():
-            alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
-        elif "champaran" in c_dist.lower():
-            alias_queries.extend(["Purba Champaran", "East Champaran"])
-        elif "bhojpur" in c_dist.lower():
-            alias_queries.extend(["BHOJPUR", "Bhojpur"])
-        alias_queries = list(dict.fromkeys(alias_queries))
+        if raw_reports is None and month_prefix:
+            raw_reports = cache.get(f"shared_raw_month_{month_prefix}")
 
-        seen_report_ids = set()
         reports = []
-        start_date = f"{month_prefix}-01"
-        end_date = f"{month_prefix}-31"
-        for aq in alias_queries:
-            docs = db.collection("daily_field_reports")\
-                .where("working_place", "==", aq)\
-                .where("date_of_reporting", ">=", start_date)\
-                .where("date_of_reporting", "<=", end_date)\
-                .stream()
-            for doc in docs:
-                if doc.id not in seen_report_ids:
-                    seen_report_ids.add(doc.id)
-                    reports.append(doc.to_dict())
+        if raw_reports is not None:
+            seen_report_ids = set()
+            for r in raw_reports:
+                r_data = r if isinstance(r, dict) else (r.to_dict() if hasattr(r, "to_dict") else dict(r))
+                r_wp = canonicalize_district(r_data.get("working_place", "") or r_data.get("district", "")).lower()
+                r_raw_wp = str(r_data.get("working_place", "") or r_data.get("district", "")).strip().lower()
+                if r_wp in alias_dists or r_raw_wp in alias_dists:
+                    r_date = str(r_data.get("date_of_reporting") or r_data.get("date") or "").strip()
+                    if not month_prefix or r_date.startswith(month_prefix):
+                        r_id = r_data.get("id") or r_data.get("doc_id") or f"{r_wp}_{r_data.get('fo_name')}_{r_date}"
+                        if r_id not in seen_report_ids:
+                            seen_report_ids.add(r_id)
+                            reports.append(r_data)
+        else:
+            alias_queries = [c_dist, district]
+            if "aurangabad" in c_dist.lower():
+                alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
+            elif "champaran" in c_dist.lower():
+                alias_queries.extend(["Purba Champaran", "East Champaran"])
+            elif "bhojpur" in c_dist.lower():
+                alias_queries.extend(["BHOJPUR", "Bhojpur"])
+            alias_queries = list(dict.fromkeys(alias_queries))
+
+            seen_report_ids = set()
+            start_date = f"{month_prefix}-01"
+            end_date = f"{month_prefix}-31"
+            for aq in alias_queries:
+                docs = db.collection("daily_field_reports")\
+                    .where("working_place", "==", aq)\
+                    .where("date_of_reporting", ">=", start_date)\
+                    .where("date_of_reporting", "<=", end_date)\
+                    .stream()
+                for doc in docs:
+                    doc_id = getattr(doc, "id", None)
+                    if not doc_id:
+                        d_dict = doc.to_dict() if hasattr(doc, "to_dict") else dict(doc)
+                        doc_id = d_dict.get("id") or d_dict.get("doc_id") or str(d_dict)
+                    if doc_id not in seen_report_ids:
+                        seen_report_ids.add(doc_id)
+                        reports.append(doc.to_dict() if hasattr(doc, "to_dict") else dict(doc))
 
         reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
 
@@ -2884,6 +2951,18 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
             del wb
         gc.collect()
 
+async def generate_district_kpi_bytes_async(district: str, month_prefix: Optional[str] = None) -> Optional[bytes]:
+    clean_month = month_prefix or get_ist_now().strftime("%Y-%m")
+    raw_monthly = await get_raw_monthly_reports(clean_month)
+    cached_targets = await get_cached_staff_targets_for_month(clean_month)
+    return await asyncio.to_thread(
+        generate_district_kpi_bytes,
+        district,
+        month_prefix=clean_month,
+        raw_reports=raw_monthly,
+        target_records=cached_targets
+    )
+
 # Concurrency Semaphore to protect Render memory/CPU from multi-tap or parallel heavy Excel exports
 KPI_EXCEL_SEMAPHORE = asyncio.Semaphore(1)
 attendance_excel_semaphore = asyncio.Semaphore(1)
@@ -3137,9 +3216,17 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
 
         try:
             async with KPI_EXCEL_SEMAPHORE:
+                raw_monthly = await get_raw_monthly_reports(month_tag)
+                cached_targets = await get_cached_staff_targets_for_month(month_tag)
                 with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for dist in bihar_districts:
-                        excel_bytes = await asyncio.to_thread(lambda d=dist: generate_district_kpi_bytes(d, month))
+                        excel_bytes = await asyncio.to_thread(
+                            generate_district_kpi_bytes,
+                            dist,
+                            month_prefix=month_tag,
+                            raw_reports=raw_monthly,
+                            target_records=cached_targets
+                        )
                         if excel_bytes:
                             zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)
                             del excel_bytes
