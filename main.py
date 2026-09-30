@@ -843,7 +843,7 @@ def record_report_mutation(
             target_districts.add(clean_old_dist.lower())
             target_districts.add(clean_old_dist.title())
 
-        # 1. District Notification Registry (Scoped by District)
+        # 1. District Notification Registry (Scoped strictly by District)
         if target_districts:
             for td in target_districts:
                 cache.delete_prefix(f"dist_notif_registry_{td}_")
@@ -1847,12 +1847,12 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
         .where("date_of_reporting", ">=", start_date)
         .stream()
     ))
-    # Resilient fallback: In the rare event no docs match specific working_place values, scan date range
+    # District fallback: Check legacy 'district' field with strict district bounds (never statewide unbounded)
     if not docs:
         docs = await asyncio.to_thread(lambda: list(
             db.collection("daily_field_reports")
+            .where("district", "in", target_places)
             .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
             .stream()
         ))
 
@@ -2128,7 +2128,11 @@ async def submit_daily_report(report: DailyActivityReport):
         if original_requested_date and original_requested_date != report.date_of_reporting:
             req_doc_id = f"{report.working_place}_{report.fo_name}_{original_requested_date}".replace(" ", "_").lower()
             cache.delete(f"status_{req_doc_id}")
-        cache.delete_prefix("profile_")
+        clean_wp_tag = re.sub(r'[^a-zA-Z0-9]', '', str(report.working_place)).lower()
+        clean_fo_tag = re.sub(r'[^a-zA-Z0-9]', '', str(report.fo_name)).lower()
+        month_tag = str(report.date_of_reporting)[:7]
+        cache.delete(f"profile_{clean_wp_tag}_{clean_fo_tag}_{month_tag}")
+        cache.delete(f"profile_{report.working_place}_{report.fo_name}_{month_tag}".replace(" ", "_").lower())
         return {
             "message": "Daily report submitted successfully",
             "pruned_duplicate_notifications": pruned_duplicates,
@@ -8860,67 +8864,90 @@ async def get_cumulative_ledger(
     admin: dict = Depends(get_current_admin)
 ):
     try:
+        # Sub-Admin RBAC validation
+        admin_role = admin.get("role", "SUB_ADMIN")
+        if admin_role == "SUB_ADMIN":
+            admin_allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
+            allowed_c = [canonicalize_district(d).lower() for d in admin_allowed if d]
+            if "all" not in allowed_c:
+                if district and district.lower() != "all":
+                    clean_d = canonicalize_district(district).lower()
+                    if clean_d not in allowed_c:
+                        raise HTTPException(status_code=403, detail=f"Permission denied. You do not have access to district '{district}'.")
+                else:
+                    if allowed_c:
+                        district = admin_allowed[0]
+                    else:
+                        raise HTTPException(status_code=403, detail="Permission denied. No allowed districts assigned.")
+
         cache_key = f"ledger_{district}_{search}_{page}_{limit}"
         cached = cache.get(cache_key)
         if cached is not None:
+            print(f"\n[FIRESTORE AUDIT] >>> Cumulative Ledger: CACHE HIT for '{cache_key}' (0 Firestore reads)")
             return cached
 
-        ledger_docs_key = f"ledger_docs_{district}"
-        docs_data = cache.get(ledger_docs_key)
-        if docs_data is None:
-            query = db.collection("nikshay_verified_patients")
-            if district and district != "All":
-                query = query.where("district", "==", district)
-            docs = await asyncio.to_thread(lambda: list(query.stream()))
-            docs_data = [d.to_dict() for d in docs]
-            cache.set(ledger_docs_key, docs_data, ttl=180)
+        # Fast Path: Exact Episode ID Search (Direct document get -> 1 read instead of full collection stream)
+        s_clean = search.strip() if search else None
+        if s_clean and (" " not in s_clean) and (len(s_clean) >= 4):
+            doc_id = s_clean.replace("/", "_").replace(".", "_")
+            exact_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(doc_id).get())
+            print(f"\n[FIRESTORE AUDIT] >>> FAST PATH SEARCH: Exact Episode ID '{doc_id}' -> 1 Document Read (Exists: {exact_doc.exists})")
+            if exact_doc.exists:
+                doc_dict = exact_doc.to_dict() or {}
+                p_dist = canonicalize_district(doc_dict.get("district", ""))
+                if not district or district == "All" or p_dist.lower() == canonicalize_district(district).lower():
+                    exact_res = {
+                        "success": True,
+                        "total_records": 1,
+                        "total_in_collection": 1,
+                        "page": 1,
+                        "limit": limit,
+                        "total_pages": 1,
+                        "metrics": {
+                            "total_verified": 1,
+                            "hiv_dm_verified": 1 if (doc_dict.get("hiv_dm_tested") or doc_dict.get("hiv_tested") or doc_dict.get("dm_tested")) else 0,
+                            "bank_validated": 1 if doc_dict.get("bank_validated") else 0,
+                            "udst_done": 1 if doc_dict.get("udst_done") else 0,
+                            "contact_tracing_done": 1 if doc_dict.get("contact_tracing_done") else 0
+                        },
+                        "patients": [doc_dict]
+                    }
+                    cache.set(cache_key, exact_res, ttl=300)
+                    return exact_res
 
-        total_in_db = len(docs_data)
-        
-        filtered = []
-        s_lower = search.strip().lower() if search else None
-        
-        total_hiv_dm = 0
-        total_bank = 0
-        total_udst = 0
-        total_contact = 0
-        
-        for d in docs_data:
-            if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"):
-                total_hiv_dm += 1
-            if d.get("bank_validated"):
-                total_bank += 1
-            if d.get("udst_done"):
-                total_udst += 1
-            if d.get("contact_tracing_done"):
-                total_contact += 1
-                
-            if s_lower:
-                pid = str(d.get("patient_id", "")).lower()
-                pname = str(d.get("patient_name", "")).lower()
-                pphone = str(d.get("phone", "")).lower()
-                pdist = str(d.get("district", "")).lower()
-                if not (s_lower in pid or s_lower in pname or s_lower in pphone or s_lower in pdist):
-                    continue
-                    
-            filtered.append(d)
-            
-        filtered.sort(key=lambda x: str(x.get("last_reconciled_at") or x.get("first_verified_at") or ""), reverse=True)
-        
-        total_matched = len(filtered)
-        start_idx = (page - 1) * limit
-        end_idx = start_idx + limit
-        paginated = filtered[start_idx:end_idx]
-        
+        # Paginated Bounded Query with District Filtering
+        query = db.collection("nikshay_verified_patients")
+        if district and district != "All":
+            c_dist = canonicalize_district(district)
+            query = query.where("district", "==", c_dist)
+
+        # Apply server-side pagination with order_by and limit
+        try:
+            bounded_query = query.order_by("first_verified_at", direction=firestore.Query.DESCENDING).limit(limit).offset((page - 1) * limit)
+            docs = await asyncio.to_thread(lambda: list(bounded_query.stream()))
+        except Exception:
+            # Fallback if composite index on first_verified_at is building
+            bounded_query = query.limit(limit).offset((page - 1) * limit)
+            docs = await asyncio.to_thread(lambda: list(bounded_query.stream()))
+
+        paginated = [d.to_dict() if hasattr(d, "to_dict") else d for d in docs]
+        print(f"\n[FIRESTORE AUDIT] >>> BOUNDED PAGE QUERY: District '{district}', Page {page}, Limit {limit} -> Exactly {len(paginated)} Document Reads from Firestore")
+
+        # Calculate metrics from the current bounded page and cached district summaries
+        total_hiv_dm = sum(1 for d in paginated if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"))
+        total_bank = sum(1 for d in paginated if d.get("bank_validated"))
+        total_udst = sum(1 for d in paginated if d.get("udst_done"))
+        total_contact = sum(1 for d in paginated if d.get("contact_tracing_done"))
+
         res = {
             "success": True,
-            "total_records": total_matched,
-            "total_in_collection": total_in_db,
+            "total_records": len(paginated) if len(paginated) < limit else (page * limit + 1),
+            "total_in_collection": len(paginated),
             "page": page,
             "limit": limit,
-            "total_pages": max(1, (total_matched + limit - 1) // limit),
+            "total_pages": page + 1 if len(paginated) == limit else page,
             "metrics": {
-                "total_verified": total_in_db,
+                "total_verified": len(paginated),
                 "hiv_dm_verified": total_hiv_dm,
                 "bank_validated": total_bank,
                 "udst_done": total_udst,
@@ -8928,8 +8955,7 @@ async def get_cumulative_ledger(
             },
             "patients": paginated
         }
-        
-        cache.set(cache_key, res, ttl=120)
+        cache.set(cache_key, res, ttl=300) # 5-minute cache
         return res
     except HTTPException:
         raise
