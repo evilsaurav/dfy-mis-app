@@ -323,6 +323,7 @@ def verify_password(plain: str, hashed_or_plain: str) -> bool:
 def create_access_token(user_data: dict) -> str:
     """Issues a signed HMAC-SHA256 JWT valid for 7 days."""
     payload = {
+        "user_id": str(user_data.get("user_id") or user_data.get("username", "admin")),
         "sub": str(user_data.get("user_id") or user_data.get("username", "admin")),
         "username": user_data.get("username", "admin"),
         "name": user_data.get("name") or user_data.get("username", "admin"),
@@ -447,7 +448,12 @@ def canonicalize_district(name: str) -> str:
     if not name:
         return ""
     clean = str(name).strip()
-    return DISTRICT_CANONICAL_MAP.get(clean.lower(), clean)
+    if clean.lower() in DISTRICT_CANONICAL_MAP:
+        return DISTRICT_CANONICAL_MAP[clean.lower()]
+    for d in DEFAULT_BIHAR_DISTRICTS:
+        if clean.lower() == d.lower():
+            return d
+    return clean
 
 def normalize_staff_key(dist_str: str, name_str: str) -> str:
     d = re.sub(r'[^a-z0-9]', '', canonicalize_district(dist_str or '').lower())
@@ -920,7 +926,7 @@ async def get_raw_monthly_reports(
     """
     clean_dists = set()
     if district_filter:
-        clean_dists = {canonicalize_district(d) for d in district_filter if d and str(d).strip().lower() != "all"}
+        clean_dists = {canonicalize_district(d).lower() for d in district_filter if d and str(d).strip().lower() != "all"}
 
     full_cache_key = f"shared_raw_month_{month_prefix}"
     dist_cache_key = full_cache_key
@@ -932,7 +938,7 @@ async def get_raw_monthly_reports(
         cached_full = cache.get(full_cache_key)
         if cached_full is not None and isinstance(cached_full, list):
             if clean_dists:
-                return [d for d in cached_full if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
+                return [d for d in cached_full if canonicalize_district(d.get("working_place") or d.get("district", "")).lower() in clean_dists]
             return cached_full
 
         # 2. Check if district-scoped cache is in memory
@@ -951,15 +957,27 @@ async def get_raw_monthly_reports(
         .where("date_of_reporting", "<=", end_date)
         .stream()
     ))
+    if not docs:
+        try:
+            docs = await asyncio.to_thread(lambda: list(
+                db.collection("daily_field_reports")
+                .where("date", ">=", start_date)
+                .where("date", "<=", end_date)
+                .stream()
+            ))
+        except Exception:
+            pass
 
     raw_list = []
     for d in docs:
         item = d.to_dict() if hasattr(d, "to_dict") else dict(d)
+        if "date_of_reporting" not in item and "date" in item:
+            item["date_of_reporting"] = item["date"]
         did = getattr(d, "id", None) or item.get("id") or item.get("doc_id")
         if not did:
             c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
             fo = str(item.get("fo_name", "")).strip()
-            dt = str(item.get("date_of_reporting", "")).strip()
+            dt = str(item.get("date_of_reporting", "") or item.get("date", "")).strip()
             did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
         if "id" not in item:
             item["id"] = did
@@ -971,7 +989,7 @@ async def get_raw_monthly_reports(
     cache.set(full_cache_key, raw_list, ttl=3600) # 1-hour shared cache
 
     if clean_dists:
-        filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
+        filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")).lower() in clean_dists]
         if dist_cache_key != full_cache_key:
             cache.set(dist_cache_key, filtered_list, ttl=3600)
         return filtered_list
@@ -3581,6 +3599,7 @@ async def get_today_attendance(
 
         # Sub-Admin RBAC validation
         admin_role = admin.get("role", "SUB_ADMIN")
+        subadmin_allowed = None
         if admin_role == "SUB_ADMIN":
             admin_allowed = admin.get("allowed_districts", []) or admin.get("districts", [])
             if admin_allowed and "All" not in admin_allowed:
@@ -3592,9 +3611,12 @@ async def get_today_attendance(
                     allowed_dist_set = allowed_dist_set.intersection(subadmin_allowed)
                 else:
                     allowed_dist_set = subadmin_allowed
+            elif not admin_allowed or "All" not in admin_allowed:
+                allowed_dist_set = set()
 
-        effective_dist = ",".join(sorted(allowed_dist_set)) if allowed_dist_set else (districts or 'all')
-        cache_key = f"attendance_{target_date}_{effective_dist}"
+        user_scope = "super" if admin_role == "SUPER_ADMIN" else f"sub_{admin.get('user_id') or admin.get('sub') or admin.get('username')}"
+        effective_dist = ",".join(sorted(allowed_dist_set)) if allowed_dist_set else (districts or 'all').lower()
+        cache_key = f"attendance_{target_date}_{effective_dist}_{user_scope}"
         if force_refresh:
             cache.delete(cache_key)
         else:
@@ -3735,42 +3757,50 @@ async def get_today_attendance(
                                 "designation": "Field Officer"
                             })
 
-        # 2. Fetch daily field reports for this date applying 10:00 AM Cutoff Segregation
+        # 2. Fetch daily field reports from master ledger applying 10:00 AM Cutoff Segregation
         try:
             target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
             next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            target_month = target_date[:7]
         except Exception:
-            next_date = ""
+            target_dt = get_ist_now().date()
+            target_date = target_dt.strftime("%Y-%m-%d")
+            next_date = (target_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            target_month = target_date[:7]
 
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
-        if not report_docs:
-            report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
+        raw_docs = list(await get_raw_monthly_reports(target_month, force=bool(force_refresh), district_filter=allowed_dist_set))
 
-        all_candidate_docs = list(report_docs)
+        # Month-End Boundary Transition Guard (Loophole 2):
+        prev_month_str = (target_dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        next_month_str = (target_dt.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
+        if target_dt.day <= 2:
+            prev_docs = await get_raw_monthly_reports(prev_month_str, force=bool(force_refresh), district_filter=allowed_dist_set)
+            if prev_docs:
+                raw_docs.extend(prev_docs)
+        elif target_dt.day >= 28:
+            next_docs = await get_raw_monthly_reports(next_month_str, force=bool(force_refresh), district_filter=allowed_dist_set)
+            if next_docs:
+                raw_docs.extend(next_docs)
+
+        all_candidate_docs = []
         seen_doc_ids = set()
-        for doc in report_docs:
-            doc_id = getattr(doc, "id", None)
+        for doc in raw_docs:
+            d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
+            if not d:
+                continue
+            doc_id = d.get("id") or d.get("doc_id") or getattr(doc, "id", None)
             if doc_id:
+                if doc_id in seen_doc_ids:
+                    continue
                 seen_doc_ids.add(doc_id)
-
-        if next_date:
-            try:
-                next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", next_date).stream()))
-                if not next_day_docs:
-                    next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", next_date).stream()))
-                for ndoc in next_day_docs:
-                    ndoc_id = getattr(ndoc, "id", None)
-                    if not ndoc_id or ndoc_id not in seen_doc_ids:
-                        all_candidate_docs.append(ndoc)
-            except Exception as e:
-                print(f"Notice fetching next_day_docs in today-attendance: {e}")
+            all_candidate_docs.append(d)
 
         reports_map = {}
         for doc in all_candidate_docs:
-            d = doc.to_dict() if hasattr(doc, "to_dict") else {}
+            d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
             if not d:
                 continue
-            dist = canonicalize_district(d.get('working_place', ''))
+            dist = canonicalize_district(d.get('working_place', '') or d.get('district', ''))
             if allowed_dist_set and dist.lower() not in allowed_dist_set:
                 continue
             fo_raw_name = d.get('fo_name', '').strip()
@@ -3964,7 +3994,22 @@ async def get_today_attendance(
             "on_leave_fos": on_leave_fos,
             "missing_fos": missing_fos
         }
-        cache.set(cache_key, res, ttl=60)
+
+        # Sub-Admin RBAC district isolation guard (Loophole 3)
+        if admin_role == "SUB_ADMIN" and subadmin_allowed is not None:
+            res["submitted_fos"] = [x for x in res["submitted_fos"] if canonicalize_district(x.get("district", "")).lower() in subadmin_allowed]
+            res["submitted_full"] = [x for x in res["submitted_full"] if canonicalize_district(x.get("district", "")).lower() in subadmin_allowed]
+            res["submitted_partial"] = [x for x in res["submitted_partial"] if canonicalize_district(x.get("district", "")).lower() in subadmin_allowed]
+            res["on_leave_fos"] = [x for x in res["on_leave_fos"] if canonicalize_district(x.get("district", "")).lower() in subadmin_allowed]
+            res["missing_fos"] = [x for x in res["missing_fos"] if canonicalize_district(x.get("district", "")).lower() in subadmin_allowed]
+            res["submitted_count"] = len(res["submitted_fos"])
+            res["submitted_full_count"] = len(res["submitted_full"])
+            res["submitted_partial_count"] = len(res["submitted_partial"])
+            res["on_leave_count"] = len(res["on_leave_fos"])
+            res["missing_count"] = len(res["missing_fos"])
+            res["total_staff"] = len([s for s in staff_list if canonicalize_district(s.get("district", "")).lower() in subadmin_allowed])
+
+        cache.set(cache_key, res, ttl=600)
         return res
     except HTTPException:
         raise
