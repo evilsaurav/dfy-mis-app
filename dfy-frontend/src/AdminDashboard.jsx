@@ -11263,8 +11263,9 @@ const availableDistrictsForFeed = useMemo(() => {
                             />
                           </div>
 
-                          {/* Role-Based Action Buttons */}
-                          {(isSuperAdmin || canManageTa) && (
+                          {/* Role-Based Action Buttons & State Machine */}
+                          {/* 1. Sub-Admin / MIS Submit Button */}
+                          {(isSuperAdmin || canManageTa) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11277,7 +11278,8 @@ const availableDistrictsForFeed = useMemo(() => {
                             </button>
                           )}
 
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                          {/* 2. Incharge & Super Admin Approve & Revert Buttons */}
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE') && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
                             <>
                               <button
                                 type="button"
@@ -11300,6 +11302,37 @@ const availableDistrictsForFeed = useMemo(() => {
                                 <span>Revert District</span>
                               </button>
                             </>
+                          )}
+
+                          {/* 3. Unlock / Revert if already APPROVED (Super Admin & Main Incharge) */}
+                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE') && taDistrictStatus === 'APPROVED' && (
+                            <button
+                              type="button"
+                              onClick={() => setTaRevertModal({ isOpen: true, district: taDistrict, month: taMonth, reason: '' })}
+                              disabled={taActionLoading}
+                              className="px-3.5 py-2 rounded-xl text-xs font-black bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              title="Unlock approved roster for emergency corrections"
+                            >
+                              <span>🔓</span>
+                              <span>Unlock / Revert Roster</span>
+                            </button>
+                          )}
+
+                          {/* Status Badges for Other Roles */}
+                          {(!isSuperAdmin && currentUser?.role !== 'MAIN_INCHARGE') && taDistrictStatus === 'SUBMITTED' && (
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-900/60 text-blue-200 border border-blue-500/40 flex items-center gap-1.5">
+                              <span>⏳</span> Awaiting Incharge Sign-off
+                            </span>
+                          )}
+                          {(!isSuperAdmin && currentUser?.role !== 'MAIN_INCHARGE') && taDistrictStatus === 'APPROVED' && (
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 flex items-center gap-1.5">
+                              <span>🔒</span> Approved &amp; Locked
+                            </span>
+                          )}
+                          {(currentUser?.role === 'MAIN_INCHARGE') && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 border border-slate-600/40 flex items-center gap-1.5">
+                              <span>📝</span> Draft in progress by Sub-Admin
+                            </span>
                           )}
 
                           <button
@@ -11754,18 +11787,20 @@ const availableDistrictsForFeed = useMemo(() => {
                             type="number"
                             min="0"
                             step="0.01"
+                            disabled={taDistrictStatus === 'APPROVED'}
                             value={taDeductionAmount || ''}
                             onChange={(e) => setTaDeductionAmount(Math.max(0, parseFloat(e.target.value) || 0))}
                             placeholder="0.00"
-                            className="w-full bg-rose-50/50 border border-rose-200 rounded-lg px-2.5 py-1 text-sm font-black text-rose-700 outline-none focus:ring-1 focus:ring-rose-500"
+                            className="w-full bg-rose-50/50 border border-rose-200 rounded-lg px-2.5 py-1 text-sm font-black text-rose-700 outline-none focus:ring-1 focus:ring-rose-500 disabled:opacity-60 disabled:cursor-not-allowed"
                           />
                         </div>
                         <input
                           type="text"
+                          disabled={taDistrictStatus === 'APPROVED'}
                           value={taDeductionReason}
                           onChange={(e) => setTaDeductionReason(e.target.value)}
                           placeholder="Reason for deduction..."
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 outline-none focus:ring-1 focus:ring-slate-400"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 outline-none focus:ring-1 focus:ring-slate-400 disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
@@ -11782,14 +11817,34 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                         <input
                           type="text"
+                          disabled={taDistrictStatus === 'APPROVED'}
                           value={taAdminRemarks}
                           onChange={(e) => setTaAdminRemarks(e.target.value)}
                           placeholder="Admin remarks for accounts..."
-                          className="w-full mt-1.5 bg-white/90 border border-emerald-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-700 outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full mt-1.5 bg-white/90 border border-emerald-300 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-700 outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed"
                         />
                       </div>
                     </div>
                   </div>
+
+                  {/* Approved District Locked Notice */}
+                  {taDistrictStatus === 'APPROVED' && (
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">🔒</span>
+                        <span>This district's TA roster has been <strong>Approved &amp; Published</strong>. Editing is locked.</span>
+                      </div>
+                      {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE') && (
+                        <button
+                          type="button"
+                          onClick={() => setTaRevertModal({ isOpen: true, district: taDistrict, month: taMonth, reason: '' })}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-black bg-emerald-700 hover:bg-emerald-800 text-white transition-all cursor-pointer"
+                        >
+                          Unlock Roster
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* 31-Day Interactive Bike Log Table */}
                   <div ref={taDailyTableRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden scroll-mt-28">
@@ -11812,7 +11867,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         <button
                           type="button"
                           onClick={handleSaveTaLog}
-                          disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                          disabled={taDistrictStatus === 'APPROVED' || taSaving || taPrefilling || !taSelectedStaffKey}
                           className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                         >
                           <span>{taSaving ? '⏳' : '💾'}</span>
@@ -11821,12 +11876,12 @@ const availableDistrictsForFeed = useMemo(() => {
                       </div>
                     </div>
 
-                    <div className="overflow-x-auto max-h-[calc(100vh-320px)] min-h-[420px] overflow-y-auto custom-scrollbar">
+                    <div className="overflow-auto max-h-[calc(100vh-340px)] min-h-[420px] custom-scrollbar">
                       <table className="w-full text-left text-xs border-collapse min-w-[1380px]">
                         <thead className="sticky top-0 z-20 bg-slate-900 text-white font-bold text-xs shadow-sm">
                           <tr>
-                            <th className="px-3.5 py-3 text-center min-w-[100px]">Date</th>
-                            <th className="px-2.5 py-3 text-center min-w-[65px]">Day</th>
+                            <th className="sticky left-0 z-30 bg-slate-900 px-3.5 py-3 text-center min-w-[105px] border-r border-slate-800">Date</th>
+                            <th className="sticky left-[105px] z-30 bg-slate-900 px-2.5 py-3 text-center min-w-[70px] border-r border-slate-800 shadow-[2px_0_5px_rgba(0,0,0,0.15)]">Day</th>
                             <th className="px-3.5 py-3 text-center min-w-[140px]">Initial Reading (KM)</th>
                             <th className="px-3.5 py-3 text-center min-w-[140px]">Final Reading (KM)</th>
                             <th className="px-2.5 py-3 text-center min-w-[85px]" title="Check if speedometer was broken/disconnected">Broken Meter?</th>
@@ -11843,22 +11898,25 @@ const availableDistrictsForFeed = useMemo(() => {
                             const entry = taDailyLogs[day.dateStr] || {};
                             const isOverride = Boolean(entry.is_override);
                             const isSunday = day.isSunday;
+                            const isLocked = taDistrictStatus === 'APPROVED';
 
                             return (
                               <tr
                                 key={day.dateStr}
                                 className={`hover:bg-teal-50/40 transition-colors ${
-                                  isSunday ? 'bg-indigo-50/30' : ''
+                                  entry.reading_error ? 'bg-rose-50/40' : (isSunday ? 'bg-indigo-50/30' : '')
                                 }`}
                               >
                                 {/* Date */}
-                                <td className="px-3.5 py-2 text-center font-bold text-slate-700 tabular-num whitespace-nowrap">
+                                <td className={`sticky left-0 z-10 px-3.5 py-2 text-center font-bold text-slate-800 tabular-num whitespace-nowrap border-r border-slate-200/80 ${
+                                  entry.reading_error ? 'bg-rose-50' : (isSunday ? 'bg-indigo-50' : 'bg-white')
+                                }`}>
                                   {day.dateStr}
                                 </td>
 
                                 {/* Day */}
-                                <td className={`px-2.5 py-2 text-center font-bold text-[11px] ${
-                                  isSunday ? 'text-indigo-600' : 'text-slate-500'
+                                <td className={`sticky left-[105px] z-10 px-2.5 py-2 text-center font-bold text-[11px] border-r border-slate-200/80 shadow-[2px_0_5px_rgba(0,0,0,0.05)] ${
+                                  entry.reading_error ? 'bg-rose-50 text-rose-700' : (isSunday ? 'bg-indigo-50 text-indigo-600' : 'bg-white text-slate-600')
                                 }`}>
                                   {day.dayName}
                                 </td>
@@ -11868,10 +11926,11 @@ const availableDistrictsForFeed = useMemo(() => {
                                   <input
                                     type="number"
                                     min="0"
+                                    disabled={isLocked}
                                     value={entry.initial_reading || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'initial_reading', e.target.value)}
                                     placeholder="e.g. 12000"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
                                   />
                                 </td>
 
@@ -11880,20 +11939,29 @@ const availableDistrictsForFeed = useMemo(() => {
                                   <input
                                     type="number"
                                     min="0"
+                                    disabled={isLocked}
                                     value={entry.final_reading || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'final_reading', e.target.value)}
                                     placeholder="e.g. 12045"
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
+                                    className={`w-full bg-slate-50 border rounded-lg px-2.5 py-1.5 text-xs text-center font-semibold text-slate-800 outline-none focus:bg-white focus:ring-1.5 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed ${
+                                      entry.reading_error ? 'border-rose-400 focus:ring-rose-500 bg-rose-50/30' : 'border-slate-200 focus:ring-teal-500'
+                                    }`}
                                   />
+                                  {entry.reading_error && (
+                                    <span className="block text-[10px] font-bold text-rose-600 mt-1 whitespace-nowrap" title={entry.reading_error}>
+                                      ⚠️ Final &lt; Initial
+                                    </span>
+                                  )}
                                 </td>
 
                                 {/* Broken Meter Toggle */}
                                 <td className="px-2 py-2 text-center">
                                   <input
                                     type="checkbox"
+                                    disabled={isLocked}
                                     checked={isOverride}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'is_override', e.target.checked)}
-                                    className="w-4 h-4 text-teal-600 rounded cursor-pointer accent-teal-600"
+                                    className="w-4 h-4 text-teal-600 rounded cursor-pointer accent-teal-600 disabled:cursor-not-allowed"
                                     title="Enable manual KM entry if bike meter was damaged"
                                   />
                                 </td>
@@ -11904,10 +11972,11 @@ const availableDistrictsForFeed = useMemo(() => {
                                     <input
                                       type="number"
                                       min="0"
+                                      disabled={isLocked}
                                       value={entry.total_km || ''}
                                       onChange={(e) => handleUpdateDailyLog(day.dateStr, 'total_km', e.target.value)}
                                       placeholder="KM"
-                                      className="w-full bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-center font-black text-amber-900 outline-none focus:bg-white focus:ring-1.5 focus:ring-amber-500 shadow-2xs"
+                                      className="w-full bg-amber-50 border border-amber-300 rounded-lg px-2.5 py-1.5 text-xs text-center font-black text-amber-900 outline-none focus:bg-white focus:ring-1.5 focus:ring-amber-500 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
                                     />
                                   ) : (
                                     <span className={`inline-block px-2.5 py-1 rounded-md text-xs font-black tabular-num ${
@@ -11932,10 +12001,11 @@ const availableDistrictsForFeed = useMemo(() => {
                                 <td className="px-2 py-1.5">
                                   <input
                                     type="text"
+                                    disabled={isLocked}
                                     value={entry.from_location || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'from_location', e.target.value)}
                                     placeholder={taDistrict + " HQ / Home"}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
                                   />
                                 </td>
 
@@ -11943,10 +12013,11 @@ const availableDistrictsForFeed = useMemo(() => {
                                 <td className="px-2 py-1.5">
                                   <input
                                     type="text"
+                                    disabled={isLocked}
                                     value={entry.to_location || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'to_location', e.target.value)}
                                     placeholder="Visited PHC / Sub-Center / Clinic..."
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
                                   />
                                 </td>
 
@@ -11954,10 +12025,11 @@ const availableDistrictsForFeed = useMemo(() => {
                                 <td className="px-2 py-1.5">
                                   <input
                                     type="text"
+                                    disabled={isLocked}
                                     value={entry.purpose || entry.remarks || ''}
                                     onChange={(e) => handleUpdateDailyLog(day.dateStr, 'purpose', e.target.value)}
                                     placeholder="e.g. Sample collection, Doctor visit, Follow-up..."
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs"
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:bg-white focus:ring-1.5 focus:ring-teal-500 shadow-2xs disabled:bg-slate-100 disabled:cursor-not-allowed"
                                   />
                                 </td>
                               </tr>
@@ -11966,7 +12038,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </tbody>
                         <tfoot className="bg-slate-100/90 font-black text-xs border-t-2 border-slate-300">
                           <tr>
-                            <td colSpan="5" className="px-4 py-3 text-right uppercase tracking-wider text-slate-600">
+                            <td colSpan="5" className="sticky left-0 z-10 bg-slate-100 px-4 py-3 text-right uppercase tracking-wider text-slate-600 border-r border-slate-200">
                               Grand Monthly Totals:
                             </td>
                             <td className="px-3 py-3 text-center text-teal-800 text-sm tabular-num">
