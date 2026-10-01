@@ -189,7 +189,6 @@ export default function AdminDashboard() {
   const [officialDistrictTarget, setOfficialDistrictTarget] = useState(0);
   const [officialTargetsByDistrict, setOfficialTargetsByDistrict] = useState({});
   const [tempOfficialTargets, setTempOfficialTargets] = useState({});
-  const [districtQuickFOValue, setDistrictQuickFOValue] = useState({});
   const [isSavingDistrictTarget, setIsSavingDistrictTarget] = useState(false);
   const [isSavingBulkDistrictTargets, setIsSavingBulkDistrictTargets] = useState(false);
   const [targetModalTab, setTargetModalTab] = useState('official'); // 'official' | 'frontline'
@@ -2048,13 +2047,9 @@ export default function AdminDashboard() {
     setIsSavingDistrictTarget(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = localStorage.getItem("token") || currentUser?.token;
-      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
+      const res = await authFetch(`${API_BASE_URL}/update-district-target`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           month: targetModalMonth,
           district: targetModalDistrict,
@@ -2095,30 +2090,45 @@ export default function AdminDashboard() {
     setIsSavingDistrictTarget(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = localStorage.getItem("token") || currentUser?.token;
-      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
+      const cDist = canonicalizeDistrict(distName);
+
+      // 1. Save Official District Target
+      const offReq = authFetch(`${API_BASE_URL}/update-district-target`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           month: targetModalMonth,
           district: distName,
           official_target: val
         })
       });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`Official target for ${distName} saved (${val})!`, 'success');
-        const cDist = canonicalizeDistrict(distName);
+
+      // 2. Save That District's Staff Targets in Parallel
+      const distStaff = targetsData.filter(t => canonicalizeDistrict(t.district) === cDist && t.fo_name);
+      const staffReq = distStaff.length > 0 ? authFetch(`${API_BASE_URL}/update-targets-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          month: targetModalMonth,
+          targets: distStaff.map(t => ({
+            district: t.district,
+            fo_name: t.fo_name,
+            target: Number(t.target) || 0
+          }))
+        })
+      }) : Promise.resolve({ ok: true, json: async () => ({ success: true }) });
+
+      const [offRes, staffRes] = await Promise.all([offReq, staffReq]);
+      const offData = await offRes.json();
+      if (offRes.ok && offData.success) {
+        showToast(`✓ Saved ${distName}: Official (${val}) & ${distStaff.length} Staff Targets!`, 'success');
         setOfficialTargetsByDistrict(prev => ({ ...prev, [cDist]: val }));
         setTempOfficialTargets(prev => ({ ...prev, [cDist]: val }));
         if (targetModalDistrict === distName) {
           setOfficialDistrictTarget(val);
         }
       } else {
-        showToast(data.detail || `Failed to save target for ${distName}`, 'error');
+        showToast(offData.detail || `Failed to save targets for ${distName}`, 'error');
       }
     } catch (err) {
       console.error("handleSaveSingleDistrictTarget error", err);
@@ -2132,7 +2142,6 @@ export default function AdminDashboard() {
     setIsSavingBulkDistrictTargets(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = localStorage.getItem("token") || currentUser?.token;
       
       const payloadTargets = targetModalDistricts.map(dist => {
         const cDist = canonicalizeDistrict(dist);
@@ -2154,12 +2163,9 @@ export default function AdminDashboard() {
         };
       });
 
-      const res = await fetch(`${API_BASE_URL}/update-district-targets-bulk`, {
+      const res = await authFetch(`${API_BASE_URL}/update-district-targets-bulk`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           month: targetModalMonth,
           targets: payloadTargets
@@ -2167,27 +2173,24 @@ export default function AdminDashboard() {
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        showToast(`✓ All ${payloadTargets.length} district official targets saved successfully!`, 'success');
         const newMap = { ...officialTargetsByDistrict };
         payloadTargets.forEach(item => {
           newMap[canonicalizeDistrict(item.district)] = item.official_target;
         });
         setOfficialTargetsByDistrict(newMap);
+        setTempOfficialTargets(newMap);
+        return true;
       } else {
         showToast(data.detail || 'Failed to bulk save official district targets', 'error');
+        return false;
       }
     } catch (err) {
       console.error("handleSaveBulkDistrictTargets error", err);
       showToast('Network error while bulk saving official district targets', 'error');
+      return false;
     } finally {
       setIsSavingBulkDistrictTargets(false);
     }
-  };
-
-  const handleSaveAllTargetsCombined = async () => {
-    await handleSaveBulkDistrictTargets();
-    await saveAllTargets();
-    showToast('✓ All Official Targets & Frontline Allocations Saved!', 'success');
   };
 
   const handleTargetChange = (district, fo_name, value) => {
@@ -2214,31 +2217,51 @@ export default function AdminDashboard() {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const targetMonth = targetModalMonth || month || new Date().toISOString().slice(0, 7);
           const isSubAdmin = currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All');
-          for (let t of targetsData) {
-              if (t.fo_name && t.district) {
-                  if (isSubAdmin && !currentUser.allowed_districts.includes(t.district)) {
-                    continue;
-                  }
-                  await authFetch(API_BASE_URL + "/update-target", {
-                      method: "POST", headers:{"Content-Type":"application/json"},
-                      body: JSON.stringify({ 
-                          fo_name: t.fo_name, 
-                          district: t.district, 
-                          target: Number(t.target) || 0,
-                          month: targetMonth
-                      })
-                  });
-              }
+          
+          const payloadTargets = targetsData.filter(t => {
+            if (!t.fo_name || !t.district) return false;
+            if (isSubAdmin && !currentUser.allowed_districts.includes(t.district)) return false;
+            return true;
+          }).map(t => ({
+            district: t.district,
+            fo_name: t.fo_name,
+            target: Number(t.target) || 0
+          }));
+
+          const res = await authFetch(`${API_BASE_URL}/update-targets-bulk`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              month: targetMonth,
+              targets: payloadTargets
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            showToast(`✓ All ${payloadTargets.length} frontline staff targets saved!`, 'success');
+            return true;
+          } else {
+            showToast(data.detail || 'Failed to save staff targets', 'error');
+            return false;
           }
-          alert(`Targets for ${targetMonth} saved successfully!`);
-          setShowTargetModal(false);
-          loadTargets('All', month);
       } catch(err) {
           console.error(err);
-          alert("Error saving targets");
+          showToast("Error saving targets", 'error');
+          return false;
       } finally {
           setIsSavingTargets(false);
       }
+  };
+
+  const handleSaveAllTargetsCombined = async () => {
+    const [offOk, staffOk] = await Promise.all([
+      handleSaveBulkDistrictTargets(),
+      saveAllTargets()
+    ]);
+    if (offOk || staffOk) {
+      showToast(`✓ All Official Targets & Frontline Allocations for ${targetModalMonth} Saved!`, 'success');
+      loadTargets('All', targetModalMonth);
+    }
   };
 
 
@@ -13299,122 +13322,114 @@ const availableDistrictsForFeed = useMemo(() => {
                     return (
                       <div 
                         key={dist} 
-                        className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 transition-all shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                        className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 transition-all shadow-2xs space-y-3"
                       >
-                        {/* District Title & Staff Count */}
-                        <div className="min-w-[160px]">
+                        {/* District Header Row: Title, Official Target, Frontline Total, Buffer Pill & Save */}
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                          {/* District Title & Staff Count */}
+                          <div className="min-w-[160px]">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-indigo-600"></span>
+                              <h4 className="text-sm font-black text-slate-800">{dist}</h4>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                                👥 {staffCount} Staff
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Official District Target Input (District has ONLY ONE official target) */}
                           <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full bg-indigo-600"></span>
-                            <h4 className="text-sm font-black text-slate-800">{dist}</h4>
+                            <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">Official Target:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={offVal}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setTempOfficialTargets(prev => ({ ...prev, [cDist]: val }));
+                              }}
+                              placeholder="e.g. 53"
+                              className="w-20 sm:w-24 bg-indigo-50/60 border border-indigo-200 rounded-xl px-2.5 py-1.5 text-center font-black text-xs text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            />
                           </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
-                              👥 {staffCount} Staff
+
+                          {/* Frontline Total & Live Buffer Pill */}
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2.5 py-1 rounded-xl border border-purple-200 whitespace-nowrap">
+                              Frontline Total: {frontlineAllocated}
                             </span>
-                            <span className="text-[10px] font-black text-purple-700">
-                              Frontline: {frontlineAllocated}
-                            </span>
-                          </div>
-                        </div>
 
-                        {/* Official District Target Input */}
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">Official Target:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={offVal}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setTempOfficialTargets(prev => ({ ...prev, [cDist]: val }));
-                            }}
-                            placeholder="e.g. 53"
-                            className="w-20 sm:w-24 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-center font-black text-xs text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                          />
-                        </div>
-
-                        {/* Quick Frontline Allocator: "Give Each Staff [ 20 ] [ Apply ]" */}
-                        <div className="flex items-center gap-1.5 bg-purple-50/70 p-1.5 rounded-xl border border-purple-100">
-                          <span className="text-[10px] font-bold text-purple-900 whitespace-nowrap pl-1">Give Each:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={districtQuickFOValue[cDist] ?? ''}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setDistrictQuickFOValue(prev => ({ ...prev, [cDist]: val }));
-                            }}
-                            placeholder="e.g. 20"
-                            className="w-16 bg-white border border-purple-200 rounded-lg px-2 py-1 text-center font-black text-xs text-purple-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const qVal = Number(districtQuickFOValue[cDist]);
-                              if (isNaN(qVal) || qVal < 0) {
-                                showToast('Please enter a valid target for staff', 'warning');
-                                return;
-                              }
-                              setTargetsData(prev => {
-                                const updated = prev.map(t => {
-                                  if (canonicalizeDistrict(t.district) === cDist) {
-                                    return { ...t, target: qVal };
-                                  }
-                                  return t;
-                                });
-                                officers.forEach(fo => {
-                                  const exists = updated.some(t =>
-                                    canonicalizeDistrict(t.district) === cDist &&
-                                    (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
-                                  );
-                                  if (!exists) {
-                                    updated.push({
-                                      district: dist,
-                                      fo_name: fo,
-                                      target: qVal
-                                    });
-                                  }
-                                });
-                                return updated;
-                              });
-                              showToast(`Set ${qVal} for each staff in ${dist} (Frontline: ${qVal * staffCount})`, 'info');
-                            }}
-                            className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-black transition-all shadow-xs cursor-pointer active:scale-95"
-                          >
-                            Apply
-                          </button>
-                        </div>
-
-                        {/* Live Comparison Buffer Pill */}
-                        <div className="min-w-[130px] flex items-center md:justify-center">
-                          {numOff > 0 ? (
-                            bufferCount >= 0 ? (
-                              <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs whitespace-nowrap">
-                                +{bufferCount} (+{bufferPct}% Buffer)
-                              </span>
+                            {numOff > 0 ? (
+                              bufferCount >= 0 ? (
+                                <span className="text-[10px] font-black px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 whitespace-nowrap">
+                                  +{bufferCount} (+{bufferPct}% Buffer)
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-black px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">
+                                  {bufferCount} Deficit ({bufferPct}%)
+                                </span>
+                              )
                             ) : (
-                              <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs whitespace-nowrap">
-                                {bufferCount} Deficit ({bufferPct}%)
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-400 whitespace-nowrap">
+                                Official unset
                               </span>
-                            )
-                          ) : (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 whitespace-nowrap">
-                              Official unset
-                            </span>
-                          )}
+                            )}
+                          </div>
+
+                          {/* District Save Button */}
+                          <div className="shrink-0 ml-auto md:ml-0">
+                            <button
+                              type="button"
+                              onClick={() => handleSaveSingleDistrictTarget(dist, numOff)}
+                              disabled={isSavingDistrictTarget}
+                              className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+                            >
+                              {isSavingDistrictTarget ? 'Saving...' : 'Save District'}
+                            </button>
+                          </div>
                         </div>
 
-                        {/* District Save Button */}
-                        <div className="shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleSaveSingleDistrictTarget(dist, numOff)}
-                            disabled={isSavingDistrictTarget}
-                            className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 hover:border-transparent transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
-                          >
-                            {isSavingDistrictTarget ? 'Saving...' : 'Save'}
-                          </button>
-                        </div>
+                        {/* Individual Frontline Staff Inputs Grid (Har ladke ka alag frontline target) */}
+                        {officers.length > 0 ? (
+                          <div className="space-y-1.5 pt-1">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                              Individual Frontline Staff Quotas ({officers.length} staff):
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {officers.map(fo => {
+                                const tData = targetsData.find(t => 
+                                  canonicalizeDistrict(t.district) === cDist && 
+                                  (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                                );
+                                const currentTarget = parseTargetVal(tData, 50);
+                                return (
+                                  <div 
+                                    key={fo} 
+                                    className="flex justify-between items-center bg-slate-50/80 hover:bg-purple-50/40 border border-slate-200/80 rounded-xl px-3 py-2 transition-colors"
+                                  >
+                                    <div className="truncate mr-2">
+                                      <span className="font-bold text-xs text-slate-800 block truncate">{fo}</span>
+                                      <span className="text-[9px] font-semibold text-slate-400">{dist}</span>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <span className="text-[10px] font-bold text-slate-400">Target:</span>
+                                      <input 
+                                        type="number" 
+                                        min="0"
+                                        value={currentTarget} 
+                                        onChange={(e) => handleTargetChange(dist, fo, e.target.value)} 
+                                        className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-inner" 
+                                        placeholder="50" 
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-xs text-slate-400 italic pt-1">No staff registered for {dist}</p>
+                        )}
                       </div>
                     );
                   });

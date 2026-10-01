@@ -254,5 +254,25 @@ def test_targets_endpoint_inherits_from_previous_month():
         assert data["targets"][0]["target"] == 45
         assert data["targets"][0].get("inherited_from") == "2026-09"
 
+def test_bulk_staff_target_update():
+    token = create_access_token({"sub": "admin", "role": "SUPER_ADMIN", "name": "Super Admin"})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("main.db.collection") as mock_coll:
+        mock_doc = MagicMock()
+        mock_coll.return_value.document.return_value = mock_doc
+
+        res = client.post("/update-targets-bulk", json={
+            "month": "2026-10",
+            "targets": [
+                {"district": "Jehanabad", "fo_name": "Rajiv Kumar", "target": 20},
+                {"district": "Jehanabad", "fo_name": "Bablu Kumar", "target": 25}
+            ]
+        }, headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["success"] is True
+        assert data["count"] == 2
+
 
 

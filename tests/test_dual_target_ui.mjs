@@ -40,12 +40,13 @@ assert(
   'AdminDashboard implements the 2-tab segmented switcher in the Target Settings Modal'
 );
 
-// 5. Quick Frontline Allocator ("Give Each") per district
+// 5. Individual Frontline targets per staff & Removal of Give Each
 assert(
-  adminCode.includes('districtQuickFOValue') &&
-  adminCode.includes('Give Each') &&
-  adminCode.includes('Frontline:'),
-  'AdminDashboard includes inline Quick Frontline Allocator for each district'
+  !adminCode.includes('Give Each') &&
+  !adminCode.includes('districtQuickFOValue') &&
+  adminCode.includes('Individual Frontline Staff Quotas') &&
+  adminCode.includes('/update-targets-bulk'),
+  'AdminDashboard removed Give Each and features individual staff frontline targets with bulk backend API'
 );
 
 // 6. Bulk Save Handlers are implemented and wired to buttons
