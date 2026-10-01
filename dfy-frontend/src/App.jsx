@@ -606,7 +606,7 @@ const MyProfileDashboard = ({
     };
     fetchFoTa();
     return () => { isCancelled = true; };
-  }, [formData?.working_place, formData?.fo_name, formData?.pin, foTaMonth, foTaRefreshTrigger]);
+  }, [formData?.working_place, formData?.fo_name, formData?.pin, foTaMonth, foTaRefreshTrigger, showToast]);
 
   useEffect(() => {
     if (stats) {
@@ -641,7 +641,7 @@ const MyProfileDashboard = ({
       }
     };
     fetchStats();
-  }, [formData, stats, setStats]);
+  }, [formData, stats, setStats, showToast]);
 
 
   const handleExecuteIdEdit = async (e) => {
@@ -5688,6 +5688,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentView, setCurrentView] = useState('form');
   const [toast, setToast] = useState({ message: "", type: "" });
+  const showToast = useCallback((message, type = 'success') => setToast({ message, type }), []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBtn, setShowInstallBtn] = useState(true);
@@ -6163,8 +6164,6 @@ function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-
-  const showToast = (message, type = 'success') => setToast({ message, type });
 
   // Auto-save draft whenever form data changes while logged in
   useEffect(() => {

@@ -4986,6 +4986,7 @@ const availableDistrictsForFeed = useMemo(() => {
       setTaAdminRemarks('');
     }
     setTaViewMode('day_by_day');
+    taDailyTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [taSummaryList]);
 
   const handleSelectStaff = useCallback((key) => {
@@ -11351,7 +11352,7 @@ const availableDistrictsForFeed = useMemo(() => {
 
                           {/* Role-Based Action Buttons & State Machine */}
                           {/* 1. Sub-Admin / MIS Submit Button (NOT Main Incharge) */}
-                          {(!isMainIncharge && (isSuperAdmin || canManageTa)) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                          {(!isMainIncharge && (isSuperAdmin || canManageTa)) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED' || taDistrictStatus === 'DISPUTED') && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11360,7 +11361,13 @@ const availableDistrictsForFeed = useMemo(() => {
                               title="Finalize and submit district roster to State Incharge for approval"
                             >
                               <span>{taActionLoading ? '⏳' : '📤'}</span>
-                              <span>{taActionLoading ? 'Submitting...' : 'Submit Roster to Incharge'}</span>
+                              <span>
+                                {taActionLoading
+                                  ? 'Submitting...'
+                                  : (taDistrictStatus === 'REVERTED' || taDistrictStatus === 'DISPUTED' || taSummaryList.some(l => l.dispute?.is_disputed || l.status === 'REVERTED' || l.dispute?.status === 'CORRECTED')
+                                      ? 'Resubmit Roster to Incharge'
+                                      : 'Submit Roster to Incharge')}
+                              </span>
                             </button>
                           )}
 
@@ -11426,6 +11433,11 @@ const availableDistrictsForFeed = useMemo(() => {
                           )}
 
                           {/* Status Badges for Other Roles */}
+                          {(!isSuperAdmin && !isMainIncharge) && taDistrictStatus === 'DISPUTED' && (
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-900/60 text-amber-200 border border-amber-500/40 flex items-center gap-1.5">
+                              <span>⚠️</span> Dispute Raised — Correct Deduction &amp; Resubmit to Incharge
+                            </span>
+                          )}
                           {(!isSuperAdmin && !isMainIncharge) && taDistrictStatus === 'SUBMITTED' && (
                             <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-900/60 text-blue-200 border border-blue-500/40 flex items-center gap-1.5">
                               <span>⏳</span> Awaiting Incharge Sign-off

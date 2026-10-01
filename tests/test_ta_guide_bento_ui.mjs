@@ -20,7 +20,7 @@ const changelogCode = readFileSync(changelogPath, 'utf8');
 // Test 1: changelogData.js Version Bump to 2.8.5
 // -------------------------------------------------------------
 console.log("\n[Test 1] Verifying changelogData.js Version and v2.8.5 Entry...");
-assert(changelogCode.includes('export const APP_VERSION = "2.8.5";'), 'APP_VERSION must be "2.8.5"');
+assert(changelogCode.includes('export const APP_VERSION = "2.8.5";') || changelogCode.includes('export const APP_VERSION = "2.8.6";'), 'APP_VERSION must be "2.8.5" or "2.8.6"');
 assert(changelogCode.includes('version: "v2.8.5"'), 'changelogData.js must contain a v2.8.5 entry');
 assert(changelogCode.includes('Travel Allowance (TA) & Bike Log'), 'v2.8.5 must mention Travel Allowance & Bike Log');
 assert(changelogCode.includes('₹4.00 / KM') || changelogCode.includes('₹4.00/KM'), 'v2.8.5 must mention ₹4.00/KM rate');

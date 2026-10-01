@@ -64,7 +64,15 @@ class MockCollection:
             matches = True
             for field, op, val in self.filters:
                 doc_val = data.get(field)
+                if doc_val is None and field == "date_of_reporting":
+                    doc_val = data.get("date")
                 if op == "==" and doc_val != val:
+                    matches = False
+                    break
+                elif op == ">=" and (doc_val is None or str(doc_val) < str(val)):
+                    matches = False
+                    break
+                elif op == "<=" and (doc_val is None or str(doc_val) > str(val)):
                     matches = False
                     break
             if matches:
@@ -771,35 +779,55 @@ def test_ta_incharge_inspection_vs_audit_permissions():
         assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "DISPUTED"
         assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["dispute"]["is_disputed"] is True
 
-        # Step 14: Main Incharge resolves dispute by correcting deduction to 0.0 -> Success!
+        # Step 14: Sub-Admin corrects the dispute by updating deduction to 0.0 -> Success!
         payload_dispute_resolved = {
             "month": "2026-10",
             "district": "Gaya",
             "staff_name": "Ramesh Kumar",
             "staff_key": "gaya_rameshkumar",
             "deduction_amount": 0.0,
-            "deduction_reason": "Dispute accepted: waiver of deduction",
+            "deduction_reason": "Dispute corrected: waiver of deduction",
             "admin_final_remarks": "Verified with original photo; deduction waived.",
             "daily_logs": {
                 "2026-10-01": {"initial_reading": 1000, "final_reading": 1040, "total_km": 40}
             }
         }
-        res14 = client.post("/api/ta-logs/save", json=payload_dispute_resolved, headers=headers_inc)
+        res14 = client.post("/api/ta-logs/save", json=payload_dispute_resolved, headers=headers_sub)
         assert res14.status_code == 200, res14.text
         doc14 = store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]
         assert doc14["deduction_amount"] == 0.0
         assert doc14["final_payable_amount"] == 160.0 # 40km * 4
         assert doc14["dispute"]["is_disputed"] is False
-        assert doc14["dispute"]["status"] == "RESOLVED"
-        assert doc14["status"] == "SUBMITTED"
+        assert doc14["dispute"]["status"] == "CORRECTED"
+        assert doc14["status"] == "DRAFT"
 
-        # Step 15: Main Incharge passes / re-approves -> Status becomes APPROVED
-        res15 = client.post("/api/ta/district-action", json={
+        # Step 15: Sub-Admin CANNOT Approve & Publish -> 403 Forbidden!
+        res15_unauth = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers=headers_sub)
+        assert res15_unauth.status_code == 403
+        assert "only main incharge or super admin can approve" in res15_unauth.text.lower()
+
+        # Step 16: Sub-Admin resubmits corrected roster to Incharge -> Status becomes SUBMITTED
+        res16 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers=headers_sub)
+        assert res16.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "SUBMITTED"
+
+        # Step 17: Main Incharge audits and approves -> Status becomes APPROVED, dispute becomes RESOLVED
+        res17 = client.post("/api/ta/district-action", json={
             "month": "2026-10",
             "district": "Gaya",
             "action": "approve"
         }, headers=headers_inc)
-        assert res15.status_code == 200
-        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "APPROVED"
+        assert res17.status_code == 200
+        doc17 = store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]
+        assert doc17["status"] == "APPROVED"
+        assert doc17["dispute"]["status"] == "RESOLVED"
 
 

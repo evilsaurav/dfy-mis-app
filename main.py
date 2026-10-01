@@ -9925,28 +9925,26 @@ async def save_ta_log(
                 detail="Main Incharge has read-only inspection access during Draft. You can audit and edit once Sub-Admin submits the roster."
             )
 
-        # Guard 3: Sub-Admin cannot edit while SUBMITTED (audit in progress by Incharge), unless it has been reverted or has an accepted dispute
-        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"] and current_status in ["SUBMITTED", "DISPUTED"] and not is_reverted and existing_dispute.get("status") != "ACCEPTED":
+        # Guard 3: Sub-Admin cannot edit while SUBMITTED (audit in progress by Incharge), unless it has been reverted or has an active/pending dispute
+        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"] and current_status == "SUBMITTED" and not has_dispute and not is_reverted:
             raise HTTPException(
                 status_code=403,
                 detail="District roster has been submitted to Incharge. Editing by Sub-Admin is locked during Incharge audit."
             )
 
         if existing_doc and existing_doc.exists:
-            # If log had an active or pending dispute, saving the updated deduction resolves it
+            # If log had an active or pending dispute, saving the updated deduction applies the correction
             if has_dispute:
                 dispute_update = dict(existing_dispute)
                 dispute_update["is_disputed"] = False
-                dispute_update["status"] = "RESOLVED"
-                dispute_update["resolved_at"] = now_str
-                dispute_update["resolved_by"] = actor_name
-                dispute_update["resolved_by_id"] = actor_id
-                dispute_update["resolution_note"] = remarks_val or f"Dispute resolved with updated deduction ₹{deduction_amount}"
+                dispute_update["status"] = "CORRECTED"
+                dispute_update["corrected_at"] = now_str
+                dispute_update["corrected_by"] = actor_name
+                dispute_update["corrected_by_id"] = actor_id
+                dispute_update["resolution_note"] = remarks_val or f"Dispute corrected with updated deduction ₹{deduction_amount}. Ready for Incharge approval."
                 ta_doc["dispute"] = dispute_update
-                if current_status == "DISPUTED":
-                    ta_doc["status"] = "SUBMITTED"
-                else:
-                    ta_doc["status"] = current_status
+                # Reset status to DRAFT so Sub-Admin resubmits to Incharge (Sub-Admin cannot approve)
+                ta_doc["status"] = "DRAFT"
             else:
                 ta_doc["status"] = current_status
                 ta_doc["dispute"] = existing_data.get("dispute", None)
@@ -10136,14 +10134,14 @@ async def ta_district_action(
                         doc_dict = d.to_dict() or {}
                         item_payload = dict(payload)
                         doc_dispute = doc_dict.get("dispute") or {}
-                        if action == "approve" and doc_dispute.get("is_disputed"):
+                        if action == "approve" and (doc_dispute.get("is_disputed") or doc_dispute.get("status") in ["PENDING", "CORRECTED", "ACCEPTED"]):
                             dispute_copy = dict(doc_dispute)
                             dispute_copy["is_disputed"] = False
                             dispute_copy["status"] = "RESOLVED"
                             dispute_copy["resolved_at"] = now_str
                             dispute_copy["resolved_by"] = actor_name
                             dispute_copy["resolved_by_id"] = actor_id
-                            dispute_copy["resolution_note"] = "Approved by Incharge"
+                            dispute_copy["resolution_note"] = dispute_copy.get("resolution_note") or "Approved and published by State Incharge"
                             item_payload["dispute"] = dispute_copy
                         batch.set(d.reference, item_payload, merge=True)
                     batch.commit()
@@ -10537,8 +10535,8 @@ async def prefill_ta_log_from_reports(
         running_odometer = 1000
 
         raw_reports = await get_raw_monthly_reports(month_prefix, force=False, district_filter={clean_dist})
-        if not raw_reports:
-            raw_reports = await asyncio.to_thread(lambda: [d.to_dict() if hasattr(d, "to_dict") else dict(d) for d in db.collection("daily_field_reports").where("working_place", "==", district).stream()])
+        if raw_reports is None:
+            raw_reports = []
 
         for rep in raw_reports:
             r_wp = canonicalize_district(rep.get("working_place", "") or rep.get("district", ""))
