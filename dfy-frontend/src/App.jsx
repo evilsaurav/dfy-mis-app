@@ -513,6 +513,7 @@ const MyProfileDashboard = ({
   const [disputeReason, setDisputeReason] = useState("");
   const [isSubmittingDispute, setIsSubmittingDispute] = useState(false);
   const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+  const [foTaRefreshTrigger, setFoTaRefreshTrigger] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => setCurrentTimeMs(Date.now()), 60000);
@@ -542,15 +543,17 @@ const MyProfileDashboard = ({
     let isCancelled = false;
     const cacheKey = `dfy_fo_ta_cache_${formData.working_place}_${formData.fo_name}_${foTaMonth}`.replace(/\s+/g, '_').toLowerCase();
 
-    // 1. Instant zero-read cache hydration from local storage
+    // 1. Instant zero-read cache hydration from local storage (Stale-While-Revalidate)
+    let hasCachedData = false;
     try {
       const rawCached = localStorage.getItem(cacheKey);
       if (rawCached) {
         const parsed = JSON.parse(rawCached);
         if (parsed && parsed.data) {
           setFoTaData(parsed.data);
-          // If cached less than 10 minutes ago, keep cached data without spamming network
-          if (parsed.timestamp && Date.now() - parsed.timestamp < 600000) {
+          hasCachedData = true;
+          // Only skip background network fetch if ALREADY approved and cached within the last 2 minutes
+          if (parsed.data?.status === 'APPROVED' && parsed.timestamp && Date.now() - parsed.timestamp < 120000) {
             setFoTaLoading(false);
             return;
           }
@@ -559,7 +562,7 @@ const MyProfileDashboard = ({
     } catch (e) {}
 
     const fetchFoTa = async () => {
-      setFoTaLoading(true);
+      if (!hasCachedData) setFoTaLoading(true);
       try {
         const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
         const params = new URLSearchParams({
@@ -581,21 +584,21 @@ const MyProfileDashboard = ({
             try {
               localStorage.setItem(cacheKey, JSON.stringify({ data: logItem, timestamp: Date.now() }));
             } catch (e) {}
-          } else if (!isCancelled) {
+          } else if (!isCancelled && !hasCachedData) {
             setFoTaData(null);
           }
-        } else if (!isCancelled) {
+        } else if (!isCancelled && !hasCachedData) {
           setFoTaData(null);
         }
       } catch (err) {
-        if (!isCancelled) setFoTaData(null);
+        if (!isCancelled && !hasCachedData) setFoTaData(null);
       } finally {
         if (!isCancelled) setFoTaLoading(false);
       }
     };
     fetchFoTa();
     return () => { isCancelled = true; };
-  }, [formData?.working_place, formData?.fo_name, formData?.pin, foTaMonth]);
+  }, [formData?.working_place, formData?.fo_name, formData?.pin, foTaMonth, foTaRefreshTrigger]);
 
   useEffect(() => {
     if (stats) {
@@ -2373,15 +2376,32 @@ const MyProfileDashboard = ({
             </div>
           </div>
 
-          {/* Month Selector for Historic Inspection */}
-          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/80 rounded-xl px-2 py-1 self-start sm:self-auto">
-            <span className="text-[10px] font-bold text-slate-400 uppercase">Month:</span>
-            <input
-              type="month"
-              value={foTaMonth}
-              onChange={(e) => setFoTaMonth(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
-            />
+          {/* Month Selector & Sync Button */}
+          <div className="flex items-center gap-1.5 self-start sm:self-auto">
+            <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/80 rounded-xl px-2 py-1">
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Month:</span>
+              <input
+                type="month"
+                value={foTaMonth}
+                onChange={(e) => setFoTaMonth(e.target.value)}
+                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  const cacheKey = `dfy_fo_ta_cache_${formData.working_place}_${formData.fo_name}_${foTaMonth}`.replace(/\s+/g, '_').toLowerCase();
+                  localStorage.removeItem(cacheKey);
+                } catch (e) {}
+                setFoTaRefreshTrigger(prev => prev + 1);
+              }}
+              disabled={foTaLoading}
+              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200/80 transition-all text-xs disabled:opacity-50 cursor-pointer active:scale-95"
+              title="Refresh Travel Allowance"
+            >
+              <span className={foTaLoading ? "inline-block animate-spin" : ""}>🔄</span>
+            </button>
           </div>
         </div>
 
