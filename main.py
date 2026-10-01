@@ -2351,6 +2351,10 @@ class DistrictTargetUpdate(BaseModel):
     district: str
     official_target: int
 
+class BulkDistrictTargetUpdate(BaseModel):
+    month: Optional[str] = None
+    targets: List[DistrictTargetUpdate]
+
 @app.get("/targets")
 @app.get("/get-targets")
 async def get_targets(district: Optional[str] = None, month: Optional[str] = None, districts: Optional[str] = None):
@@ -2656,6 +2660,76 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-district-targets-bulk")
+async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: dict = Depends(get_current_admin)):
+    try:
+        month = data.month or datetime.now().strftime("%Y-%m")
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        allowed = None
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+
+        updated_districts = []
+        for item in data.targets:
+            clean_dist = canonicalize_district(item.district.strip())
+            if allowed is not None and "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. Cross-district target modification forbidden for '{clean_dist}'.")
+            target_val = int(item.official_target)
+            if target_val < 0:
+                raise HTTPException(status_code=400, detail=f"Official target for '{clean_dist}' cannot be negative.")
+
+            month_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+            fallback_doc_id = clean_dist.replace(" ", "").lower()
+
+            def _write_docs(m_id, f_id, cd, tv):
+                db.collection("district_targets").document(m_id).set({
+                    "month": month,
+                    "district": cd,
+                    "official_target": tv,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, merge=True)
+                db.collection("district_targets").document(f_id).set({
+                    "district": cd,
+                    "official_target": tv,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, merge=True)
+
+            await asyncio.to_thread(_write_docs, month_doc_id, fallback_doc_id, clean_dist, target_val)
+            updated_districts.append(clean_dist)
+
+        cache.delete_prefix("targets_")
+        cache.delete_prefix(f"district_targets_{month}".lower())
+        cache.delete_prefix(f"pacing_settings_{month}")
+
+        await log_admin_activity(
+            action_type="DISTRICT_TARGETS_BULK_UPDATED",
+            details=f"Bulk updated official district targets for {len(updated_districts)} districts for month {month}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={"month": month, "districts": updated_districts}
+        )
+        return {
+            "success": True,
+            "month": month,
+            "count": len(updated_districts),
+            "updated_districts": updated_districts,
+            "message": f"Successfully updated official targets for {len(updated_districts)} districts!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 

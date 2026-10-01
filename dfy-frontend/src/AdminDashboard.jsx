@@ -188,7 +188,13 @@ export default function AdminDashboard() {
   const [targetsData, setTargetsData] = useState([]);
   const [officialDistrictTarget, setOfficialDistrictTarget] = useState(0);
   const [officialTargetsByDistrict, setOfficialTargetsByDistrict] = useState({});
+  const [tempOfficialTargets, setTempOfficialTargets] = useState({});
+  const [districtQuickFOValue, setDistrictQuickFOValue] = useState({});
   const [isSavingDistrictTarget, setIsSavingDistrictTarget] = useState(false);
+  const [isSavingBulkDistrictTargets, setIsSavingBulkDistrictTargets] = useState(false);
+  const [targetModalTab, setTargetModalTab] = useState('official'); // 'official' | 'frontline'
+  const [targetSearchQuery, setTargetSearchQuery] = useState('');
+  const [adminTargetViewMode, setAdminTargetViewMode] = useState('official'); // 'official' | 'frontline'
   const [activeMetric, setActiveMetric] = useState('notifications');
   const [performanceViewMode, setPerformanceViewMode] = useState('chart'); // 'chart' | 'cards'
   const [performanceMetricFilter, setPerformanceMetricFilter] = useState('notif_only'); // 'notif_only' | 'target_vs_notif' | 'pct_achieve'
@@ -1971,6 +1977,7 @@ export default function AdminDashboard() {
               setTargetsData(data.targets);
               if (data.official_targets_by_district) {
                   setOfficialTargetsByDistrict(data.official_targets_by_district);
+                  setTempOfficialTargets(prev => ({ ...data.official_targets_by_district, ...prev }));
                   if (targetModalDistrict && targetModalDistrict !== 'All') {
                     const cD = canonicalizeDistrict(targetModalDistrict);
                     if (data.official_targets_by_district[cD] !== undefined) {
@@ -2018,9 +2025,14 @@ export default function AdminDashboard() {
       if (res.ok && data.success) {
         showToast(`Official district target for ${targetModalDistrict} saved (${val})!`, 'success');
         setOfficialDistrictTarget(val);
+        const cDist = canonicalizeDistrict(targetModalDistrict);
         setOfficialTargetsByDistrict(prev => ({
           ...prev,
-          [canonicalizeDistrict(targetModalDistrict)]: val
+          [cDist]: val
+        }));
+        setTempOfficialTargets(prev => ({
+          ...prev,
+          [cDist]: val
         }));
       } else {
         showToast(data.detail || 'Failed to save official district target', 'error');
@@ -2031,6 +2043,111 @@ export default function AdminDashboard() {
     } finally {
       setIsSavingDistrictTarget(false);
     }
+  };
+
+  const handleSaveSingleDistrictTarget = async (distName, targetVal) => {
+    if (!distName) return;
+    const val = Number(targetVal);
+    if (isNaN(val) || val < 0) {
+      showToast('Official target must be a non-negative number', 'error');
+      return;
+    }
+    setIsSavingDistrictTarget(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem("token") || currentUser?.token;
+      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          month: targetModalMonth,
+          district: distName,
+          official_target: val
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`Official target for ${distName} saved (${val})!`, 'success');
+        const cDist = canonicalizeDistrict(distName);
+        setOfficialTargetsByDistrict(prev => ({ ...prev, [cDist]: val }));
+        setTempOfficialTargets(prev => ({ ...prev, [cDist]: val }));
+        if (targetModalDistrict === distName) {
+          setOfficialDistrictTarget(val);
+        }
+      } else {
+        showToast(data.detail || `Failed to save target for ${distName}`, 'error');
+      }
+    } catch (err) {
+      console.error("handleSaveSingleDistrictTarget error", err);
+      showToast('Network error while saving official district target', 'error');
+    } finally {
+      setIsSavingDistrictTarget(false);
+    }
+  };
+
+  const handleSaveBulkDistrictTargets = async () => {
+    setIsSavingBulkDistrictTargets(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem("token") || currentUser?.token;
+      
+      const payloadTargets = targetModalDistricts.map(dist => {
+        const cDist = canonicalizeDistrict(dist);
+        const officers = staffDirectory[dist] || [];
+        const frontlineAllocated = officers.reduce((sum, fo) => {
+          const tData = targetsData.find(t => 
+            canonicalizeDistrict(t.district) === cDist && 
+            (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+          );
+          return sum + parseTargetVal(tData, 50);
+        }, 0);
+        const offVal = tempOfficialTargets[cDist] !== undefined 
+          ? Number(tempOfficialTargets[cDist]) 
+          : (officialTargetsByDistrict[cDist] !== undefined ? Number(officialTargetsByDistrict[cDist]) : frontlineAllocated);
+
+        return {
+          district: dist,
+          official_target: Math.max(0, offVal)
+        };
+      });
+
+      const res = await fetch(`${API_BASE_URL}/update-district-targets-bulk`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          month: targetModalMonth,
+          targets: payloadTargets
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`✓ All ${payloadTargets.length} district official targets saved successfully!`, 'success');
+        const newMap = { ...officialTargetsByDistrict };
+        payloadTargets.forEach(item => {
+          newMap[canonicalizeDistrict(item.district)] = item.official_target;
+        });
+        setOfficialTargetsByDistrict(newMap);
+      } else {
+        showToast(data.detail || 'Failed to bulk save official district targets', 'error');
+      }
+    } catch (err) {
+      console.error("handleSaveBulkDistrictTargets error", err);
+      showToast('Network error while bulk saving official district targets', 'error');
+    } finally {
+      setIsSavingBulkDistrictTargets(false);
+    }
+  };
+
+  const handleSaveAllTargetsCombined = async () => {
+    await handleSaveBulkDistrictTargets();
+    await saveAllTargets();
+    showToast('✓ All Official Targets & Frontline Allocations Saved!', 'success');
   };
 
   const handleTargetChange = (district, fo_name, value) => {
@@ -4332,7 +4449,10 @@ const availableDistrictsForFeed = useMemo(() => {
       const list = distList.map(dist => {
         const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
         const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
-        const target = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+        const staffTargetSum = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+        const cDist = canonicalizeDistrict(dist);
+        const offTgt = officialTargetsByDistrict[cDist] !== undefined ? Number(officialTargetsByDistrict[cDist]) : 0;
+        const target = (adminTargetViewMode === 'frontline' || offTgt <= 0) ? staffTargetSum : offTgt;
         const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
         return {
           name: dist,
@@ -4341,7 +4461,9 @@ const availableDistrictsForFeed = useMemo(() => {
           target: target,
           percentage: pct,
           reports: distRecords.length,
-          type: 'district'
+          type: 'district',
+          officialTarget: offTgt,
+          frontlineTarget: staffTargetSum
         };
       });
 
@@ -4383,7 +4505,7 @@ const availableDistrictsForFeed = useMemo(() => {
       return list.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
     }
     return list.sort((a, b) => b.notifications - a.notifications || b.percentage - a.percentage);
-  }, [rawRecords, targetsData, staffDirectory, selectedDistrict, currentUser, performanceMetricFilter]);
+  }, [rawRecords, targetsData, staffDirectory, selectedDistrict, currentUser, performanceMetricFilter, adminTargetViewMode, officialTargetsByDistrict]);
 
   const performanceChartHeight = useMemo(() => {
     const len = performanceData.length;
@@ -4402,18 +4524,23 @@ const availableDistrictsForFeed = useMemo(() => {
     const result = distList.map(dist => {
       const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
       const notif = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
-      const target = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+      const staffTargetSum = targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+      const cDist = canonicalizeDistrict(dist);
+      const offTgt = officialTargetsByDistrict[cDist] !== undefined ? Number(officialTargetsByDistrict[cDist]) : 0;
+      const target = (adminTargetViewMode === 'frontline' || offTgt <= 0) ? staffTargetSum : offTgt;
       const pct = target > 0 ? Math.round((notif / target) * 100) : 0;
       return {
         district: dist,
         notifications: notif,
         target: target,
         percentage: pct,
-        reports: distRecords.length
+        reports: distRecords.length,
+        officialTarget: offTgt,
+        frontlineTarget: staffTargetSum
       };
     });
     return result.sort((a, b) => b.percentage - a.percentage || b.notifications - a.notifications);
-  }, [rawRecords, targetsData, staffDirectory, currentUser]);
+  }, [rawRecords, targetsData, staffDirectory, currentUser, adminTargetViewMode, officialTargetsByDistrict]);
 
   // Set of all patient IDs notified in the current month across active records
   const currentMonthNotifIdSet = useMemo(() => {
@@ -4532,7 +4659,10 @@ const availableDistrictsForFeed = useMemo(() => {
           const staffCount = (staffList || []).filter(s => canonicalizeDistrict(s.district) === key && s.is_active !== false && s.status !== 'inactive').length;
           tSum = (staffCount > 0 ? staffCount : 1) * 50;
         }
-        map[key].target = tSum;
+        const offTgt = officialTargetsByDistrict[key] !== undefined ? Number(officialTargetsByDistrict[key]) : 0;
+        map[key].target = (adminTargetViewMode === 'frontline' || offTgt <= 0) ? tSum : offTgt;
+        map[key].officialTarget = offTgt;
+        map[key].frontlineTarget = tSum;
       } else {
         const cDist = canonicalizeDistrict(selectedDistrict);
         const tObj = (targetsData || []).find(t => {
@@ -4577,7 +4707,7 @@ const availableDistrictsForFeed = useMemo(() => {
       return 0;
     });
     return data;
-  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter]);
+  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter, adminTargetViewMode, officialTargetsByDistrict]);
 
   // Aggregate totals across all rows in tableData (for both All Districts and District Drill-down)
   const tableTotals = useMemo(() => {
@@ -5211,6 +5341,40 @@ const availableDistrictsForFeed = useMemo(() => {
                 >
                   {fos.map(f => <option key={f} value={f}>{f === 'All' ? 'All Officers' : f}</option>)}
                 </select>
+
+                {/* Target Perspective Global Switch */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/90 shadow-2xs shrink-0" title="Switch between Official State Targets and Frontline Operational Stretch">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminTargetViewMode('official');
+                      showToast('Switched to 🏛️ Official District Benchmark view', 'info');
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                      adminTargetViewMode === 'official'
+                        ? 'bg-white text-indigo-700 shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>🏛️</span>
+                    <span>Official</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAdminTargetViewMode('frontline');
+                      showToast('Switched to 🛵 Frontline Ground Reality view', 'info');
+                    }}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                      adminTargetViewMode === 'frontline'
+                        ? 'bg-purple-600 text-white shadow-xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    <span>🛵</span>
+                    <span>Frontline</span>
+                  </button>
+                </div>
 
                 {selectedDistrict !== 'All' ? (
                   <button
@@ -7087,7 +7251,12 @@ const availableDistrictsForFeed = useMemo(() => {
                     </h3>
                     <p className="text-slate-400 text-xs font-semibold">Run-rate needed for 100% monthly achievement</p>
                   </div>
-                  <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0">
+                  <span className={`text-[11px] font-black px-2.5 py-1 rounded-xl border shrink-0 ${
+                    adminTargetViewMode === 'frontline'
+                      ? 'bg-purple-50 text-purple-700 border-purple-200'
+                      : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                  }`}>
+                    {adminTargetViewMode === 'frontline' ? '🛵 Frontline: ' : '🏛️ Official: '}
                     {selectedDistrict !== 'All' ? selectedDistrict : (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All') ? currentUser.allowed_districts.join(', ') : 'Statewide')}
                   </span>
                 </div>
@@ -7138,7 +7307,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       }
                     }
 
-                    const scopedTarget = effectiveDistrictTarget;
+                    const scopedTarget = (adminTargetViewMode === 'frontline') ? frontlineStretchTarget : effectiveDistrictTarget;
                     const totalScopeNotif = totals.notifications || 0;
                     const pendingScopeNotif = Math.max(0, scopedTarget - totalScopeNotif);
 
@@ -7194,13 +7363,19 @@ const availableDistrictsForFeed = useMemo(() => {
 
                         <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-2 text-xs">
                           <div className="flex justify-between font-bold">
-                            <span className="text-slate-500">Scope Target &amp; Actual:</span>
-                            <span className="font-black text-slate-800">{totalScopeNotif} / {effectiveDistrictTarget} Notif</span>
+                            <span className="text-slate-500">
+                              {adminTargetViewMode === 'frontline' ? '🛵 Frontline Quota & Actual:' : '🏛️ Official Target & Actual:'}
+                            </span>
+                            <span className="font-black text-slate-800">{totalScopeNotif} / {scopedTarget} Notif</span>
                           </div>
                           {frontlineStretchTarget > 0 && frontlineStretchTarget !== effectiveDistrictTarget && (
                             <div className="flex justify-between font-bold text-[11px] bg-purple-50/80 px-2 py-1 rounded-lg border border-purple-100">
-                              <span className="text-purple-700">🛵 Frontline Stretch Quota:</span>
-                              <span className="font-black text-purple-900">{frontlineStretchTarget} (Ground Pacing: {groundPct}%)</span>
+                              <span className="text-purple-700">
+                                {adminTargetViewMode === 'frontline' ? '🏛️ Official State Quota:' : '🛵 Frontline Stretch Quota:'}
+                              </span>
+                              <span className="font-black text-purple-900">
+                                {adminTargetViewMode === 'frontline' ? `${effectiveDistrictTarget} Notif` : `${frontlineStretchTarget} (Ground Pacing: ${groundPct}%)`}
+                              </span>
                             </div>
                           )}
                           <div className="flex justify-between font-bold">
@@ -12873,20 +13048,20 @@ const availableDistrictsForFeed = useMemo(() => {
 
       {/* Dynamic Monthly Targets Modal */}
       {showTargetModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden shadow-2xl border border-slate-100 animate-fade-in">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-100 animate-fade-in">
             {/* Modal Header with Month & District Pickers */}
-            <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-50/80">
+            <div className="p-4 sm:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-slate-50/80">
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xl">🎯</span>
-                  <h2 className="text-lg sm:text-xl font-black text-slate-800">Dynamic Monthly Targets</h2>
+                  <h2 className="text-lg sm:text-xl font-black text-slate-800">Dynamic Monthly Targets Suite</h2>
                 </div>
-                <p className="text-xs text-slate-500 font-medium">Harr mahine ke liye alag target configure karein (Bihar Total: 6,357)</p>
+                <p className="text-xs text-slate-500 font-medium">Set official district quotas &amp; quick frontline staff targets (Bihar Total: 6,357)</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {/* Month Picker */}
-                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-xs">
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 shadow-xs">
                   <span className="text-[10px] font-black uppercase text-purple-600">Month:</span>
                   <input 
                     type="month" 
@@ -12920,70 +13095,140 @@ const availableDistrictsForFeed = useMemo(() => {
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
-                <button onClick={() => setShowTargetModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none ml-1">&times;</button>
+                <button onClick={() => setShowTargetModal(false)} className="text-slate-400 hover:text-slate-600 font-bold text-2xl p-1 leading-none ml-1 cursor-pointer">&times;</button>
               </div>
             </div>
 
-            {/* Custom Target Action Bar */}
-            <div className="px-5 py-3 bg-purple-50/60 border-b border-purple-100 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-purple-900">
-                <span>⚡ Custom Bulk Setter for {targetModalDistrict === 'All' ? 'All Permitted Districts' : targetModalDistrict}:</span>
-              </div>
-              <div className="flex items-center gap-1.5 ml-auto">
-                <input
-                  type="number"
-                  placeholder="Set Officer Target"
-                  value={bulkTargetValue}
-                  onChange={(e) => setBulkTargetValue(e.target.value)}
-                  className="w-36 bg-white border border-purple-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-800 outline-none"
-                />
+            {/* Navigation Tabs & Search Bar */}
+            <div className="px-4 sm:px-6 py-2.5 bg-slate-50/90 border-b border-slate-200/80 flex flex-wrap items-center justify-between gap-3">
+              <div className="inline-flex p-1 bg-slate-200/80 rounded-xl">
                 <button
                   type="button"
-                  onClick={() => {
-                    const val = Number(bulkTargetValue);
-                    if (val > 0) {
-                      setTargetsData(prev => prev.map(t => {
-                        if (targetModalDistrict === 'All' || t.district === targetModalDistrict) {
-                          return { ...t, target: val };
-                        }
-                        return t;
-                      }));
-                      setBulkTargetValue("");
-                    }
-                  }}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs"
+                  onClick={() => setTargetModalTab('official')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    targetModalTab === 'official'
+                      ? 'bg-white text-indigo-700 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
                 >
-                  Apply
+                  <span>🎯</span>
+                  <span>1. District Master Targets</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetModalTab('frontline')}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                    targetModalTab === 'frontline'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>🛵</span>
+                  <span>2. Individual Staff Fine-Tuning</span>
+                </button>
+              </div>
+
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Filter district..."
+                  value={targetSearchQuery}
+                  onChange={(e) => setTargetSearchQuery(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 outline-none w-36 sm:w-48 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                />
+                {targetSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setTargetSearchQuery('')}
+                    className="absolute right-2.5 top-1.5 text-xs font-black text-slate-400 hover:text-slate-600"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* 🎯 Official District Target Card & Live Comparison Buffer Pill */}
-            {targetModalDistrict !== 'All' && (
-              <div className="mx-5 my-3 p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/80 border border-indigo-200/70 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-sm">
-                    🎯
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
-                        Official District Target ({targetModalDistrict})
-                      </h4>
-                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
-                        State Lead / KPI Metric
+            {/* Statewide Summary Balance Banner */}
+            {(() => {
+              let totalOff = 0;
+              let totalFrontline = 0;
+              targetModalDistricts.forEach(dist => {
+                const cDist = canonicalizeDistrict(dist);
+                const officers = staffDirectory[dist] || [];
+                const fTotal = officers.reduce((sum, fo) => {
+                  const tData = targetsData.find(t => 
+                    canonicalizeDistrict(t.district) === cDist && 
+                    (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                  );
+                  return sum + parseTargetVal(tData, 50);
+                }, 0);
+                totalFrontline += fTotal;
+                const offVal = tempOfficialTargets[cDist] !== undefined
+                  ? Number(tempOfficialTargets[cDist])
+                  : (officialTargetsByDistrict[cDist] !== undefined ? Number(officialTargetsByDistrict[cDist]) : 0);
+                totalOff += (isNaN(offVal) ? 0 : offVal);
+              });
+              const bufferCount = Math.max(0, totalFrontline - totalOff);
+              const bufferPct = totalOff > 0 ? Math.round((bufferCount / totalOff) * 100) : 0;
+
+              return (
+                <div className="mx-4 sm:mx-6 mt-3 p-3 bg-gradient-to-r from-indigo-50/90 via-purple-50/70 to-pink-50/50 border border-indigo-100 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 bg-indigo-600 text-white rounded-lg text-xs font-black">📊</span>
+                    <div>
+                      <span className="font-black text-slate-800 uppercase tracking-wider text-[11px] block">
+                        Target Balance ({targetModalDistricts.length} Districts)
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-semibold">
+                        Official quotas drive Excel/WhatsApp. Frontline quotas measure field activity.
                       </span>
                     </div>
-                    <p className="text-[11px] text-slate-500 font-medium">
-                      Reports, Excel workbooks &amp; WhatsApp bulletins will evaluate achievement against this number.
-                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 sm:gap-4 ml-auto">
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Official Quota</span>
+                      <span className="text-xs sm:text-sm font-black text-indigo-700">{totalOff}</span>
+                    </div>
+                    <div className="h-6 w-px bg-slate-200"></div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Frontline Total</span>
+                      <span className="text-xs sm:text-sm font-black text-purple-700">{totalFrontline}</span>
+                    </div>
+                    <div className="h-6 w-px bg-slate-200"></div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Net Buffer</span>
+                      <span className={`text-xs sm:text-sm font-black ${bufferCount > 0 ? 'text-emerald-700' : 'text-slate-600'}`}>
+                        +{bufferCount} ({bufferPct}%)
+                      </span>
+                    </div>
                   </div>
                 </div>
+              );
+            })()}
 
-                <div className="flex items-center gap-3 ml-auto">
-                  {(() => {
-                    const cDist = canonicalizeDistrict(targetModalDistrict);
-                    const officers = staffDirectory[targetModalDistrict] || [];
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-4 custom-scrollbar">
+              {(() => {
+                const effectiveList = targetModalDistrict === 'All' ? targetModalDistricts : [targetModalDistrict];
+                const displayedDistricts = effectiveList.filter(d => 
+                  !targetSearchQuery || d.toLowerCase().includes(targetSearchQuery.toLowerCase().trim())
+                );
+
+                if (displayedDistricts.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-slate-400">
+                      <span className="text-3xl block mb-2">🔍</span>
+                      <p className="font-bold text-sm">No districts matching "{targetSearchQuery}"</p>
+                    </div>
+                  );
+                }
+
+                // TAB 1: ONE-SCREEN DISTRICT MASTER TARGETS GRID
+                if (targetModalTab === 'official') {
+                  return displayedDistricts.map(dist => {
+                    const cDist = canonicalizeDistrict(dist);
+                    const officers = staffDirectory[dist] || [];
+                    const staffCount = officers.length;
                     const frontlineAllocated = officers.reduce((sum, fo) => {
                       const tData = targetsData.find(t => 
                         canonicalizeDistrict(t.district) === cDist && 
@@ -12991,134 +13236,290 @@ const availableDistrictsForFeed = useMemo(() => {
                       );
                       return sum + parseTargetVal(tData, 50);
                     }, 0);
-                    const offVal = Number(officialDistrictTarget) || 0;
-                    const bufferCount = Math.max(0, frontlineAllocated - offVal);
-                    const bufferPct = offVal > 0 ? Math.round((bufferCount / offVal) * 100) : 0;
+
+                    const offVal = tempOfficialTargets[cDist] !== undefined 
+                      ? tempOfficialTargets[cDist] 
+                      : (officialTargetsByDistrict[cDist] !== undefined ? officialTargetsByDistrict[cDist] : '');
+                    const numOff = Number(offVal) || 0;
+                    const bufferCount = frontlineAllocated - numOff;
+                    const bufferPct = numOff > 0 ? Math.round((bufferCount / numOff) * 100) : 0;
 
                     return (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-right mr-2 hidden sm:block">
-                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Stretch Buffer</span>
-                          <span className="text-xs font-black text-emerald-700">
-                            +{bufferCount} ({bufferPct}%)
-                          </span>
+                      <div 
+                        key={dist} 
+                        className="p-4 bg-white rounded-2xl border border-slate-200 hover:border-indigo-300 transition-all shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      >
+                        {/* District Title & Staff Count */}
+                        <div className="min-w-[160px]">
+                          <div className="flex items-center gap-2">
+                            <span className="h-2.5 w-2.5 rounded-full bg-indigo-600"></span>
+                            <h4 className="text-sm font-black text-slate-800">{dist}</h4>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                              👥 {staffCount} Staff
+                            </span>
+                            <span className="text-[10px] font-black text-purple-700">
+                              Frontline: {frontlineAllocated}
+                            </span>
+                          </div>
                         </div>
-                        <input
-                          type="number"
-                          min="0"
-                          value={officialDistrictTarget || ''}
-                          onChange={(e) => setOfficialDistrictTarget(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          placeholder="Official Target"
-                          className="w-28 bg-white border border-indigo-300 rounded-xl px-3 py-2 text-center font-black text-sm text-indigo-900 outline-none focus:ring-2 focus:ring-indigo-500 shadow-inner"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleSaveDistrictTarget}
-                          disabled={isSavingDistrictTarget}
-                          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-black transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
-                        >
-                          {isSavingDistrictTarget ? 'Saving...' : 'Save Official Target'}
-                        </button>
+
+                        {/* Official District Target Input */}
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">Official Target:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={offVal}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setTempOfficialTargets(prev => ({ ...prev, [cDist]: val }));
+                            }}
+                            placeholder="e.g. 53"
+                            className="w-20 sm:w-24 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-center font-black text-xs text-indigo-900 focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                          />
+                        </div>
+
+                        {/* Quick Frontline Allocator: "Give Each Staff [ 20 ] [ Apply ]" */}
+                        <div className="flex items-center gap-1.5 bg-purple-50/70 p-1.5 rounded-xl border border-purple-100">
+                          <span className="text-[10px] font-bold text-purple-900 whitespace-nowrap pl-1">Give Each:</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={districtQuickFOValue[cDist] ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setDistrictQuickFOValue(prev => ({ ...prev, [cDist]: val }));
+                            }}
+                            placeholder="e.g. 20"
+                            className="w-16 bg-white border border-purple-200 rounded-lg px-2 py-1 text-center font-black text-xs text-purple-900 focus:outline-none focus:ring-1 focus:ring-purple-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const qVal = Number(districtQuickFOValue[cDist]);
+                              if (isNaN(qVal) || qVal < 0) {
+                                showToast('Please enter a valid target for staff', 'warning');
+                                return;
+                              }
+                              setTargetsData(prev => {
+                                const updated = prev.map(t => {
+                                  if (canonicalizeDistrict(t.district) === cDist) {
+                                    return { ...t, target: qVal };
+                                  }
+                                  return t;
+                                });
+                                officers.forEach(fo => {
+                                  const exists = updated.some(t =>
+                                    canonicalizeDistrict(t.district) === cDist &&
+                                    (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                                  );
+                                  if (!exists) {
+                                    updated.push({
+                                      district: dist,
+                                      fo_name: fo,
+                                      target: qVal
+                                    });
+                                  }
+                                });
+                                return updated;
+                              });
+                              showToast(`Set ${qVal} for each staff in ${dist} (Frontline: ${qVal * staffCount})`, 'info');
+                            }}
+                            className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-black transition-all shadow-xs cursor-pointer active:scale-95"
+                          >
+                            Apply
+                          </button>
+                        </div>
+
+                        {/* Live Comparison Buffer Pill */}
+                        <div className="min-w-[130px] flex items-center md:justify-center">
+                          {numOff > 0 ? (
+                            bufferCount >= 0 ? (
+                              <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-2xs whitespace-nowrap">
+                                +{bufferCount} (+{bufferPct}% Buffer)
+                              </span>
+                            ) : (
+                              <span className="text-[11px] font-black px-2.5 py-1 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 shadow-2xs whitespace-nowrap">
+                                {bufferCount} Deficit ({bufferPct}%)
+                              </span>
+                            )
+                          ) : (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-lg bg-slate-100 text-slate-500 whitespace-nowrap">
+                              Official unset
+                            </span>
+                          )}
+                        </div>
+
+                        {/* District Save Button */}
+                        <div className="shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveSingleDistrictTarget(dist, numOff)}
+                            disabled={isSavingDistrictTarget}
+                            className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-indigo-50 hover:bg-indigo-600 text-indigo-700 hover:text-white border border-indigo-200 hover:border-transparent transition-all shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
+                          >
+                            {isSavingDistrictTarget ? 'Saving...' : 'Save'}
+                          </button>
+                        </div>
                       </div>
                     );
-                  })()}
-                </div>
-              </div>
-            )}
+                  });
+                }
 
-            {/* Staff List with Targets and District Total Indicators */}
-            <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
-              {(targetModalDistrict === 'All' ? targetModalDistricts : [targetModalDistrict]).map(dist => {
-                const officers = staffDirectory[dist] || [];
-                const cDist = canonicalizeDistrict(dist);
-                const distTotal = officers.reduce((sum, fo) => {
-                  const tData = targetsData.find(t => 
-                    canonicalizeDistrict(t.district) === cDist && 
-                    (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
-                  );
-                  return sum + parseTargetVal(tData, 50);
-                }, 0);
+                // TAB 2: INDIVIDUAL STAFF FINE-TUNING GRID
+                return displayedDistricts.map(dist => {
+                  const officers = staffDirectory[dist] || [];
+                  const cDist = canonicalizeDistrict(dist);
+                  const distTotal = officers.reduce((sum, fo) => {
+                    const tData = targetsData.find(t => 
+                      canonicalizeDistrict(t.district) === cDist && 
+                      (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                    );
+                    return sum + parseTargetVal(tData, 50);
+                  }, 0);
 
-                return (
-                  <div key={dist} className="space-y-2.5 bg-slate-50/60 p-3.5 rounded-2xl border border-slate-100">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-200/80">
-                      <div className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full bg-purple-600"></span>
-                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">{dist} District ({officers.length} Staff)</h4>
+                  const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist]) || 
+                    (dist === targetModalDistrict ? officialDistrictTarget : 0);
+                  const bufferCount = distTotal - offTgt;
+                  const bufferPct = offTgt > 0 ? Math.round((bufferCount / offTgt) * 100) : 0;
+
+                  return (
+                    <div key={dist} className="space-y-2.5 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                        <div className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full bg-purple-600"></span>
+                          <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">{dist} District ({officers.length} Staff)</h4>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {offTgt > 0 && (
+                            <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                              Official: {offTgt}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2.5 py-0.5 rounded-full border border-purple-200">
+                            Frontline: {distTotal}
+                          </span>
+                          {offTgt > 0 && (
+                            <span className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
+                              bufferCount >= 0 
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                : 'bg-amber-50 text-amber-700 border-amber-200'
+                            }`}>
+                              {bufferCount >= 0 ? `Buffer: +${bufferCount} (+${bufferPct}%)` : `Deficit: ${bufferCount} (${bufferPct}%)`}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {(() => {
-                          const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist]) || 
-                            (dist === targetModalDistrict ? officialDistrictTarget : 0);
-                          const bufferCount = Math.max(0, distTotal - offTgt);
-                          const bufferPct = offTgt > 0 ? Math.round((bufferCount / offTgt) * 100) : 0;
-                          return (
-                            <>
-                              {offTgt > 0 && (
-                                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-200">
-                                  Official: {offTgt}
-                                </span>
-                              )}
-                              <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2.5 py-0.5 rounded-full border border-purple-200">
-                                Frontline: {distTotal}
-                              </span>
-                              {offTgt > 0 && bufferCount > 0 && (
-                                <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200">
-                                  Buffer: +{bufferPct}% (+{bufferCount})
-                                </span>
-                              )}
-                            </>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {officers.map(fo => {
+                          const tData = targetsData.find(t => 
+                            canonicalizeDistrict(t.district) === cDist && 
+                            (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
                           );
-                        })()}
+                          const currentTarget = parseTargetVal(tData, 50);
+                          return (
+                            <div key={fo} className="flex justify-between items-center bg-white border border-slate-100 hover:border-purple-200 p-3 rounded-xl transition-colors shadow-2xs">
+                              <div className="truncate mr-2">
+                                <span className="font-bold text-xs text-slate-800 block truncate">{fo}</span>
+                                <span className="text-[10px] font-semibold text-slate-400">{dist}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[10px] font-bold text-slate-400">Target:</span>
+                                <input 
+                                  type="number" 
+                                  value={currentTarget} 
+                                  onChange={(e) => handleTargetChange(dist, fo, e.target.value)} 
+                                  className="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-inner" 
+                                  placeholder="50" 
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      {officers.map(fo => {
-                        const tData = targetsData.find(t => 
-                          canonicalizeDistrict(t.district) === cDist && 
-                          (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
-                        );
-                        const currentTarget = parseTargetVal(tData, 50);
-                        return (
-                          <div key={fo} className="flex justify-between items-center bg-white border border-slate-100 hover:border-purple-200 p-3 rounded-xl transition-colors shadow-2xs">
-                            <div className="truncate mr-2">
-                              <span className="font-bold text-xs text-slate-800 block truncate">{fo}</span>
-                              <span className="text-[10px] font-semibold text-slate-400">{dist}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <span className="text-[10px] font-bold text-slate-400">Target:</span>
-                              <input 
-                                type="number" 
-                                value={currentTarget} 
-                                onChange={(e) => handleTargetChange(dist, fo, e.target.value)} 
-                                className="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-inner" 
-                                placeholder="50" 
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
 
             {/* Modal Footer */}
-            <div className="p-5 border-t border-slate-100 bg-slate-50/80 flex flex-wrap justify-between items-center gap-3">
+            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/90 flex flex-wrap justify-between items-center gap-3">
               <span className="text-xs text-slate-500 font-medium">
-                Saving will apply targets strictly to <strong className="text-purple-700">{targetModalMonth}</strong>.
+                Target Month: <strong className="text-purple-700">{targetModalMonth}</strong>
+                {targetModalTab === 'official' ? ' (Official quotas sync to KPI reports & bulletins)' : ' (Frontline quotas measure field activity)'}
               </span>
-              <div className="flex items-center gap-3 ml-auto">
-                <button onClick={() => setShowTargetModal(false)} className="px-4 py-2.5 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-200 transition-colors">Cancel</button>
+              <div className="flex flex-wrap items-center gap-2 ml-auto">
                 <button 
-                  onClick={saveAllTargets} 
-                  disabled={isSavingTargets}
-                  className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2.5 rounded-xl font-bold text-xs shadow-md shadow-purple-600/20 active:scale-95 transition-all flex items-center gap-2"
+                  type="button"
+                  onClick={() => setShowTargetModal(false)} 
+                  className="px-4 py-2 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
                 >
-                  {isSavingTargets ? 'Saving...' : `Save ${targetModalMonth} Targets`}
+                  Close
                 </button>
+
+                {targetModalTab === 'official' ? (
+                  <>
+                    <button 
+                      type="button"
+                      onClick={handleSaveBulkDistrictTargets} 
+                      disabled={isSavingBulkDistrictTargets}
+                      className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 sm:px-5 py-2 rounded-xl font-bold text-xs shadow-md shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {isSavingBulkDistrictTargets ? (
+                        <>
+                          <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          <span>Saving Official...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>🏛️</span>
+                          <span>Save All Official Targets</span>
+                        </>
+                      )}
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={handleSaveAllTargetsCombined} 
+                      disabled={isSavingBulkDistrictTargets || isSavingTargets}
+                      className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white px-5 sm:px-6 py-2 rounded-xl font-bold text-xs shadow-md shadow-purple-600/25 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      {isSavingBulkDistrictTargets || isSavingTargets ? (
+                        <>
+                          <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                          <span>Saving All...</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>✓</span>
+                          <span>Save All (Official + Frontline)</span>
+                        </>
+                      )}
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    type="button"
+                    onClick={saveAllTargets} 
+                    disabled={isSavingTargets}
+                    className="bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white px-6 py-2 rounded-xl font-bold text-xs shadow-md shadow-purple-600/20 active:scale-95 transition-all flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isSavingTargets ? (
+                      <>
+                        <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        <span>Saving Staff Quotas...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>🛵</span>
+                        <span>Save Frontline Staff Quotas</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>

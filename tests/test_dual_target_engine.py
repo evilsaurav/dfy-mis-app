@@ -174,4 +174,26 @@ def test_kpi_excel_engine_uses_official_district_target():
                 break
         assert gt_found, "GRAND TOTAL row should be present in Performance sheet"
 
+def test_bulk_district_target_update():
+    token = create_access_token({"sub": "admin", "role": "SUPER_ADMIN", "name": "Super Admin"})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("main.db.collection") as mock_coll:
+        mock_doc = MagicMock()
+        mock_coll.return_value.document.return_value = mock_doc
+
+        res = client.post("/update-district-targets-bulk", json={
+            "month": "2026-10",
+            "targets": [
+                {"district": "Jehanabad", "official_target": 53},
+                {"district": "Jamui", "official_target": 70}
+            ]
+        }, headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["success"] is True
+        assert data["count"] == 2
+        assert "Jehanabad" in data["updated_districts"]
+        assert "Jamui" in data["updated_districts"]
+
 

@@ -10,34 +10,76 @@ const appPath = path.resolve('dfy-frontend/src/App.jsx');
 const adminCode = fs.readFileSync(adminPath, 'utf8');
 const appCode = fs.readFileSync(appPath, 'utf8');
 
-// 1. Admin Target Setting Modal features Official District Target input
+// 1. Admin Target Setting Modal features Official District Target input & state
 assert(
   adminCode.includes('officialDistrictTarget') &&
-  adminCode.includes('setOfficialDistrictTarget'),
-  'AdminDashboard declares officialDistrictTarget state hook'
+  adminCode.includes('setOfficialDistrictTarget') &&
+  adminCode.includes('tempOfficialTargets') &&
+  adminCode.includes('setTempOfficialTargets'),
+  'AdminDashboard declares officialDistrictTarget & tempOfficialTargets state hooks'
 );
 
 // 2. Admin Target Setting Modal features save district target handler with RBAC
 assert(
-  adminCode.includes('handleSaveDistrictTarget') &&
+  adminCode.includes('handleSaveSingleDistrictTarget') &&
   adminCode.includes('/update-district-target'),
-  'AdminDashboard implements handleSaveDistrictTarget calling /update-district-target'
+  'AdminDashboard implements handleSaveSingleDistrictTarget calling /update-district-target'
 );
 
-// 3. Admin Target Modal renders Live Comparison Buffer Pill
+// 3. User constraint: Custom Bulk Setter banner is completely removed!
 assert(
-  adminCode.includes('Buffer:') || adminCode.includes('Stretch Quota'),
-  'AdminDashboard renders live buffer comparison badge between official and frontline targets'
+  !adminCode.includes('Custom Bulk Setter for'),
+  'AdminDashboard has completely removed the legacy Custom Bulk Setter banner'
 );
 
-// 4. Overview Target Pacing Card prioritizes officialDistrictTarget
+// 4. Modal includes Tab switcher and One-Screen Master Grid
 assert(
-  adminCode.includes('effectiveDistrictTarget') ||
-  adminCode.includes('officialDistrictTarget || totalStateTarget'),
-  'Overview Target Pacing Card calculates pacing using official district target'
+  adminCode.includes('targetModalTab') &&
+  adminCode.includes('1. District Master Targets') &&
+  adminCode.includes('2. Individual Staff Fine-Tuning'),
+  'AdminDashboard implements the 2-tab segmented switcher in the Target Settings Modal'
 );
 
-// 5. Zero Leakage in FO Mobile App
+// 5. Quick Frontline Allocator ("Give Each") per district
+assert(
+  adminCode.includes('districtQuickFOValue') &&
+  adminCode.includes('Give Each') &&
+  adminCode.includes('Frontline:'),
+  'AdminDashboard includes inline Quick Frontline Allocator for each district'
+);
+
+// 6. Bulk Save Handlers are implemented and wired to buttons
+assert(
+  adminCode.includes('handleSaveBulkDistrictTargets') &&
+  adminCode.includes('handleSaveAllTargetsCombined') &&
+  adminCode.includes('/update-district-targets-bulk'),
+  'AdminDashboard implements bulk district target saving and combined saving'
+);
+
+// 7. Global Perspective Switch in Header
+assert(
+  adminCode.includes('adminTargetViewMode') &&
+  adminCode.includes('setAdminTargetViewMode') &&
+  adminCode.includes('Official') &&
+  adminCode.includes('Frontline'),
+  'AdminDashboard renders header global perspective toggle between Official and Frontline'
+);
+
+// 8. Performance data, Leaderboard, and Table sync with perspective switch
+assert(
+  adminCode.includes("adminTargetViewMode === 'frontline'") &&
+  adminCode.includes('officialTarget: offTgt') &&
+  adminCode.includes('frontlineTarget: staffTargetSum'),
+  'Performance calculations benchmark against official target or frontline stretch based on adminTargetViewMode'
+);
+
+// 9. Overview Target Pacing Card prioritizes adminTargetViewMode
+assert(
+  adminCode.includes("(adminTargetViewMode === 'frontline') ? frontlineStretchTarget : effectiveDistrictTarget"),
+  'Overview Target Pacing Card calculates pacing using selected target view perspective'
+);
+
+// 10. Zero Leakage in FO Mobile App
 assert(
   !appCode.includes('official_district_target'),
   'FO Mobile App does not expose or leak official district target'
