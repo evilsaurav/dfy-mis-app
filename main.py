@@ -9668,8 +9668,8 @@ async def get_ta_logs(
         allowed_districts = []
 
         if is_admin:
-            admin_role = admin.get("role", "SUB_ADMIN")
-            if admin_role != "SUPER_ADMIN":
+            admin_role = (admin.get("role") or "SUB_ADMIN").strip().upper()
+            if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
                 allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
                 if "all" not in allowed_districts and district:
                     c_dist = canonicalize_district(district).lower()
@@ -9817,14 +9817,14 @@ async def save_ta_log(
         if not clean_dist:
             raise HTTPException(status_code=400, detail="Valid district is required.")
 
-        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_role = (admin.get("role") or "SUB_ADMIN").strip().upper()
         user_perms = admin.get("permissions") or {}
         # Sub-Admin / District Isolation & TA permission check
-        if admin_role != "SUPER_ADMIN":
+        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
             allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
             if "all" not in allowed and clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized to modify TA logs for this district.")
-            if admin_role == "SUB_ADMIN" and user_perms.get("can_manage_ta") is False and "can_manage_ta" in user_perms:
+            if admin_role == "SUB_ADMIN" and user_perms.get("can_manage_ta") is False:
                 raise HTTPException(status_code=403, detail="You do not have permission to manage Travel Allowance logs. Contact Super Admin.")
 
         # Recalculate daily entries deterministically
@@ -9967,11 +9967,11 @@ async def ta_district_action(
         if not clean_month or not clean_dist:
             raise HTTPException(status_code=400, detail="Valid month and district are required.")
 
-        admin_role = admin.get("role", "SUB_ADMIN")
+        admin_role = (admin.get("role") or "SUB_ADMIN").strip().upper()
         allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
 
-        # District isolation check for non-Super Admin
-        if admin_role != "SUPER_ADMIN":
+        # District isolation check for non-Super Admin / Main Incharge
+        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"]:
             if "all" not in allowed and clean_dist.lower() not in allowed:
                 raise HTTPException(status_code=403, detail="Not authorized for this district.")
 
@@ -9982,15 +9982,17 @@ async def ta_district_action(
 
         if action == "submit":
             user_perms = admin.get("permissions") or {}
+            # Super Admin, Main Incharge, and MIS can always submit.
+            # Sub-Admins can submit their allowed districts unless explicitly revoked (can_manage_ta is False).
+            has_subadmin_ta_perm = user_perms.get("can_manage_ta") is not False
             is_authorized = (
-                admin_role == "SUPER_ADMIN" or
-                admin_role == "MIS" or
-                (admin_role == "SUB_ADMIN" and user_perms.get("can_manage_ta") is True)
+                admin_role in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"] or
+                (admin_role == "SUB_ADMIN" and has_subadmin_ta_perm)
             )
             if not is_authorized:
                 raise HTTPException(
                     status_code=403,
-                    detail="Only Super Admin or Sub Admins with 'can_manage_ta' permission can submit district TA roster."
+                    detail="Permission denied. You do not have permission to submit district TA roster."
                 )
             status_val = "SUBMITTED"
             update_payload = {
@@ -10556,7 +10558,7 @@ async def get_ta_analytics(
     """
     try:
         allowed_districts = []
-        if admin and admin.get("role") != "SUPER_ADMIN":
+        if admin and (admin.get("role") or "").strip().upper() not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
             allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
             if district and district != "All":
                 c_dist = canonicalize_district(district).lower()
@@ -10656,8 +10658,8 @@ async def export_travel_allowance_excel(
         raise HTTPException(status_code=400, detail="Valid district is required.")
 
     # District Permission Guard
-    admin_role = admin.get("role", "SUB_ADMIN")
-    if admin_role != "SUPER_ADMIN":
+    admin_role = (admin.get("role") or "SUB_ADMIN").strip().upper()
+    if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
         allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
         if "all" not in allowed and clean_dist.lower() not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized to export TA logs for this district.")

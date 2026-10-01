@@ -697,12 +697,15 @@ export default function AdminDashboard() {
   };
 
 
-  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+  const userRole = (currentUser?.role || '').toUpperCase();
+  const isSuperAdmin = userRole === 'SUPER_ADMIN';
+  const isMainIncharge = userRole === 'MAIN_INCHARGE';
+  const isMis = userRole === 'MIS';
   const canEditTargets = isSuperAdmin || currentUser?.permissions?.can_edit_targets !== false;
   const canManageStaff = isSuperAdmin || currentUser?.permissions?.can_manage_staff !== false;
   const canEditPatientIds = isSuperAdmin || currentUser?.permissions?.can_edit_patient_ids !== false;
   const canExportReports = isSuperAdmin || currentUser?.permissions?.can_export_reports !== false;
-  const canManageTa = isSuperAdmin || currentUser?.permissions?.can_manage_ta === true || currentUser?.role === 'MIS' || (!currentUser?.role && !currentUser?.permissions);
+  const canManageTa = isSuperAdmin || isMainIncharge || isMis || currentUser?.permissions?.can_manage_ta !== false;
 
   const getAdminToken = useCallback(() => {
     return encodeURIComponent(localStorage.getItem('dfy_admin_token') || '');
@@ -11264,8 +11267,8 @@ const availableDistrictsForFeed = useMemo(() => {
                           </div>
 
                           {/* Role-Based Action Buttons & State Machine */}
-                          {/* 1. Sub-Admin / MIS Submit Button */}
-                          {(isSuperAdmin || canManageTa) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                          {/* 1. Sub-Admin / MIS / Incharge Submit Button */}
+                          {(isSuperAdmin || isMainIncharge || canManageTa) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11278,8 +11281,22 @@ const availableDistrictsForFeed = useMemo(() => {
                             </button>
                           )}
 
+                          {/* 1.1 Direct Approve button for Super Admin & Main Incharge when in DRAFT / REVERTED */}
+                          {(isSuperAdmin || isMainIncharge) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                            <button
+                              type="button"
+                              onClick={() => handleDistrictAction('approve')}
+                              disabled={taActionLoading || taDistrictStaff.length === 0}
+                              className="px-3.5 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
+                              title="Directly approve district travel allowance roster and publish for payroll"
+                            >
+                              <span>{taActionLoading ? '⏳' : '⚡'}</span>
+                              <span>{taActionLoading ? 'Approving...' : 'Direct Approve & Publish'}</span>
+                            </button>
+                          )}
+
                           {/* 2. Incharge & Super Admin Approve & Revert Buttons */}
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE') && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
+                          {(isSuperAdmin || isMainIncharge) && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
                             <>
                               <button
                                 type="button"
@@ -11305,7 +11322,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           )}
 
                           {/* 3. Unlock / Revert if already APPROVED (Super Admin & Main Incharge) */}
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE') && taDistrictStatus === 'APPROVED' && (
+                          {(isSuperAdmin || isMainIncharge) && taDistrictStatus === 'APPROVED' && (
                             <button
                               type="button"
                               onClick={() => setTaRevertModal({ isOpen: true, district: taDistrict, month: taMonth, reason: '' })}
@@ -11319,19 +11336,14 @@ const availableDistrictsForFeed = useMemo(() => {
                           )}
 
                           {/* Status Badges for Other Roles */}
-                          {(!isSuperAdmin && currentUser?.role !== 'MAIN_INCHARGE') && taDistrictStatus === 'SUBMITTED' && (
+                          {(!isSuperAdmin && !isMainIncharge) && taDistrictStatus === 'SUBMITTED' && (
                             <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-900/60 text-blue-200 border border-blue-500/40 flex items-center gap-1.5">
                               <span>⏳</span> Awaiting Incharge Sign-off
                             </span>
                           )}
-                          {(!isSuperAdmin && currentUser?.role !== 'MAIN_INCHARGE') && taDistrictStatus === 'APPROVED' && (
+                          {(!isSuperAdmin && !isMainIncharge) && taDistrictStatus === 'APPROVED' && (
                             <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-900/60 text-emerald-200 border border-emerald-500/40 flex items-center gap-1.5">
                               <span>🔒</span> Approved &amp; Locked
-                            </span>
-                          )}
-                          {(currentUser?.role === 'MAIN_INCHARGE') && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
-                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-800 text-slate-300 border border-slate-600/40 flex items-center gap-1.5">
-                              <span>📝</span> Draft in progress by Sub-Admin
                             </span>
                           )}
 

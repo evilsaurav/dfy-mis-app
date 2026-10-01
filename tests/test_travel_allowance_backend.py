@@ -466,3 +466,112 @@ def test_ta_analytics_cached_behavior():
         data2 = res2.json()
         assert data2["month_total_km"] == 600
 
+
+def test_ta_district_action_rbac_and_lifecycle():
+    store = {
+        "travel_allowance_logs": {
+            "2026-10_gaya_fo1": {
+                "month": "2026-10",
+                "district": "Gaya",
+                "staff_key": "fo1",
+                "staff_name": "Field Officer 1",
+                "total_km": 100,
+                "status": "DRAFT"
+            }
+        },
+        "admin_audit_logs": {}
+    }
+    mock_db = MagicMock()
+    mock_db.collection.side_effect = lambda c: MockCollection(c, store)
+    mock_batch = MagicMock()
+    mock_db.batch.return_value = mock_batch
+
+    subadmin_gaya_token = create_access_token({
+        "sub": "sub_gaya",
+        "username": "sub_gaya",
+        "role": "SUB_ADMIN",
+        "allowed_districts": ["Gaya"],
+        "permissions": {} # default: can_manage_ta not specified, should be allowed
+    })
+    subadmin_rohtas_token = create_access_token({
+        "sub": "sub_rohtas",
+        "username": "sub_rohtas",
+        "role": "SUB_ADMIN",
+        "allowed_districts": ["Rohtas"],
+        "permissions": {}
+    })
+    subadmin_revoked_token = create_access_token({
+        "sub": "sub_revoked",
+        "username": "sub_revoked",
+        "role": "SUB_ADMIN",
+        "allowed_districts": ["Gaya"],
+        "permissions": {"can_manage_ta": False}
+    })
+    incharge_token = create_access_token({
+        "sub": "logistics",
+        "username": "logistics",
+        "role": "MAIN_INCHARGE",
+        "allowed_districts": ["All"]
+    })
+    superadmin_token = create_access_token({
+        "sub": "admin",
+        "username": "admin",
+        "role": "SUPER_ADMIN",
+        "allowed_districts": ["All"]
+    })
+
+    with patch("main.db", mock_db):
+        cache.clear()
+
+        # 1. Sub-Admin outside district cannot submit
+        res_cross = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers={"Authorization": f"Bearer {subadmin_rohtas_token}"})
+        assert res_cross.status_code == 403
+
+        # 2. Sub-Admin with revoked can_manage_ta cannot submit
+        res_revoked = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers={"Authorization": f"Bearer {subadmin_revoked_token}"})
+        assert res_revoked.status_code == 403
+
+        # 3. Permitted Sub-Admin CAN submit
+        res_sub_submit = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers={"Authorization": f"Bearer {subadmin_gaya_token}"})
+        assert res_sub_submit.status_code == 200
+        assert res_sub_submit.json()["success"] is True
+
+        # 4. Sub-Admin CANNOT approve
+        res_sub_appr = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers={"Authorization": f"Bearer {subadmin_gaya_token}"})
+        assert res_sub_appr.status_code == 403
+
+        # 5. Main Incharge CAN approve
+        res_incharge_appr = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers={"Authorization": f"Bearer {incharge_token}"})
+        assert res_incharge_appr.status_code == 200
+        assert res_incharge_appr.json()["success"] is True
+
+        # 6. Super Admin CAN revert
+        res_super_rev = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "revert",
+            "revert_reason": "Odometer correction required on Day 5"
+        }, headers={"Authorization": f"Bearer {superadmin_token}"})
+        assert res_super_rev.status_code == 200
+        assert res_super_rev.json()["success"] is True
+
