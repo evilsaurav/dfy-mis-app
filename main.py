@@ -2346,6 +2346,12 @@ class TargetUpdate(BaseModel):
     target: int
     month: Optional[str] = None
 
+class DistrictTargetUpdate(BaseModel):
+    month: Optional[str] = None
+    district: str
+    official_target: int
+
+@app.get("/targets")
 @app.get("/get-targets")
 async def get_targets(district: Optional[str] = None, month: Optional[str] = None, districts: Optional[str] = None):
     try:
@@ -2434,6 +2440,77 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             
         targets.sort(key=lambda x: (x["district"], x["fo_name"]))
         res = {"success": True, "month": month, "targets": targets}
+
+        # Dual-Target Resolution: Official Target vs. Frontline Operational Stretch
+        if district and district != "All":
+            clean_dist = canonicalize_district(district.strip())
+            dt_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+            dt_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(dt_doc_id).get())
+            official_target = None
+            if dt_doc and getattr(dt_doc, "exists", False) is True:
+                raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
+                if isinstance(raw_val, (int, float)) and raw_val > 0:
+                    official_target = int(raw_val)
+            if official_target is None or official_target <= 0:
+                fallback_doc_id = clean_dist.replace(" ", "").lower()
+                fallback_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).get())
+                if fallback_doc and getattr(fallback_doc, "exists", False) is True:
+                    raw_val = fallback_doc.to_dict().get("official_target") if hasattr(fallback_doc, "to_dict") and callable(fallback_doc.to_dict) and fallback_doc.to_dict() else None
+                    if isinstance(raw_val, (int, float)) and raw_val > 0:
+                        official_target = int(raw_val)
+            
+            staff_targets_sum = sum(t["target"] for t in targets)
+            if official_target is None or official_target <= 0:
+                official_target = staff_targets_sum
+                
+            buffer_count = max(0, staff_targets_sum - official_target)
+            buffer_percent = round((buffer_count / max(1, official_target)) * 100, 1) if official_target > 0 else 0.0
+
+            res["official_district_target"] = official_target
+            res["staff_targets_sum"] = staff_targets_sum
+            res["buffer_percent"] = buffer_percent
+            res["buffer_count"] = buffer_count
+        else:
+            staff_targets_sum = sum(t["target"] for t in targets)
+            dt_docs = await asyncio.to_thread(lambda: list(db.collection("district_targets").stream()))
+            dist_map = {}
+            for d in dt_docs:
+                dd = d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) and d.to_dict() else {}
+                d_m = dd.get("month")
+                d_dist = dd.get("district")
+                if not d_dist or not isinstance(d_dist, str):
+                    continue
+                c_dist = canonicalize_district(d_dist)
+                raw_tgt = dd.get("official_target")
+                tgt_val = int(raw_tgt) if isinstance(raw_tgt, (int, float)) else 0
+                if d_m == month:
+                    dist_map[c_dist] = tgt_val
+                elif not d_m and c_dist not in dist_map:
+                    dist_map[c_dist] = tgt_val
+            
+            official_targets_by_dist = {}
+            staff_sums_by_dist = {}
+            for t in targets:
+                c_d = canonicalize_district(t["district"])
+                staff_sums_by_dist[c_d] = staff_sums_by_dist.get(c_d, 0) + t["target"]
+            
+            total_official = 0
+            for c_d, s_sum in staff_sums_by_dist.items():
+                off_t = dist_map.get(c_d, s_sum)
+                if not isinstance(off_t, (int, float)) or off_t <= 0:
+                    off_t = s_sum
+                official_targets_by_dist[c_d] = off_t
+                total_official += off_t
+            
+            buffer_count = max(0, staff_targets_sum - total_official)
+            buffer_percent = round((buffer_count / max(1, total_official)) * 100, 1) if total_official > 0 else 0.0
+            
+            res["official_district_target"] = total_official
+            res["official_targets_by_district"] = official_targets_by_dist
+            res["staff_targets_sum"] = staff_targets_sum
+            res["buffer_percent"] = buffer_percent
+            res["buffer_count"] = buffer_count
+
         cache.set(cache_key, res, ttl=1800) # 30 min cache
         return res
     except HTTPException:
@@ -2514,6 +2591,72 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-district-target")
+async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depends(get_current_admin)):
+    try:
+        month = data.month or datetime.now().strftime("%Y-%m")
+        clean_dist = canonicalize_district(data.district.strip())
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. Cross-district target modification forbidden for '{clean_dist}'.")
+        
+        target_val = int(data.official_target)
+        if target_val < 0:
+            raise HTTPException(status_code=400, detail="Official target cannot be negative.")
+
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 1. Month-scoped document: {month}_{clean_dist}
+        month_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("district_targets").document(month_doc_id).set({
+            "month": month,
+            "district": clean_dist,
+            "official_target": target_val,
+            "updated_at": now_str,
+            "updated_by": actor_name,
+            "updated_by_role": actor_role
+        }, merge=True))
+
+        # 2. General fallback document: {clean_dist}
+        fallback_doc_id = clean_dist.replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).set({
+            "district": clean_dist,
+            "official_target": target_val,
+            "updated_at": now_str,
+            "updated_by": actor_name,
+            "updated_by_role": actor_role
+        }, merge=True))
+
+        cache.delete_prefix("targets_")
+        cache.delete_prefix(f"district_targets_{month}_{clean_dist}".lower())
+        cache.delete_prefix(f"pacing_settings_{month}")
+
+        await log_admin_activity(
+            action_type="DISTRICT_TARGET_UPDATED",
+            details=f"Updated official district target for {clean_dist} to {target_val} for month {month}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            diff={"month": month, "official_target": target_val}
+        )
+        return {
+            "success": True, 
+            "month": month, 
+            "district": clean_dist, 
+            "official_target": target_val, 
+            "message": f"Official target for {clean_dist} ({month}) updated to {target_val}!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # 17 Standard KPI Categories Definition (Exact Master Blueprint)
@@ -2597,6 +2740,29 @@ def generate_district_kpi_bytes(
         target_map = {}
 
         c_dist = canonicalize_district(district)
+        # Fetch Official District Target if set
+        dt_doc_id = f"{month_prefix}_{c_dist}".replace(" ", "").lower()
+        official_target = None
+        try:
+            dt_doc = db.collection("district_targets").document(dt_doc_id).get()
+            if dt_doc and getattr(dt_doc, "exists", False) is True:
+                raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
+                if isinstance(raw_val, (int, float)) and raw_val > 0:
+                    official_target = int(raw_val)
+            if official_target is None:
+                fb_id = c_dist.replace(" ", "").lower()
+                fb_doc = db.collection("district_targets").document(fb_id).get()
+                if fb_doc and getattr(fb_doc, "exists", False) is True:
+                    raw_val = fb_doc.to_dict().get("official_target") if hasattr(fb_doc, "to_dict") and callable(fb_doc.to_dict) and fb_doc.to_dict() else None
+                    if isinstance(raw_val, (int, float)) and raw_val > 0:
+                        official_target = int(raw_val)
+        except Exception as e:
+            print(f"Notice: Target fetch exception for {district}: {e}")
+            official_target = None
+
+        if not isinstance(official_target, (int, float)) or official_target <= 0:
+            official_target = None
+
         alias_dists = {c_dist.lower(), district.lower()}
         if "aurangabad" in c_dist.lower():
             alias_dists.update(["aurangabad-bi", "aurangabad"])
@@ -2916,6 +3082,11 @@ def generate_district_kpi_bytes(
                     break
 
             if gt_row:
+                if isinstance(official_target, (int, float)) and official_target > 0:
+                    ws_perf.cell(row=gt_row, column=3).value = official_target
+                    cell_gt_pct = ws_perf.cell(row=gt_row, column=5)
+                    cell_gt_pct.value = f"=IF(C{gt_row}>0, D{gt_row}/C{gt_row}, 0)"
+                    cell_gt_pct.number_format = "0.0%"
                 ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
                 gt_fill_color = "001E3A8A"
                 if ref_gt_cell and ref_gt_cell.fill and getattr(ref_gt_cell.fill.start_color, 'rgb', None):

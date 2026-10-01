@@ -186,6 +186,9 @@ export default function AdminDashboard() {
   const [isSavingTargets, setIsSavingTargets] = useState(false);
   const [bulkTargetValue, setBulkTargetValue] = useState("");
   const [targetsData, setTargetsData] = useState([]);
+  const [officialDistrictTarget, setOfficialDistrictTarget] = useState(0);
+  const [officialTargetsByDistrict, setOfficialTargetsByDistrict] = useState({});
+  const [isSavingDistrictTarget, setIsSavingDistrictTarget] = useState(false);
   const [activeMetric, setActiveMetric] = useState('notifications');
   const [performanceViewMode, setPerformanceViewMode] = useState('chart'); // 'chart' | 'cards'
   const [performanceMetricFilter, setPerformanceMetricFilter] = useState('notif_only'); // 'notif_only' | 'target_vs_notif' | 'pct_achieve'
@@ -1966,10 +1969,68 @@ export default function AdminDashboard() {
           const data = await res.json();
           if(data.success && Array.isArray(data.targets)) {
               setTargetsData(data.targets);
+              if (data.official_targets_by_district) {
+                  setOfficialTargetsByDistrict(data.official_targets_by_district);
+                  if (targetModalDistrict && targetModalDistrict !== 'All') {
+                    const cD = canonicalizeDistrict(targetModalDistrict);
+                    if (data.official_targets_by_district[cD] !== undefined) {
+                      setOfficialDistrictTarget(data.official_targets_by_district[cD]);
+                    }
+                  } else if (data.official_district_target !== undefined) {
+                    setOfficialDistrictTarget(data.official_district_target);
+                  }
+              } else if (data.official_district_target !== undefined) {
+                  setOfficialDistrictTarget(data.official_district_target);
+              }
           }
       } catch(err) {
           console.error("loadTargets error", err);
       }
+  };
+
+  const handleSaveDistrictTarget = async () => {
+    if (!targetModalDistrict || targetModalDistrict === 'All') {
+      showToast('Please select a specific district to set its official target', 'warning');
+      return;
+    }
+    const val = Number(officialDistrictTarget);
+    if (isNaN(val) || val < 0) {
+      showToast('Official target must be a non-negative number', 'error');
+      return;
+    }
+    setIsSavingDistrictTarget(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem("token") || currentUser?.token;
+      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          month: targetModalMonth,
+          district: targetModalDistrict,
+          official_target: val
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        showToast(`Official district target for ${targetModalDistrict} saved (${val})!`, 'success');
+        setOfficialDistrictTarget(val);
+        setOfficialTargetsByDistrict(prev => ({
+          ...prev,
+          [canonicalizeDistrict(targetModalDistrict)]: val
+        }));
+      } else {
+        showToast(data.detail || 'Failed to save official district target', 'error');
+      }
+    } catch (err) {
+      console.error("handleSaveDistrictTarget error", err);
+      showToast('Network error while saving official district target', 'error');
+    } finally {
+      setIsSavingDistrictTarget(false);
+    }
   };
 
   const handleTargetChange = (district, fo_name, value) => {
@@ -4112,19 +4173,27 @@ const availableDistrictsForFeed = useMemo(() => {
       return permittedDistricts.includes(cDist);
     });
 
-    const totalStateTarget = permittedTargets.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
-    
     const distStats = {};
     permittedDistricts.forEach(d => {
       distStats[d] = { dist: d, notif: 0, tests: 0, dbt: 0, km: 0, tgt: 0, pct: 0 };
     });
 
+    // Accumulate frontline staff targets first
     permittedTargets.forEach(t => {
       const cDist = canonicalizeDistrict(t.district);
       if (distStats[cDist]) {
         distStats[cDist].tgt += (Number(t.target) || 0);
       }
     });
+
+    // Override with official target if set for this district
+    permittedDistricts.forEach(d => {
+      if (officialTargetsByDistrict && officialTargetsByDistrict[d] && officialTargetsByDistrict[d] > 0) {
+        distStats[d].tgt = Number(officialTargetsByDistrict[d]);
+      }
+    });
+
+    const totalStateTarget = Object.values(distStats).reduce((sum, d) => sum + d.tgt, 0);
 
     (rawRecords || []).forEach(r => {
       const cDist = canonicalizeDistrict(r.working_place || r.district || '');
@@ -4163,7 +4232,7 @@ const availableDistrictsForFeed = useMemo(() => {
 
     msg += `\n_DFY Bihar State Health Monitoring Cell_`;
     return msg;
-  }, [month, totals, rawRecords, targetsData, districts, currentUser]);
+  }, [month, rawRecords, targetsData, districts, currentUser, officialTargetsByDistrict]);
 
   const copyWhatsAppBulletin = async () => {
     try {
@@ -5454,7 +5523,14 @@ const availableDistrictsForFeed = useMemo(() => {
                 {canEditTargets && (
                   <button 
                     onClick={() => {
-                      setTargetModalDistrict(selectedDistrict !== 'All' ? selectedDistrict : 'All');
+                      const initDist = selectedDistrict !== 'All' ? selectedDistrict : 'All';
+                      setTargetModalDistrict(initDist);
+                      if (initDist !== 'All') {
+                        const cD = canonicalizeDistrict(initDist);
+                        if (officialTargetsByDistrict && officialTargetsByDistrict[cD] !== undefined) {
+                          setOfficialDistrictTarget(officialTargetsByDistrict[cD]);
+                        }
+                      }
                       loadTargets('All');
                       fetchDirectory();
                       setShowTargetModal(true);
@@ -7020,15 +7096,49 @@ const availableDistrictsForFeed = useMemo(() => {
                   {(() => {
                     const { totalWorkingDays, elapsedWorkingDays, remainingWorkingDays, isCurrentMonth, isPastMonth } = workingDaysInfo;
 
-                    let scopedTarget = 0;
+                    let frontlineStretchTarget = 0;
                     if (selectedDistrict !== 'All') {
-                      scopedTarget = targetsData.filter(t => t.district === selectedDistrict).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                      frontlineStretchTarget = targetsData.filter(t => canonicalizeDistrict(t.district) === canonicalizeDistrict(selectedDistrict)).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
                     } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
-                      scopedTarget = targetsData.filter(t => currentUser.allowed_districts.includes(t.district)).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                      const allowedCanon = currentUser.allowed_districts.map(canonicalizeDistrict);
+                      frontlineStretchTarget = targetsData.filter(t => allowedCanon.includes(canonicalizeDistrict(t.district))).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
                     } else {
-                      scopedTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                      frontlineStretchTarget = targetsData.reduce((sum, t) => sum + (Number(t.target) || 0), 0);
                     }
 
+                    let effectiveDistrictTarget = 0;
+                    if (selectedDistrict !== 'All') {
+                      const cDist = canonicalizeDistrict(selectedDistrict);
+                      const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist]) || 0;
+                      effectiveDistrictTarget = offTgt > 0 ? offTgt : frontlineStretchTarget;
+                    } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+                      const permitted = (currentUser.allowed_districts || []).map(canonicalizeDistrict);
+                      permitted.forEach(d => {
+                        const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[d]) || 0;
+                        if (offTgt > 0) {
+                          effectiveDistrictTarget += offTgt;
+                        } else {
+                          const staffSum = targetsData.filter(t => canonicalizeDistrict(t.district) === d).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                          effectiveDistrictTarget += staffSum;
+                        }
+                      });
+                    } else {
+                      const allDists = (districts || []).filter(d => d !== 'All').map(canonicalizeDistrict);
+                      allDists.forEach(d => {
+                        const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[d]) || 0;
+                        if (offTgt > 0) {
+                          effectiveDistrictTarget += offTgt;
+                        } else {
+                          const staffSum = targetsData.filter(t => canonicalizeDistrict(t.district) === d).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+                          effectiveDistrictTarget += staffSum;
+                        }
+                      });
+                      if (effectiveDistrictTarget <= 0) {
+                        effectiveDistrictTarget = frontlineStretchTarget;
+                      }
+                    }
+
+                    const scopedTarget = effectiveDistrictTarget;
                     const totalScopeNotif = totals.notifications || 0;
                     const pendingScopeNotif = Math.max(0, scopedTarget - totalScopeNotif);
 
@@ -7061,6 +7171,8 @@ const availableDistrictsForFeed = useMemo(() => {
                       daysRemainingDisplay = totalWorkingDays;
                     }
 
+                    const groundPct = frontlineStretchTarget > 0 ? Math.round((totalScopeNotif / frontlineStretchTarget) * 100) : 0;
+
                     return (
                       <>
                         <div className="bg-indigo-50/70 p-4 rounded-2xl border border-indigo-100 flex justify-between items-center">
@@ -7083,8 +7195,14 @@ const availableDistrictsForFeed = useMemo(() => {
                         <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 space-y-2 text-xs">
                           <div className="flex justify-between font-bold">
                             <span className="text-slate-500">Scope Target &amp; Actual:</span>
-                            <span className="font-black text-slate-800">{totalScopeNotif} / {scopedTarget} Notif</span>
+                            <span className="font-black text-slate-800">{totalScopeNotif} / {effectiveDistrictTarget} Notif</span>
                           </div>
+                          {frontlineStretchTarget > 0 && frontlineStretchTarget !== effectiveDistrictTarget && (
+                            <div className="flex justify-between font-bold text-[11px] bg-purple-50/80 px-2 py-1 rounded-lg border border-purple-100">
+                              <span className="text-purple-700">🛵 Frontline Stretch Quota:</span>
+                              <span className="font-black text-purple-900">{frontlineStretchTarget} (Ground Pacing: {groundPct}%)</span>
+                            </div>
+                          )}
                           <div className="flex justify-between font-bold">
                             <span className="text-slate-500">{isPastMonth ? 'Final Achievement:' : 'Month-End Projection:'}</span>
                             <span className="font-black text-indigo-600">{projectedTotal} Notifications ({projectedPct}%)</span>
@@ -12786,7 +12904,14 @@ const availableDistrictsForFeed = useMemo(() => {
                 <select 
                   value={targetModalDistrict} 
                   onChange={(e) => {
-                    setTargetModalDistrict(e.target.value);
+                    const newD = e.target.value;
+                    setTargetModalDistrict(newD);
+                    if (newD !== 'All') {
+                      const cD = canonicalizeDistrict(newD);
+                      if (officialTargetsByDistrict && officialTargetsByDistrict[cD] !== undefined) {
+                        setOfficialDistrictTarget(officialTargetsByDistrict[cD]);
+                      }
+                    }
                   }}
                   className="bg-white border border-slate-200 text-slate-700 font-bold text-xs rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-purple-500 shadow-xs"
                 >
@@ -12833,6 +12958,74 @@ const availableDistrictsForFeed = useMemo(() => {
               </div>
             </div>
 
+            {/* 🎯 Official District Target Card & Live Comparison Buffer Pill */}
+            {targetModalDistrict !== 'All' && (
+              <div className="mx-5 my-3 p-4 bg-gradient-to-r from-blue-50/80 via-indigo-50/60 to-purple-50/80 border border-indigo-200/70 rounded-2xl flex flex-wrap items-center justify-between gap-4 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-lg shadow-sm">
+                    🎯
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                        Official District Target ({targetModalDistrict})
+                      </h4>
+                      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800 border border-indigo-200">
+                        State Lead / KPI Metric
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      Reports, Excel workbooks &amp; WhatsApp bulletins will evaluate achievement against this number.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 ml-auto">
+                  {(() => {
+                    const cDist = canonicalizeDistrict(targetModalDistrict);
+                    const officers = staffDirectory[targetModalDistrict] || [];
+                    const frontlineAllocated = officers.reduce((sum, fo) => {
+                      const tData = targetsData.find(t => 
+                        canonicalizeDistrict(t.district) === cDist && 
+                        (isOfficerNameMatch(t.fo_name, fo, cDist) || isOfficerNameMatch(canonicalizeFo(t.fo_name, cDist, staffDirectory), fo, cDist))
+                      );
+                      return sum + parseTargetVal(tData, 50);
+                    }, 0);
+                    const offVal = Number(officialDistrictTarget) || 0;
+                    const bufferCount = Math.max(0, frontlineAllocated - offVal);
+                    const bufferPct = offVal > 0 ? Math.round((bufferCount / offVal) * 100) : 0;
+
+                    return (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="text-right mr-2 hidden sm:block">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Stretch Buffer</span>
+                          <span className="text-xs font-black text-emerald-700">
+                            +{bufferCount} ({bufferPct}%)
+                          </span>
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          value={officialDistrictTarget || ''}
+                          onChange={(e) => setOfficialDistrictTarget(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          placeholder="Official Target"
+                          className="w-28 bg-white border border-indigo-300 rounded-xl px-3 py-2 text-center font-black text-sm text-indigo-900 outline-none focus:ring-2 focus:ring-indigo-500 shadow-inner"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleSaveDistrictTarget}
+                          disabled={isSavingDistrictTarget}
+                          className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-xs font-black transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+                        >
+                          {isSavingDistrictTarget ? 'Saving...' : 'Save Official Target'}
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
             {/* Staff List with Targets and District Total Indicators */}
             <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6 custom-scrollbar">
               {(targetModalDistrict === 'All' ? targetModalDistricts : [targetModalDistrict]).map(dist => {
@@ -12854,9 +13047,29 @@ const availableDistrictsForFeed = useMemo(() => {
                         <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">{dist} District ({officers.length} Staff)</h4>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2.5 py-0.5 rounded-full border border-purple-200">
-                          District Total: {distTotal}
-                        </span>
+                        {(() => {
+                          const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist]) || 
+                            (dist === targetModalDistrict ? officialDistrictTarget : 0);
+                          const bufferCount = Math.max(0, distTotal - offTgt);
+                          const bufferPct = offTgt > 0 ? Math.round((bufferCount / offTgt) * 100) : 0;
+                          return (
+                            <>
+                              {offTgt > 0 && (
+                                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-full border border-indigo-200">
+                                  Official: {offTgt}
+                                </span>
+                              )}
+                              <span className="text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 px-2.5 py-0.5 rounded-full border border-purple-200">
+                                Frontline: {distTotal}
+                              </span>
+                              {offTgt > 0 && bufferCount > 0 && (
+                                <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                  Buffer: +{bufferPct}% (+{bufferCount})
+                                </span>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     </div>
 
