@@ -3645,6 +3645,13 @@ export default function AdminDashboard() {
     }
   }, [showDuplicateModal, duplicateRadarTab]);
 
+  // Lazy Tab Loading: Load targets & official district benchmarks when District Benchmarks tab is active
+  useEffect(() => {
+    if (isAuthenticated && activeMainTab === 'district_benchmarks') {
+      loadTargets('All', month);
+    }
+  }, [activeMainTab, isAuthenticated, month]);
+
   // Background Silent Auto-Sync & Tab-Focus Sync (0-read delta polling)
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -5132,10 +5139,25 @@ const availableDistrictsForFeed = useMemo(() => {
     const { totalWorkingDays, elapsedWorkingDays, remainingWorkingDays } = workingDaysInfo;
 
     return distList.map(dist => {
-      const distStaff = staffPacingData.filter(s => canonicalizeDistrict(s.district) === dist);
+      const cDist = canonicalizeDistrict(dist);
+      const distStaff = staffPacingData.filter(s => canonicalizeDistrict(s.district) === cDist);
       const staffCount = distStaff.length;
-      const target = distStaff.reduce((sum, s) => sum + s.target, 0) || (targetsData.filter(t => canonicalizeDistrict(t.district) === dist).reduce((sum, t) => sum + (Number(t.target) || 0), 0) || 100);
-      const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === dist);
+
+      // 1. Frontline Staff Target Sum (Ground Reality)
+      const frontlineTarget = targetsData.filter(t => canonicalizeDistrict(t.district) === cDist).reduce((sum, t) => sum + (Number(t.target) || 0), 0) || distStaff.reduce((sum, s) => sum + s.target, 0) || 0;
+
+      // 2. Official District Target Quota
+      const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist] !== undefined) ? Number(officialTargetsByDistrict[cDist]) : 0;
+
+      // 3. Dynamic Effective Target based on active perspective (Official vs Frontline)
+      const target = (adminTargetViewMode === 'frontline' || offTgt <= 0)
+        ? (frontlineTarget > 0 ? frontlineTarget : (offTgt > 0 ? offTgt : 100))
+        : offTgt;
+
+      const bufferCount = Math.max(0, frontlineTarget - offTgt);
+      const bufferPct = offTgt > 0 ? Math.round((bufferCount / offTgt) * 100) : 0;
+
+      const distRecords = rawRecords.filter(r => canonicalizeDistrict(r.working_place) === cDist);
       const achieved = distRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
 
       const expectedPace = Math.min(target, Math.round((target / Math.max(1, totalWorkingDays)) * elapsedWorkingDays));
@@ -5156,6 +5178,10 @@ const availableDistrictsForFeed = useMemo(() => {
         district: dist,
         staffCount,
         target,
+        officialTarget: offTgt,
+        frontlineTarget,
+        bufferCount,
+        bufferPct,
         expectedPace,
         achieved,
         pacingPct,
@@ -5168,7 +5194,7 @@ const availableDistrictsForFeed = useMemo(() => {
         reportsCount: distRecords.length
       };
     }).sort((a, b) => b.pacingPct - a.pacingPct || b.achieved - a.achieved);
-  }, [staffPacingData, staffDirectory, currentUser, workingDaysInfo, targetsData, rawRecords]);
+  }, [staffPacingData, currentUser, workingDaysInfo, targetsData, rawRecords, adminTargetViewMode, officialTargetsByDistrict]);
 
   // WhatsApp Coaching Message Generator
   const generateCoachingMessage = (officer) => {
@@ -8816,22 +8842,67 @@ const availableDistrictsForFeed = useMemo(() => {
               🏢
             </div>
             <div>
-              <h3 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
-                District Benchmarks &amp; Target Pacing Matrix
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-lg font-black text-slate-800 tracking-tight flex items-center gap-2">
+                  District Benchmarks &amp; Target Pacing Matrix
+                </h3>
                 <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded-full">{month}</span>
-              </h3>
+                <span className={`text-[10px] font-black px-2.5 py-0.5 rounded-full border shadow-2xs flex items-center gap-1 ${
+                  adminTargetViewMode === 'frontline'
+                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                }`}>
+                  {adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational Mode' : '🏛️ Official Benchmark Mode'}
+                </span>
+              </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
                 Comparative district pacing run-rates, target deficit/surplus forecasts &amp; state percentile rankings.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-black text-indigo-950 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-100">
-            <span>{districtPacingData.length} Districts Analyzed</span>
-            <span>&bull;</span>
-            <span className="text-emerald-700">{districtPacingData.filter(d => d.status === 'ON_TRACK').length} On Track</span>
-            <span>&bull;</span>
-            <span className="text-rose-700">{districtPacingData.filter(d => d.status === 'CRITICAL').length} Critical</span>
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Target Perspective Quick Switcher */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200/90 shadow-2xs shrink-0" title="Switch between Official State Targets and Frontline Operational Stretch">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminTargetViewMode('official');
+                  showToast('District Pacing switched to 🏛️ Official District Quotas', 'info');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  adminTargetViewMode === 'official'
+                    ? 'bg-white text-indigo-700 shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>🏛️</span>
+                <span>Official Quotas</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminTargetViewMode('frontline');
+                  showToast('District Pacing switched to 🛵 Frontline Operational Stretch', 'info');
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer ${
+                  adminTargetViewMode === 'frontline'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                <span>🛵</span>
+                <span>Frontline Targets</span>
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs font-black text-indigo-950 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-100">
+              <span>{districtPacingData.length} Districts Analyzed</span>
+              <span>&bull;</span>
+              <span className="text-emerald-700">{districtPacingData.filter(d => d.status === 'ON_TRACK').length} On Track</span>
+              <span>&bull;</span>
+              <span className="text-rose-700">{districtPacingData.filter(d => d.status === 'CRITICAL').length} Critical</span>
+            </div>
           </div>
         </div>
 
@@ -8843,7 +8914,13 @@ const availableDistrictsForFeed = useMemo(() => {
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-400 font-black uppercase text-[10px] tracking-wider">
                   <th className="p-3.5 sticky left-0 bg-slate-50 z-10">District Name</th>
                   <th className="p-3.5 text-center">Staff Count</th>
-                  <th className="p-3.5 text-center">District Target</th>
+                  <th className="p-3.5 text-center">
+                    <div>{adminTargetViewMode === 'frontline' ? 'Frontline Target' : 'Official Target'}</div>
+                    <span className="text-[9px] font-normal lowercase text-slate-400">
+                      {adminTargetViewMode === 'frontline' ? '(Ground Stretch)' : '(State Quota)'}
+                    </span>
+                  </th>
+                  <th className="p-3.5 text-center">Official vs Frontline</th>
                   <th className="p-3.5 text-center">Expected Pace</th>
                   <th className="p-3.5 text-center">Achieved</th>
                   <th className="p-3.5 min-w-[160px]">Pacing Velocity Tracker</th>
@@ -8866,7 +8943,30 @@ const availableDistrictsForFeed = useMemo(() => {
                       </div>
                     </td>
                     <td className="p-3.5 text-center text-slate-600 font-bold">{d.staffCount} FOs</td>
-                    <td className="p-3.5 text-center font-bold text-slate-600">{d.target}</td>
+                    <td className="p-3.5 text-center">
+                      <span className="font-black text-sm text-slate-900 block">{d.target}</span>
+                      <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded inline-block font-mono ${
+                        adminTargetViewMode === 'frontline'
+                          ? 'text-purple-700 bg-purple-50 border border-purple-200'
+                          : 'text-indigo-700 bg-indigo-50 border border-indigo-200'
+                      }`}>
+                        {adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official'}
+                      </span>
+                    </td>
+                    <td className="p-3.5 text-center text-xs">
+                      <div className="flex items-center justify-center gap-1.5 font-bold text-[11px]">
+                        <span className="text-slate-600" title="Official State Quota">🏛️ {d.officialTarget || '—'}</span>
+                        <span className="text-slate-300">/</span>
+                        <span className="text-purple-700" title="Frontline Staff Sum">🛵 {d.frontlineTarget}</span>
+                      </div>
+                      {d.officialTarget > 0 && (
+                        <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full inline-block mt-0.5 ${
+                          d.bufferCount > 0 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-50 text-slate-500 border border-slate-200'
+                        }`}>
+                          {d.bufferCount > 0 ? `+${d.bufferCount} Buffer (${d.bufferPct}%)` : 'Exact Quota'}
+                        </span>
+                      )}
+                    </td>
                     <td className="p-3.5 text-center font-bold text-slate-500">{d.expectedPace}</td>
                     <td className="p-3.5 text-center font-black text-slate-800">
                       {d.achieved}
@@ -8891,7 +8991,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                         <div className="flex justify-between text-[9px] text-slate-400 font-semibold font-mono">
                           <span>Pace: {d.pacingPct}%</span>
-                          <span>Target: {d.target}</span>
+                          <span>Target: {d.target} ({adminTargetViewMode === 'frontline' ? 'FO' : 'Official'})</span>
                         </div>
                       </div>
                     </td>
@@ -8921,7 +9021,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           setSelectedDistrict(d.district);
                           setActiveMainTab('staff_pacing');
                         }}
-                        className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-colors"
+                        className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
                       >
                         Drilldown Staff ➔
                       </button>

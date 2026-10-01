@@ -125,4 +125,21 @@ assert(
   'main.py evicts profile cache on bulk staff target update'
 );
 
+// 16. District Pacing Data calculates both Official and Frontline targets with perspective switch
+assert(
+  adminCode.includes('frontlineTarget') &&
+  adminCode.includes('(adminTargetViewMode === \'frontline\' || offTgt <= 0)') &&
+  adminCode.includes('adminTargetViewMode, officialTargetsByDistrict]);'),
+  'districtPacingData computes official vs frontline targets and reactive to adminTargetViewMode & officialTargetsByDistrict'
+);
+
+// 17. District Benchmarks & Pacing Matrix UI includes perspective switcher and dual targets
+assert(
+  adminCode.includes('District Benchmarks &amp; Target Pacing Matrix') &&
+  adminCode.includes('Official vs Frontline') &&
+  adminCode.includes('Official Quotas') &&
+  adminCode.includes('Frontline Targets'),
+  'District Benchmarks & Target Pacing Matrix renders quick switcher and dual targets breakdown'
+);
+
 console.log('🎉 ALL DUAL-TARGET UI & PRIVACY TESTS PASSED 100%!\n');
