@@ -2009,6 +2009,12 @@ class TargetUpdate(BaseModel):
     target: int
     month: Optional[str] = None
 
+class DistrictTargetUpdate(BaseModel):
+    month: Optional[str] = None
+    district: str
+    official_target: int
+
+@app.get("/targets")
 @app.get("/get-targets")
 async def get_targets(district: Optional[str] = None, month: Optional[str] = None, districts: Optional[str] = None):
     try:
@@ -2084,6 +2090,71 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             
         targets.sort(key=lambda x: (x["district"], x["fo_name"]))
         res = {"success": True, "month": month, "targets": targets}
+
+        # Dual-Target Resolution: Official Target vs. Frontline Operational Stretch
+        if district and district != "All":
+            clean_dist = canonicalize_district(district.strip())
+            dt_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+            dt_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(dt_doc_id).get())
+            official_target = None
+            if dt_doc.exists:
+                official_target = dt_doc.to_dict().get("official_target")
+            if official_target is None or official_target <= 0:
+                fallback_doc_id = clean_dist.replace(" ", "").lower()
+                fallback_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).get())
+                if fallback_doc.exists:
+                    official_target = fallback_doc.to_dict().get("official_target")
+            
+            staff_targets_sum = sum(t["target"] for t in targets)
+            if official_target is None or official_target <= 0:
+                official_target = staff_targets_sum
+                
+            buffer_count = max(0, staff_targets_sum - official_target)
+            buffer_percent = round((buffer_count / max(1, official_target)) * 100, 1) if official_target > 0 else 0.0
+
+            res["official_district_target"] = official_target
+            res["staff_targets_sum"] = staff_targets_sum
+            res["buffer_percent"] = buffer_percent
+            res["buffer_count"] = buffer_count
+        else:
+            staff_targets_sum = sum(t["target"] for t in targets)
+            dt_docs = await asyncio.to_thread(lambda: list(db.collection("district_targets").stream()))
+            dist_map = {}
+            for d in dt_docs:
+                dd = d.to_dict()
+                d_m = dd.get("month")
+                d_dist = dd.get("district")
+                if not d_dist:
+                    continue
+                c_dist = canonicalize_district(d_dist)
+                if d_m == month:
+                    dist_map[c_dist] = int(dd.get("official_target", 0))
+                elif not d_m and c_dist not in dist_map:
+                    dist_map[c_dist] = int(dd.get("official_target", 0))
+            
+            official_targets_by_dist = {}
+            staff_sums_by_dist = {}
+            for t in targets:
+                c_d = canonicalize_district(t["district"])
+                staff_sums_by_dist[c_d] = staff_sums_by_dist.get(c_d, 0) + t["target"]
+            
+            total_official = 0
+            for c_d, s_sum in staff_sums_by_dist.items():
+                off_t = dist_map.get(c_d, s_sum)
+                if off_t <= 0:
+                    off_t = s_sum
+                official_targets_by_dist[c_d] = off_t
+                total_official += off_t
+            
+            buffer_count = max(0, staff_targets_sum - total_official)
+            buffer_percent = round((buffer_count / max(1, total_official)) * 100, 1) if total_official > 0 else 0.0
+            
+            res["official_district_target"] = total_official
+            res["official_targets_by_district"] = official_targets_by_dist
+            res["staff_targets_sum"] = staff_targets_sum
+            res["buffer_percent"] = buffer_percent
+            res["buffer_count"] = buffer_count
+
         cache.set(cache_key, res, ttl=1800) # 30 min cache
         return res
     except HTTPException:
@@ -2141,6 +2212,72 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-district-target")
+async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depends(get_current_admin)):
+    try:
+        month = data.month or datetime.now().strftime("%Y-%m")
+        clean_dist = canonicalize_district(data.district.strip())
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and clean_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. Cross-district target modification forbidden for '{clean_dist}'.")
+        
+        target_val = int(data.official_target)
+        if target_val < 0:
+            raise HTTPException(status_code=400, detail="Official target cannot be negative.")
+
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUB_ADMIN")
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # 1. Month-scoped document: {month}_{clean_dist}
+        month_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("district_targets").document(month_doc_id).set({
+            "month": month,
+            "district": clean_dist,
+            "official_target": target_val,
+            "updated_at": now_str,
+            "updated_by": actor_name,
+            "updated_by_role": actor_role
+        }, merge=True))
+
+        # 2. General fallback document: {clean_dist}
+        fallback_doc_id = clean_dist.replace(" ", "").lower()
+        await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).set({
+            "district": clean_dist,
+            "official_target": target_val,
+            "updated_at": now_str,
+            "updated_by": actor_name,
+            "updated_by_role": actor_role
+        }, merge=True))
+
+        cache.delete_prefix("targets_")
+        cache.delete_prefix(f"district_targets_{month}_{clean_dist}".lower())
+        cache.delete_prefix(f"pacing_settings_{month}")
+
+        await log_admin_activity(
+            action_type="DISTRICT_TARGET_UPDATED",
+            details=f"Updated official district target for {clean_dist} to {target_val} for month {month}",
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            district=clean_dist,
+            diff={"month": month, "official_target": target_val}
+        )
+        return {
+            "success": True, 
+            "month": month, 
+            "district": clean_dist, 
+            "official_target": target_val, 
+            "message": f"Official target for {clean_dist} ({month}) updated to {target_val}!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 # 14 Standard KPI Categories Definition (Exact Master Blueprint)
