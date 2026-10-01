@@ -379,3 +379,90 @@ def test_ta_analytics():
         assert data["total_ta_gross"] == 4000.0
         assert data["total_ta_deductions"] == 150.0
         assert data["total_ta_final_payable"] == 3850.0
+
+def test_get_ta_logs_empty_district_does_not_stream_state():
+    store = {
+        "admin_users": {
+            "superadmin": {
+                "name": "Admin",
+                "role": "SUPER_ADMIN"
+            }
+        },
+        "travel_allowance_logs": {
+            "2026-09_gaya_rameshkumar": {
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_name": "Ramesh Kumar",
+                "staff_key": "gaya_rameshkumar",
+                "total_km": 100
+            }
+        }
+    }
+    mock_db = MagicMock()
+    mock_db.collection.side_effect = lambda c: MockCollection(c, store)
+
+    token = create_access_token({
+        "sub": "superadmin",
+        "role": "SUPER_ADMIN",
+        "name": "Admin"
+    })
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("main.db", mock_db):
+        cache.clear()
+        res = client.get("/api/ta-logs?month=2026-09&district=Sheohar", headers=headers)
+        assert res.status_code == 200, res.text
+        data = res.json()
+        assert data["success"] is True
+        # Sheohar has 0 logs, should return [] without returning Gaya's doc
+        assert data["logs"] == []
+        # Verify it was cached
+        cached = cache.get("ta_roster_2026-09_sheohar")
+        assert cached == []
+
+def test_ta_analytics_cached_behavior():
+    store = {
+        "admin_users": {
+            "superadmin": {
+                "name": "Admin",
+                "role": "SUPER_ADMIN"
+            }
+        },
+        "travel_allowance_logs": {
+            "2026-09_gaya_rameshkumar": {
+                "month": "2026-09",
+                "district": "Gaya",
+                "total_km": 600,
+                "gross_amount": 2400.0,
+                "deduction_amount": 100.0,
+                "final_payable_amount": 2300.0,
+                "daily_logs": {"2026-09-01": {"total_km": 25}}
+            }
+        }
+    }
+    mock_db = MagicMock()
+    mock_db.collection.side_effect = lambda c: MockCollection(c, store)
+
+    token = create_access_token({
+        "sub": "superadmin",
+        "role": "SUPER_ADMIN",
+        "name": "Admin"
+    })
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("main.db", mock_db):
+        cache.clear()
+        res = client.get("/api/ta-logs/analytics?month=2026-09&district=Gaya", headers=headers)
+        assert res.status_code == 200
+        data1 = res.json()
+        assert data1["success"] is True
+        assert data1["district"] == "Gaya"
+        assert data1["month_total_km"] == 600
+
+        # Now wipe mock db store. The second call should hit the 900s TTL cache with 0 DB reads
+        store["travel_allowance_logs"] = {}
+        res2 = client.get("/api/ta-logs/analytics?month=2026-09&district=Gaya", headers=headers)
+        assert res2.status_code == 200
+        data2 = res2.json()
+        assert data2["month_total_km"] == 600
+

@@ -9761,11 +9761,6 @@ async def get_ta_logs(
                 .stream()
             ))
 
-            if not query_docs:
-                # Fallback for documents that may have alternate casing
-                all_month = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
-                query_docs = [d for d in all_month if canonicalize_district(d.to_dict().get("district", "")).lower() == clean_dist.lower()]
-
             results = []
             for d in query_docs:
                 dat = d.to_dict()
@@ -9781,7 +9776,7 @@ async def get_ta_logs(
                 dat.setdefault("dispute", None)
                 results.append(dat)
 
-            cache.set(cache_key, results, ttl=300)
+            cache.set(cache_key, results, ttl=120 if not results else 300)
             return {"success": True, "logs": results}
 
         # Multi-record statewide / multi-district query
@@ -9919,12 +9914,15 @@ async def save_ta_log(
 
         await asyncio.to_thread(lambda: doc_ref.set(ta_doc, merge=True))
 
-        # Evict TA Caches
-        cache.delete_prefix("ta_")
-        cache.delete(f"ta_roster_{req.month.strip()}_{clean_dist.lower()}")
-        cache.delete(f"ta_logs_{req.month.strip()}_{clean_dist.lower()}")
-        cache.delete(f"ta_analytics_{req.month.strip()}_{clean_dist.lower()}")
+        # Targeted Evict TA Caches
+        clean_m = req.month.strip()
+        clean_d = clean_dist.lower()
+        cache.delete(f"ta_roster_{clean_m}_{clean_d}")
+        cache.delete(f"ta_logs_{clean_m}_{clean_d}")
+        cache.delete(f"ta_analytics_{clean_m}_{clean_d}")
+        cache.delete(f"ta_analytics_{clean_m}_all")
         cache.delete("ta_analytics_all")
+        cache.delete_prefix(f"ta_analytics_{clean_m}_")
 
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -10044,11 +10042,6 @@ async def ta_district_action(
             .stream()
         ))
 
-        if not docs:
-            # Fallback for case-insensitive district matching
-            all_month = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
-            docs = [d for d in all_month if canonicalize_district(d.to_dict().get("district", "")).lower() == clean_dist.lower()]
-
         # Filter by staff_keys if provided
         target_skeys = set(k.strip().lower().replace(" ", "") for k in req.staff_keys) if req.staff_keys else None
         if target_skeys:
@@ -10090,7 +10083,9 @@ async def ta_district_action(
         cache.delete(f"ta_roster_{clean_month}_{clean_dist.lower()}")
         cache.delete(f"ta_logs_{clean_month}_{clean_dist.lower()}")
         cache.delete(f"ta_analytics_{clean_month}_{clean_dist.lower()}")
-        cache.delete_prefix("ta_")
+        cache.delete(f"ta_analytics_{clean_month}_all")
+        cache.delete("ta_analytics_all")
+        cache.delete_prefix(f"ta_analytics_{clean_month}_")
 
         # Log admin activity
         await log_admin_activity(
@@ -10570,8 +10565,20 @@ async def get_ta_analytics(
 
         target_month = (month.strip() if month else "") or get_ist_now().strftime("%Y-%m")
         clean_dist = canonicalize_district(district) if district and district != "All" else None
+        allowed_scope = "_".join(sorted(allowed_districts)) if allowed_districts else "all"
+        cache_key = f"ta_analytics_{target_month}_{clean_dist.lower() if clean_dist else 'all'}_{allowed_scope}"
+        cached_val = cache.get(cache_key)
+        if cached_val is not None:
+            return cached_val
 
-        all_ta_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").stream()))
+        if clean_dist:
+            all_ta_docs = await asyncio.to_thread(lambda: list(
+                db.collection("travel_allowance_logs")
+                .where("district", "==", clean_dist)
+                .stream()
+            ))
+        else:
+            all_ta_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").stream()))
 
         total_project_km_ytd = 0
         month_total_km = 0
@@ -10608,7 +10615,7 @@ async def get_ta_analytics(
 
         avg_daily_km_per_fo = round(month_total_km / active_days_count, 1) if active_days_count > 0 else 0.0
 
-        return {
+        res_payload = {
             "success": True,
             "month": target_month,
             "district": district or "All",
@@ -10619,6 +10626,8 @@ async def get_ta_analytics(
             "total_ta_deductions": round(total_ta_deductions, 2),
             "total_ta_final_payable": round(total_ta_final_payable, 2)
         }
+        cache.set(cache_key, res_payload, ttl=900)
+        return res_payload
     except HTTPException:
         raise
     except Exception as e:
@@ -10657,7 +10666,14 @@ async def export_travel_allowance_excel(
         wb = None
         try:
             # 1. Fetch Staff Directory for this district
-            staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+            staff_docs = await asyncio.to_thread(lambda: list(
+                db.collection("staff_directory")
+                .where("district", "==", clean_dist)
+                .stream()
+            ))
+            if not staff_docs:
+                staff_docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
+
             staff_list = []
             seen_keys = set()
             for sd in staff_docs:
@@ -10675,7 +10691,12 @@ async def export_travel_allowance_excel(
                         seen_keys.add(sname.lower())
 
             # 2. Fetch all TA logs for this month and district
-            ta_docs = await asyncio.to_thread(lambda: list(db.collection("travel_allowance_logs").where("month", "==", clean_month).stream()))
+            ta_docs = await asyncio.to_thread(lambda: list(
+                db.collection("travel_allowance_logs")
+                .where("month", "==", clean_month)
+                .where("district", "==", clean_dist)
+                .stream()
+            ))
             ta_by_staff = {}
             for td in ta_docs:
                 tdata = td.to_dict()
@@ -10981,4 +11002,7 @@ async def export_travel_allowance_excel(
                     wb.close()
                 except Exception:
                     pass
+                del wb
+            output = None
+            content_bytes = None
             gc.collect()
