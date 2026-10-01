@@ -491,7 +491,7 @@ def test_staff_designation_update_evicts_cache_and_shifts_bucket(super_admin_tok
         assert not any(s["fo_name"] == "Rohan Das" for s in d1.get("top_lt", []))
 
         # Verify cached state exists
-        assert cache.get("statewide_top_2026-09_monthly") is not None
+        assert cache.get("statewide_top_2026-09_monthly_official") is not None
 
         # 2. Update staff designation to Lab Technician (LT)
         update_res = client.post(
@@ -508,7 +508,7 @@ def test_staff_designation_update_evicts_cache_and_shifts_bucket(super_admin_tok
 
         # 3. Verify caches evicted
         assert cache.get("staff_directory_map") is None
-        assert cache.get("statewide_top_2026-09_monthly") is None
+        assert cache.get("statewide_top_2026-09_monthly_official") is None
 
         # 4. Fetch leaderboard again: Rohan Das must now appear in top_lt and NOT in top_fo
         res2 = client.get(

@@ -102,4 +102,15 @@ assert(
   'operationalMonth.js exports getPreviousMonth helper'
 );
 
+// 13. Top Performers Studio perspective sync & badge
+assert(
+  adminCode.includes('&target_mode=${targetModeParam}') &&
+  adminCode.includes('fetchTopPerformers(topPerformersPeriod, adminTargetViewMode)'),
+  'AdminDashboard passes target_mode parameter and re-fetches top performers on perspective switch'
+);
+assert(
+  adminCode.includes("adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational' : '🏛️ Official Quota'"),
+  'AdminDashboard renders perspective badge on Bihar Statewide Top Performers Studio header'
+);
+
 console.log('🎉 ALL DUAL-TARGET UI & PRIVACY TESTS PASSED 100%!\n');

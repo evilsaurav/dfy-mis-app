@@ -1299,12 +1299,14 @@ async def get_system_version():
 async def get_statewide_top_performers(
     month: Optional[str] = None,
     period: str = "monthly",
+    target_mode: str = "official",
     admin: dict = Depends(get_current_admin)
 ):
     """
     Statewide Leaderboard for Bihar Top Performers Studio.
     Bypasses Sub-Admin district RBAC by design so all coordinators can view statewide champions.
     Returns Top 5 Districts and Top 5 Field Officers for the specified period ('weekly', 'fortnightly', 'monthly').
+    Supports dual-target benchmarking via target_mode ('official' vs 'frontline').
     """
     try:
         now_dt = datetime.utcnow() + timedelta(hours=5, minutes=30)
@@ -1316,7 +1318,11 @@ async def get_statewide_top_performers(
         if period not in ("weekly", "fortnightly", "monthly"):
             period = "monthly"
 
-        cache_key = f"statewide_top_{month}_{period}"
+        clean_target_mode = (target_mode or "official").lower().strip()
+        if clean_target_mode not in ("official", "frontline"):
+            clean_target_mode = "official"
+
+        cache_key = f"statewide_top_{month}_{period}_{clean_target_mode}"
         cached = cache.get(cache_key)
         if cached is not None:
             return cached
@@ -1384,26 +1390,41 @@ async def get_statewide_top_performers(
         # Load district targets and staff month-specific targets
         dist_targets = {}
         staff_month_targets = {}
+        frontline_sums = {}
+        official_dist_targets = {}
         try:
             target_res = await get_targets(district=None, month=month)
-            if target_res and "targets" in target_res:
-                for t in target_res["targets"]:
-                    d_clean = canonicalize_district(t.get("district") or "")
-                    raw_t = t.get("target")
-                    if raw_t is not None and str(raw_t).strip() != "":
-                        try:
-                            t_num = float(raw_t)
-                        except (ValueError, TypeError):
+            if isinstance(target_res, dict):
+                official_dist_targets = target_res.get("official_targets_by_district") or {}
+                if "targets" in target_res:
+                    for t in target_res["targets"]:
+                        d_clean = canonicalize_district(t.get("district") or "")
+                        raw_t = t.get("target")
+                        if raw_t is not None and str(raw_t).strip() != "":
+                            try:
+                                t_num = float(raw_t)
+                            except (ValueError, TypeError):
+                                t_num = 50.0
+                        else:
                             t_num = 50.0
+                        frontline_sums[d_clean] = frontline_sums.get(d_clean, 0.0) + t_num
+                        fo_raw = (t.get("fo_name") or t.get("name") or "").strip()
+                        if d_clean and fo_raw:
+                            norm_k = normalize_staff_key(d_clean, fo_raw)
+                            staff_month_targets[norm_k] = t_num
+
+            all_known_dists = set(official_dist_targets.keys()).union(set(frontline_sums.keys()))
+            for d_name in all_known_dists:
+                if clean_target_mode == "official":
+                    off_val = official_dist_targets.get(d_name)
+                    if off_val is not None and isinstance(off_val, (int, float)) and off_val > 0:
+                        dist_targets[d_name] = float(off_val)
                     else:
-                        t_num = 50.0
-                    dist_targets[d_clean] = dist_targets.get(d_clean, 0.0) + t_num
-                    fo_raw = (t.get("fo_name") or t.get("name") or "").strip()
-                    if d_clean and fo_raw:
-                        norm_k = normalize_staff_key(d_clean, fo_raw)
-                        staff_month_targets[norm_k] = t_num
-        except Exception:
-            pass
+                        dist_targets[d_name] = frontline_sums.get(d_name, 50.0)
+                else:
+                    dist_targets[d_name] = frontline_sums.get(d_name, 50.0)
+        except Exception as e_targets:
+            print(f"[Leaderboard] Notice loading targets for statewide: {e_targets}")
 
         # Aggregate by District and by Staff designation roles
         district_counts = {}
@@ -1659,6 +1680,7 @@ async def get_statewide_top_performers(
             "success": True,
             "month": month,
             "period": period,
+            "target_mode": clean_target_mode,
             "start_date": start_date or f"{month}-01",
             "end_date": today_str,
             "top_districts": top_districts,
@@ -2719,6 +2741,7 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         cache.delete_prefix("targets_")
         cache.delete_prefix(f"district_targets_{month}_{clean_dist}".lower())
         cache.delete_prefix(f"pacing_settings_{month}")
+        cache.delete_prefix("statewide_top_")
 
         await log_admin_activity(
             action_type="DISTRICT_TARGET_UPDATED",
@@ -2815,6 +2838,7 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
         cache.delete_prefix("targets_")
         cache.delete_prefix(f"district_targets_{month}".lower())
         cache.delete_prefix(f"pacing_settings_{month}")
+        cache.delete_prefix("statewide_top_")
 
         await log_admin_activity(
             action_type="DISTRICT_TARGETS_BULK_UPDATED",

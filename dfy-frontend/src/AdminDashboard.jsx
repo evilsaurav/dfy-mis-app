@@ -2127,6 +2127,9 @@ export default function AdminDashboard() {
         if (targetModalDistrict === distName) {
           setOfficialDistrictTarget(val);
         }
+        if (typeof fetchTopPerformers === 'function') {
+          fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
+        }
       } else {
         showToast(offData.detail || `Failed to save targets for ${distName}`, 'error');
       }
@@ -2261,6 +2264,9 @@ export default function AdminDashboard() {
     if (offOk || staffOk) {
       showToast(`✓ All Official Targets & Frontline Allocations for ${targetModalMonth} Saved!`, 'success');
       loadTargets('All', targetModalMonth);
+      if (typeof fetchTopPerformers === 'function') {
+        fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
+      }
     }
   };
 
@@ -3122,11 +3128,12 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchTopPerformers = useCallback(async (period = topPerformersPeriod) => {
+  const fetchTopPerformers = useCallback(async (period = topPerformersPeriod, mode = adminTargetViewMode) => {
     try {
       setLoadingTopPerformers(true);
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}`);
+      const targetModeParam = mode === 'frontline' ? 'frontline' : 'official';
+      const res = await authFetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}&target_mode=${targetModeParam}`);
       if (res.ok) {
         const json = await res.json();
         if (json && json.success) {
@@ -3138,7 +3145,7 @@ export default function AdminDashboard() {
     } finally {
       setLoadingTopPerformers(false);
     }
-  }, [month, topPerformersPeriod, authFetch]);
+  }, [month, topPerformersPeriod, adminTargetViewMode, authFetch]);
 
   const generateTopPerformersPosterCanvas = useCallback(async () => {
     const canvas = topPerformersCanvasRef.current;
@@ -3282,13 +3289,15 @@ export default function AdminDashboard() {
     };
 
     // 1. Q1: Top 5 Districts
-    drawQuadrant(col1X, row1Y, 'TOP 5 DISTRICTS', 'Target Achievement & Volume', '🏛️', '#38bdf8', topPerformersData.top_districts || [], (d, startX, startY) => {
+    const distSub = adminTargetViewMode === 'frontline' ? 'Frontline Stretch & Volume' : 'Official Quota & Volume';
+    drawQuadrant(col1X, row1Y, 'TOP 5 DISTRICTS', distSub, '🏛️', '#38bdf8', topPerformersData.top_districts || [], (d, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
       ctx.fillText(d.district, startX, startY + 28);
 
-      const pctText = `${d.percentage}% Target`;
+      const modeTag = adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official';
+      const pctText = `${d.percentage}% ${modeTag} Target (${d.target || 0})`;
       ctx.fillStyle = d.percentage >= 100 ? '#10b981' : '#f59e0b';
       ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
       ctx.fillText(pctText, startX, startY + 54);
@@ -3497,7 +3506,7 @@ export default function AdminDashboard() {
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
     ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1935);
-  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg, adminTargetViewMode]);
 
   const handleDownloadTopPerformersPoster = useCallback(async () => {
     try {
@@ -3520,21 +3529,23 @@ export default function AdminDashboard() {
 
   const handleShareTopPerformersWhatsApp = useCallback(() => {
     const periodName = topPerformersPeriod === 'weekly' ? 'Weekly Sprint (Last 7 Days)' : topPerformersPeriod === 'fortnightly' ? '15-Day Drive' : `Monthly (${month})`;
+    const modeLabel = adminTargetViewMode === 'frontline' ? 'FRONTLINE STRETCH' : 'OFFICIAL QUOTA';
     let text = `*🏆 DOCTORS FOR YOU — BIHAR TB MISSION*\n`;
-    text += `*🌟 STATEWIDE TOP PERFORMERS LEADERBOARD (${periodName})*\n\n`;
+    text += `*🌟 STATEWIDE TOP PERFORMERS LEADERBOARD (${periodName} • ${modeLabel})*\n\n`;
 
     const activeTribute = topPerformerRandomMsg || TOP_PERFORMER_MESSAGES[0];
     text += `*✨ STATEWIDE LEADERSHIP TRIBUTE:*\n_"${activeTribute}"_\n\n`;
 
     // 1. Top 5 Districts
-    text += `*🏛️ TOP 5 DISTRICTS (DC TARGET & VOLUME):*\n`;
+    text += `*🏛️ TOP 5 DISTRICTS (${modeLabel} & VOLUME):*\n`;
     const dists = topPerformersData?.top_districts || [];
     if (dists.length === 0) {
       text += `_No district data recorded_\n`;
     } else {
       dists.slice(0, 5).forEach((d, i) => {
         const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
-        text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% Target)\n`;
+        const targetLabel = adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official';
+        text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% ${targetLabel}: ${d.target || 0})\n`;
       });
     }
 
@@ -3590,7 +3601,7 @@ export default function AdminDashboard() {
     text += `\n_Congratulations to all clinical champions leading Bihar's TB elimination drive! 🏥_`;
 
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg, adminTargetViewMode]);
 
   // Global & Session Data Fetching (runs on month change, auth, or period toggle)
   useEffect(() => {
@@ -3601,9 +3612,16 @@ export default function AdminDashboard() {
       loadTargets('All'); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
-      fetchTopPerformers(topPerformersPeriod);
+      fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
     }
-  }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers]);
+  }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers, adminTargetViewMode]);
+
+  // Re-fetch Top Performers leaderboard when target perspective mode switches
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
+    }
+  }, [adminTargetViewMode, topPerformersPeriod, isAuthenticated, fetchTopPerformers]);
 
   // District-Specific Settings (runs only when selected district changes)
   useEffect(() => {
@@ -6505,10 +6523,17 @@ const availableDistrictsForFeed = useMemo(() => {
                     <div className="flex items-center gap-3">
                       <span className="text-2xl sm:text-3xl">🏆</span>
                       <div>
-                        <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-2">
+                        <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex flex-wrap items-center gap-2">
                           Bihar Statewide Top Performers Studio
                           <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wider">
                             Statewide Broadcast
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                            adminTargetViewMode === 'frontline'
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                              : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                          }`}>
+                            {adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational' : '🏛️ Official Quota'}
                           </span>
                         </h3>
                         <p className="text-xs text-slate-400 font-medium">
@@ -6702,7 +6727,9 @@ const availableDistrictsForFeed = useMemo(() => {
                             </div>
                             <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
                               <span className="text-teal-300 font-black">{dist.notifications} notifs</span>
-                              <span className="text-slate-400 text-[10px]">Target: {dist.target || 0}</span>
+                              <span className="text-slate-400 text-[10px]">
+                                {adminTargetViewMode === 'frontline' ? 'Frontline:' : 'Official:'} {dist.target || 0}
+                              </span>
                             </div>
                           </div>
                         ))
@@ -17729,10 +17756,17 @@ const availableDistrictsForFeed = useMemo(() => {
               <div className="flex items-center gap-3">
                 <span className="text-3xl">🏆</span>
                 <div>
-                  <h2 className="text-lg sm:text-xl font-black text-white flex items-center gap-2">
+                  <h2 className="text-lg sm:text-xl font-black text-white flex flex-wrap items-center gap-2">
                     Bihar Top Performers Studio
                     <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
                       Statewide Broadcast
+                    </span>
+                    <span className={`text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full border ${
+                      adminTargetViewMode === 'frontline'
+                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                        : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                    }`}>
+                      {adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational' : '🏛️ Official Quota'}
                     </span>
                   </h2>
                   <p className="text-xs text-slate-400 font-medium">
@@ -17838,7 +17872,9 @@ const availableDistrictsForFeed = useMemo(() => {
                         <span className="text-lg">🏛️</span>
                         <div>
                           <h4 className="text-xs font-black uppercase tracking-wider text-sky-400">Top 5 Districts</h4>
-                          <p className="text-[10px] text-slate-400">Target Achievement &amp; Volume</p>
+                          <p className="text-[10px] text-slate-400">
+                            {adminTargetViewMode === 'frontline' ? 'Frontline Stretch Benchmark' : 'Official State Quota Benchmark'}
+                          </p>
                         </div>
                       </div>
                       <span className="text-[10px] font-mono text-slate-400">Target %</span>
@@ -17869,7 +17905,9 @@ const availableDistrictsForFeed = useMemo(() => {
                               </span>
                               <div>
                                 <span className="font-bold text-sm text-white block">{d.district}</span>
-                                <span className="text-[10px] text-sky-300 font-mono font-semibold">{d.notifications} notifications</span>
+                                <span className="text-[10px] text-sky-300 font-mono font-semibold">
+                                  {d.notifications} / {d.target || 0} notifs ({adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official'})
+                                </span>
                               </div>
                             </div>
                             <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${d.percentage >= 100 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
