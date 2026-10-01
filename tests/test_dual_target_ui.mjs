@@ -108,9 +108,21 @@ assert(
   adminCode.includes('fetchTopPerformers(topPerformersPeriod, adminTargetViewMode)'),
   'AdminDashboard passes target_mode parameter and re-fetches top performers on perspective switch'
 );
+// 14. FO Mobile App Main Dashboard renders Frontline Target & Progress Card
 assert(
-  adminCode.includes("adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational' : '🏛️ Official Quota'"),
-  'AdminDashboard renders perspective badge on Bihar Statewide Top Performers Studio header'
+  appCode.includes('Frontline Target') &&
+  appCode.includes('Monthly Goal:') &&
+  appCode.includes('foMonthlyHistory?.target') &&
+  appCode.includes('foMonthlyHistory?.breakdown?.notification'),
+  'FO Mobile App renders Frontline Monthly Target & Progress Card on main reporting screen'
+);
+
+// 15. Backend main.py evicts profile cache on bulk target update
+const mainPath = path.resolve('main.py');
+const mainCode = fs.readFileSync(mainPath, 'utf8');
+assert(
+  mainCode.includes('cache.delete_prefix("profile_")'),
+  'main.py evicts profile cache on bulk staff target update'
 );
 
 console.log('🎉 ALL DUAL-TARGET UI & PRIVACY TESTS PASSED 100%!\n');

@@ -6819,6 +6819,126 @@ function App() {
                 </div>
               )}
 
+              {/* Frontline Monthly Target & Progress Card */}
+              {(() => {
+                const targetVal = Number(foMonthlyHistory?.target) || 50;
+                const notifAchieved = Number(foMonthlyHistory?.breakdown?.notification) || 0;
+                const remaining = Math.max(0, targetVal - notifAchieved);
+                const pct = targetVal > 0 ? Math.round((notifAchieved / targetVal) * 100) : 0;
+                const progressWidth = Math.min(100, Math.max(0, pct));
+                const isTargetAchieved = notifAchieved >= targetVal && targetVal > 0;
+                const streak = Number(foMonthlyHistory?.streak_days) || 0;
+                const reqRunRate = foMonthlyHistory?.working_days_info?.required_run_rate;
+                const remainingDays = foMonthlyHistory?.working_days_info?.remaining_working_days;
+
+                return (
+                  <div className="mb-4 bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 text-white rounded-3xl p-4 sm:p-5 shadow-lg border border-indigo-800/40 relative overflow-hidden">
+                    {/* Background Glow */}
+                    <div className="absolute -top-12 -right-12 w-36 h-36 bg-indigo-500/20 rounded-full blur-2xl pointer-events-none"></div>
+                    <div className="absolute -bottom-10 -left-10 w-28 h-28 bg-emerald-500/15 rounded-full blur-xl pointer-events-none"></div>
+
+                    {/* Header Row */}
+                    <div className="flex items-center justify-between relative z-10 mb-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-base shadow-inner">
+                          🎯
+                        </span>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-300">
+                              Frontline Target
+                            </span>
+                            <span className="text-[9px] font-bold text-slate-400 bg-white/10 px-1.5 py-0.5 rounded">
+                              {getOperationalMonth().operationalMonth}
+                            </span>
+                          </div>
+                          <h4 className="text-sm font-black text-white tracking-tight flex items-center gap-1.5">
+                            <span>Monthly Goal: <strong>{targetVal}</strong></span>
+                            {isTargetAchieved && (
+                              <span className="bg-emerald-500/30 text-emerald-300 text-[9px] font-black px-2 py-0.5 rounded-full border border-emerald-400/30">
+                                🎉 Goal Met!
+                              </span>
+                            )}
+                          </h4>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {streak > 0 && (
+                          <span className="bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-black px-2 py-1 rounded-xl flex items-center gap-1 shadow-2xs">
+                            🔥 {streak}d
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
+                          title="Refresh Target"
+                          className="w-7 h-7 rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all flex items-center justify-center text-slate-300 text-xs border border-white/10 cursor-pointer"
+                        >
+                          🔄
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Primary Stats Grid */}
+                    <div className="grid grid-cols-3 gap-2 relative z-10 mb-3">
+                      <div className="bg-white/5 border border-white/10 rounded-2xl p-2.5 text-center">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">Target</span>
+                        <span className="text-base sm:text-lg font-black text-indigo-200">{targetVal}</span>
+                      </div>
+                      <div className="bg-white/5 border border-white/10 rounded-2xl p-2.5 text-center">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">Achieved</span>
+                        <span className="text-base sm:text-lg font-black text-emerald-400">{notifAchieved}</span>
+                      </div>
+                      <div className="bg-white/5 border border-white/10 rounded-2xl p-2.5 text-center">
+                        <span className="text-[9px] font-bold uppercase text-slate-400 block tracking-wider">Remaining</span>
+                        <span className={`text-base sm:text-lg font-black ${isTargetAchieved ? 'text-emerald-400' : 'text-amber-300'}`}>
+                          {remaining}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="relative z-10 mb-2.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold mb-1">
+                        <span className="text-slate-300">Progress</span>
+                        <span className={isTargetAchieved ? 'text-emerald-400 font-black' : 'text-indigo-300 font-black'}>
+                          {pct}% ({notifAchieved}/{targetVal})
+                        </span>
+                      </div>
+                      <div className="w-full bg-slate-800/80 rounded-full h-2.5 p-0.5 overflow-hidden border border-white/10">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 ease-out ${
+                            isTargetAchieved
+                              ? 'bg-gradient-to-r from-emerald-400 to-teal-300 shadow-sm shadow-emerald-500/50'
+                              : 'bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 shadow-sm shadow-indigo-500/50'
+                          }`}
+                          style={{ width: `${progressWidth}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer Info / Tap to Profile */}
+                    <div className="relative z-10 pt-2 border-t border-white/10 flex items-center justify-between text-[10px] text-slate-300 font-medium">
+                      <span>
+                        {remainingDays !== undefined && remainingDays > 0 && !isTargetAchieved
+                          ? `⏱️ ~${reqRunRate || Math.ceil(remaining / remainingDays)} / day needed (${remainingDays} days left)`
+                          : isTargetAchieved
+                          ? '🏆 Outstanding work! All targets completed.'
+                          : '🌟 Every notification logged counts.'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setCurrentView('profile')}
+                        className="text-indigo-300 hover:text-white font-bold underline underline-offset-2 flex items-center gap-0.5 shrink-0 cursor-pointer"
+                      >
+                        <span>Honors</span>
+                        <span>→</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {/* Real-time Floating Mini-HUD for daily entries */}
               <div className="sticky top-16 z-30 bg-white/95 backdrop-blur-md rounded-2xl border border-slate-200/90 p-3 shadow-sm mb-4 transition-all">
                 <div className="flex items-center justify-between">

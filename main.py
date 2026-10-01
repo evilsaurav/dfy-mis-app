@@ -2954,6 +2954,7 @@ async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
         cache.delete_prefix("statewide_top_")
+        cache.delete_prefix("profile_")
         invalidate_staff_directory_cache()
 
         await log_admin_activity(
@@ -4180,14 +4181,31 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
             
         # Step 2: Fetch Target (Month-Scoped with Fallback)
         target_val = 50
+        target_found = False
         try:
-            for tid in [f"{req_month}_{clean_wp}_{req.fo_name}".replace(" ", "").lower(), f"{clean_wp}_{req.fo_name}".replace(" ", "").lower()]:
-                m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
-                if m_doc.exists:
-                    target_val = int(m_doc.to_dict().get("target", 50))
-                    break
-        except Exception:
-            target_val = 50
+            targets_res = await get_targets(district=clean_wp, month=req_month)
+            if targets_res and isinstance(targets_res, dict) and "targets" in targets_res:
+                for t in targets_res["targets"]:
+                    t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
+                    if t_fo == clean_fo or is_officer_name_match(t.get("fo_name") or t.get("name"), req.fo_name, clean_wp):
+                        try:
+                            target_val = int(t.get("target", 50))
+                            target_found = True
+                        except Exception:
+                            target_val = 50
+                        break
+        except Exception as e_tgt:
+            print(f"[Legacy Profile Stats] Target lookup fallback notice: {e_tgt}")
+
+        if not target_found:
+            try:
+                for tid in [f"{req_month}_{clean_wp}_{req.fo_name}".replace(" ", "").lower(), f"{clean_wp}_{req.fo_name}".replace(" ", "").lower()]:
+                    m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
+                    if m_doc.exists:
+                        target_val = int(m_doc.to_dict().get("target", 50))
+                        break
+            except Exception:
+                target_val = 50
             
         # Step 3: Fetch all reports for the month asynchronously
         start_date = f"{req_month}-01"
@@ -4328,18 +4346,35 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
                     raise HTTPException(status_code=401, detail="Invalid PIN")
 
-            # 2. In-Memory Target Lookup
+            # 2. In-Memory Target Lookup via Unified Target Engine
             target_val = 50
-            cached_targets = await get_cached_staff_targets_for_month(req_month)
-            for t in (cached_targets or []):
-                t_wp = canonicalize_district(t.get("district", ""))
-                t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
-                if t_wp == clean_wp and t_fo == clean_fo:
-                    try:
-                        target_val = int(t.get("target", 50))
-                    except Exception:
-                        target_val = 50
-                    break
+            target_found = False
+            try:
+                targets_res = await get_targets(district=clean_wp, month=req_month)
+                if targets_res and isinstance(targets_res, dict) and "targets" in targets_res:
+                    for t in targets_res["targets"]:
+                        t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
+                        if t_fo == clean_fo or is_officer_name_match(t.get("fo_name") or t.get("name"), req.fo_name, clean_wp):
+                            try:
+                                target_val = int(t.get("target", 50))
+                                target_found = True
+                            except Exception:
+                                target_val = 50
+                            break
+            except Exception as e_tgt:
+                print(f"[Profile Stats] Target lookup fallback notice: {e_tgt}")
+
+            if not target_found:
+                cached_targets = await get_cached_staff_targets_for_month(req_month)
+                for t in (cached_targets or []):
+                    t_wp = canonicalize_district(t.get("district", ""))
+                    t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
+                    if t_wp == clean_wp and (t_fo == clean_fo or is_officer_name_match(t.get("fo_name") or t.get("name"), req.fo_name, clean_wp)):
+                        try:
+                            target_val = int(t.get("target", 50))
+                        except Exception:
+                            target_val = 50
+                        break
 
             # 3. In-Memory Monthly Reports Lookup from Master Ledger
             raw_docs = await get_raw_monthly_reports(req_month, district_filter={clean_wp})
