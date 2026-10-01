@@ -11607,7 +11607,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                             </button>
                                           );
                                         })()}
-                                        {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)))) && (
+                                        {isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)) && (
                                           <>
                                             {status !== 'APPROVED' ? (
                                               <button
@@ -11759,7 +11759,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
                           </button>
 
-                          {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)))) && (
+                          {isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)) && (
                             <>
                               <button
                                 type="button"

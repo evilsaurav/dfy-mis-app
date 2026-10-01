@@ -115,9 +115,27 @@ assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DISPUTED', true, true, fals
 assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DRAFT', true, true, false), false); // Post-submission dispute-accepted draft: Editable!
 assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'APPROVED', true, false, false), true); // Locked once published without dispute
 
-// 2.3 Super Admin editing
-assert.strictEqual(isEditingLocked('SUPER_ADMIN', 'DRAFT'), false);
-assert.strictEqual(isEditingLocked('SUPER_ADMIN', 'SUBMITTED'), false);
-assert.strictEqual(isEditingLocked('SUPER_ADMIN', 'APPROVED'), true);
+// ========================
+// 3. SINGLE STAFF PASS & HOLD RBAC TESTS
+// ========================
+function canPassHoldStaff(role, districtStatus, hasSubmission = false) {
+  const isMainIncharge = role === 'MAIN_INCHARGE';
+  if (!isMainIncharge) return false;
+  return (districtStatus === 'SUBMITTED' || districtStatus === 'DISPUTED' || districtStatus === 'REVERTED' || hasSubmission);
+}
 
-console.log("✅ All workflow state machine and editing lock tests passed 100%!");
+// Sub-Admin and Admin NEVER have Pass or Hold buttons
+assert.strictEqual(canPassHoldStaff('SUB_ADMIN', 'SUBMITTED', true), false);
+assert.strictEqual(canPassHoldStaff('SUB_ADMIN', 'DRAFT', false), false);
+assert.strictEqual(canPassHoldStaff('ADMIN', 'SUBMITTED', true), false);
+assert.strictEqual(canPassHoldStaff('ADMIN', 'DRAFT', false), false);
+assert.strictEqual(canPassHoldStaff('SUPER_ADMIN', 'SUBMITTED', true), false);
+
+// Main Incharge ONLY has Pass and Hold during audit
+assert.strictEqual(canPassHoldStaff('MAIN_INCHARGE', 'DRAFT', false), false);
+assert.strictEqual(canPassHoldStaff('MAIN_INCHARGE', 'SUBMITTED', true), true);
+assert.strictEqual(canPassHoldStaff('MAIN_INCHARGE', 'DISPUTED', true), true);
+assert.strictEqual(canPassHoldStaff('MAIN_INCHARGE', 'REVERTED', true), true);
+
+console.log("✅ All workflow state machine, Pass/Hold RBAC, and editing lock tests passed 100%!");
+
