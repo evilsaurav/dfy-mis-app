@@ -11588,14 +11588,25 @@ const availableDistrictsForFeed = useMemo(() => {
                                     </td>
                                     <td className="px-3 py-2.5 text-center">
                                       <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                                        <button
-                                          type="button"
-                                          onClick={() => selectStaffForDrilldown(staff)}
-                                          className="text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer bg-slate-100 hover:bg-teal-700 hover:text-white text-slate-700 border border-slate-200 active:scale-95 shadow-2xs"
-                                          title="Open day-by-day bike log audit"
-                                        >
-                                          Inspect ➔
-                                        </button>
+                                        {(() => {
+                                          const canEditStaffLog = !isTaEditingLocked && 
+                                            (isSuperAdmin || canManageTa) && 
+                                            (status === 'DRAFT' || status === 'REVERTED' || status === 'DISPUTED' || taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED' || taDistrictStatus === 'DISPUTED');
+                                          return (
+                                            <button
+                                              type="button"
+                                              onClick={() => selectStaffForDrilldown(staff)}
+                                              className={`text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer border active:scale-95 shadow-2xs ${
+                                                canEditStaffLog 
+                                                  ? 'bg-blue-50 hover:bg-blue-600 hover:text-white text-blue-700 border-blue-200'
+                                                  : 'bg-slate-100 hover:bg-teal-700 hover:text-white text-slate-700 border-slate-200'
+                                              }`}
+                                              title={canEditStaffLog ? "Edit day-by-day bike log & readings" : "Inspect day-by-day bike log audit"}
+                                            >
+                                              {canEditStaffLog ? '✏️ Edit ➔' : '🔍 Inspect ➔'}
+                                            </button>
+                                          );
+                                        })()}
                                         {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)))) && (
                                           <>
                                             {status !== 'APPROVED' ? (
@@ -11997,7 +12008,7 @@ const availableDistrictsForFeed = useMemo(() => {
                           <span>Day-by-Day Two-Wheeler Meter Readings &amp; Route Verification — {taCurrentStaff ? taCurrentStaff.name : (taSelectedStaffKey || 'Officer')}</span>
                         </h3>
                         <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-0.5">
-                          Month: {taMonth} | Designation: {taDesignation} | District: {taDistrict} | 31-Day Field Verification Log
+                          Month: {taMonth} | Designation: {taDesignation} | District: {taDistrict} | {taMonthDays.length}-Day Field Verification Log (Days 1 to {taMonthDays.length})
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -12018,7 +12029,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       </div>
                     </div>
 
-                    <div className="overflow-auto max-h-[calc(100vh-340px)] min-h-[420px] custom-scrollbar">
+                    <div className="overflow-x-auto custom-scrollbar">
                       <table className="w-full text-left text-xs border-collapse min-w-[1380px]">
                         <thead className="sticky top-0 z-20 bg-slate-900 text-white font-bold text-xs shadow-sm">
                           <tr>
