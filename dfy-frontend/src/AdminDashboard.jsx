@@ -4971,20 +4971,41 @@ const availableDistrictsForFeed = useMemo(() => {
               setTaAdminRemarks(found.admin_final_remarks || '');
               setTaDesignation(found.designation || 'Field Officer');
             } else {
-              setTaDailyLogs({});
-              setTaDeductionAmount(0);
-              setTaDeductionReason('');
-              setTaAdminRemarks('');
+              const draftKey = `dfy_ta_draft_${mon}_${dist}_${cleanSKey}`;
+              let restored = false;
+              try {
+                const saved = localStorage.getItem(draftKey);
+                if (saved) {
+                  const draft = JSON.parse(saved);
+                  if (draft && draft.daily_logs && Object.keys(draft.daily_logs).length > 0) {
+                    setTaDailyLogs(draft.daily_logs);
+                    setTaDeductionAmount(draft.deduction_amount || 0);
+                    setTaDeductionReason(draft.deduction_reason || '');
+                    setTaAdminRemarks(draft.admin_remarks || '');
+                    restored = true;
+                    showToast("Restored unsaved draft from local storage.", "info");
+                  }
+                }
+              } catch (e) {
+                console.warn("Draft restore failed", e);
+              }
+              if (!restored) {
+                setTaDailyLogs({});
+                setTaDeductionAmount(0);
+                setTaDeductionReason('');
+                setTaAdminRemarks('');
+              }
             }
           }
         }
       }
     } catch (err) {
       console.error("Error fetching TA logs:", err);
+      showToast("Network sync failed. Retaining current draft data.", "warning");
     } finally {
       setTaLoading(false);
     }
-  }, [authFetch, taSelectedStaffKey]);
+  }, [authFetch, taSelectedStaffKey, showToast]);
 
   const handleSaveTaLog = async () => {
     if (!isSuperAdmin && !canManageTa) {
@@ -5018,6 +5039,13 @@ const availableDistrictsForFeed = useMemo(() => {
       });
       if (res.ok) {
         const data = await res.json();
+        const cleanSKey = (sKey || '').trim().toLowerCase();
+        const draftKey = `dfy_ta_draft_${taMonth}_${taDistrict}_${cleanSKey}`;
+        try {
+          localStorage.removeItem(draftKey);
+        } catch {
+          // ignore
+        }
         showToast(data.message || `Saved TA log for ${sName}. Payable: ₹${data.final_payable_amount}`, "success");
         fetchTaLog(taDistrict, taMonth, taSelectedStaffKey);
         fetchTaAnalytics(taMonth, taDistrict);
@@ -5156,19 +5184,47 @@ const availableDistrictsForFeed = useMemo(() => {
         const init = Number(updated.initial_reading) || 0;
         const fin = Number(updated.final_reading) || 0;
         if (!updated.is_override) {
-          if (fin >= init && init > 0) {
-            updated.total_km = fin - init;
+          if (init > 0 && fin > 0) {
+            if (fin < init) {
+              updated.total_km = 0;
+              updated.reading_error = "Final reading cannot be less than initial reading";
+            } else {
+              updated.total_km = fin - init;
+              updated.reading_error = null;
+            }
           } else {
-            updated.total_km = Number(updated.total_km) || 0;
+            updated.total_km = 0;
+            updated.reading_error = null;
           }
         } else {
           updated.total_km = Number(updated.total_km) || 0;
+          updated.reading_error = null;
         }
         updated.amount = Math.round(updated.total_km * 4.0 * 100) / 100;
       }
       return { ...prev, [dateStr]: updated };
     });
   };
+
+  // Auto-save TA draft to localStorage on changes
+  useEffect(() => {
+    if (!showReportsStudio || reportsStudioTab !== 'ta_payout' || !taMonth || !taDistrict || !taSelectedStaffKey) return;
+    const cleanSKey = taSelectedStaffKey.trim().toLowerCase();
+    const draftKey = `dfy_ta_draft_${taMonth}_${taDistrict}_${cleanSKey}`;
+    if (taDailyLogs && Object.keys(taDailyLogs).length > 0) {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify({
+          daily_logs: taDailyLogs,
+          deduction_amount: taDeductionAmount,
+          deduction_reason: taDeductionReason,
+          admin_remarks: taAdminRemarks,
+          saved_at: Date.now()
+        }));
+      } catch (e) {
+        console.warn("Local draft auto-save notice:", e);
+      }
+    }
+  }, [showReportsStudio, reportsStudioTab, taDailyLogs, taDeductionAmount, taDeductionReason, taAdminRemarks, taMonth, taDistrict, taSelectedStaffKey]);
 
   useEffect(() => {
     if (showReportsStudio && reportsStudioTab === 'ta_payout') {
