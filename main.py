@@ -2314,7 +2314,12 @@ def get_kpi_tab_name(day: int) -> str:
     else:
         return f"{day}th"
 
-def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = None) -> Optional[bytes]:
+def generate_district_kpi_bytes(
+    district: str, 
+    month_prefix: Optional[str] = None, 
+    raw_reports: Optional[list] = None, 
+    target_records: Optional[list] = None
+) -> Optional[bytes]:
     if not month_prefix:
         month_prefix = datetime.now().strftime("%Y-%m")
         
@@ -2346,24 +2351,51 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
         wb.calculation.fullCalcOnLoad = True
     except Exception:
         pass
-    
+
+    c_dist = canonicalize_district(district)
+    # Fetch Official District Target if set
+    dt_doc_id = f"{month_prefix}_{c_dist}".replace(" ", "").lower()
+    official_target = None
+    try:
+        dt_doc = db.collection("district_targets").document(dt_doc_id).get()
+        if dt_doc.exists:
+            official_target = dt_doc.to_dict().get("official_target")
+        if official_target is None or official_target <= 0:
+            fb_id = c_dist.replace(" ", "").lower()
+            fb_doc = db.collection("district_targets").document(fb_id).get()
+            if fb_doc.exists:
+                official_target = fb_doc.to_dict().get("official_target")
+    except Exception as e:
+        print(f"Notice: Target fetch exception for {district}: {e}")
+
     # 1. Fetch Targets (Prioritizing Month-Scoped Target)
     target_map = {}
-    try:
-        t_docs = db.collection("staff_targets").where("district", "==", district).stream()
-        for td in t_docs:
-            t_data = td.to_dict()
-            f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
-            if f_name:
-                if t_data.get("month") == month_prefix:
-                    target_map[f_name] = int(t_data.get("target", 50))
-                elif f_name not in target_map:
-                    target_map[f_name] = int(t_data.get("target", 50))
-    except Exception as e:
-        print(f"Target fetch notice for {district}: {e}")
+    if target_records is not None:
+        c_dist_lower = c_dist.lower()
+        for t_data in target_records:
+            t_dist = canonicalize_district(str(t_data.get("district", ""))).lower()
+            if t_dist == c_dist_lower:
+                f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
+                if f_name:
+                    if t_data.get("month") == month_prefix:
+                        target_map[f_name] = int(t_data.get("target", 50))
+                    elif f_name not in target_map:
+                        target_map[f_name] = int(t_data.get("target", 50))
+    else:
+        try:
+            t_docs = db.collection("staff_targets").where("district", "==", district).stream()
+            for td in t_docs:
+                t_data = td.to_dict()
+                f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
+                if f_name:
+                    if t_data.get("month") == month_prefix:
+                        target_map[f_name] = int(t_data.get("target", 50))
+                    elif f_name not in target_map:
+                        target_map[f_name] = int(t_data.get("target", 50))
+        except Exception as e:
+            print(f"Target fetch notice for {district}: {e}")
                     
     # 2. Fetch and Sort Daily Field Reports for this District and Month
-    c_dist = canonicalize_district(district)
     alias_queries = [c_dist, district]
     if "aurangabad" in c_dist.lower():
         alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
@@ -2372,21 +2404,35 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
     elif "bhojpur" in c_dist.lower():
         alias_queries.extend(["BHOJPUR", "Bhojpur"])
     alias_queries = list(dict.fromkeys(alias_queries))
+    alias_queries_lower = [a.lower() for a in alias_queries]
 
-    seen_report_ids = set()
-    reports = []
     start_date = f"{month_prefix}-01"
     end_date = f"{month_prefix}-31"
-    for aq in alias_queries:
-        docs = db.collection("daily_field_reports")\
-            .where("working_place", "==", aq)\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)\
-            .stream()
-        for doc in docs:
-            if doc.id not in seen_report_ids:
-                seen_report_ids.add(doc.id)
-                reports.append(doc.to_dict())
+
+    if raw_reports is not None:
+        seen_report_ids = set()
+        reports = []
+        for rep in raw_reports:
+            r_wp = canonicalize_district(str(rep.get("working_place", ""))).lower()
+            r_date = str(rep.get("date_of_reporting", "")).strip()
+            if r_wp in alias_queries_lower and start_date <= r_date <= end_date:
+                rid = rep.get("id") or f"{r_wp}_{rep.get('fo_name')}_{r_date}"
+                if rid not in seen_report_ids:
+                    seen_report_ids.add(rid)
+                    reports.append(rep)
+    else:
+        seen_report_ids = set()
+        reports = []
+        for aq in alias_queries:
+            docs = db.collection("daily_field_reports")\
+                .where("working_place", "==", aq)\
+                .where("date_of_reporting", ">=", start_date)\
+                .where("date_of_reporting", "<=", end_date)\
+                .stream()
+            for doc in docs:
+                if doc.id not in seen_report_ids:
+                    seen_report_ids.add(doc.id)
+                    reports.append(doc.to_dict())
             
     reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
     
@@ -2621,6 +2667,11 @@ def generate_district_kpi_bytes(district: str, month_prefix: Optional[str] = Non
                 break
 
         if gt_row:
+            if official_target and official_target > 0:
+                ws_perf.cell(row=gt_row, column=3).value = official_target
+                cell_gt_pct = ws_perf.cell(row=gt_row, column=5)
+                cell_gt_pct.value = f"=IF(C{gt_row}>0, D{gt_row}/C{gt_row}, 0)"
+                cell_gt_pct.number_format = "0.0%"
             ref_gt_cell = ws_perf.cell(row=gt_row, column=6)
             for col_idx, _, _ in cohort_col_defs:
                 col_ltr = get_column_letter(col_idx)

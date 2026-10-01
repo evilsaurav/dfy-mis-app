@@ -142,3 +142,36 @@ def test_negative_target_validation():
     assert res.status_code == 400
     assert "cannot be negative" in res.text.lower()
 
+def test_kpi_excel_engine_uses_official_district_target():
+    import io
+    import openpyxl
+    from main import generate_district_kpi_bytes
+    
+    raw_reports = [{"working_place": "Jamui", "date_of_reporting": "2026-10-05", "fo_name": "Rajiv Kumar", "total_notifications": 10}]
+    target_records = [{"district": "Jamui", "fo_name": "Rajiv Kumar", "target": 35}]
+    
+    with patch("main.db.collection") as mock_coll:
+        dt_doc = MagicMock()
+        dt_doc.exists = True
+        dt_doc.to_dict.return_value = {"district": "Jamui", "month": "2026-10", "official_target": 100}
+        mock_coll.return_value.document.return_value.get.return_value = dt_doc
+        
+        excel_bytes = generate_district_kpi_bytes("Jamui", "2026-10", raw_reports=raw_reports, target_records=target_records)
+        assert excel_bytes is not None
+        assert len(excel_bytes) > 0
+        
+        wb = openpyxl.load_workbook(io.BytesIO(excel_bytes), data_only=False)
+        assert "Performance sheet" in wb.sheetnames
+        ws_perf = wb["Performance sheet"]
+        
+        # Verify Grand Total target cell has the official district target (100)
+        gt_found = False
+        for r in range(5, ws_perf.max_row + 1):
+            val = ws_perf.cell(row=r, column=1).value
+            if val and "GRAND TOTAL" in str(val).upper():
+                assert ws_perf.cell(row=r, column=3).value == 100
+                gt_found = True
+                break
+        assert gt_found, "GRAND TOTAL row should be present in Performance sheet"
+
+
