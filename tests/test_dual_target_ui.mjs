@@ -85,4 +85,20 @@ assert(
   'FO Mobile App does not expose or leak official district target'
 );
 
+// 11. Last month inheritance and Copy Last Month action
+assert(
+  adminCode.includes('handleCopyFromLastMonth') &&
+  adminCode.includes('Copy Last Month') &&
+  adminCode.includes('getPreviousMonth'),
+  'AdminDashboard implements handleCopyFromLastMonth and displays Copy Last Month button'
+);
+
+// 12. operationalMonth.js exports getPreviousMonth
+const opMonthPath = path.resolve('dfy-frontend/src/utils/operationalMonth.js');
+const opMonthCode = fs.readFileSync(opMonthPath, 'utf8');
+assert(
+  opMonthCode.includes('export const getPreviousMonth'),
+  'operationalMonth.js exports getPreviousMonth helper'
+);
+
 console.log('🎉 ALL DUAL-TARGET UI & PRIVACY TESTS PASSED 100%!\n');

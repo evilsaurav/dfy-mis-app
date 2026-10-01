@@ -196,4 +196,63 @@ def test_bulk_district_target_update():
         assert "Jehanabad" in data["updated_districts"]
         assert "Jamui" in data["updated_districts"]
 
+def test_get_previous_month():
+    from main import get_previous_month
+    assert get_previous_month("2026-10") == "2026-09"
+    assert get_previous_month("2026-01") == "2025-12"
+    assert get_previous_month("2026-03") == "2026-02"
+    assert get_previous_month("") == ""
+    assert get_previous_month(None) == ""
+
+def test_targets_endpoint_inherits_from_previous_month():
+    token = create_access_token({"sub": "admin", "role": "SUPER_ADMIN", "name": "Super Admin"})
+    headers = {"Authorization": f"Bearer {token}"}
+
+    with patch("main.get_directory") as mock_dir, \
+         patch("main.db.collection") as mock_coll:
+        mock_dir.return_value = {"Jamui": ["Rajiv Kumar", "Bablu Kumar"]}
+        
+        # Staff targets exist only for 2026-09 (previous month)
+        doc1 = MagicMock()
+        doc1.to_dict.return_value = {"district": "Jamui", "fo_name": "Rajiv Kumar", "target": 45, "month": "2026-09"}
+        doc2 = MagicMock()
+        doc2.to_dict.return_value = {"district": "Jamui", "fo_name": "Bablu Kumar", "target": 45, "month": "2026-09"}
+        
+        # Official district target exists only for 2026-09
+        dt_doc_sep = MagicMock()
+        dt_doc_sep.exists = True
+        dt_doc_sep.to_dict.return_value = {"district": "Jamui", "month": "2026-09", "official_target": 80}
+
+        dt_doc_oct = MagicMock()
+        dt_doc_oct.exists = False
+        dt_doc_oct.to_dict.return_value = None
+
+        def mock_coll_side_effect(name):
+            m = MagicMock()
+            if name == "district_targets":
+                def doc_get(doc_id):
+                    dm = MagicMock()
+                    if "2026-09" in doc_id:
+                        dm.get.return_value = dt_doc_sep
+                    else:
+                        dm.get.return_value = dt_doc_oct
+                    return dm
+                m.document.side_effect = doc_get
+            elif name == "staff_targets":
+                m.stream.return_value = [doc1, doc2]
+            return m
+
+        mock_coll.side_effect = mock_coll_side_effect
+        cache.clear()
+
+        res = client.get("/targets?month=2026-10&district=Jamui", headers=headers)
+        assert res.status_code == 200
+        data = res.json()
+        assert data["official_district_target"] == 80  # Inherited from 2026-09!
+        assert data["staff_targets_sum"] == 90        # 45 + 45 inherited from 2026-09!
+        assert data["buffer_count"] == 10
+        assert data["targets"][0]["target"] == 45
+        assert data["targets"][0].get("inherited_from") == "2026-09"
+
+
 

@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { CHANGELOG_ENTRIES, APP_VERSION, LAST_UPDATED_DATE } from './changelogData';
 import { downloadOrShareCanvas } from './canvasShare';
 import { getCachedDashboardData, setCachedDashboardData, clearCachedDashboardData, clearAllAdminCache } from './adminCache';
-import { getOperationalMonth } from './utils/operationalMonth';
+import { getOperationalMonth, getPreviousMonth } from './utils/operationalMonth';
 
 const feedCategoriesConfig = [
   { key: 'notification_ids', label: 'Notification (TB Diagnosis)', isPrimary: true, icon: '📋' },
@@ -1977,7 +1977,7 @@ export default function AdminDashboard() {
               setTargetsData(data.targets);
               if (data.official_targets_by_district) {
                   setOfficialTargetsByDistrict(data.official_targets_by_district);
-                  setTempOfficialTargets(prev => ({ ...data.official_targets_by_district, ...prev }));
+                  setTempOfficialTargets(data.official_targets_by_district);
                   if (targetModalDistrict && targetModalDistrict !== 'All') {
                     const cD = canonicalizeDistrict(targetModalDistrict);
                     if (data.official_targets_by_district[cD] !== undefined) {
@@ -1993,6 +1993,46 @@ export default function AdminDashboard() {
       } catch(err) {
           console.error("loadTargets error", err);
       }
+  };
+
+  const handleCopyFromLastMonth = async () => {
+    const prevM = getPreviousMonth(targetModalMonth);
+    if (!prevM) {
+      showToast('Could not determine previous month', 'warning');
+      return;
+    }
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let q = `?month=${prevM}`;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      showToast(`Loading targets from ${prevM}...`, 'info');
+      const res = await fetch(`${API_BASE_URL}/get-targets${q}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.targets)) {
+        const copiedTargets = data.targets.map(t => ({ ...t, month: targetModalMonth }));
+        setTargetsData(copiedTargets);
+        if (data.official_targets_by_district) {
+          setOfficialTargetsByDistrict(data.official_targets_by_district);
+          setTempOfficialTargets(data.official_targets_by_district);
+          if (targetModalDistrict && targetModalDistrict !== 'All') {
+            const cD = canonicalizeDistrict(targetModalDistrict);
+            if (data.official_targets_by_district[cD] !== undefined) {
+              setOfficialDistrictTarget(data.official_targets_by_district[cD]);
+            }
+          } else if (data.official_district_target !== undefined) {
+            setOfficialDistrictTarget(data.official_district_target);
+          }
+        }
+        showToast(`✓ Targets from ${prevM} loaded! Edit any value and save for ${targetModalMonth}.`, 'success');
+      } else {
+        showToast(`No targets found for ${prevM}`, 'warning');
+      }
+    } catch (err) {
+      console.error("handleCopyFromLastMonth error", err);
+      showToast('Failed to copy targets from previous month', 'error');
+    }
   };
 
   const handleSaveDistrictTarget = async () => {
@@ -13128,23 +13168,35 @@ const availableDistrictsForFeed = useMemo(() => {
                 </button>
               </div>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="Filter district..."
-                  value={targetSearchQuery}
-                  onChange={(e) => setTargetSearchQuery(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 outline-none w-36 sm:w-48 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 shadow-2xs"
-                />
-                {targetSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setTargetSearchQuery('')}
-                    className="absolute right-2.5 top-1.5 text-xs font-black text-slate-400 hover:text-slate-600"
-                  >
-                    ×
-                  </button>
-                )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyFromLastMonth}
+                  title={`Pull/Copy all targets from previous month (${getPreviousMonth(targetModalMonth)})`}
+                  className="px-3 py-1.5 rounded-xl text-xs font-black bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 shadow-2xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 shrink-0"
+                >
+                  <span>📋</span>
+                  <span>Copy Last Month ({getPreviousMonth(targetModalMonth)})</span>
+                </button>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Filter district..."
+                    value={targetSearchQuery}
+                    onChange={(e) => setTargetSearchQuery(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 outline-none w-32 sm:w-44 placeholder-slate-400 focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                  />
+                  {targetSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setTargetSearchQuery('')}
+                      className="absolute right-2.5 top-1.5 text-xs font-black text-slate-400 hover:text-slate-600"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -13179,8 +13231,8 @@ const availableDistrictsForFeed = useMemo(() => {
                       <span className="font-black text-slate-800 uppercase tracking-wider text-[11px] block">
                         Target Balance ({targetModalDistricts.length} Districts)
                       </span>
-                      <span className="text-[11px] text-slate-500 font-semibold">
-                        Official quotas drive Excel/WhatsApp. Frontline quotas measure field activity.
+                      <span className="text-[11px] text-slate-500 font-semibold block">
+                        Auto-inherited from last month ({getPreviousMonth(targetModalMonth) || 'previous'}). Edit any district or staff value and save to apply specifically to {targetModalMonth}.
                       </span>
                     </div>
                   </div>

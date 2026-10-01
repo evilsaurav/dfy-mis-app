@@ -36,6 +36,26 @@ export const getOperationalMonth = (customDate = new Date()) => {
 };
 
 /**
+ * Returns previous calendar month in YYYY-MM format
+ */
+export const getPreviousMonth = (monthStr) => {
+  if (!monthStr || typeof monthStr !== 'string' || !monthStr.includes('-')) return '';
+  try {
+    const parts = monthStr.split('-');
+    let y = parseInt(parts[0], 10);
+    let m = parseInt(parts[1], 10);
+    m -= 1;
+    if (m < 1) {
+      m = 12;
+      y -= 1;
+    }
+    return `${y}-${String(m).padStart(2, '0')}`;
+  } catch (err) {
+    return '';
+  }
+};
+
+/**
  * Calculates Target Pacing & Forecaster metrics across 3 modes:
  * - Past Month: Closed month, zero extrapolation, exact achieved count.
  * - Current Month: Live in-flight pacing based on elapsed & remaining working days.

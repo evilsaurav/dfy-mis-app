@@ -478,6 +478,22 @@ def is_officer_name_match(name_a: str, name_b: str, district: str = "") -> bool:
             return True
     return False
 
+def get_previous_month(month_str: Optional[str]) -> str:
+    """Returns YYYY-MM formatted string for the calendar month immediately preceding month_str."""
+    if not month_str or not isinstance(month_str, str) or "-" not in month_str:
+        return ""
+    try:
+        parts = month_str.strip().split("-")
+        y = int(parts[0])
+        m = int(parts[1])
+        m -= 1
+        if m < 1:
+            m = 12
+            y -= 1
+        return f"{y:04d}-{m:02d}"
+    except Exception:
+        return ""
+
 def load_baseline_staff_directory():
     directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
     if os.path.exists("staff_directory_snapshot.json"):
@@ -657,14 +673,20 @@ async def get_cached_staff_targets_for_month(month: str) -> List[dict]:
             return cached
 
     try:
+        prev_month = get_previous_month(clean_month)
         month_docs = await asyncio.to_thread(lambda: list(
             db.collection("staff_targets").where("month", "==", clean_month).stream()
         ))
+        prev_docs = []
+        if prev_month:
+            prev_docs = await asyncio.to_thread(lambda: list(
+                db.collection("staff_targets").where("month", "==", prev_month).stream()
+            ))
         default_docs = await asyncio.to_thread(lambda: list(
             db.collection("staff_targets").where("month", "==", None).stream()
         ))
         records = []
-        for doc in (month_docs + default_docs):
+        for doc in (month_docs + prev_docs + default_docs):
             d = doc.to_dict() if hasattr(doc, "to_dict") and callable(doc.to_dict) else (doc if isinstance(doc, dict) else {})
             if d:
                 records.append(d)
@@ -2372,8 +2394,10 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             return cached
 
         target_records = await get_cached_staff_targets_for_month(month)
+        prev_month = get_previous_month(month)
         
         month_targets = {}
+        historical_staff_targets = {}
         default_targets = {}
         
         for data in target_records:
@@ -2396,6 +2420,15 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                     "target": d_target,
                     "month": month
                 }
+            elif d_month and d_month < month:
+                if key not in historical_staff_targets or d_month > historical_staff_targets[key]["source_month"]:
+                    historical_staff_targets[key] = {
+                        "fo_name": d_name,
+                        "district": d_dist,
+                        "target": d_target,
+                        "month": month,
+                        "source_month": d_month
+                    }
             elif not d_month:
                 default_targets[key] = {
                     "fo_name": d_name,
@@ -2416,8 +2449,14 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                 if not s_name:
                     continue
                 key = f"{s_dist}_{s_name}".lower()
+                is_inherited = False
+                source_m = None
                 if key in month_targets:
                     t_val = month_targets[key]["target"]
+                elif key in historical_staff_targets:
+                    t_val = historical_staff_targets[key]["target"]
+                    is_inherited = True
+                    source_m = historical_staff_targets[key]["source_month"]
                 elif key in default_targets:
                     t_val = default_targets[key]["target"]
                 else:
@@ -2427,6 +2466,13 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                         if canonicalize_district(mt_obj.get("district", "")) == canonicalize_district(s_dist) and is_officer_name_match(mt_obj.get("fo_name"), s_name, s_dist):
                             t_val = mt_obj.get("target")
                             break
+                    if t_val is None and historical_staff_targets:
+                        for ht_key, ht_obj in historical_staff_targets.items():
+                            if canonicalize_district(ht_obj.get("district", "")) == canonicalize_district(s_dist) and is_officer_name_match(ht_obj.get("fo_name"), s_name, s_dist):
+                                t_val = ht_obj.get("target")
+                                is_inherited = True
+                                source_m = ht_obj.get("source_month")
+                                break
                     if t_val is None:
                         for dt_key, dt_obj in default_targets.items():
                             if canonicalize_district(dt_obj.get("district", "")) == canonicalize_district(s_dist) and is_officer_name_match(dt_obj.get("fo_name"), s_name, s_dist):
@@ -2435,12 +2481,15 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                     if t_val is None:
                         t_val = 50
                     
-                targets.append({
+                target_entry = {
                     "fo_name": s_name,
                     "district": s_dist,
                     "target": t_val,
                     "month": month
-                })
+                }
+                if is_inherited:
+                    target_entry["inherited_from"] = source_m
+                targets.append(target_entry)
             
         targets.sort(key=lambda x: (x["district"], x["fo_name"]))
         res = {"success": True, "month": month, "targets": targets}
@@ -2451,10 +2500,23 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             dt_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
             dt_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(dt_doc_id).get())
             official_target = None
+            inherited_from_month = None
             if dt_doc and getattr(dt_doc, "exists", False) is True:
                 raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
                 if isinstance(raw_val, (int, float)) and raw_val > 0:
                     official_target = int(raw_val)
+
+            # Fallback 1: Previous month (last month)
+            if (official_target is None or official_target <= 0) and prev_month:
+                prev_doc_id = f"{prev_month}_{clean_dist}".replace(" ", "").lower()
+                prev_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(prev_doc_id).get())
+                if prev_doc and getattr(prev_doc, "exists", False) is True:
+                    raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
+                    if isinstance(raw_val, (int, float)) and raw_val > 0:
+                        official_target = int(raw_val)
+                        inherited_from_month = prev_month
+
+            # Fallback 2: Generic fallback doc
             if official_target is None or official_target <= 0:
                 fallback_doc_id = clean_dist.replace(" ", "").lower()
                 fallback_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).get())
@@ -2474,10 +2536,14 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             res["staff_targets_sum"] = staff_targets_sum
             res["buffer_percent"] = buffer_percent
             res["buffer_count"] = buffer_count
+            if inherited_from_month:
+                res["inherited_from_month"] = inherited_from_month
         else:
             staff_targets_sum = sum(t["target"] for t in targets)
             dt_docs = await asyncio.to_thread(lambda: list(db.collection("district_targets").stream()))
             dist_map = {}
+            historical_dist_map = {} # c_dist -> (month, tgt_val)
+            default_dist_map = {}
             for d in dt_docs:
                 dd = d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) and d.to_dict() else {}
                 d_m = dd.get("month")
@@ -2487,10 +2553,15 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                 c_dist = canonicalize_district(d_dist)
                 raw_tgt = dd.get("official_target")
                 tgt_val = int(raw_tgt) if isinstance(raw_tgt, (int, float)) else 0
+                if tgt_val <= 0:
+                    continue
                 if d_m == month:
                     dist_map[c_dist] = tgt_val
-                elif not d_m and c_dist not in dist_map:
-                    dist_map[c_dist] = tgt_val
+                elif d_m and d_m < month:
+                    if c_dist not in historical_dist_map or d_m > historical_dist_map[c_dist][0]:
+                        historical_dist_map[c_dist] = (d_m, tgt_val)
+                elif not d_m:
+                    default_dist_map[c_dist] = tgt_val
             
             official_targets_by_dist = {}
             staff_sums_by_dist = {}
@@ -2500,8 +2571,13 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             
             total_official = 0
             for c_d, s_sum in staff_sums_by_dist.items():
-                off_t = dist_map.get(c_d, s_sum)
-                if not isinstance(off_t, (int, float)) or off_t <= 0:
+                off_t = dist_map.get(c_d)
+                if off_t is None or off_t <= 0:
+                    if c_d in historical_dist_map:
+                        off_t = historical_dist_map[c_d][1]
+                if off_t is None or off_t <= 0:
+                    off_t = default_dist_map.get(c_d)
+                if off_t is None or off_t <= 0:
                     off_t = s_sum
                 official_targets_by_dist[c_d] = off_t
                 total_official += off_t
@@ -2823,7 +2899,16 @@ def generate_district_kpi_bytes(
                 raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
                 if isinstance(raw_val, (int, float)) and raw_val > 0:
                     official_target = int(raw_val)
-            if official_target is None:
+            if official_target is None or official_target <= 0:
+                prev_m = get_previous_month(month_prefix)
+                if prev_m:
+                    prev_id = f"{prev_m}_{c_dist}".replace(" ", "").lower()
+                    prev_doc = db.collection("district_targets").document(prev_id).get()
+                    if prev_doc and getattr(prev_doc, "exists", False) is True:
+                        raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
+                        if isinstance(raw_val, (int, float)) and raw_val > 0:
+                            official_target = int(raw_val)
+            if official_target is None or official_target <= 0:
                 fb_id = c_dist.replace(" ", "").lower()
                 fb_doc = db.collection("district_targets").document(fb_id).get()
                 if fb_doc and getattr(fb_doc, "exists", False) is True:
@@ -2846,6 +2931,7 @@ def generate_district_kpi_bytes(
             alias_dists.update(["bhojpur"])
 
         if target_records is not None:
+            prev_m = get_previous_month(month_prefix)
             for td in target_records:
                 t_data = td if isinstance(td, dict) else (td.to_dict() if hasattr(td, "to_dict") else dict(td))
                 td_dist = canonicalize_district(t_data.get("district", "")).lower()
@@ -2854,9 +2940,12 @@ def generate_district_kpi_bytes(
                     f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name") or t_data.get("name") or "")).strip().lower()
                     if f_name:
                         t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
-                        if t_data.get("month") == month_prefix:
+                        td_month = t_data.get("month")
+                        if td_month == month_prefix:
                             target_map[f_name] = t_val
-                        elif f_name not in target_map:
+                        elif td_month == prev_m and f_name not in target_map:
+                            target_map[f_name] = t_val
+                        elif not td_month and f_name not in target_map:
                             target_map[f_name] = t_val
         else:
             try:
