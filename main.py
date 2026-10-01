@@ -9874,6 +9874,8 @@ async def save_ta_log(
         doc_ref = db.collection("travel_allowance_logs").document(doc_id)
 
         now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
         ta_doc = {
             "doc_id": doc_id,
             "month": req.month.strip(),
@@ -9890,7 +9892,7 @@ async def save_ta_log(
             "admin_final_remarks": remarks_val,
             "daily_logs": calculated_daily,
             "last_updated_at": now_str,
-            "last_updated_by": admin.get("name") or admin.get("username", "Admin"),
+            "last_updated_by": actor_name,
             "last_updated_role": admin_role
         }
 
@@ -9898,37 +9900,63 @@ async def save_ta_log(
         existing_doc = await asyncio.to_thread(doc_ref.get)
         existing_data = existing_doc.to_dict() or {} if (existing_doc and existing_doc.exists) else {}
         current_status = existing_data.get("status", "DRAFT")
+        existing_dispute = existing_data.get("dispute") or {}
+        has_dispute = bool(
+            current_status == "DISPUTED" or
+            existing_dispute.get("is_disputed") or
+            existing_dispute.get("status") in ["PENDING", "ACCEPTED"] or
+            existing_data.get("dispute_reason")
+        )
+        was_submitted = bool(existing_data.get("submitted_at"))
+        is_reverted = bool(current_status == "REVERTED" or existing_data.get("revert_reason"))
 
-        # Guard 1: APPROVED rosters are locked for all modifications until explicitly unlocked/reverted
-        if current_status == "APPROVED":
+        # Guard 1: APPROVED rosters are locked for all modifications unless there is an active/accepted dispute
+        if current_status == "APPROVED" and not has_dispute:
             raise HTTPException(
                 status_code=400,
                 detail="This district TA roster is Approved & Published. Editing is locked until unlocked by Incharge or Super Admin."
             )
 
-        # Guard 2: Main Incharge cannot edit during DRAFT or REVERTED (read-only inspection until Sub-Admin submits)
-        if admin_role == "MAIN_INCHARGE" and current_status in ["DRAFT", "REVERTED"]:
+        # Guard 2: Main Incharge has read-only inspection access ONLY during initial unsubmitted DRAFT
+        # Once submitted, reverted, or under dispute correction, Main Incharge has full audit and editing rights.
+        if admin_role == "MAIN_INCHARGE" and current_status == "DRAFT" and not was_submitted and not has_dispute and not is_reverted:
             raise HTTPException(
                 status_code=403,
                 detail="Main Incharge has read-only inspection access during Draft. You can audit and edit once Sub-Admin submits the roster."
             )
 
-        # Guard 3: Sub-Admin cannot edit once SUBMITTED (audit is in progress by Incharge)
-        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"] and current_status in ["SUBMITTED", "DISPUTED"]:
+        # Guard 3: Sub-Admin cannot edit while SUBMITTED (audit in progress by Incharge), unless it has been reverted or has an accepted dispute
+        if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"] and current_status in ["SUBMITTED", "DISPUTED"] and not is_reverted and existing_dispute.get("status") != "ACCEPTED":
             raise HTTPException(
                 status_code=403,
                 detail="District roster has been submitted to Incharge. Editing by Sub-Admin is locked during Incharge audit."
             )
 
         if existing_doc and existing_doc.exists:
-            ta_doc["status"] = current_status
+            # If log had an active or pending dispute, saving the updated deduction resolves it
+            if has_dispute:
+                dispute_update = dict(existing_dispute)
+                dispute_update["is_disputed"] = False
+                dispute_update["status"] = "RESOLVED"
+                dispute_update["resolved_at"] = now_str
+                dispute_update["resolved_by"] = actor_name
+                dispute_update["resolved_by_id"] = actor_id
+                dispute_update["resolution_note"] = remarks_val or f"Dispute resolved with updated deduction ₹{deduction_amount}"
+                ta_doc["dispute"] = dispute_update
+                if current_status == "DISPUTED":
+                    ta_doc["status"] = "SUBMITTED"
+                else:
+                    ta_doc["status"] = current_status
+            else:
+                ta_doc["status"] = current_status
+                ta_doc["dispute"] = existing_data.get("dispute", None)
+
             ta_doc["submitted_at"] = existing_data.get("submitted_at", "")
             ta_doc["submitted_by"] = existing_data.get("submitted_by", "")
             ta_doc["approved_at"] = existing_data.get("approved_at", "")
             ta_doc["approved_by"] = existing_data.get("approved_by", "")
             ta_doc["reverted_at"] = existing_data.get("reverted_at", "")
             ta_doc["revert_reason"] = existing_data.get("revert_reason", "")
-            ta_doc["dispute"] = existing_data.get("dispute", None)
         else:
             ta_doc["status"] = "DRAFT"
             ta_doc["submitted_at"] = ""
@@ -9951,8 +9979,6 @@ async def save_ta_log(
         cache.delete("ta_analytics_all")
         cache.delete_prefix(f"ta_analytics_{clean_m}_")
 
-        actor_name = admin.get("name") or admin.get("username", "Admin")
-        actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity(
             action_type="TA_LOG_SAVED",
             details=f"Saved TA & Bike Log for {req.staff_name} ({clean_dist}) for {req.month}: {total_km} KM, Payable: ₹{final_payable_amount}",
@@ -10107,7 +10133,19 @@ async def ta_district_action(
                 for i in range(0, len(doc_list), chunk_size):
                     batch = db.batch()
                     for d in doc_list[i:i + chunk_size]:
-                        batch.set(d.reference, payload, merge=True)
+                        doc_dict = d.to_dict() or {}
+                        item_payload = dict(payload)
+                        doc_dispute = doc_dict.get("dispute") or {}
+                        if action == "approve" and doc_dispute.get("is_disputed"):
+                            dispute_copy = dict(doc_dispute)
+                            dispute_copy["is_disputed"] = False
+                            dispute_copy["status"] = "RESOLVED"
+                            dispute_copy["resolved_at"] = now_str
+                            dispute_copy["resolved_by"] = actor_name
+                            dispute_copy["resolved_by_id"] = actor_id
+                            dispute_copy["resolution_note"] = "Approved by Incharge"
+                            item_payload["dispute"] = dispute_copy
+                        batch.set(d.reference, item_payload, merge=True)
                     batch.commit()
 
             await asyncio.to_thread(_apply_batch, docs, update_payload)
@@ -10345,10 +10383,12 @@ async def ta_resolve_dispute(
     """
     try:
         admin_role = admin.get("role", "SUB_ADMIN")
-        if admin_role not in ["MAIN_INCHARGE", "SUPER_ADMIN"]:
+        user_perms = admin.get("permissions") or {}
+        has_subadmin_ta_perm = user_perms.get("can_manage_ta") is not False
+        if admin_role not in ["MAIN_INCHARGE", "SUPER_ADMIN"] and not (admin_role == "SUB_ADMIN" and has_subadmin_ta_perm):
             raise HTTPException(
                 status_code=403,
-                detail="Only Main Incharge or Super Admin can resolve TA disputes."
+                detail="Only Main Incharge, Super Admin, or authorized Sub-Admins can resolve TA disputes."
             )
 
         clean_month = req.month.strip()
@@ -10593,7 +10633,7 @@ async def get_ta_analytics(
     """
     try:
         allowed_districts = []
-        if admin and (admin.get("role") or "").strip().upper() not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
+        if admin and (admin.get("role") or "").strip().upper() not in ["SUPER_ADMIN", "MAIN_INCHARGE"]:
             allowed_districts = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
             if district and district != "All":
                 c_dist = canonicalize_district(district).lower()
@@ -10694,7 +10734,7 @@ async def export_travel_allowance_excel(
 
     # District Permission Guard
     admin_role = (admin.get("role") or "SUB_ADMIN").strip().upper()
-    if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE", "MIS"]:
+    if admin_role not in ["SUPER_ADMIN", "MAIN_INCHARGE"]:
         allowed = [canonicalize_district(d).lower() for d in admin.get("allowed_districts", [])]
         if "all" not in allowed and clean_dist.lower() not in allowed:
             raise HTTPException(status_code=403, detail="Not authorized to export TA logs for this district.")

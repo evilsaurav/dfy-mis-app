@@ -4900,13 +4900,68 @@ const availableDistrictsForFeed = useMemo(() => {
   }, [taSummaryList, taSelectedStaffKey, taCurrentStaff]);
 
   const isTaEditingLocked = useMemo(() => {
+    // 1. If currently inspecting a specific staff member
+    if (taCurrentStaffLog) {
+      const staffStatus = taCurrentStaffLog.status || 'DRAFT';
+      const hasDispute = Boolean(
+        staffStatus === 'DISPUTED' ||
+        taCurrentStaffLog.dispute?.is_disputed ||
+        taCurrentStaffLog.dispute?.status === 'PENDING' ||
+        taCurrentStaffLog.dispute?.status === 'ACCEPTED' ||
+        taCurrentStaffLog.dispute_reason
+      );
+      const isReverted = Boolean(
+        staffStatus === 'REVERTED' ||
+        taCurrentStaffLog.revert_reason ||
+        taCurrentStaffLog.reverted_at
+      );
+      const wasSubmitted = Boolean(taCurrentStaffLog.submitted_at);
+
+      // If approved and no active dispute/revert: locked for all editing
+      if (staffStatus === 'APPROVED' && !hasDispute) return true;
+
+      // Main Incharge:
+      if (isMainIncharge) {
+        // Main Incharge can edit once roster was submitted, or has dispute, or is reverted, or staff is in audit/dispute mode
+        if (wasSubmitted || hasDispute || isReverted || staffStatus === 'SUBMITTED' || staffStatus === 'DISPUTED') {
+          return false;
+        }
+        // Only locked during fresh initial unsubmitted draft
+        return true;
+      }
+
+      // Sub-Admin (or non-Super/non-Incharge):
+      if (!isSuperAdmin && !isMainIncharge) {
+        // Sub-admin is only locked if submitted to incharge and not reverted or under dispute correction
+        if (staffStatus === 'SUBMITTED' && !hasDispute && !isReverted) return true;
+        return false;
+      }
+
+      return false;
+    }
+
+    // 2. Fallback to district-level status if no specific staff is selected
     if (taDistrictStatus === 'APPROVED') return true;
-    // Main Incharge has read-only inspection access during DRAFT or REVERTED (until Sub-Admin submits)
-    if (isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED')) return true;
-    // Sub-Admin (or non-Super/non-Incharge) cannot edit once submitted or disputed (awaiting Incharge sign-off)
-    if (!isSuperAdmin && !isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED')) return true;
+    if (isMainIncharge) {
+      const hasAnyDispute = taSummaryList.some(l => 
+        l.status === 'DISPUTED' || 
+        l.dispute?.is_disputed || 
+        l.dispute?.status === 'PENDING' || 
+        l.dispute?.status === 'ACCEPTED'
+      );
+      const hasAnySubmission = taSummaryList.some(l => Boolean(l.submitted_at));
+      const hasAnyRevert = taSummaryList.some(l => l.status === 'REVERTED' || Boolean(l.revert_reason));
+      if (hasAnyDispute || hasAnySubmission || hasAnyRevert || taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') {
+        return false;
+      }
+      return taDistrictStatus === 'DRAFT';
+    }
+    if (!isSuperAdmin && !isMainIncharge) {
+      if (taDistrictStatus === 'SUBMITTED') return true;
+      return false;
+    }
     return false;
-  }, [taDistrictStatus, isMainIncharge, isSuperAdmin]);
+  }, [taDistrictStatus, taCurrentStaffLog, taSummaryList, isMainIncharge, isSuperAdmin]);
 
   const selectStaffForDrilldown = useCallback((staff) => {
     const sKey = staff.id || staff.name;
@@ -11323,15 +11378,15 @@ const availableDistrictsForFeed = useMemo(() => {
                             </button>
                           )}
 
-                          {/* 1.2 Inspection Badge for Main Incharge when in DRAFT / REVERTED */}
-                          {isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                          {/* 1.2 Inspection Badge for Main Incharge when in unsubmitted initial DRAFT */}
+                          {isMainIncharge && taDistrictStatus === 'DRAFT' && !taSummaryList.some(l => l.submitted_at || l.status === 'REVERTED' || l.dispute?.status === 'PENDING' || l.dispute?.status === 'ACCEPTED') && (
                             <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-900/60 text-amber-200 border border-amber-500/40 flex items-center gap-1.5">
                               <span>📝</span> Sub-Admin Data Feeding in Progress (Read-Only Inspection)
                             </span>
                           )}
 
                           {/* 2. Incharge & Super Admin Approve & Revert Buttons */}
-                          {(isSuperAdmin || isMainIncharge) && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
+                          {(isSuperAdmin || isMainIncharge) && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || (taDistrictStatus === 'DRAFT' && taSummaryList.some(l => l.submitted_at))) && (
                             <>
                               <button
                                 type="button"
@@ -11529,7 +11584,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                         >
                                           Inspect ➔
                                         </button>
-                                        {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED'))) && (
+                                        {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)))) && (
                                           <>
                                             {status !== 'APPROVED' ? (
                                               <button
@@ -11681,7 +11736,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
                           </button>
 
-                          {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED'))) && (
+                          {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED' || taDistrictStatus === 'REVERTED' || taSummaryList.some(l => l.submitted_at)))) && (
                             <>
                               <button
                                 type="button"
@@ -11776,12 +11831,20 @@ const availableDistrictsForFeed = useMemo(() => {
                       {Boolean(taCurrentStaffLog?.dispute?.reason || taCurrentStaffLog?.dispute_reason || taCurrentStaffLog?.status === 'DISPUTED') && (
                         <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-xl flex items-start gap-3 animate-fade-in shadow-2xs">
                           <span className="text-xl">🚩</span>
-                          <div>
-                            <h5 className="text-xs font-black text-amber-900 uppercase tracking-wide">
-                              Staff Dispute Raised
-                            </h5>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <h5 className="text-xs font-black text-amber-900 uppercase tracking-wide">
+                                Staff Dispute Raised ({taCurrentStaffLog?.dispute?.status || 'PENDING'})
+                              </h5>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-200 text-amber-900">
+                                Action Required
+                              </span>
+                            </div>
                             <p className="text-xs text-amber-800 font-semibold mt-0.5">
                               {taCurrentStaffLog?.dispute?.reason || taCurrentStaffLog?.dispute_reason || 'Field officer has flagged a discrepancy with this month\'s log.'}
+                            </p>
+                            <p className="text-[11px] text-amber-700 mt-1 font-medium">
+                              💡 <em>Adjust the deduction amount or odometer readings below, then click <strong>"Save TA Log"</strong> to resolve this dispute and re-audit.</em>
                             </p>
                           </div>
                         </div>
@@ -11894,7 +11957,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   )}
 
                   {/* Main Incharge Read-Only Inspection Notice */}
-                  {isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                  {isMainIncharge && taDistrictStatus === 'DRAFT' && !taSummaryList.some(l => l.submitted_at || l.status === 'REVERTED' || l.dispute?.status === 'PENDING' || l.dispute?.status === 'ACCEPTED') && (
                     <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
                       <div className="flex items-center gap-2">
                         <span className="text-base">📝</span>
@@ -11904,7 +11967,7 @@ const availableDistrictsForFeed = useMemo(() => {
                   )}
 
                   {/* Sub-Admin Submitted Notice */}
-                  {!isSuperAdmin && !isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
+                  {!isSuperAdmin && !isMainIncharge && taDistrictStatus === 'SUBMITTED' && (
                     <div className="bg-blue-50 border border-blue-300 text-blue-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
                       <div className="flex items-center gap-2">
                         <span className="text-base">⏳</span>

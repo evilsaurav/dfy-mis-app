@@ -216,7 +216,8 @@ async def test_ta_district_action_unauthorized_roles_and_district_isolation():
             "user_id": "test_gaya_subadmin",
             "name": "Sub Admin",
             "role": "SUB_ADMIN",
-            "allowed_districts": ["Gaya"]
+            "allowed_districts": ["Gaya"],
+            "permissions": {"can_manage_ta": False}
         })
         mis_token = main.create_access_token({
             "user_id": "test_gaya_mis",

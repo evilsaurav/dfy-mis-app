@@ -302,7 +302,7 @@ async def test_ta_dispute_invalid_pin_and_non_approved():
             "month": month,
             "district": district,
             "staff_key": staff_key,
-            "pin": "0000",
+            "pin": "9999",
             "reason": "Test"
         })
         assert wrong_pin_res.status_code == 401

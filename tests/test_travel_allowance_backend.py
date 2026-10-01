@@ -591,6 +591,13 @@ def test_ta_incharge_inspection_vs_audit_permissions():
                 "allowed_districts": ["All"]
             }
         },
+        "staff_directory": {
+            "gaya_rameshkumar": {
+                "name": "Ramesh Kumar",
+                "pin": "1234",
+                "district": "Gaya"
+            }
+        },
         "travel_allowance_logs": {}
     }
 
@@ -723,5 +730,76 @@ def test_ta_incharge_inspection_vs_audit_permissions():
         # Step 10: Sub-Admin can edit again once REVERTED -> Success!
         res10 = client.post("/api/ta-logs/save", json=payload_day1, headers=headers_sub)
         assert res10.status_code == 200
+
+        # Step 11: Main Incharge can ALSO audit, edit, and adjust deduction once REVERTED -> Success!
+        payload_inc_revert_correction = {
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_name": "Ramesh Kumar",
+            "staff_key": "gaya_rameshkumar",
+            "deduction_amount": 10.0,
+            "deduction_reason": "Adjusted after audit",
+            "admin_final_remarks": "Incharge corrected deduction",
+            "daily_logs": {
+                "2026-10-01": {"initial_reading": 1000, "final_reading": 1040, "total_km": 40}
+            }
+        }
+        res11 = client.post("/api/ta-logs/save", json=payload_inc_revert_correction, headers=headers_inc)
+        assert res11.status_code == 200
+        doc11 = store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]
+        assert doc11["deduction_amount"] == 10.0
+        assert doc11["total_km"] == 40
+
+        # Step 12: Main Incharge re-approves -> Success, status becomes APPROVED
+        res12 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers=headers_inc)
+        assert res12.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "APPROVED"
+
+        # Step 13: Staff files dispute on the deduction -> Status becomes DISPUTED
+        res13 = client.post("/api/ta/dispute", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_key": "gaya_rameshkumar",
+            "pin": "1234",
+            "reason": "Deduction was wrong, please review odometer pic"
+        })
+        assert res13.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "DISPUTED"
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["dispute"]["is_disputed"] is True
+
+        # Step 14: Main Incharge resolves dispute by correcting deduction to 0.0 -> Success!
+        payload_dispute_resolved = {
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_name": "Ramesh Kumar",
+            "staff_key": "gaya_rameshkumar",
+            "deduction_amount": 0.0,
+            "deduction_reason": "Dispute accepted: waiver of deduction",
+            "admin_final_remarks": "Verified with original photo; deduction waived.",
+            "daily_logs": {
+                "2026-10-01": {"initial_reading": 1000, "final_reading": 1040, "total_km": 40}
+            }
+        }
+        res14 = client.post("/api/ta-logs/save", json=payload_dispute_resolved, headers=headers_inc)
+        assert res14.status_code == 200, res14.text
+        doc14 = store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]
+        assert doc14["deduction_amount"] == 0.0
+        assert doc14["final_payable_amount"] == 160.0 # 40km * 4
+        assert doc14["dispute"]["is_disputed"] is False
+        assert doc14["dispute"]["status"] == "RESOLVED"
+        assert doc14["status"] == "SUBMITTED"
+
+        # Step 15: Main Incharge passes / re-approves -> Status becomes APPROVED
+        res15 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers=headers_inc)
+        assert res15.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "APPROVED"
 
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert';
 
-function getVisibleActions(role, canManageTa, districtStatus) {
+function getVisibleActions(role, canManageTa, districtStatus, hasSubmission = false, hasDispute = false) {
   const actions = [];
   const isSuperAdmin = role === 'SUPER_ADMIN';
   const isMainIncharge = role === 'MAIN_INCHARGE';
@@ -15,14 +15,14 @@ function getVisibleActions(role, canManageTa, districtStatus) {
     actions.push('DIRECT_APPROVE_ROSTER');
   }
 
-  // 1.2 Inspection Badge for Main Incharge on DRAFT / REVERTED
-  if (isMainIncharge && (districtStatus === 'DRAFT' || districtStatus === 'REVERTED')) {
+  // 1.2 Inspection Badge for Main Incharge on unsubmitted fresh DRAFT
+  if (isMainIncharge && districtStatus === 'DRAFT' && !hasSubmission && !hasDispute) {
     actions.push('INSPECTION_MODE');
   }
 
-  // 2. Incharge / Super Admin actions on SUBMITTED or DISPUTED
+  // 2. Incharge / Super Admin actions on SUBMITTED, DISPUTED, or REVERTED
   if (isSuperAdmin || isMainIncharge) {
-    if (districtStatus === 'SUBMITTED' || districtStatus === 'DISPUTED') {
+    if (districtStatus === 'SUBMITTED' || districtStatus === 'DISPUTED' || districtStatus === 'REVERTED' || (districtStatus === 'DRAFT' && hasSubmission)) {
       actions.push('APPROVE_ROSTER');
       actions.push('REVERT_ROSTER');
     } else if (districtStatus === 'APPROVED') {
@@ -42,13 +42,21 @@ function getVisibleActions(role, canManageTa, districtStatus) {
   return actions;
 }
 
-function isEditingLocked(role, districtStatus) {
+function isEditingLocked(role, districtStatus, wasSubmitted = false, hasDispute = false, isReverted = false) {
   const isSuperAdmin = role === 'SUPER_ADMIN';
   const isMainIncharge = role === 'MAIN_INCHARGE';
 
-  if (districtStatus === 'APPROVED') return true;
-  if (isMainIncharge && (districtStatus === 'DRAFT' || districtStatus === 'REVERTED')) return true;
-  if (!isSuperAdmin && !isMainIncharge && (districtStatus === 'SUBMITTED' || districtStatus === 'DISPUTED')) return true;
+  if (districtStatus === 'APPROVED' && !hasDispute) return true;
+  if (isMainIncharge) {
+    if (wasSubmitted || hasDispute || isReverted || districtStatus === 'SUBMITTED' || districtStatus === 'DISPUTED') {
+      return false;
+    }
+    return districtStatus === 'DRAFT';
+  }
+  if (!isSuperAdmin && !isMainIncharge) {
+    if (districtStatus === 'SUBMITTED' && !hasDispute && !isReverted) return true;
+    return false;
+  }
   return false;
 }
 
@@ -68,17 +76,17 @@ assert.deepStrictEqual(getVisibleActions('SUB_ADMIN', true, 'SUBMITTED'), ['AWAI
 // 1.4 Sub-Admin on APPROVED
 assert.deepStrictEqual(getVisibleActions('SUB_ADMIN', true, 'APPROVED'), ['APPROVED_LOCKED']);
 
-// 1.5 Main Incharge on DRAFT (Read-only inspection, NO submit button)
-assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'DRAFT'), ['INSPECTION_MODE']);
+// 1.5 Main Incharge on fresh initial DRAFT (Read-only inspection, NO submit button)
+assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'DRAFT', false, false), ['INSPECTION_MODE']);
 
-// 1.6 Main Incharge on REVERTED (Read-only inspection, awaiting Sub-Admin resubmit)
-assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'REVERTED'), ['INSPECTION_MODE']);
+// 1.6 Main Incharge on REVERTED (Audit and review mode)
+assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'REVERTED', true, false), ['APPROVE_ROSTER', 'REVERT_ROSTER']);
 
 // 1.7 Main Incharge on SUBMITTED (Full approve & revert controls)
-assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'SUBMITTED'), ['APPROVE_ROSTER', 'REVERT_ROSTER']);
+assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'SUBMITTED', true, false), ['APPROVE_ROSTER', 'REVERT_ROSTER']);
 
 // 1.8 Main Incharge on DISPUTED (Full review controls)
-assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'DISPUTED'), ['APPROVE_ROSTER', 'REVERT_ROSTER']);
+assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'DISPUTED', true, true), ['APPROVE_ROSTER', 'REVERT_ROSTER']);
 
 // 1.9 Main Incharge on APPROVED (Unlock/revert control)
 assert.deepStrictEqual(getVisibleActions('MAIN_INCHARGE', false, 'APPROVED'), ['UNLOCK_REVERT_ROSTER']);
@@ -95,15 +103,17 @@ assert.deepStrictEqual(getVisibleActions('SUPER_ADMIN', true, 'APPROVED'), ['UNL
 
 // 2.1 Sub-Admin editing
 assert.strictEqual(isEditingLocked('SUB_ADMIN', 'DRAFT'), false);
-assert.strictEqual(isEditingLocked('SUB_ADMIN', 'REVERTED'), false);
-assert.strictEqual(isEditingLocked('SUB_ADMIN', 'SUBMITTED'), true);
+assert.strictEqual(isEditingLocked('SUB_ADMIN', 'REVERTED', true, false, true), false);
+assert.strictEqual(isEditingLocked('SUB_ADMIN', 'SUBMITTED', true, false, false), true);
 assert.strictEqual(isEditingLocked('SUB_ADMIN', 'APPROVED'), true);
 
 // 2.2 Main Incharge editing
-assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DRAFT'), true); // Read-only inspection
-assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'REVERTED'), true); // Read-only inspection
-assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'SUBMITTED'), false); // Audit and edit mode!
-assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'APPROVED'), true); // Locked once published
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DRAFT', false, false, false), true); // Fresh initial Draft: Read-only inspection
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'SUBMITTED', true, false, false), false); // Submitted: Audit and edit mode
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'REVERTED', true, false, true), false); // Reverted: Audit and edit mode
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DISPUTED', true, true, false), false); // Disputed: Dispute audit and correction mode
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'DRAFT', true, true, false), false); // Post-submission dispute-accepted draft: Editable!
+assert.strictEqual(isEditingLocked('MAIN_INCHARGE', 'APPROVED', true, false, false), true); // Locked once published without dispute
 
 // 2.3 Super Admin editing
 assert.strictEqual(isEditingLocked('SUPER_ADMIN', 'DRAFT'), false);
