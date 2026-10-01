@@ -72,6 +72,7 @@ class MockCollection:
                 snap.exists = True
                 snap.id = doc_id
                 snap.to_dict.return_value = dict(data)
+                snap.reference = MockDocRef(self.coll_name, doc_id, self.store)
                 yield snap
 
 @pytest.fixture(autouse=True)
@@ -574,4 +575,153 @@ def test_ta_district_action_rbac_and_lifecycle():
         }, headers={"Authorization": f"Bearer {superadmin_token}"})
         assert res_super_rev.status_code == 200
         assert res_super_rev.json()["success"] is True
+
+def test_ta_incharge_inspection_vs_audit_permissions():
+    store = {
+        "admin_users": {
+            "dc_gaya": {
+                "name": "DC Gaya",
+                "role": "SUB_ADMIN",
+                "allowed_districts": ["Gaya"],
+                "permissions": {"can_manage_ta": True}
+            },
+            "logistics_incharge": {
+                "name": "Logistics Incharge",
+                "role": "MAIN_INCHARGE",
+                "allowed_districts": ["All"]
+            }
+        },
+        "travel_allowance_logs": {}
+    }
+
+    mock_db = MagicMock()
+    mock_db.collection.side_effect = lambda c: MockCollection(c, store)
+    mock_batch = MagicMock()
+    mock_batch.set.side_effect = lambda ref, data, merge=True: ref.set(data, merge=merge)
+    mock_db.batch.return_value = mock_batch
+
+    subadmin_token = create_access_token({
+        "sub": "dc_gaya",
+        "username": "dc_gaya",
+        "name": "DC Gaya",
+        "role": "SUB_ADMIN",
+        "allowed_districts": ["Gaya"],
+        "permissions": {"can_manage_ta": True}
+    })
+    incharge_token = create_access_token({
+        "sub": "logistics_incharge",
+        "username": "logistics_incharge",
+        "name": "Logistics Incharge",
+        "role": "MAIN_INCHARGE",
+        "allowed_districts": ["All"]
+    })
+
+    headers_sub = {"Authorization": f"Bearer {subadmin_token}"}
+    headers_inc = {"Authorization": f"Bearer {incharge_token}"}
+
+    with patch("main.db", mock_db):
+        cache.clear()
+
+        # Step 1: Sub-Admin feeds initial data in DRAFT -> Success
+        payload_day1 = {
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_name": "Ramesh Kumar",
+            "staff_key": "gaya_rameshkumar",
+            "daily_logs": {
+                "2026-10-01": {"initial_reading": 1000, "final_reading": 1040, "total_km": 40}
+            }
+        }
+        res1 = client.post("/api/ta-logs/save", json=payload_day1, headers=headers_sub)
+        assert res1.status_code == 200, res1.text
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "DRAFT"
+
+        # Step 2: Main Incharge tries to EDIT during DRAFT -> Rejected 403 (Read-only inspection)
+        payload_inc_draft = {
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_name": "Ramesh Kumar",
+            "staff_key": "gaya_rameshkumar",
+            "deduction_amount": 50.0,
+            "daily_logs": {}
+        }
+        res2 = client.post("/api/ta-logs/save", json=payload_inc_draft, headers=headers_inc)
+        assert res2.status_code == 403
+        assert "read-only inspection access during draft" in res2.text.lower()
+
+        # Step 3: Main Incharge tries to call action='submit' -> Rejected 400 (Cannot submit to themselves)
+        res3 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers=headers_inc)
+        assert res3.status_code == 400
+        assert "cannot submit roster to themselves" in res3.text.lower()
+
+        # Step 4: Sub-Admin submits roster to Incharge -> Success, status becomes SUBMITTED
+        res4 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "submit"
+        }, headers=headers_sub)
+        assert res4.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "SUBMITTED"
+
+        # Step 5: Sub-Admin tries to edit after submission -> Rejected 403 (Locked during audit)
+        res5 = client.post("/api/ta-logs/save", json=payload_day1, headers=headers_sub)
+        assert res5.status_code == 403
+        assert "locked during incharge audit" in res5.text.lower()
+
+        # Step 6: Main Incharge audits and edits/saves during SUBMITTED -> Success!
+        payload_inc_audit = {
+            "month": "2026-10",
+            "district": "Gaya",
+            "staff_name": "Ramesh Kumar",
+            "staff_key": "gaya_rameshkumar",
+            "deduction_amount": 20.0,
+            "deduction_reason": "Excess route claim",
+            "admin_final_remarks": "Audited by Incharge",
+            "daily_logs": {
+                "2026-10-01": {"initial_reading": 1000, "final_reading": 1035, "total_km": 35}
+            }
+        }
+        res6 = client.post("/api/ta-logs/save", json=payload_inc_audit, headers=headers_inc)
+        assert res6.status_code == 200
+        doc = store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]
+        assert doc["status"] == "SUBMITTED"
+        assert doc["deduction_amount"] == 20.0
+        assert doc["total_km"] == 35
+
+        # Step 7: Main Incharge approves and publishes -> Success, status becomes APPROVED
+        res7 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "approve"
+        }, headers=headers_inc)
+        assert res7.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "APPROVED"
+
+        # Step 8: Both Sub-Admin and Main Incharge are locked from editing while APPROVED -> Rejected 400
+        res8_sub = client.post("/api/ta-logs/save", json=payload_day1, headers=headers_sub)
+        assert res8_sub.status_code == 400
+        assert "approved & published" in res8_sub.text.lower()
+
+        res8_inc = client.post("/api/ta-logs/save", json=payload_inc_audit, headers=headers_inc)
+        assert res8_inc.status_code == 400
+        assert "approved & published" in res8_inc.text.lower()
+
+        # Step 9: Main Incharge unlocks / reverts roster -> Success, status becomes REVERTED
+        res9 = client.post("/api/ta/district-action", json={
+            "month": "2026-10",
+            "district": "Gaya",
+            "action": "revert",
+            "revert_reason": "Need re-verification of kilometer reading"
+        }, headers=headers_inc)
+        assert res9.status_code == 200
+        assert store["travel_allowance_logs"]["2026-10_gaya_rameshkumar"]["status"] == "REVERTED"
+
+        # Step 10: Sub-Admin can edit again once REVERTED -> Success!
+        res10 = client.post("/api/ta-logs/save", json=payload_day1, headers=headers_sub)
+        assert res10.status_code == 200
+
 

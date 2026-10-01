@@ -4899,6 +4899,15 @@ const availableDistrictsForFeed = useMemo(() => {
     ) || null;
   }, [taSummaryList, taSelectedStaffKey, taCurrentStaff]);
 
+  const isTaEditingLocked = useMemo(() => {
+    if (taDistrictStatus === 'APPROVED') return true;
+    // Main Incharge has read-only inspection access during DRAFT or REVERTED (until Sub-Admin submits)
+    if (isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED')) return true;
+    // Sub-Admin (or non-Super/non-Incharge) cannot edit once submitted or disputed (awaiting Incharge sign-off)
+    if (!isSuperAdmin && !isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED')) return true;
+    return false;
+  }, [taDistrictStatus, isMainIncharge, isSuperAdmin]);
+
   const selectStaffForDrilldown = useCallback((staff) => {
     const sKey = staff.id || staff.name;
     setTaSelectedStaffKey(sKey);
@@ -5011,6 +5020,15 @@ const availableDistrictsForFeed = useMemo(() => {
   }, [authFetch, taSelectedStaffKey, showToast]);
 
   const handleSaveTaLog = async () => {
+    if (isTaEditingLocked) {
+      showToast(
+        isMainIncharge
+          ? "Main Incharge has read-only inspection access during Draft. You can audit and edit once Sub-Admin submits the roster."
+          : (taDistrictStatus === 'APPROVED' ? "This district's TA roster is Approved & Locked." : "Editing is locked while awaiting Incharge sign-off."),
+        "warning"
+      );
+      return;
+    }
     if (!isSuperAdmin && !canManageTa) {
       showToast("You do not have permission to manage Travel Allowance logs. Please contact Super Admin.", "error");
       return;
@@ -5064,6 +5082,15 @@ const availableDistrictsForFeed = useMemo(() => {
   };
 
   const handlePrefillTaFromReports = async () => {
+    if (isTaEditingLocked) {
+      showToast(
+        isMainIncharge
+          ? "Main Incharge has read-only inspection access during Draft."
+          : "Editing is locked.",
+        "warning"
+      );
+      return;
+    }
     if (!taCurrentStaff && !taSelectedStaffKey) {
       showToast("Please select a staff member first.", "error");
       return;
@@ -5168,6 +5195,7 @@ const availableDistrictsForFeed = useMemo(() => {
   };
 
   const handleUpdateDailyLog = (dateStr, field, value) => {
+    if (isTaEditingLocked) return;
     setTaDailyLogs(prev => {
       const current = prev[dateStr] || {
         initial_reading: '',
@@ -11267,8 +11295,8 @@ const availableDistrictsForFeed = useMemo(() => {
                           </div>
 
                           {/* Role-Based Action Buttons & State Machine */}
-                          {/* 1. Sub-Admin / MIS / Incharge Submit Button */}
-                          {(isSuperAdmin || isMainIncharge || canManageTa) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                          {/* 1. Sub-Admin / MIS Submit Button (NOT Main Incharge) */}
+                          {(!isMainIncharge && (isSuperAdmin || canManageTa)) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('submit')}
@@ -11281,8 +11309,8 @@ const availableDistrictsForFeed = useMemo(() => {
                             </button>
                           )}
 
-                          {/* 1.1 Direct Approve button for Super Admin & Main Incharge when in DRAFT / REVERTED */}
-                          {(isSuperAdmin || isMainIncharge) && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                          {/* 1.1 Direct Approve button ONLY for Super Admin when in DRAFT / REVERTED (testing/override) */}
+                          {isSuperAdmin && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
                             <button
                               type="button"
                               onClick={() => handleDistrictAction('approve')}
@@ -11293,6 +11321,13 @@ const availableDistrictsForFeed = useMemo(() => {
                               <span>{taActionLoading ? '⏳' : '⚡'}</span>
                               <span>{taActionLoading ? 'Approving...' : 'Direct Approve & Publish'}</span>
                             </button>
+                          )}
+
+                          {/* 1.2 Inspection Badge for Main Incharge when in DRAFT / REVERTED */}
+                          {isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-900/60 text-amber-200 border border-amber-500/40 flex items-center gap-1.5">
+                              <span>📝</span> Sub-Admin Data Feeding in Progress (Read-Only Inspection)
+                            </span>
                           )}
 
                           {/* 2. Incharge & Super Admin Approve & Revert Buttons */}
@@ -11494,7 +11529,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                         >
                                           Inspect ➔
                                         </button>
-                                        {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                                        {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED'))) && (
                                           <>
                                             {status !== 'APPROVED' ? (
                                               <button
@@ -11639,14 +11674,14 @@ const availableDistrictsForFeed = useMemo(() => {
                           <button
                             type="button"
                             onClick={handleSaveTaLog}
-                            disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                            disabled={isTaEditingLocked || taSaving || taPrefilling || !taSelectedStaffKey}
                             className="px-3.5 py-2 rounded-xl text-xs font-black bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                           >
                             <span>{taSaving ? '⏳' : '💾'}</span>
                             <span>{taSaving ? 'Saving...' : 'Save TA Log'}</span>
                           </button>
 
-                          {(currentUser?.role === 'SUPER_ADMIN' || currentUser?.role === 'MAIN_INCHARGE' || !currentUser?.role) && (
+                          {(isSuperAdmin || (isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED'))) && (
                             <>
                               <button
                                 type="button"
@@ -11698,7 +11733,7 @@ const availableDistrictsForFeed = useMemo(() => {
                                       setTaShowOptionsMenu(false);
                                       handlePrefillTaFromReports();
                                     }}
-                                    disabled={taPrefilling || taSaving || !taSelectedStaffKey}
+                                    disabled={isTaEditingLocked || taPrefilling || taSaving || !taSelectedStaffKey}
                                     className="w-full text-left px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-teal-50 hover:text-teal-900 transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
                                   >
                                     <span>{taPrefilling ? '⏳' : '⚡'}</span>
@@ -11799,7 +11834,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             type="number"
                             min="0"
                             step="0.01"
-                            disabled={taDistrictStatus === 'APPROVED'}
+                            disabled={isTaEditingLocked}
                             value={taDeductionAmount || ''}
                             onChange={(e) => setTaDeductionAmount(Math.max(0, parseFloat(e.target.value) || 0))}
                             placeholder="0.00"
@@ -11808,7 +11843,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                         <input
                           type="text"
-                          disabled={taDistrictStatus === 'APPROVED'}
+                          disabled={isTaEditingLocked}
                           value={taDeductionReason}
                           onChange={(e) => setTaDeductionReason(e.target.value)}
                           placeholder="Reason for deduction..."
@@ -11829,7 +11864,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         </div>
                         <input
                           type="text"
-                          disabled={taDistrictStatus === 'APPROVED'}
+                          disabled={isTaEditingLocked}
                           value={taAdminRemarks}
                           onChange={(e) => setTaAdminRemarks(e.target.value)}
                           placeholder="Admin remarks for accounts..."
@@ -11858,6 +11893,26 @@ const availableDistrictsForFeed = useMemo(() => {
                     </div>
                   )}
 
+                  {/* Main Incharge Read-Only Inspection Notice */}
+                  {isMainIncharge && (taDistrictStatus === 'DRAFT' || taDistrictStatus === 'REVERTED') && (
+                    <div className="bg-amber-50 border border-amber-300 text-amber-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📝</span>
+                        <span><strong>Inspection Mode:</strong> District Sub-Admin is currently feeding data. You have read-only inspection access. Once the Sub-Admin submits the roster, you can audit, edit, and approve/publish.</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Sub-Admin Submitted Notice */}
+                  {!isSuperAdmin && !isMainIncharge && (taDistrictStatus === 'SUBMITTED' || taDistrictStatus === 'DISPUTED') && (
+                    <div className="bg-blue-50 border border-blue-300 text-blue-900 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-between gap-2 shadow-2xs animate-fade-in">
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">⏳</span>
+                        <span><strong>Submitted to Incharge:</strong> This roster has been submitted for audit. Editing is locked while awaiting Incharge sign-off.</span>
+                      </div>
+                    </div>
+                  )}
+
                   {/* 31-Day Interactive Bike Log Table */}
                   <div ref={taDailyTableRef} className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden scroll-mt-28">
                     <div className="p-4 sm:px-6 border-b border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -11879,7 +11934,7 @@ const availableDistrictsForFeed = useMemo(() => {
                         <button
                           type="button"
                           onClick={handleSaveTaLog}
-                          disabled={taDistrictStatus === 'APPROVED' || taSaving || taPrefilling || !taSelectedStaffKey}
+                          disabled={isTaEditingLocked || taSaving || taPrefilling || !taSelectedStaffKey}
                           className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                         >
                           <span>{taSaving ? '⏳' : '💾'}</span>
@@ -11910,7 +11965,7 @@ const availableDistrictsForFeed = useMemo(() => {
                             const entry = taDailyLogs[day.dateStr] || {};
                             const isOverride = Boolean(entry.is_override);
                             const isSunday = day.isSunday;
-                            const isLocked = taDistrictStatus === 'APPROVED';
+                            const isLocked = isTaEditingLocked;
 
                             return (
                               <tr
@@ -12101,7 +12156,7 @@ const availableDistrictsForFeed = useMemo(() => {
                       <button
                         type="button"
                         onClick={handleSaveTaLog}
-                        disabled={taSaving || taPrefilling || !taSelectedStaffKey}
+                        disabled={isTaEditingLocked || taSaving || taPrefilling || !taSelectedStaffKey}
                         className="px-4 py-2 rounded-xl text-xs font-black bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer active:scale-95"
                       >
                         <span>{taSaving ? '⏳' : '💾'}</span>

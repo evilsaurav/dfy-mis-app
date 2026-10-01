@@ -587,11 +587,19 @@ const MyProfileDashboard = ({
           } else if (!isCancelled && !hasCachedData) {
             setFoTaData(null);
           }
-        } else if (!isCancelled && !hasCachedData) {
-          setFoTaData(null);
+        } else {
+          if (res.status === 401 && foTaRefreshTrigger > 0) {
+            showToast("PIN verification failed for TA records. Please check your PIN.", "error");
+          }
+          if (!isCancelled && !hasCachedData) {
+            setFoTaData(null);
+          }
         }
       } catch (err) {
         if (!isCancelled && !hasCachedData) setFoTaData(null);
+        if (foTaRefreshTrigger > 0) {
+          showToast("Could not sync TA records. Ensure the server is reachable.", "warning");
+        }
       } finally {
         if (!isCancelled) setFoTaLoading(false);
       }
