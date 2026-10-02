@@ -12,6 +12,12 @@ if str(BASE_DIR) not in sys.path:
 from main import app, cache, create_access_token
 
 
+@pytest.fixture(autouse=True)
+def clear_test_cache():
+    cache.clear()
+    yield
+    cache.clear()
+
 def make_admin_token(role: str = "SUPER_ADMIN", allowed_districts=None, username="test_admin"):
     return create_access_token({
         "user_id": "test_admin_id",
@@ -312,7 +318,7 @@ async def test_mark_and_unmark_leave_invalidates_profile_cache():
             assert mark_res.status_code == 200, mark_res.text
 
             assert cache.get("profile_patna_ramesh_kumar_2026-09") is None
-            assert cache.get("profile_gaya_sita_devi_2026-09") is None
+            assert cache.get("profile_gaya_sita_devi_2026-09") is not None  # Scoped eviction preserves other officers
 
             # Re-seed profile cache
             cache.set("profile_patna_ramesh_kumar_2026-09", {"cached_again": True})

@@ -121,8 +121,10 @@ console.log("✔ Android & Desktop use standard direct download.");
 
 
 console.log("\n[Test 5] Checking App.jsx and AdminDashboard.jsx integration...");
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
 const appContent = fs.readFileSync(path.resolve('dfy-frontend/src/App.jsx'), 'utf8');
-const adminContent = fs.readFileSync(path.resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+const adminContent = getFullAdminDashboardCode();
 
 assert.ok(
   appContent.includes('downloadOrShareCanvas'),

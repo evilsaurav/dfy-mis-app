@@ -1,10 +1,8 @@
-import fs from 'fs';
-import path from 'path';
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
 console.log("=== Running Attendance Radar Past-Date Timestamps UI Verification ===");
 
-const dashboardPath = path.resolve('dfy-frontend/src/AdminDashboard.jsx');
-const dashboardContent = fs.readFileSync(dashboardPath, 'utf8');
+const dashboardContent = getFullAdminDashboardCode();
 
 // Test 1: Check r.submitted_time in deriveAttendanceFromRecords
 console.log("\n[Test 1] Checking deriveAttendanceFromRecords handles r.submitted_time...");

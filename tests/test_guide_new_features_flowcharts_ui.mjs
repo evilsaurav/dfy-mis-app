@@ -10,8 +10,9 @@ console.log("=== Running FO Guide & Admin SOP New Feature Flowcharts UI Test (v2
 const appPath = resolve('dfy-frontend/src/App.jsx');
 const appCode = readFileSync(appPath, 'utf8');
 
-const adminPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const adminCode = readFileSync(adminPath, 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 // -------------------------------------------------------------
 // Test 1: Critical Zero-Leakage Privacy Verification in App.jsx
@@ -97,12 +98,8 @@ console.log("✔ FO Guide Topic 10 successfully verified with all 4 bento steps.
 // -------------------------------------------------------------
 console.log("\n[Test 4] Verifying Topic 11 (top_performers_studio) in AdminDashboard.jsx...");
 
-// Extract showAppGuideModal
-const guideModalStart = adminCode.indexOf('{showAppGuideModal && (');
-assert(guideModalStart !== -1, "showAppGuideModal modal block must exist in AdminDashboard.jsx");
-const guideModalEnd = adminCode.indexOf('{/* ========================================================================= */}', guideModalStart + 100);
-assert(guideModalEnd !== -1, "showAppGuideModal modal end boundary must be identifiable");
-const guideModalCode = adminCode.substring(guideModalStart, guideModalEnd);
+const guideModalPath = resolve('dfy-frontend/src/components/Admin/modals/AppGuideModal.jsx');
+const guideModalCode = readFileSync(guideModalPath, 'utf8');
 
 // Check sidebar topics entry
 assert(guideModalCode.includes("key: 'top_performers_studio'"), "Sidebar topics must contain key: 'top_performers_studio'");

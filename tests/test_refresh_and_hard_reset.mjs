@@ -5,10 +5,10 @@ import assert from 'assert';
 console.log("Running Frontend Guaranteed Live Refresh & Hard Reset UI Verification Tests...\n");
 
 // 1. Read source files
-const adminDashboardPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const appPath = resolve('dfy-frontend/src/App.jsx');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
-const adminDashboardCode = readFileSync(adminDashboardPath, 'utf8');
+const adminDashboardCode = getFullAdminDashboardCode();
+const appPath = resolve('dfy-frontend/src/App.jsx');
 const appCode = readFileSync(appPath, 'utf8');
 
 console.log("1. Verifying AdminDashboard.jsx Live Refresh...");

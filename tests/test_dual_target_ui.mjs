@@ -2,12 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import assert from 'node:assert';
 
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
 console.log('=== Running Dual-Target UI & RBAC Verification Tests ===\n');
 
-const adminPath = path.resolve('dfy-frontend/src/AdminDashboard.jsx');
 const appPath = path.resolve('dfy-frontend/src/App.jsx');
 
-const adminCode = fs.readFileSync(adminPath, 'utf8');
+const adminCode = getFullAdminDashboardCode();
 const appCode = fs.readFileSync(appPath, 'utf8');
 
 // 1. Admin Target Setting Modal features Official District Target input & state
@@ -117,12 +118,11 @@ assert(
   'FO Mobile App renders Frontline Monthly Target & Progress Card on main reporting screen'
 );
 
-// 15. Backend main.py evicts profile cache on bulk target update
-const mainPath = path.resolve('main.py');
-const mainCode = fs.readFileSync(mainPath, 'utf8');
+// 15. Backend evicts profile cache on bulk target update
+const backendCode = fs.readFileSync(path.resolve('main.py'), 'utf8') + '\n' + fs.readFileSync(path.resolve('backend/routers/targets.py'), 'utf8');
 assert(
-  mainCode.includes('cache.delete_prefix("profile_")'),
-  'main.py evicts profile cache on bulk staff target update'
+  backendCode.includes('cache.delete_prefix("profile_")'),
+  'backend evicts profile cache on bulk staff target update'
 );
 
 // 16. District Pacing Data calculates both Official and Frontline targets with perspective switch

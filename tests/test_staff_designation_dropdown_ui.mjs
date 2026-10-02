@@ -4,8 +4,9 @@ import assert from 'assert';
 
 console.log("=== Running Staff Designation Dropdown & Sync Verification ===");
 
-const adminPath = path.resolve('dfy-frontend/src/AdminDashboard.jsx');
-const content = fs.readFileSync(adminPath, 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const content = getFullAdminDashboardCode();
 
 // 1. Verify Edit Staff Modal (pinChangeModal) has all required designations
 console.log("\n[Test 1] Checking Edit Staff Modal designation options...");

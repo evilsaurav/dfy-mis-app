@@ -28,3 +28,6 @@ cache/
 .superpowers/
 scratch/
 .codebase-memory/
+.archify/
+*_backup.py
+dfy-tb-mis-application-runtime.jpeg

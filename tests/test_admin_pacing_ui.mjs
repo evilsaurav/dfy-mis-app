@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getOperationalMonth, calculateOverviewPacing } from '../dfy-frontend/src/utils/operationalMonth.js';
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,8 +124,7 @@ console.log('✓ calculateOverviewPacing passes past, current, and future month 
 // -------------------------------------------------------------
 // 3. Static Audit of AdminDashboard.jsx
 // -------------------------------------------------------------
-const dashboardPath = path.resolve(__dirname, '../dfy-frontend/src/AdminDashboard.jsx');
-const dashboardCode = fs.readFileSync(dashboardPath, 'utf-8');
+const dashboardCode = getFullAdminDashboardCode();
 
 // Assert buggy hardcoded 30 days is removed
 assert.ok(!dashboardCode.includes('const daysInMonth = 30;'), 'AdminDashboard.jsx must not contain buggy hardcoded "daysInMonth = 30"');

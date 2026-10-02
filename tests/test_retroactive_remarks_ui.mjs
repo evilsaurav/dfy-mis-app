@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import assert from 'assert';
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 // 1. Verify modal state declarations exist
 assert(adminCode.includes('attendanceRemarkModal') && adminCode.includes('setAttendanceRemarkModal'), "Must declare attendanceRemarkModal state");

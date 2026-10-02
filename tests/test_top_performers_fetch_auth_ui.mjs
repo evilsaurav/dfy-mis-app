@@ -11,7 +11,7 @@ const fetchTopPerformersIndex = adminCode.indexOf('const fetchTopPerformers =');
 assert(fetchTopPerformersIndex !== -1, "fetchTopPerformers must be defined in AdminDashboard.jsx");
 
 // Extract the fetchTopPerformers function block (up to its closing dependency array)
-const nextCallbackIndex = adminCode.indexOf('const generateTopPerformersPosterCanvas =', fetchTopPerformersIndex);
+const nextCallbackIndex = adminCode.indexOf('const fetchData =', fetchTopPerformersIndex);
 assert(nextCallbackIndex !== -1, "Could not find boundary after fetchTopPerformers");
 
 const fetchTopPerformersBlock = adminCode.slice(fetchTopPerformersIndex, nextCallbackIndex);
@@ -55,8 +55,8 @@ console.log("✔ useCallback dependency array includes authFetch.");
 
 console.log("\n[Test 5] Checking state update on response ok...");
 assert(
-  fetchTopPerformersBlock.includes('setTopPerformersData(json)'),
-  "fetchTopPerformers must call setTopPerformersData(json) on successful fetch"
+  fetchTopPerformersBlock.includes('setTopPerformersData(data)') || fetchTopPerformersBlock.includes('setTopPerformersData(json)'),
+  "fetchTopPerformers must call setTopPerformersData on successful fetch"
 );
 console.log("✔ State update logic is intact.");
 

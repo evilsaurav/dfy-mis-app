@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import assert from 'assert';
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 console.log("=== Running Top Performers Studio & Layout UI Verification ===");
 
@@ -20,15 +22,17 @@ console.log("✔ Work Balance Radar is completely removed.");
 
 // Test 2: Verify Bihar Top Performers Studio is full-width and placed BEFORE Daily Progression Trend
 console.log("\n[Test 2] Checking full-width layout hierarchy...");
-const topPerformersIndex = adminCode.indexOf('Bihar Statewide Top Performers Studio');
-const dailyTrendIndex = adminCode.indexOf('Daily Progression Trend');
+const overviewPath = resolve('dfy-frontend/src/components/Admin/tabs/OverviewTab.jsx');
+const overviewCode = readFileSync(overviewPath, 'utf8');
+const topPerformersIndex = overviewCode.indexOf('Bihar Statewide Top Performers Studio');
+const dailyTrendIndex = overviewCode.indexOf('Daily Progression Trend');
 assert(
   topPerformersIndex !== -1,
-  "Bihar Statewide Top Performers Studio must exist in AdminDashboard.jsx"
+  "Bihar Statewide Top Performers Studio must exist in OverviewTab.jsx"
 );
 assert(
   dailyTrendIndex !== -1,
-  "Daily Progression Trend must exist in AdminDashboard.jsx"
+  "Daily Progression Trend must exist in OverviewTab.jsx"
 );
 assert(
   topPerformersIndex < dailyTrendIndex,

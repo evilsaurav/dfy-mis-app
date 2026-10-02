@@ -27,8 +27,9 @@ assert(
 console.log("✔ App.jsx patient contact card verified.");
 
 console.log("2. Verifying AdminDashboard.jsx (Admin Patient Journey Drawer)...");
-const adminPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const adminCode = readFileSync(adminPath, 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 assert(
   adminCode.includes('journeyResult.metadata?.patient_name') && adminCode.includes('journeyResult.metadata?.phone'),

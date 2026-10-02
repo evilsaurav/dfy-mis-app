@@ -1,10 +1,9 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import assert from 'assert';
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
 console.log("Running Attendance Radar Next-Day Morning Badge UI Tests...");
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+const adminCode = getFullAdminDashboardCode();
 
 // Test 1: Verify getSubmissionTimeClassification accepts isNextDay parameter
 assert(

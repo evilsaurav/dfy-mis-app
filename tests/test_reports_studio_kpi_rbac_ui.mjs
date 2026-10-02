@@ -2,7 +2,9 @@ import fs from 'fs';
 import path from 'path';
 import assert from 'assert';
 
-const adminCode = fs.readFileSync(path.resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf-8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 // 1. Verify canDownloadBulkZip exists and checks roles/districts
 assert(

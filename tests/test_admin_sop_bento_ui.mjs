@@ -11,16 +11,16 @@ console.log("\n[Test 1] Verifying changelogData.js Version and v2.8.3 Entry...")
 const changelogPath = resolve('dfy-frontend/src/changelogData.js');
 const changelogCode = readFileSync(changelogPath, 'utf8');
 
-assert(['2.8.3', '2.8.4', '2.8.5'].some(v => changelogCode.includes(`export const APP_VERSION = "${v}";`)), 'APP_VERSION must be >= "2.8.3"');
+assert(['2.8.3', '2.8.4', '2.8.5', '2.8.6'].some(v => changelogCode.includes(`export const APP_VERSION = "${v}";`)), 'APP_VERSION must be >= "2.8.3"');
 
 const v283Index = changelogCode.indexOf('version: "v2.8.3"');
 assert(v283Index !== -1, 'changelogData.js must contain a v2.8.3 entry');
 
-// Check that v2.8.3, v2.8.4, or v2.8.5 entry is first in CHANGELOG_ENTRIES
+// Check that v2.8.3, v2.8.4, v2.8.5, or v2.8.6 entry is first in CHANGELOG_ENTRIES
 const changelogEntriesStart = changelogCode.indexOf('export const CHANGELOG_ENTRIES = [');
 assert(changelogEntriesStart !== -1, 'CHANGELOG_ENTRIES array must exist');
 const firstEntryPos = changelogCode.indexOf('version:', changelogEntriesStart);
-assert(['"v2.8.3"', '"v2.8.4"', '"v2.8.5"'].some(v => changelogCode.substring(firstEntryPos, firstEntryPos + 30).includes(v)), 'v2.8.3+ must be the first entry in CHANGELOG_ENTRIES');
+assert(['"v2.8.3"', '"v2.8.4"', '"v2.8.5"', '"v2.8.6"'].some(v => changelogCode.substring(firstEntryPos, firstEntryPos + 30).includes(v)), 'v2.8.3+ must be the first entry in CHANGELOG_ENTRIES');
 
 // Verify key highlights in v2.8.3
 assert(changelogCode.includes('Stealth 10:00 AM') || changelogCode.includes('10:00 AM Reporting Cutoff'), 'v2.8.3 must mention Stealth 10:00 AM Reporting Cutoff');
@@ -35,15 +35,10 @@ console.log("✔ changelogData.js successfully verified for v2.8.3 release.");
 // -------------------------------------------------------------
 // Test 2: AdminDashboard.jsx showAppGuideModal Extraction
 // -------------------------------------------------------------
-console.log("\n[Test 2] Extracting showAppGuideModal from AdminDashboard.jsx...");
-const adminPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const adminCode = readFileSync(adminPath, 'utf8');
-
-const guideModalStart = adminCode.indexOf('{showAppGuideModal && (');
-assert(guideModalStart !== -1, 'showAppGuideModal modal block must exist in AdminDashboard.jsx');
-const guideModalEnd = adminCode.indexOf('{/* ========================================================================= */}', guideModalStart + 100);
-assert(guideModalEnd !== -1, 'showAppGuideModal modal end boundary must be identifiable');
-const guideModalCode = adminCode.substring(guideModalStart, guideModalEnd);
+const guideModalPath = resolve('dfy-frontend/src/components/Admin/modals/AppGuideModal.jsx');
+const guideModalCode = readFileSync(guideModalPath, 'utf8');
+const adminModalsCode = readFileSync(resolve('dfy-frontend/src/components/Admin/AdminModals.jsx'), 'utf8');
+assert(adminModalsCode.includes('AppGuideModal') && adminModalsCode.includes('show={showAppGuideModal}'), 'showAppGuideModal modal block must exist');
 
 // -------------------------------------------------------------
 // Test 3: Verify All 10 Topic Keys Exist in Admin SOP Modal

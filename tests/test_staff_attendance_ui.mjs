@@ -2,7 +2,9 @@ import { readFileSync } from 'fs';
 import { resolve } from 'path';
 import assert from 'assert';
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 // 1. Verify legacy Dossier is removed
 assert(!adminCode.includes('Field Officer Monthly Appraisal & TA/DA Dossier') && !adminCode.includes('Field Officer Monthly Appraisal &amp; TA/DA Dossier'), "Legacy Dossier heading must be removed");

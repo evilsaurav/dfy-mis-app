@@ -1,8 +1,7 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import assert from 'assert';
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+const adminCode = getFullAdminDashboardCode();
 
 // 1. Verify normalizeStaffKey helper is declared and collapses consonants
 assert(

@@ -7,8 +7,9 @@ console.log("Running Visual Bento Flowcharts & Privacy UI Verification Tests...\
 const appPath = resolve('dfy-frontend/src/App.jsx');
 const appCode = readFileSync(appPath, 'utf8');
 
-const adminPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const adminCode = readFileSync(adminPath, 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 const changelogPath = resolve('dfy-frontend/src/changelogData.js');
 const changelogCode = readFileSync(changelogPath, 'utf8');
@@ -60,7 +61,7 @@ console.log("✔ Admin SOP bento flowcharts present in AdminDashboard.jsx.");
 
 // 4. Verify Version Bump to 2.8.2+ in changelogData.js
 console.log("4. Verifying Version Bump to v2.8.2+ in changelogData.js...");
-assert(['2.8.2', '2.8.3', '2.8.4', '2.8.5'].some(v => changelogCode.includes(`export const APP_VERSION = "${v}";`)), "App version must be >= 2.8.2");
+assert(['2.8.2', '2.8.3', '2.8.4', '2.8.5', '2.8.6'].some(v => changelogCode.includes(`export const APP_VERSION = "${v}";`)), "App version must be >= 2.8.2");
 assert(changelogCode.includes('export const LAST_UPDATED_DATE ='), "Last updated date must be exported");
 assert(changelogCode.includes('v2.8.2'), "Changelog must include v2.8.2 release entry");
 assert(changelogCode.includes('Staff Attendance'), "Changelog must describe Staff Attendance export");

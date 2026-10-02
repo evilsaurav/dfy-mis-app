@@ -4,11 +4,13 @@ import assert from 'assert';
 
 console.log("Running Staff Target Sync & Master Table Resilient Matching Tests...");
 
-const adminCode = readFileSync(resolve('dfy-frontend/src/AdminDashboard.jsx'), 'utf8');
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
+
+const adminCode = getFullAdminDashboardCode();
 
 // Test 1: Verify isOfficerNameMatch helper is defined at top-level
 assert(
-  adminCode.includes('const isOfficerNameMatch = (nameA, nameB, dist = \'\') => {'),
+  adminCode.includes("isOfficerNameMatch = (nameA, nameB, dist = '') => {"),
   "isOfficerNameMatch helper function must be defined"
 );
 
@@ -70,7 +72,7 @@ assert(
 
 // Test 8: Verify parseTargetVal helper is defined and correctly preserves 0 targets
 assert(
-  adminCode.includes('const parseTargetVal = (tObj, fallback = 50) => {'),
+  adminCode.includes("parseTargetVal = (tObj, fallback = 50) => {"),
   "parseTargetVal helper function must be defined"
 );
 

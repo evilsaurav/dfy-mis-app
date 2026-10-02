@@ -1,11 +1,9 @@
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import assert from 'assert';
+import { getFullAdminDashboardCode } from './test_helpers.mjs';
 
 console.log("Running Attendance Radar Mobile Layout Verification Tests...\n");
 
-const adminDashboardPath = resolve('dfy-frontend/src/AdminDashboard.jsx');
-const adminDashboardCode = readFileSync(adminDashboardPath, 'utf8');
+const adminDashboardCode = getFullAdminDashboardCode();
 
 console.log("1. Verifying Attendance Radar Outer Modal Overlay...");
 // Outer overlay must have overflow-y-auto to allow scrolling on small viewports
