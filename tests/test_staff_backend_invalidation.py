@@ -20,6 +20,11 @@ from backend.routers.staff import (
     UpdateStaffDetailsReq
 )
 
+@pytest.fixture(autouse=True)
+def mock_snapshot_file():
+    with patch("backend.routers.staff.os.path.exists", return_value=False):
+        yield
+
 @pytest.mark.asyncio
 async def test_add_staff_invalidates_all_critical_cache_prefixes():
     with patch("backend.routers.staff.cache") as mock_cache, \
@@ -62,6 +67,8 @@ async def test_delete_staff_invalidates_staff_list_and_targets():
         mock_cache.delete_prefix.assert_any_call("staff_list_")
         mock_cache.delete_prefix.assert_any_call("targets_")
         mock_cache.delete_prefix.assert_any_call("staff_targets_raw_")
+        mock_cache.delete_prefix.assert_any_call("attendance_")
+        mock_cache.delete_prefix.assert_any_call("statewide_top_")
         assert mock_inval_dir.called
 
 @pytest.mark.asyncio
@@ -83,6 +90,8 @@ async def test_toggle_staff_status_invalidates_staff_list_and_targets():
         mock_cache.delete_prefix.assert_any_call("staff_list_")
         mock_cache.delete_prefix.assert_any_call("targets_")
         mock_cache.delete_prefix.assert_any_call("staff_targets_raw_")
+        mock_cache.delete_prefix.assert_any_call("attendance_")
+        mock_cache.delete_prefix.assert_any_call("statewide_top_")
         assert mock_inval_dir.called
 
 @pytest.mark.asyncio
@@ -104,6 +113,8 @@ async def test_update_staff_pin_invalidates_staff_list_and_targets():
         mock_cache.delete_prefix.assert_any_call("staff_list_")
         mock_cache.delete_prefix.assert_any_call("targets_")
         mock_cache.delete_prefix.assert_any_call("staff_targets_raw_")
+        mock_cache.delete_prefix.assert_any_call("attendance_")
+        mock_cache.delete_prefix.assert_any_call("statewide_top_")
         assert mock_inval_dir.called
 
 @pytest.mark.asyncio
@@ -124,8 +135,7 @@ async def test_update_staff_details_invalidates_staff_list_and_targets():
         req = UpdateStaffDetailsReq(
             district="Patna",
             name="Test Officer",
-            new_name="Test Officer",
-            pin="1234",
+            new_pin="1234",
             designation="Field Officer",
             target=75
         )
@@ -135,4 +145,6 @@ async def test_update_staff_details_invalidates_staff_list_and_targets():
         mock_cache.delete_prefix.assert_any_call("staff_list_")
         mock_cache.delete_prefix.assert_any_call("targets_")
         mock_cache.delete_prefix.assert_any_call("staff_targets_raw_")
+        mock_cache.delete_prefix.assert_any_call("attendance_")
+        mock_cache.delete_prefix.assert_any_call("statewide_top_")
         assert mock_inval_dir.called
