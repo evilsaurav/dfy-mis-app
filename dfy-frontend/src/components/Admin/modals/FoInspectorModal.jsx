@@ -42,10 +42,13 @@ export default function FoInspectorModal({
           return dateB.localeCompare(dateA); // Latest date first (e.g. 2026-09-09 before 2026-09-05)
         });
         const totalNotif = foRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
+        const effectiveDistrict = (inspectingFO.district && inspectingFO.district !== 'All') 
+          ? inspectingFO.district 
+          : (foRecords[0]?.working_place || (selectedDistrict !== 'All' ? selectedDistrict : ''));
         const targetObj = (targetsData || []).find(t => 
-          canonicalizeDistrict(t.district) === canonicalizeDistrict(inspectingFO.district) &&
-          (isOfficerNameMatch(t.fo_name, inspectingFO.fo_name, inspectingFO.district) ||
-           isOfficerNameMatch(canonicalizeFo(t.fo_name, inspectingFO.district, staffDirectory), inspectingFO.fo_name, inspectingFO.district))
+          canonicalizeDistrict(t.district) === canonicalizeDistrict(effectiveDistrict) &&
+          (isOfficerNameMatch(t.fo_name, inspectingFO.fo_name, effectiveDistrict) ||
+           isOfficerNameMatch(canonicalizeFo(t.fo_name, effectiveDistrict, staffDirectory), inspectingFO.fo_name, effectiveDistrict))
         );
         const targetNum = parseTargetVal(targetObj, 0);
         const pct = targetNum > 0 ? Math.min(100, Math.round((totalNotif / targetNum) * 100)) : 0;
@@ -117,7 +120,7 @@ export default function FoInspectorModal({
                   </div>
                   <div>
                     <h3 className="text-lg font-black text-slate-800">{inspectingFO.fo_name}</h3>
-                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{inspectingFO.district} District &bull; Month: {month}</p>
+                    <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{effectiveDistrict || inspectingFO.district} District &bull; Month: {month}</p>
                   </div>
                 </div>
 
@@ -151,10 +154,7 @@ export default function FoInspectorModal({
                 </button>
                 <button
                   onClick={() => {
-                    const foDist = (inspectingFO.district && inspectingFO.district !== 'All') 
-                      ? inspectingFO.district 
-                      : (foRecords[0]?.working_place || (selectedDistrict !== 'All' ? selectedDistrict : ''));
-                    setFeedDistrict(foDist);
+                    setFeedDistrict(effectiveDistrict);
                     setFeedFoName(inspectingFO.fo_name);
                     setFeedDate(new Date().toISOString().slice(0, 10));
                     setFeedCategoryInputs({});
@@ -196,7 +196,7 @@ export default function FoInspectorModal({
                               type="button"
                               onClick={() => setDeleteDayModal({
                                 isOpen: true,
-                                district: rec.working_place || inspectingFO.district,
+                                district: rec.working_place || effectiveDistrict || inspectingFO.district,
                                 fo_name: inspectingFO.fo_name,
                                 date: rec.date,
                                 dayIdsCount: dayIdsCount,
@@ -229,7 +229,7 @@ export default function FoInspectorModal({
                                   <span className="text-[10px] font-black uppercase text-slate-500">{cat.label} ({ids.length})</span>
                                   <div className="flex items-center gap-1.5">
                                     <button
-                                      onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'add', oldId: '', newId: '', error: '' })}
+                                      onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || effectiveDistrict || inspectingFO.district, date: rec.date, category: cat.key, action: 'add', oldId: '', newId: '', error: '' })}
                                       className="text-[9px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded"
                                       title="Add missing ID"
                                     >
@@ -261,14 +261,14 @@ export default function FoInspectorModal({
                                           </span>
                                         )}
                                         <button
-                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'replace', oldId: id, newId: id, error: '' })}
+                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || effectiveDistrict || inspectingFO.district, date: rec.date, category: cat.key, action: 'replace', oldId: id, newId: id, error: '' })}
                                           className="text-slate-400 hover:text-indigo-600 text-[9px]"
                                           title="Edit / Correct ID"
                                         >
                                           ✏️
                                         </button>
                                         <button
-                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || inspectingFO.district, date: rec.date, category: cat.key, action: 'delete', oldId: id, newId: '', error: '' })}
+                                          onClick={() => setAdminEditModal({ fo_name: inspectingFO.fo_name, district: rec.working_place || effectiveDistrict || inspectingFO.district, date: rec.date, category: cat.key, action: 'delete', oldId: id, newId: '', error: '' })}
                                           className="text-slate-400 hover:text-red-500 text-[9px]"
                                           title="Delete ID"
                                         >

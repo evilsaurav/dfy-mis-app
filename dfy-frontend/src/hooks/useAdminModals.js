@@ -1979,6 +1979,8 @@ export function useAdminModals({
     // 5. Patient Journey
     showJourneyModal, setShowJourneyModal,
     journeyPatientId, setJourneyPatientId,
+    journeySearchId: journeyPatientId,
+    setJourneySearchId: setJourneyPatientId,
     journeyLoading, journeyResult, journeyError,
     handleFetchJourney,
 
