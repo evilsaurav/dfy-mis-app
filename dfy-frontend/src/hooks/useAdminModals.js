@@ -316,17 +316,22 @@ export function useAdminModals({
     setLoadingCascade(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/cascade-alerts?month=${month}`);
+      let q = `?month=${month}`;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await authFetch(`${API_BASE_URL}/admin/cascade-alerts${q}`);
       if (res.ok) {
         const data = await res.json();
-        setCascadeData(data || { summary: {}, alerts: [] });
+        const unwrap = (data && data.data) ? data.data : (data || { summary: {}, alerts: [] });
+        setCascadeData(unwrap);
       }
     } catch (e) {
       console.error("Cascade alerts fetch error", e);
     } finally {
       setLoadingCascade(false);
     }
-  }, [month, authFetch]);
+  }, [month, authFetch, currentUser]);
 
   // 3. Recent ID Edits Fetcher
   const fetchRecentIdEdits = useCallback(async () => {
