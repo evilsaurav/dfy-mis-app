@@ -2026,7 +2026,7 @@ export function useAdminModals({
     showCascadeModal, setShowCascadeModal,
     cascadeData, loadingCascade,
     cascadeFilterDist, setCascadeFilterDist,
-    cascadeRiskFilter, setRiskFilter: setCascadeRiskFilter,
+    cascadeRiskFilter, setCascadeRiskFilter, setRiskFilter: setCascadeRiskFilter,
     fetchCascadeAlerts,
 
     // 3. Recent ID Edits
