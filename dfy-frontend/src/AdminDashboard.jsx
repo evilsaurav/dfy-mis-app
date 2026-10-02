@@ -492,6 +492,14 @@ export default function AdminDashboard() {
     }
 
     const hasValidIds = cachedData && Array.isArray(cachedData.records) && cachedData.records.some(r => Array.isArray(r.notification_ids));
+    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !hasValidIds) {
+      try {
+        localStorage.removeItem(cacheKey);
+      } catch (e) {}
+      await clearCachedDashboardData(cacheKey);
+      cachedData = null;
+    }
+
     if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && hasValidIds && !forceRefresh) {
       setRawRecords(cachedData.records);
       if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
@@ -514,7 +522,7 @@ export default function AdminDashboard() {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const payload = { month_prefix: month, force_refresh: Boolean(forceRefresh) };
 
-      if (!forceRefresh && cachedData && cachedData.synced_at && cachedData.records?.length > 0) {
+      if (!forceRefresh && cachedData && cachedData.synced_at && cachedData.records?.length > 0 && hasValidIds) {
         payload.since = cachedData.synced_at;
         payload.cached_count = cachedData.records.length;
       }
@@ -539,6 +547,9 @@ export default function AdminDashboard() {
       if (data.mode === 'NO_CHANGE') {
         setSyncStatus('UP_TO_DATE');
         if (data.synced_at) setLastSyncedTime(data.synced_at);
+        if (cachedData?.records && cachedData.records.length > 0 && hasValidIds) {
+          setRawRecords(prev => (prev && prev.length > 0) ? prev : cachedData.records);
+        }
       } else if (data.mode === 'DELTA') {
         setRawRecords(prev => {
           const currentList = (prev && prev.length > 0) ? prev : (cachedData?.records || []);
