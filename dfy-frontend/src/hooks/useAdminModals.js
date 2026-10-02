@@ -530,15 +530,23 @@ export function useAdminModals({
     setAuditLoading(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const effectiveAction = overrideAction !== undefined ? overrideAction : auditFilterAction;
+      const effectiveDist = overrideDist !== undefined ? overrideDist : auditFilterTarget;
+      const effectiveUser = overrideUser !== undefined ? overrideUser : auditFilterAdmin;
+      const effectiveSearch = overrideSearch !== undefined ? overrideSearch : auditSearchQuery;
+
       const res = await authFetch(`${API_BASE_URL}/admin/audit-logs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action_filter: overrideAction !== undefined ? overrideAction : auditFilterAction,
-          district_filter: overrideDist !== undefined ? overrideDist : auditFilterTarget,
-          user_filter: overrideUser !== undefined ? overrideUser : auditFilterAdmin,
-          search: overrideSearch !== undefined ? overrideSearch : auditSearchQuery,
-          limit: 100
+          action_type: effectiveAction,
+          action_filter: effectiveAction,
+          district: effectiveDist,
+          district_filter: effectiveDist,
+          user_id: effectiveUser,
+          user_filter: effectiveUser,
+          search: effectiveSearch,
+          limit: 300
         })
       });
       if (res.ok) {

@@ -65,11 +65,14 @@ class AdminUserUpdateReq(BaseModel):
     status: Optional[str] = None
 
 class AuditLogQueryReq(BaseModel):
-    action_type: Optional[str] = "All"
-    district: Optional[str] = "All"
-    user_id: Optional[str] = "All"
+    action_type: Optional[str] = None
+    action_filter: Optional[str] = None
+    district: Optional[str] = None
+    district_filter: Optional[str] = None
+    user_id: Optional[str] = None
+    user_filter: Optional[str] = None
     search: Optional[str] = ""
-    limit: Optional[int] = 200
+    limit: Optional[int] = 300
 # get_ist_now is defined at the top of the module for global availability
 
 
@@ -361,7 +364,7 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         # Fetch audit logs ordered chronologically descending
         docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
             .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(query.limit or 200)
+            .limit(query.limit or 300)
             .stream()))
             
         def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
@@ -378,6 +381,10 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
             except Exception:
                 return str(ts_str)
 
+        effective_action = query.action_type or query.action_filter or "All"
+        effective_district = query.district or query.district_filter or "All"
+        effective_user = query.user_id or query.user_filter or "All"
+
         logs = []
         for doc in docs:
             d = doc.to_dict()
@@ -388,11 +395,11 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
                 continue
 
             # Apply filters in memory
-            if query.action_type and query.action_type != "All" and d.get("action_type") != query.action_type:
+            if effective_action != "All" and d.get("action_type") != effective_action:
                 continue
-            if query.district and query.district != "All" and d.get("district") != query.district:
+            if effective_district != "All" and d.get("district") != effective_district:
                 continue
-            if query.user_id and query.user_id != "All" and d.get("user_id") != query.user_id:
+            if effective_user != "All" and d.get("user_id") != effective_user:
                 continue
             if query.search:
                 s_lower = query.search.lower()
