@@ -782,6 +782,22 @@ export function useAdminModals({
     }
   }, [ledgerDistrict, authFetch]);
 
+  const fetchNikshaySyncStatus = useCallback(async () => {
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const res = await fetch(`${API_BASE_URL}/admin/nikshay/sync-status`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNikshaySyncStatus(data);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch nikshay sync status", e);
+    }
+  }, [getAdminToken]);
+
   const handleReconcileNikshay = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!nikshayFile) {
@@ -809,6 +825,7 @@ export function useAdminModals({
       const data = await res.json();
       setNikshayResult(data);
       fetchCumulativeLedger(1, '', nikshayDistrict);
+      fetchNikshaySyncStatus();
     } catch (err) {
       setNikshayError(err.message || 'Error running reconciliation');
     } finally {
@@ -1927,6 +1944,13 @@ export function useAdminModals({
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
   }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg, adminTargetViewMode]);
 
+  // Trigger useEffects (Strict TDZ Order: placed after all useCallbacks and before return)
+  useEffect(() => {
+    if (showNikshayModal) {
+      fetchNikshaySyncStatus();
+    }
+  }, [showNikshayModal, fetchNikshaySyncStatus]);
+
   return {
     // 1. Security
     showSecurityModal, setShowSecurityModal,
@@ -2034,7 +2058,7 @@ export function useAdminModals({
     ledgerData, ledgerSearch, setLedgerSearch,
     ledgerDistrict, setLedgerDistrict,
     ledgerLoading, ledgerExporting, reviewExporting,
-    nikshaySyncStatus, handleReconcileNikshay,
+    nikshaySyncStatus, fetchNikshaySyncStatus, handleReconcileNikshay,
     handleDownloadReviewSheet, handleExportCumulativeLedger,
     fetchCumulativeLedger,
     isSubAdmin: currentUser?.role === 'SUB_ADMIN',
