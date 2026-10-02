@@ -130,8 +130,8 @@ export default function TravelAllowanceModal({
   // ── ROSTER VIEW ───────────────────────────────────────────────────────────
   if (viewMode === 'ROSTER') {
     return (
-      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto">
-        <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl border border-slate-100 my-4 flex flex-col">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col overflow-hidden">
+        <div className="bg-white w-full h-full flex flex-col overflow-hidden">
 
           {/* Header */}
           <div className="flex flex-wrap gap-3 items-center justify-between p-5 border-b border-slate-100">
@@ -419,8 +419,8 @@ export default function TravelAllowanceModal({
   const isLocked = selectedOfficer?.is_locked || false;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-start justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl w-full max-w-5xl shadow-2xl border border-slate-100 my-4 flex flex-col">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col overflow-hidden">
+      <div className="bg-white w-full h-full flex flex-col overflow-hidden">
 
         {/* Header */}
         <div className="flex flex-wrap gap-3 items-center justify-between p-5 border-b border-slate-100">
@@ -572,7 +572,7 @@ export default function TravelAllowanceModal({
               />
             </div>
             <button
-              onClick={() => handleSaveLog?.(selectedOfficer?.staff_key, drilldownLog, deductionAmount, deductionReason)}
+              onClick={() => handleSaveLog?.(selectedOfficer?.staff_key, drilldownLog, deductionAmount, deductionReason, selectedOfficer)}
               disabled={isSubmitting || isLocked || !canEdit}
               className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >

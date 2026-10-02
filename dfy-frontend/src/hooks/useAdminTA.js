@@ -95,7 +95,7 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     }
   }, [isSubAdmin, taMonth, taDistrict, authFetch, API_BASE_URL, showToast, fetchRoster]);
 
-  const handleSaveLog = useCallback(async (staffKey, days, deduction, deductionReasonText) => {
+  const handleSaveLog = useCallback(async (staffKey, days, deduction, deductionReasonText, officer) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
@@ -105,10 +105,12 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
         body: JSON.stringify({
           month: taMonth,
           district: taDistrict,
+          staff_name: officer?.staff_name || officer?.name || staffKey || '',
+          designation: officer?.designation || 'Field Officer',
           staff_key: staffKey,
           days,
-          deduction_amount: deduction,
-          deduction_reason: deductionReasonText,
+          deduction_amount: parseFloat(deduction) || 0,
+          deduction_reason: deductionReasonText || '',
         }),
       });
       if (res.status === 423) {

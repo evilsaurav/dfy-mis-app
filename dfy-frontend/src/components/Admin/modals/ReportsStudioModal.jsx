@@ -53,11 +53,11 @@ export default function ReportsStudioModal({
   if (!showReportsStudio) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-4xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col overflow-hidden">
+          <div className="bg-white w-full h-full flex flex-col overflow-hidden animate-fade-in">
             
             {/* Modal Header */}
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+            <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
               <div>
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
                   <span>📊</span> DFY Executive Reports &amp; Export Studio
@@ -68,7 +68,7 @@ export default function ReportsStudioModal({
             </div>
 
             {/* Studio Navigation Tabs */}
-            <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
+            <div className="flex flex-wrap gap-2 px-6 py-3 border-b border-slate-100">
               {[
                 { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
                 { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
@@ -89,7 +89,7 @@ export default function ReportsStudioModal({
             </div>
 
             {/* Studio Content Area */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar my-4 pr-1">
+            <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-4">
               
               {/* Tab 1: District KPI Workbooks */}
               {reportsStudioTab === "kpi_workbooks" && (
