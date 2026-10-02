@@ -112,6 +112,7 @@ export default function AdminDashboard() {
   const [attendanceDistrictFilter, setAttendanceDistrictFilter] = useState('All');
   const [attendanceTimeFilter, setAttendanceTimeFilter] = useState('all');
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [copiedAttendance, setCopiedAttendance] = useState(false);
   const [lastSyncedTime, setLastSyncedTime] = useState('');
   const [syncStatus, setSyncStatus] = useState('LIVE');
   const lastFocusSyncRef = useRef(Date.now());
@@ -238,7 +239,13 @@ export default function AdminDashboard() {
     handleUpdatePacingHolidays,
     getSubmissionTimeClassification,
     inactiveStaffNamesSet,
-    chronicDefaulters
+    chronicDefaulters,
+    districtAttendanceRollup,
+    copyMissingReminder,
+    copySubmittedSummary,
+    copyDefaultersWarning,
+    copyDistrictSpecificSummary,
+    copyOnLeaveSummary
   } = useAdminAttendance({
     currentUser,
     attendanceDate,
@@ -262,7 +269,7 @@ export default function AdminDashboard() {
     setIsSavingAttendanceRemark,
     pacingHolidaysCount,
     setPacingHolidaysCount,
-    setCopiedAttendance: () => {}
+    setCopiedAttendance
   });
 
   // --- Custom Hook 2: Analytics & Pacing Engine ---
@@ -299,7 +306,10 @@ export default function AdminDashboard() {
     officialTargetsByDistrict,
     pacingHolidaysCount,
     districts,
-    showToast
+    showToast,
+    activeMetric,
+    performanceMetricFilter,
+    staffList
   });
 
   // --- Custom Hook 3: Reports & Workbook Downloads Engine ---
@@ -890,6 +900,10 @@ export default function AdminDashboard() {
           tableTotals={tableTotals}
           adminTargetViewMode={adminTargetViewMode}
           setIsAuthenticated={setIsAuthenticated}
+          targetsData={targetsData}
+          error={error}
+          fetchData={fetchData}
+          isSuperAdmin={isSuperAdmin}
         />
 
         {/* Tab 2: Staff Target Pacing & Run-Rate Studio */}
@@ -898,6 +912,7 @@ export default function AdminDashboard() {
           month={month}
           selectedDistrict={selectedDistrict}
           setSelectedDistrict={setSelectedDistrict}
+          districts={districts}
           workingDaysInfo={workingDaysInfo}
           pacingHolidaysCount={pacingHolidaysCount}
           handleUpdatePacingHolidays={handleUpdatePacingHolidays}
@@ -943,7 +958,25 @@ export default function AdminDashboard() {
         </footer>
 
         {/* --- 24 Modular Administration Modals --- */}
-        <AdminModals {...modals} />
+        <AdminModals
+          {...modals}
+          selectedDistrict={selectedDistrict}
+          districts={districts}
+          currentUser={currentUser}
+          isSubAdmin={!isSuperAdmin}
+          month={month}
+          staffDirectory={staffDirectory}
+          tempOfficialTargets={tempOfficialTargets}
+          setTempOfficialTargets={setTempOfficialTargets}
+          districtAttendanceRollup={districtAttendanceRollup}
+          copyMissingReminder={copyMissingReminder}
+          copySubmittedSummary={copySubmittedSummary}
+          copyDefaultersWarning={copyDefaultersWarning}
+          copyDistrictSpecificSummary={copyDistrictSpecificSummary}
+          copyOnLeaveSummary={copyOnLeaveSummary}
+          isSavingLeave={isSavingLeave}
+          copiedAttendance={copiedAttendance}
+        />
 
         {/* Global Toast Notification Portal */}
         {toast && (

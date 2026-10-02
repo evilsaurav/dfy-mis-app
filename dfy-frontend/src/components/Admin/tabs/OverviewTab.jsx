@@ -61,9 +61,15 @@ export default function OverviewTab({
   requestSort,
   tableTotals = {},
   adminTargetViewMode,
-  setIsAuthenticated
+  setIsAuthenticated,
+  targetsData = [],
+  error = null,
+  fetchData = () => {},
+  isSuperAdmin = false
 }) {
   if (activeMainTab !== 'overview') return null;
+
+  const attendance = todayAttendance;
 
   const TH = ({ label, sortKey }) => {
     const isSorted = sortConfig.key === sortKey;

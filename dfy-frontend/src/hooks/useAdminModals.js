@@ -168,6 +168,7 @@ export function useAdminModals({
 
   // 11. Notif Tray
   const [showNotifTrayModal, setShowNotifTrayModal] = useState(false);
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
   const [notifTrayFilterDistrict, setNotifTrayFilterDistrict] = useState('All');
   const [notifTraySearchQuery, setNotifTraySearchQuery] = useState('');
   const [notifTrayCategoryFilter, setNotifTrayCategoryFilter] = useState('all');
@@ -1374,6 +1375,37 @@ export function useAdminModals({
     }
   };
 
+  const handleOpenEditDay = useCallback((rec, foDistParam = '', foNameParam = '') => {
+    const foDist = rec.working_place || foDistParam || '';
+    const foName = foNameParam || rec.fo_name || '';
+    const dateStr = rec.date || rec.date_of_reporting || '';
+
+    const initialInputs = {};
+    (feedCategoriesConfig || []).forEach(cat => {
+      const ids = rec[cat.key] || [];
+      initialInputs[cat.key] = Array.isArray(ids) ? ids.join('\n') : '';
+    });
+
+    const mKm = rec.morning_km !== undefined && rec.morning_km !== null ? rec.morning_km : 0;
+    const eKm = rec.evening_km !== undefined && rec.evening_km !== null ? rec.evening_km : 0;
+    const tKm = rec.total_km || rec.travel_expenses || (eKm && mKm ? Math.max(0, eKm - mKm) : 0);
+
+    setEditDayModal({
+      isOpen: true,
+      district: foDist,
+      fo_name: foName,
+      date: dateStr,
+      morning_km: mKm,
+      evening_km: eKm,
+      travel_expenses: tKm,
+      visited_names: Array.isArray(rec.visited_names) ? rec.visited_names.join(', ') : (rec.visited_names || ''),
+      remark: rec.remark || '',
+      category_inputs: initialInputs,
+      isSubmitting: false,
+      error: ''
+    });
+  }, [feedCategoriesConfig]);
+
   const handleExecuteEditDay = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
     if (!editDayModal) return;
@@ -2100,6 +2132,7 @@ export function useAdminModals({
 
     // 22. Edit Day Report
     editDayModal, setEditDayModal,
+    handleOpenEditDay,
     handleExecuteEditDay,
 
     // 23. Reports Studio

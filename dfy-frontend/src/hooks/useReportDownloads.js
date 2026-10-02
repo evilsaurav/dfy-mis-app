@@ -121,25 +121,6 @@ export function useReportDownloads({
     setSelectedAttendanceDistricts([]);
   };
 
-  const handleToggleNotifDistrict = (dist) => {
-    setNotifTrayDistricts(prev => {
-      const clean = prev.filter(d => d !== 'All');
-      if (clean.includes(dist)) {
-        return clean.filter(d => d !== dist);
-      } else {
-        return [...clean, dist];
-      }
-    });
-  };
-
-  const handleSelectAllNotifDistricts = () => {
-    setNotifTrayDistricts([...availableKpiDistricts]);
-  };
-
-  const handleClearNotifDistricts = () => {
-    setNotifTrayDistricts([]);
-  };
-
   const handleDownloadMedicineReport = () => {
     if (isDownloadingMedicineReport) return;
     setIsDownloadingMedicineReport(true);

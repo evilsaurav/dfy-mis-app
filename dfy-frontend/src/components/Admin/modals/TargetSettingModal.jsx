@@ -1,5 +1,5 @@
 import React from 'react';
-import { canonicalizeDistrict, parseTargetVal, isOfficerNameMatch } from '../../../utils/districtHelpers';
+import { canonicalizeDistrict, canonicalizeFo, parseTargetVal, isOfficerNameMatch } from '../../../utils/districtHelpers';
 import { getPreviousMonth } from '../../../utils/operationalMonth';
 
 export default function TargetSettingModal({
@@ -29,7 +29,10 @@ export default function TargetSettingModal({
   saveAllTargets,
   handleSaveAllTargetsCombined,
   isSavingTargets,
-  frontlineAllocated = 0
+  frontlineAllocated = 0,
+  staffDirectory = {},
+  tempOfficialTargets = {},
+  setTempOfficialTargets = () => {}
 }) {
   if (!show) return null;
 

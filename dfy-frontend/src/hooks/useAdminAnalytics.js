@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { canonicalizeDistrict, canonicalizeFo, isOfficerNameMatch, parseTargetVal } from '../utils/districtHelpers';
+import { canonicalizeDistrict, canonicalizeFo, isOfficerNameMatch, parseTargetVal, DEFAULT_BIHAR_DISTRICTS } from '../utils/districtHelpers';
 
 export function useAdminAnalytics({
   rawRecords = [],
@@ -19,6 +19,10 @@ export function useAdminAnalytics({
   pacingFilterStatus = 'ALL',
   pacingSearchQuery = '',
   pacingSortConfig = { key: 'pacingPct', direction: 'desc' },
+  officialTargetsByDistrict = {},
+  officialDistrictTarget = 0,
+  activeMetric = 'notifications',
+  performanceMetricFilter = 'notif_only',
   showToast
 }) {
   const [copiedBulletin, setCopiedBulletin] = useState(false);
@@ -961,6 +965,55 @@ export function useAdminAnalytics({
     window.open(shareUrl, '_blank');
   };
 
+  // Dual-Target Hierarchy Derivations (Statewide & District Scope)
+  const frontlineStretchTarget = useMemo(() => {
+    if (selectedDistrict !== 'All') {
+      return (targetsData || []).filter(t => canonicalizeDistrict(t.district) === canonicalizeDistrict(selectedDistrict)).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      const allowedCanon = currentUser.allowed_districts.map(canonicalizeDistrict);
+      return (targetsData || []).filter(t => allowedCanon.includes(canonicalizeDistrict(t.district))).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    } else {
+      return (targetsData || []).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+    }
+  }, [targetsData, selectedDistrict, currentUser]);
+
+  const effectiveDistrictTarget = useMemo(() => {
+    if (selectedDistrict !== 'All') {
+      const cDist = canonicalizeDistrict(selectedDistrict);
+      const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[cDist]) || 0;
+      return offTgt > 0 ? offTgt : frontlineStretchTarget;
+    } else if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+      let eff = 0;
+      const permitted = (currentUser.allowed_districts || []).map(canonicalizeDistrict);
+      permitted.forEach(d => {
+        const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[d]) || 0;
+        if (offTgt > 0) {
+          eff += offTgt;
+        } else {
+          const staffSum = (targetsData || []).filter(t => canonicalizeDistrict(t.district) === d).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+          eff += staffSum;
+        }
+      });
+      return eff;
+    } else {
+      let eff = 0;
+      const allDists = (districts && districts.length > 0 ? districts : DEFAULT_BIHAR_DISTRICTS).filter(d => d !== 'All').map(canonicalizeDistrict);
+      allDists.forEach(d => {
+        const offTgt = (officialTargetsByDistrict && officialTargetsByDistrict[d]) || 0;
+        if (offTgt > 0) {
+          eff += offTgt;
+        } else {
+          const staffSum = (targetsData || []).filter(t => canonicalizeDistrict(t.district) === d).reduce((sum, t) => sum + (Number(t.target) || 0), 0);
+          eff += staffSum;
+        }
+      });
+      return eff <= 0 ? frontlineStretchTarget : eff;
+    }
+  }, [selectedDistrict, officialTargetsByDistrict, frontlineStretchTarget, currentUser, districts, targetsData]);
+
+  const scopedTarget = useMemo(() => {
+    return (adminTargetViewMode === 'frontline') ? frontlineStretchTarget : effectiveDistrictTarget;
+  }, [adminTargetViewMode, frontlineStretchTarget, effectiveDistrictTarget]);
 
   return {
     filteredRecords,

@@ -12,7 +12,9 @@ export default function DuplicateRadarModal({
   duplicateRadarTab,
   setDuplicateRadarTab,
   duplicateRepairing,
-  handleRepairDuplicates
+  handleRepairDuplicates,
+  repairingDocId = null,
+  handleRepairDuplicate = () => {}
 }) {
   if (!show) return null;
 

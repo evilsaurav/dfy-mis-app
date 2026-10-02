@@ -11,7 +11,18 @@ export default function FoInspectorModal({
   setFoSearchId,
   month,
   setEditingRecord,
-  setDeleteDayModal
+  setDeleteDayModal,
+  selectedDistrict = 'All',
+  setFeedDistrict = () => {},
+  setFeedFoName = () => {},
+  setFeedDate = () => {},
+  setFeedCategoryInputs = () => {},
+  setFeedRemarks = () => {},
+  setFeedError = () => {},
+  setFeedSuccess = () => {},
+  setShowAdminFeedModal = () => {},
+  handleOpenEditDay = () => {},
+  setAdminEditModal = () => {}
 }) {
   const [copiedFoCategory, setCopiedFoCategory] = useState(null);
   if (!inspectingFO) return null;

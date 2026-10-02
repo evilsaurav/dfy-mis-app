@@ -36,7 +36,10 @@ export default function NikshayModal({
   month,
   setShowJourneyModal,
   setJourneySearchId,
-  handleFetchJourney
+  handleFetchJourney,
+  selectedDistrict = 'All',
+  reviewExporting = false,
+  getAdminToken = () => ''
 }) {
   if (!show) return null;
 

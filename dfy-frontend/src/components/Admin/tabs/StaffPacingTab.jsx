@@ -25,7 +25,8 @@ export default function StaffPacingTab({
   setPacingViewMode,
   setInspectingFO,
   copyCoachingMessage,
-  copiedCoachingOfficer
+  copiedCoachingOfficer,
+  districts = []
 }) {
   if (activeMainTab !== 'staff_pacing') return null;
 

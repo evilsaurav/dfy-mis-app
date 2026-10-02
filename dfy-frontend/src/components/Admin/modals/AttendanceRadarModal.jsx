@@ -28,7 +28,15 @@ export default function AttendanceRadarModal({
   handleExecuteAttendanceRemark,
   isSavingAttendanceRemark,
   getSubmissionTimeClassification,
-  districts = []
+  districts = [],
+  districtAttendanceRollup = {},
+  copyDistrictSpecificSummary = () => {},
+  isSavingLeave = false,
+  copyMissingReminder = () => {},
+  copiedAttendance = false,
+  copySubmittedSummary = () => {},
+  copyOnLeaveSummary = () => {},
+  copyDefaultersWarning = () => {}
 }) {
   if (!show || !attendance) return null;
 

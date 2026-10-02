@@ -265,6 +265,9 @@ export default function AdminModals(props) {
         setShowJourneyModal={props.setShowJourneyModal}
         setJourneySearchId={props.setJourneySearchId || props.setJourneyPatientId}
         handleFetchJourney={props.handleFetchJourney}
+        selectedDistrict={props.selectedDistrict || props.nikshayDistrict || 'All'}
+        reviewExporting={props.reviewExporting}
+        getAdminToken={props.getAdminToken || (() => '')}
       />
 
       {/* 15. Admin Backdated Feeding Studio */}
@@ -324,6 +327,9 @@ export default function AdminModals(props) {
         handleSaveAllTargetsCombined={props.handleSaveAllTargetsCombined}
         isSavingTargets={props.isSavingTargets}
         frontlineAllocated={props.frontlineAllocated || 0}
+        staffDirectory={props.staffDirectory || {}}
+        tempOfficialTargets={props.tempOfficialTargets || props.officialTargetsByDistrict || {}}
+        setTempOfficialTargets={props.setTempOfficialTargets || (() => {})}
       />
 
       {/* 17. Live Attendance Radar */}
@@ -355,6 +361,14 @@ export default function AdminModals(props) {
         isSavingAttendanceRemark={props.isSavingAttendanceRemark}
         getSubmissionTimeClassification={props.getSubmissionTimeClassification}
         districts={props.districts || []}
+        districtAttendanceRollup={props.districtAttendanceRollup || {}}
+        copyMissingReminder={props.copyMissingReminder || (() => {})}
+        copySubmittedSummary={props.copySubmittedSummary || (() => {})}
+        copyDefaultersWarning={props.copyDefaultersWarning || (() => {})}
+        copyDistrictSpecificSummary={props.copyDistrictSpecificSummary || (() => {})}
+        copyOnLeaveSummary={props.copyOnLeaveSummary || (() => {})}
+        isSavingLeave={props.isSavingLeave || false}
+        copiedAttendance={props.copiedAttendance || false}
       />
 
       {/* 18. Duplicate Patient ID Radar */}
@@ -371,6 +385,8 @@ export default function AdminModals(props) {
         setDuplicateRadarTab={props.setDuplicateRadarTab}
         duplicateRepairing={props.duplicateRepairing || props.repairingDocId}
         handleRepairDuplicates={props.handleRepairDuplicates || props.handleRepairDuplicate}
+        repairingDocId={props.repairingDocId || null}
+        handleRepairDuplicate={props.handleRepairDuplicate || props.handleRepairDuplicates || (() => {})}
       />
 
       {/* 19. FO Field Officer Inspector */}
@@ -385,6 +401,17 @@ export default function AdminModals(props) {
         month={props.month}
         setEditingRecord={props.setEditingRecord || (() => {})}
         setDeleteDayModal={props.setDeleteDayModal}
+        selectedDistrict={props.selectedDistrict || 'All'}
+        setFeedDistrict={props.setFeedDistrict || (() => {})}
+        setFeedFoName={props.setFeedFoName || (() => {})}
+        setFeedDate={props.setFeedDate || (() => {})}
+        setFeedCategoryInputs={props.setFeedCategoryInputs || (() => {})}
+        setFeedRemarks={props.setFeedRemarks || (() => {})}
+        setFeedError={props.setFeedError || (() => {})}
+        setFeedSuccess={props.setFeedSuccess || (() => {})}
+        setShowAdminFeedModal={props.setShowAdminFeedModal || (() => {})}
+        handleOpenEditDay={props.handleOpenEditDay || (() => {})}
+        setAdminEditModal={props.setAdminEditModal || (() => {})}
       />
 
       {/* 20. Staff Management Suite */}
