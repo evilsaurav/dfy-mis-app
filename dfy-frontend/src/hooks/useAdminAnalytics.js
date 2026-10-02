@@ -28,6 +28,16 @@ export function useAdminAnalytics({
   const [copiedBulletin, setCopiedBulletin] = useState(false);
   const [copiedCoachingOfficer, setCopiedCoachingOfficer] = useState(null);
 
+  // Field Officers List for Filter
+  const fos = useMemo(() => {
+    let filtered = rawRecords;
+    if (selectedDistrict !== 'All') {
+      filtered = filtered.filter(r => canonicalizeDistrict(r.working_place) === selectedDistrict);
+    }
+    const names = Array.from(new Set(filtered.map(r => canonicalizeFo(r.fo_name, r.working_place, staffDirectory)))).filter(Boolean).sort();
+    return ['All', ...names];
+  }, [rawRecords, selectedDistrict, staffDirectory]);
+
   // Filtered Records
   const filteredRecords = useMemo(() => {
     return rawRecords.filter(r => {
@@ -1016,9 +1026,11 @@ export function useAdminAnalytics({
   }, [adminTargetViewMode, frontlineStretchTarget, effectiveDistrictTarget]);
 
   return {
+    fos,
     filteredRecords,
     aggregate,
     totals,
+    aggregations: totals,
     liveWhatsAppBulletin,
     copyWhatsAppBulletin,
     copiedBulletin,

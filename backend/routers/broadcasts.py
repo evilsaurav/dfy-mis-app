@@ -86,6 +86,7 @@ async def create_broadcast(req: BroadcastCreateReq, admin: dict = Depends(get_cu
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/broadcasts/active")
+@router.get("/admin/broadcasts/active")
 async def get_active_broadcasts(
     district: Optional[str] = None, 
     role: Optional[str] = None,  # 'FIELD_STAFF' or 'SUB_ADMIN'

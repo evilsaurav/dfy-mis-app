@@ -41,6 +41,8 @@ router = APIRouter(tags=["staff"])
 
 
 @router.get("/staff-directory")
+@router.get("/admin/directory")
+@router.get("/get-directory")
 async def get_staff_directory():
     try:
         cached = cache.get("staff_directory_list")
@@ -113,6 +115,7 @@ class ToggleStaffStatusReq(BaseModel):
     effective_date: Optional[str] = None  # YYYY-MM-DD
 
 @router.get("/admin/staff/list")
+@router.get("/admin/staff-list")
 async def get_staff_full_list(
     districts: Optional[str] = None,
     status_filter: Optional[str] = "active",

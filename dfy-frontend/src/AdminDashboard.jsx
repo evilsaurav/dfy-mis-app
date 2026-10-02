@@ -277,6 +277,7 @@ export default function AdminDashboard() {
     fos,
     filteredRecords,
     aggregations,
+    totals,
     dailyTrendStats,
     performanceData,
     tableData,
@@ -364,10 +365,10 @@ export default function AdminDashboard() {
   const fetchDirectory = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/directory`);
+      const res = await authFetch(`${API_BASE_URL}/staff-directory`);
       if (res.ok) {
         const data = await res.json();
-        setStaffDirectory(data);
+        setStaffDirectory(data.data || data);
       }
     } catch (e) {
       console.error("Staff directory fetch error", e);
@@ -378,24 +379,32 @@ export default function AdminDashboard() {
     try {
       const targetMonth = monthVal || month;
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/targets?month=${targetMonth}&district=${dist}`);
+      let q = `?month=${targetMonth}`;
+      if (dist && dist !== 'All') {
+        q += `&district=${encodeURIComponent(dist)}`;
+      }
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await authFetch(`${API_BASE_URL}/get-targets${q}`);
       if (res.ok) {
         const data = await res.json();
         const targetsList = data.targets || [];
         setTargetsData(targetsList);
 
-        if (dist === 'All') {
-          const map = {};
-          targetsList.forEach(t => {
-            const cDist = canonicalizeDistrict(t.district);
-            if (cDist && typeof t.official_district_target === 'number') {
-              map[cDist] = t.official_district_target;
+        if (data.official_targets_by_district) {
+          setOfficialTargetsByDistrict(data.official_targets_by_district);
+          setTempOfficialTargets(data.official_targets_by_district);
+          if (dist && dist !== 'All') {
+            const cD = canonicalizeDistrict(dist);
+            if (data.official_targets_by_district[cD] !== undefined) {
+              setOfficialDistrictTarget(data.official_targets_by_district[cD]);
             }
-          });
-          setOfficialTargetsByDistrict(map);
-          setTempOfficialTargets(map);
-        } else if (targetsList.length > 0 && targetsList[0].official_district_target !== undefined) {
-          setOfficialDistrictTarget(targetsList[0].official_district_target);
+          } else if (data.official_district_target !== undefined) {
+            setOfficialDistrictTarget(data.official_district_target);
+          }
+        } else if (data.official_district_target !== undefined) {
+          setOfficialDistrictTarget(data.official_district_target);
         }
       }
     } catch (e) {
@@ -406,7 +415,12 @@ export default function AdminDashboard() {
   const fetchStaffList = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/staff-list`);
+      const params = new URLSearchParams();
+      params.append("status_filter", "all");
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        params.append("districts", currentUser.allowed_districts.join(','));
+      }
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/list?${params.toString()}`);
       if (res.ok) {
         const data = await res.json();
         setStaffList(data.staff || []);
@@ -419,10 +433,14 @@ export default function AdminDashboard() {
   const fetchActiveBroadcasts = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/broadcasts/active`);
+      let q = '';
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/active${q}`);
       if (res.ok) {
         const data = await res.json();
-        setActiveBroadcasts(data || []);
+        setActiveBroadcasts(data.broadcasts || data || []);
       }
     } catch (e) {
       console.error("Broadcasts fetch error", e);
@@ -434,7 +452,7 @@ export default function AdminDashboard() {
     try {
       const targetModeParam = mode === 'frontline' ? 'frontline' : 'official';
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/top-performers?month=${month}&period=${period}&mode=${mode}&target_mode=${targetModeParam}`);
+      const res = await authFetch(`${API_BASE_URL}/api/statewide-top-performers?month=${month}&period=${period}&mode=${targetModeParam}&target_mode=${targetModeParam}`);
       if (res.ok) {
         const data = await res.json();
         setTopPerformersData(data);
@@ -682,7 +700,7 @@ export default function AdminDashboard() {
       fetchData(false); 
       fetchAttendance(); 
       fetchDirectory(); 
-      loadTargets('All'); 
+      loadTargets('All', month); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
       fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
@@ -872,7 +890,7 @@ export default function AdminDashboard() {
           effectiveDistrictTarget={effectiveDistrictTarget}
           frontlineStretchTarget={frontlineStretchTarget}
           scopedTarget={scopedTarget}
-          totals={aggregations}
+          totals={aggregations || totals}
           isSubAdmin={!isSuperAdmin}
           currentUser={currentUser}
           setInspectingFO={modals.setInspectingFO}

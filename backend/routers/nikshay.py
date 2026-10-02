@@ -1051,7 +1051,10 @@ async def export_cumulative_ledger(
 # --- Patient Longitudinal Journey Timeline Drawer API ---
 # =========================================================================
 @router.get("/api/reports/patient-journey/{patient_id}")
-async def get_patient_journey(patient_id: str):
+@router.get("/api/nikshay/patient-journey/{patient_id}")
+@router.get("/api/nikshay/patient-journey")
+@router.get("/api/reports/patient-journey")
+async def get_patient_journey(patient_id: Optional[str] = None):
     try:
         clean_id = str(patient_id).strip()
         if not clean_id:

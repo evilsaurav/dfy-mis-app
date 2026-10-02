@@ -207,6 +207,7 @@ class RepairDuplicateRequest(BaseModel):
     duplicate_ids: List[str]
 
 @router.get("/admin/scan-duplicate-notifications")
+@router.get("/admin/duplicate-scan")
 async def scan_duplicate_notifications(
     month: Optional[str] = Query(None),
     districts: Optional[str] = Query(None),

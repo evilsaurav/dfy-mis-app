@@ -1559,6 +1559,7 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     return {"summary": summary, "alerts": alert_list}
 
 @router.get("/api/reports/cascade-alerts")
+@router.get("/admin/cascade-alerts")
 async def get_cascade_alerts(month: Optional[str] = None, district: Optional[str] = "All", fo_name: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:

@@ -43,6 +43,7 @@ class BulkStaffTargetUpdate(BaseModel):
 
 @router.get("/targets")
 @router.get("/get-targets")
+@router.get("/admin/targets")
 async def get_targets(district: Optional[str] = None, month: Optional[str] = None, districts: Optional[str] = None):
     try:
         if not month:

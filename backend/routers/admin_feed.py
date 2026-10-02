@@ -1039,6 +1039,7 @@ async def admin_edit_day_report(
 
 # --- 7-Day ID Modifications & Audit Radar ---
 @router.get("/admin/reports/recent-id-edits")
+@router.get("/admin/recent-id-edits")
 async def get_recent_id_edits(
     days: Optional[int] = 7,
     limit: Optional[int] = 300,

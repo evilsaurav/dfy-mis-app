@@ -30,10 +30,13 @@ router = APIRouter(tags=["top_performers"])
 
 
 @router.get("/api/statewide-top-performers")
+@router.get("/admin/top-performers")
+@router.get("/api/top-performers")
 async def get_statewide_top_performers(
     month: Optional[str] = None,
     period: str = "monthly",
     target_mode: str = "official",
+    mode: Optional[str] = None,
     admin: dict = Depends(get_current_admin)
 ):
     """
@@ -55,7 +58,7 @@ async def get_statewide_top_performers(
         if period not in ("weekly", "fortnightly", "monthly"):
             period = "monthly"
 
-        clean_target_mode = (target_mode or "official").lower().strip()
+        clean_target_mode = (target_mode or mode or "official").lower().strip()
         if clean_target_mode not in ("official", "frontline"):
             clean_target_mode = "official"
 
@@ -349,6 +352,7 @@ async def get_statewide_top_performers(
                 "district": s["district"],
                 "designation": s.get("designation") or "Field Officer",
                 "notifications": s["notifications"],
+                "target": int(s.get("target", 50)),
                 "percentage": s["percentage"],
                 "metric_value": s["notifications"],
                 "metric_label": "notifications"
