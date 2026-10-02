@@ -12,10 +12,6 @@ from datetime import datetime, timedelta, date as dt_date
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from fastapi.responses import StreamingResponse, FileResponse
-import pandas as pd
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -123,6 +119,8 @@ async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_
                     
                 consolidated_data.append(row)
 
+        import pandas as pd  # lazy import
+        import openpyxl
         df = pd.DataFrame(consolidated_data)
         df.loc[len(df)] = pd.Series({'Date': 'Designed by Insomniac'})
         output = io.BytesIO()
@@ -197,8 +195,14 @@ def generate_district_kpi_bytes(
     district: str, 
     month_prefix: Optional[str] = None, 
     raw_reports: Optional[list] = None, 
-    target_records: Optional[list] = None
+    target_records: Optional[list] = None,
+    district_targets_map: Optional[dict] = None
 ) -> Optional[bytes]:
+    import pandas as pd  # lazy — cached in sys.modules after first call
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
     if not month_prefix:
         month_prefix = datetime.now().strftime("%Y-%m")
         
@@ -237,31 +241,45 @@ def generate_district_kpi_bytes(
         target_map = {}
 
         c_dist = canonicalize_district(district)
-        # Fetch Official District Target if set
+        # Fetch Official District Target — use pre-fetched map (ZIP path) or 3-fallback Firestore reads
         dt_doc_id = f"{month_prefix}_{c_dist}".replace(" ", "").lower()
         official_target = None
         try:
-            dt_doc = db.collection("district_targets").document(dt_doc_id).get()
-            if dt_doc and getattr(dt_doc, "exists", False) is True:
-                raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
+            if district_targets_map is not None:
+                # O(1) dict lookups — no Firestore reads (ZIP export path)
+                prev_m = get_previous_month(month_prefix)
+                fb_id = c_dist.replace(" ", "").lower()
+                prev_id = f"{prev_m}_{fb_id}" if prev_m else None
+                raw_val = (
+                    district_targets_map.get(dt_doc_id) or
+                    (district_targets_map.get(prev_id) if prev_id else None) or
+                    district_targets_map.get(fb_id)
+                )
                 if isinstance(raw_val, (int, float)) and raw_val > 0:
                     official_target = int(raw_val)
-            if official_target is None or official_target <= 0:
-                prev_m = get_previous_month(month_prefix)
-                if prev_m:
-                    prev_id = f"{prev_m}_{c_dist}".replace(" ", "").lower()
-                    prev_doc = db.collection("district_targets").document(prev_id).get()
-                    if prev_doc and getattr(prev_doc, "exists", False) is True:
-                        raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
-                        if isinstance(raw_val, (int, float)) and raw_val > 0:
-                            official_target = int(raw_val)
-            if official_target is None or official_target <= 0:
-                fb_id = c_dist.replace(" ", "").lower()
-                fb_doc = db.collection("district_targets").document(fb_id).get()
-                if fb_doc and getattr(fb_doc, "exists", False) is True:
-                    raw_val = fb_doc.to_dict().get("official_target") if hasattr(fb_doc, "to_dict") and callable(fb_doc.to_dict) and fb_doc.to_dict() else None
+            else:
+                # Single-district download — 3-fallback Firestore reads (original behavior)
+                dt_doc = db.collection("district_targets").document(dt_doc_id).get()
+                if dt_doc and getattr(dt_doc, "exists", False) is True:
+                    raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
                     if isinstance(raw_val, (int, float)) and raw_val > 0:
                         official_target = int(raw_val)
+                if official_target is None or official_target <= 0:
+                    prev_m = get_previous_month(month_prefix)
+                    if prev_m:
+                        prev_id = f"{prev_m}_{c_dist}".replace(" ", "").lower()
+                        prev_doc = db.collection("district_targets").document(prev_id).get()
+                        if prev_doc and getattr(prev_doc, "exists", False) is True:
+                            raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
+                            if isinstance(raw_val, (int, float)) and raw_val > 0:
+                                official_target = int(raw_val)
+                if official_target is None or official_target <= 0:
+                    fb_id = c_dist.replace(" ", "").lower()
+                    fb_doc = db.collection("district_targets").document(fb_id).get()
+                    if fb_doc and getattr(fb_doc, "exists", False) is True:
+                        raw_val = fb_doc.to_dict().get("official_target") if hasattr(fb_doc, "to_dict") and callable(fb_doc.to_dict) and fb_doc.to_dict() else None
+                        if isinstance(raw_val, (int, float)) and raw_val > 0:
+                            official_target = int(raw_val)
         except Exception as e:
             print(f"Notice: Target fetch exception for {district}: {e}")
             official_target = None
@@ -756,6 +774,7 @@ async def download_medicine_consumption(
                 filtered_reports.append(r)
                 
             # Build openpyxl workbook
+            import openpyxl  # lazy import
             wb = openpyxl.Workbook()
             
             # Sheet 1: Detailed Patient Consumption
@@ -928,6 +947,21 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
 
                 raw_monthly = await get_raw(month_tag)
                 cached_targets = await get_targets(month_tag)
+
+                # B1 fix: pre-fetch all district_targets in ONE stream before the loop
+                # eliminates up to 99 blocking Firestore reads (3 per district × 33 districts)
+                dt_cache_key = f"district_targets_map_{month_tag}"
+                district_targets_map = cache.get(dt_cache_key)
+                if district_targets_map is None:
+                    dt_docs = await asyncio.to_thread(
+                        lambda: list(db.collection("district_targets").stream())
+                    )
+                    district_targets_map = {}
+                    for d in dt_docs:
+                        dd = d.to_dict() if hasattr(d, "to_dict") else {}
+                        district_targets_map[d.id] = dd.get("official_target", 0)
+                    cache.set(dt_cache_key, district_targets_map, ttl=600)
+
                 with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for dist in bihar_districts:
                         excel_bytes = await asyncio.to_thread(
@@ -935,7 +969,8 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
                             dist,
                             month_prefix=month_tag,
                             raw_reports=raw_monthly,
-                            target_records=cached_targets
+                            target_records=cached_targets,
+                            district_targets_map=district_targets_map
                         )
                         if excel_bytes:
                             zip_file.writestr(f"KPI_Report_{safe_filename(dist)}_{month_tag}.xlsx", excel_bytes)

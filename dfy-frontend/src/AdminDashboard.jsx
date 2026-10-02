@@ -726,12 +726,6 @@ export default function AdminDashboard() {
   }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers, adminTargetViewMode]);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
-    }
-  }, [adminTargetViewMode, topPerformersPeriod, isAuthenticated, fetchTopPerformers]);
-
-  useEffect(() => {
     if (isAuthenticated && selectedDistrict) {
       fetchPacingSettings(month, selectedDistrict);
     }

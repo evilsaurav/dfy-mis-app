@@ -11,10 +11,6 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import pandas as pd
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 from google.cloud import firestore
 
 from backend.core.database import db
@@ -41,7 +37,7 @@ from backend.core.styles import (
 
 router = APIRouter(tags=["nikshay"])
 logger = logging.getLogger("nikshay")
-
+NIKSHAY_EXPORT_SEMAPHORE = asyncio.Semaphore(1)
 
 # --- Nikshay Column Header Matching Helpers ---
 # =========================================================================
@@ -212,7 +208,7 @@ async def reconcile_nikshay(
         content = await file.read()
         filename = file.filename.lower()
         sheet_used = "Default"
-        
+        import pandas as pd  # lazy — only loaded when upload is processed
         # 1. Multi-sheet Excel Parser targeting 'mastersheet'
         if filename.endswith(".csv"):
             df = pd.read_csv(io.BytesIO(content))
@@ -927,6 +923,7 @@ async def download_nikshay_review_sheet(
                 "Final Decision (Approved / Rejected Fake ID)": "Approved"
             })
             
+        import pandas as pd  # lazy — only loaded when export is requested
         df_export = pd.DataFrame(rows)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -1064,40 +1061,43 @@ async def export_cumulative_ledger(
     admin: dict = Depends(get_current_admin)
 ):
     try:
-        query = db.collection("nikshay_verified_patients")
-        if district and district != "All":
-            query = query.where("district", "==", district)
-            
-        docs = await asyncio.to_thread(lambda: list(query.stream()))
-        
-        rows = []
-        for doc in docs:
-            d = doc.to_dict()
-            rows.append({
-                "Episode ID": d.get("patient_id", ""),
-                "Patient Name": d.get("patient_name", ""),
-                "Phone": d.get("phone", ""),
-                "District": d.get("district", ""),
-                "Notification Verified": "Yes" if d.get("notification_verified") else "Pending",
-                "HIV/DM Screened": "Yes" if (d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested")) else "Pending",
-                "DBT Bank Validated": "Yes" if d.get("bank_validated") else "Pending",
-                "UDST Done": "Yes" if d.get("udst_done") else "Pending",
-                "Contact Tracing Done": "Yes" if d.get("contact_tracing_done") else "Pending",
-                "Treatment Outcome": d.get("treatment_outcome", ""),
-                "First Verified Date": str(d.get("first_verified_at", ""))[:10],
-                "Last Reconciled Date": str(d.get("last_reconciled_at", ""))[:10],
-                "Reconciled By": d.get("reconciled_by", "")
-            })
-            
-        df_export = pd.DataFrame(rows)
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df_export.to_excel(writer, index=False, sheet_name="Cumulative Ledger")
-            ws = writer.sheets["Cumulative Ledger"]
-            style_excel_worksheet(ws, header_fill_color="059669")
-            
-        output.seek(0)
-        dist_slug = district.replace(" ", "_") if district else "All"
+        async with NIKSHAY_EXPORT_SEMAPHORE:
+            query = db.collection("nikshay_verified_patients")
+            if district and district != "All":
+                query = query.where("district", "==", district)
+
+            docs = await asyncio.to_thread(lambda: list(query.limit(5000).stream()))
+
+            rows = []
+            for doc in docs:
+                d = doc.to_dict()
+                rows.append({
+                    "Episode ID": d.get("patient_id", ""),
+                    "Patient Name": d.get("patient_name", ""),
+                    "Phone": d.get("phone", ""),
+                    "District": d.get("district", ""),
+                    "Notification Verified": "Yes" if d.get("notification_verified") else "Pending",
+                    "HIV/DM Screened": "Yes" if (d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested")) else "Pending",
+                    "DBT Bank Validated": "Yes" if d.get("bank_validated") else "Pending",
+                    "UDST Done": "Yes" if d.get("udst_done") else "Pending",
+                    "Contact Tracing Done": "Yes" if d.get("contact_tracing_done") else "Pending",
+                    "Treatment Outcome": d.get("treatment_outcome", ""),
+                    "First Verified Date": str(d.get("first_verified_at", ""))[:10],
+                    "Last Reconciled Date": str(d.get("last_reconciled_at", ""))[:10],
+                    "Reconciled By": d.get("reconciled_by", "")
+                })
+            import pandas as pd  # lazy import
+            df_export = pd.DataFrame(rows)
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_export.to_excel(writer, index=False, sheet_name="Cumulative Ledger")
+                ws = writer.sheets["Cumulative Ledger"]
+                style_excel_worksheet(ws, header_fill_color="059669")
+
+            del df_export
+            gc.collect()
+            output.seek(0)
+            dist_slug = district.replace(" ", "_") if district else "All"
         filename = f"Nikshay_Cumulative_Ledger_{dist_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx"
         
         return StreamingResponse(

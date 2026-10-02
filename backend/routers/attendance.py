@@ -11,9 +11,6 @@ from datetime import datetime, timedelta, date as dt_date
 from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 from backend.core.database import db, ENABLE_IN_MEMORY_DERIVATION
 from backend.core.cache import cache
@@ -830,6 +827,9 @@ async def export_staff_attendance(
             sorted_officers = sorted(officers_map.values(), key=lambda x: (x["district"], x["name"]))
 
             # 6. Build Workbook
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+            from openpyxl.utils import get_column_letter
             wb = openpyxl.Workbook()
             ws1 = wb.active
             ws1.title = "Attendance Matrix"

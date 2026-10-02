@@ -8,10 +8,6 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import pandas as pd
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -672,6 +668,7 @@ async def export_staff_pins(district: Optional[str] = "All", districts: Optional
         for idx, r in enumerate(rows):
             r["S.No"] = idx + 1
             
+        import pandas as pd  # lazy — only loaded when staff export is requested
         df = pd.DataFrame(rows)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
