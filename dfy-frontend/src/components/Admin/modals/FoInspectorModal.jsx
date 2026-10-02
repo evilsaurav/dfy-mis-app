@@ -31,7 +31,8 @@ export default function FoInspectorModal({
           if (!r.fo_name || !inspectingFO || !inspectingFO.fo_name) return false;
           const cDist = canonicalizeDistrict(inspectingFO.district || r.working_place);
           const matchName = isOfficerNameMatch(r.fo_name, inspectingFO.fo_name, cDist) ||
-            canonicalizeFo(r.fo_name, r.working_place, staffDirectory) === canonicalizeFo(inspectingFO.fo_name, inspectingFO.district, staffDirectory);
+            canonicalizeFo(r.fo_name, r.working_place, staffDirectory) === canonicalizeFo(inspectingFO.fo_name, inspectingFO.district, staffDirectory) ||
+            String(r.fo_name).trim().toLowerCase() === String(inspectingFO.fo_name).trim().toLowerCase();
           if (!matchName) return false;
           if (!inspectingFO.district || inspectingFO.district === 'All') return true;
           return canonicalizeDistrict(r.working_place) === canonicalizeDistrict(inspectingFO.district);

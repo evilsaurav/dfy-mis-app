@@ -5148,6 +5148,7 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentView, setCurrentView] = useState('form');
   const [toast, setToast] = useState({ message: "", type: "" });
+  const showToast = useCallback((message, type = 'success') => setToast({ message, type }), []);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBtn, setShowInstallBtn] = useState(true);
@@ -5619,8 +5620,6 @@ function App() {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-
-  const showToast = (message, type = 'success') => setToast({ message, type });
 
   // Auto-save draft whenever form data changes while logged in
   useEffect(() => {

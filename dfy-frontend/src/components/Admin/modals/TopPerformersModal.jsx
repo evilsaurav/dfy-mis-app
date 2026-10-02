@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const TOP_PERFORMER_MESSAGES = [
+const TOP_PERFORMER_MESSAGES = [
   "🌟 Bihar TB Warriors: Aapka asadharan samarpan aur kadi mehnat Bihar ko TB-mukt banane ki disha me ek nayi kranti la rahi hai!",
   "🔥 Salute to Real Heroes: Har ek notification, home visit aur diagnostic test se kisi pariwar ki zindagi sawar rahi hai. Shandar pradarshan!",
   "🏆 Pride of Doctors For You: Aapki nishtha aur zameeni karyashaili poore Bihar ke sabhi swasthya karmio ke liye prernasrot hai!",

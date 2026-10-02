@@ -35,3 +35,41 @@ def test_format_dashboard_record_includes_timestamps_and_total_ids():
     # Total IDs = 1 (notif) + 1 (test) + 1 (hiv) + 1 (dbt) + 1 (diff) + 4 (tpt) + 1 (sample) + 1 (contact) + 1 (face) + 1 (doc) = 13
     assert record["total_ids"] == 13, f"Expected 13 total IDs, got {record['total_ids']}"
     assert record["is_next_day_submission"] is False
+
+
+def test_format_dashboard_record_preserves_raw_ids_and_cohort_arrays():
+    """Verify format_dashboard_record preserves raw ID lists and visited_names for FO inspection and cohort engine."""
+    sample_doc = {
+        "id": "patna_test_fo_2026-10-01",
+        "working_place": "Patna",
+        "fo_name": "Test Officer",
+        "date_of_reporting": "2026-10-01",
+        "notification_ids": ["N-101", "N-102"],
+        "sample_tested_ids": ["T-101"],
+        "hiv_dm_ids": ["H-101"],
+        "dbt_ids": ["D-101", "D-102"],
+        "home_visit_ids": ["HV-101"],
+        "contact_tracing_ids": ["CT-101"],
+        "follow_up_ids": ["FU-101"],
+        "documents_ids": ["DOC-101"],
+        "differentiated_tb_ids": ["DF-101"],
+        "visited_names": ["Dr. Sharma Clinic", "City Pharmacy"],
+        "is_override_used": True
+    }
+
+    record = format_dashboard_record(sample_doc)
+    assert record is not None
+    assert record["notification_ids"] == ["N-101", "N-102"]
+    assert record["sample_tested_ids"] == ["T-101"]
+    assert record["hiv_dm_ids"] == ["H-101"]
+    assert record["dbt_ids"] == ["D-101", "D-102"]
+    assert record["home_visit_ids"] == ["HV-101"]
+    assert record["contact_tracing_ids"] == ["CT-101"]
+    assert record["follow_up_ids"] == ["FU-101"]
+    assert record["documents_ids"] == ["DOC-101"]
+    assert record["differentiated_tb_ids"] == ["DF-101"]
+    assert record["visited_names"] == ["Dr. Sharma Clinic", "City Pharmacy"]
+    assert record["home_visits"] == 1
+    assert record["follow_ups"] == 1
+    assert record["is_override"] is True
+

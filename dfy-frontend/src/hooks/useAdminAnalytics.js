@@ -349,6 +349,37 @@ export function useAdminAnalytics({
   // Table Data with Grouping & Sorting
   const tableData = useMemo(() => {
     const map = {};
+    if (selectedDistrict === 'All') {
+      let distList = DEFAULT_BIHAR_DISTRICTS;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        const userAllowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+        distList = distList.filter(d => userAllowed.includes(d));
+      }
+      distList.forEach(dist => {
+        map[dist] = { 
+          name: dist, 
+          ...aggregate([]),
+          target: 0,
+          hiv_dm_cur: 0,
+          hiv_dm_prev: 0,
+          tests_cur: 0,
+          tests_prev: 0,
+          dbt_cur: 0,
+          dbt_prev: 0,
+          home_visits_cur: 0,
+          home_visits_prev: 0,
+          contact_tracing_cur: 0,
+          contact_tracing_prev: 0,
+          follow_ups_cur: 0,
+          follow_ups_prev: 0,
+          documents_cur: 0,
+          documents_prev: 0,
+          differentiated_tb_cur: 0,
+          differentiated_tb_prev: 0,
+        };
+      });
+    }
+
     filteredRecords.forEach(r => {
       const key = selectedDistrict === 'All' 
         ? canonicalizeDistrict(r.working_place) 
@@ -499,7 +530,7 @@ export function useAdminAnalytics({
       return 0;
     });
     return data;
-  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter, adminTargetViewMode, officialTargetsByDistrict]);
+  }, [filteredRecords, selectedDistrict, sortConfig, staffDirectory, targetsData, staffList, currentMonthNotifIdSet, masterTableCohortFilter, adminTargetViewMode, officialTargetsByDistrict, currentUser]);
 
   // Aggregate totals across all rows in tableData (for both All Districts and District Drill-down)
   const tableTotals = useMemo(() => {
@@ -1040,6 +1071,7 @@ export function useAdminAnalytics({
     copiedBulletin,
     dailyTrendStats,
     performanceData,
+    performanceChartHeight,
     tableData,
     tableTotals,
     requestSort,

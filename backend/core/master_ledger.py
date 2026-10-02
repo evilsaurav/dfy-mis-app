@@ -481,32 +481,63 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
         # Group 1
         "hiv_dm": len(data.get("hiv_dm_ids", [])),
         "dbt": len(data.get("dbt_ids", [])),
-        "sample_collection": len(data.get("sample_collection_ids", [])),
         
         # Group 2
+        "sample_collection": len(data.get("sample_collection_ids", [])),
         "outcome_assigned": len(data.get("outcome_assigned_ids", [])),
+        
+        # Group 3 (with singular aliases for backward compatibility)
+        "home_visits": len(data.get("home_visit_ids", [])),
         "home_visit": len(data.get("home_visit_ids", [])),
         "contact_tracing": len(data.get("contact_tracing_ids", [])),
+        "follow_ups": len(data.get("follow_up_ids", [])),
         "follow_up": len(data.get("follow_up_ids", [])),
         "face_to_face": len(data.get("face_to_face_ids", [])),
         
-        # Group 3
+        # Group 4
         "documents": len(data.get("documents_ids", [])),
         "fdc_provided": len(data.get("fdc_provided_ids", [])),
         "fdc_details": data.get("fdc_details", []),
         "kit_consumption": len(data.get("kit_consumption_ids", [])),
+        
+        # Group 5 (New Fields & Special)
         "differentiated_tb": len(data.get("differentiated_tb_ids", [])),
         "tpt_treatment_start": len(data.get("tpt_treatment_start_ids", [])),
         "tpt_presumptive": len(data.get("tpt_presumptive_ids", [])),
+        "adhar_face_auth": len(data.get("adhar_face_authentication_ids", [])),
         "adhar_face_authentication": len(data.get("adhar_face_authentication_ids", [])),
         "consent_with_id": len(data.get("consent_with_id_ids", [])),
         "culture_dst": len(data.get("culture_dst_ids", [])),
+        
+        # Raw ID Lists for FO Drill-Down Inspector & Cohort Engine
+        "notification_ids": data.get("notification_ids", []),
+        "hiv_dm_ids": data.get("hiv_dm_ids", []),
+        "dbt_ids": data.get("dbt_ids", []),
+        "sample_collection_ids": data.get("sample_collection_ids", []),
+        "sample_tested_ids": data.get("sample_tested_ids", []),
+        "outcome_assigned_ids": data.get("outcome_assigned_ids", []),
+        "home_visit_ids": data.get("home_visit_ids", []),
+        "contact_tracing_ids": data.get("contact_tracing_ids", []),
+        "follow_up_ids": data.get("follow_up_ids", []),
+        "face_to_face_ids": data.get("face_to_face_ids", []),
+        "presumptive_ids": data.get("presumptive_ids", []),
+        "documents_ids": data.get("documents_ids", []),
+        "fdc_provided_ids": data.get("fdc_provided_ids", []),
+        "kit_consumption_ids": data.get("kit_consumption_ids", []),
+        "differentiated_tb_ids": data.get("differentiated_tb_ids", []),
+        "tpt_treatment_start_ids": data.get("tpt_treatment_start_ids", []),
+        "tpt_presumptive_ids": data.get("tpt_presumptive_ids", []),
+        "adhar_face_authentication_ids": data.get("adhar_face_authentication_ids", []),
+        "consent_with_id_ids": data.get("consent_with_id_ids", []),
+        "culture_dst_ids": data.get("culture_dst_ids", []),
+        "visited_names": data.get("visited_names", []),
         
         # Remarks & Flags
         "remark": data.get("remark", ""),
         "admin_remark": data.get("admin_remark", ""),
         "admin_remark_by": data.get("admin_remark_by", ""),
         "submission_count": data.get("submission_count", 1),
+        "is_override": bool(data.get("is_override_used")),
         "is_override_used": bool(data.get("is_override_used"))
     }
 

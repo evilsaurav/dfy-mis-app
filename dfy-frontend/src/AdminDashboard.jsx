@@ -280,6 +280,7 @@ export default function AdminDashboard() {
     totals,
     dailyTrendStats,
     performanceData,
+    performanceChartHeight,
     tableData,
     tableTotals,
     workingDaysInfo,
@@ -490,7 +491,8 @@ export default function AdminDashboard() {
       await clearCachedDashboardData(cacheKey);
     }
 
-    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !forceRefresh) {
+    const hasValidIds = cachedData && Array.isArray(cachedData.records) && cachedData.records.some(r => Array.isArray(r.notification_ids));
+    if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && hasValidIds && !forceRefresh) {
       setRawRecords(cachedData.records);
       if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
       if (!silent) setIsLoading(false);
@@ -902,7 +904,7 @@ export default function AdminDashboard() {
           setPerformanceViewMode={setPerformanceViewMode}
           performanceMetricFilter={performanceMetricFilter}
           setPerformanceMetricFilter={setPerformanceMetricFilter}
-          performanceChartHeight={340}
+          performanceChartHeight={performanceChartHeight}
           performanceData={performanceData}
           activeMetric={activeMetric}
           setActiveMetric={setActiveMetric}
