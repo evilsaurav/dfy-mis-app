@@ -765,13 +765,17 @@ export function useAdminAnalytics({
   }, [staffList, staffDirectory, rawRecords, targetsData, workingDaysInfo, currentUser]);
 
   const pacingStats = useMemo(() => {
-    const totalStaff = staffPacingData.length;
-    const onTrack = staffPacingData.filter(s => s.status === 'ON_TRACK').length;
-    const watchlist = staffPacingData.filter(s => s.status === 'WATCHLIST').length;
-    const critical = staffPacingData.filter(s => s.status === 'CRITICAL').length;
-    const totalTarget = staffPacingData.reduce((sum, s) => sum + s.target, 0);
-    const totalAchieved = staffPacingData.reduce((sum, s) => sum + s.achieved, 0);
-    const totalProjected = staffPacingData.reduce((sum, s) => sum + s.projectedFinish, 0);
+    let scopedList = staffPacingData;
+    if (selectedDistrict && selectedDistrict !== 'All') {
+      scopedList = scopedList.filter(s => canonicalizeDistrict(s.district) === canonicalizeDistrict(selectedDistrict));
+    }
+    const totalStaff = scopedList.length;
+    const onTrack = scopedList.filter(s => s.status === 'ON_TRACK').length;
+    const watchlist = scopedList.filter(s => s.status === 'WATCHLIST').length;
+    const critical = scopedList.filter(s => s.status === 'CRITICAL').length;
+    const totalTarget = scopedList.reduce((sum, s) => sum + s.target, 0);
+    const totalAchieved = scopedList.reduce((sum, s) => sum + s.achieved, 0);
+    const totalProjected = scopedList.reduce((sum, s) => sum + s.projectedFinish, 0);
     const statePacingPct = totalTarget > 0 ? Math.round((totalAchieved / totalTarget) * 100) : 0;
     const stateProjectedPct = totalTarget > 0 ? Math.round((totalProjected / totalTarget) * 100) : 0;
 
@@ -786,13 +790,13 @@ export function useAdminAnalytics({
       statePacingPct,
       stateProjectedPct
     };
-  }, [staffPacingData]);
+  }, [staffPacingData, selectedDistrict]);
 
   const filteredStaffPacing = useMemo(() => {
     let list = staffPacingData;
 
-    if (selectedDistrict !== 'All') {
-      list = list.filter(s => s.district === selectedDistrict);
+    if (selectedDistrict && selectedDistrict !== 'All') {
+      list = list.filter(s => canonicalizeDistrict(s.district) === canonicalizeDistrict(selectedDistrict));
     }
 
     if (pacingFilterStatus !== 'ALL') {

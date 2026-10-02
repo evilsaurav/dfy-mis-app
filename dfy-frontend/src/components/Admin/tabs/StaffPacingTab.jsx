@@ -172,10 +172,18 @@ export default function StaffPacingTab({
 
         {/* Dual Officer Head-to-Head Benchmark Comparator */}
         {staffPacingData.length >= 2 && (() => {
-          const defaultA = comparatorOfficerA || staffPacingData[0]?.id;
-          const defaultB = comparatorOfficerB || (staffPacingData[1]?.id !== defaultA ? staffPacingData[1]?.id : staffPacingData[0]?.id);
-          const officerA = staffPacingData.find(s => s.id === defaultA) || staffPacingData[0];
-          const officerB = staffPacingData.find(s => s.id === defaultB) || staffPacingData[1];
+          const availableStaff = (selectedDistrict && selectedDistrict !== 'All')
+            ? staffPacingData.filter(s => (s.district || '').toLowerCase() === selectedDistrict.toLowerCase())
+            : staffPacingData;
+          const displayStaff = availableStaff.length >= 2 ? availableStaff : staffPacingData;
+          const defaultA = comparatorOfficerA && displayStaff.some(s => s.id === comparatorOfficerA)
+            ? comparatorOfficerA
+            : displayStaff[0]?.id;
+          const defaultB = comparatorOfficerB && displayStaff.some(s => s.id === comparatorOfficerB && s.id !== defaultA)
+            ? comparatorOfficerB
+            : (displayStaff[1]?.id !== defaultA ? displayStaff[1]?.id : displayStaff[0]?.id);
+          const officerA = displayStaff.find(s => s.id === defaultA) || displayStaff[0];
+          const officerB = displayStaff.find(s => s.id === defaultB) || (displayStaff.length > 1 ? displayStaff[1] : displayStaff[0]);
 
           if (!officerA || !officerB) return null;
 
@@ -201,7 +209,7 @@ export default function StaffPacingTab({
                     onChange={(e) => setComparatorOfficerA(e.target.value)}
                     className="bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500"
                   >
-                    {staffPacingData.map(s => (
+                    {displayStaff.map(s => (
                       <option key={s.id} value={s.id}>Officer A: {s.name} ({s.district})</option>
                     ))}
                   </select>
@@ -211,7 +219,7 @@ export default function StaffPacingTab({
                     onChange={(e) => setComparatorOfficerB(e.target.value)}
                     className="bg-purple-50 border border-purple-200 text-purple-900 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-purple-500"
                   >
-                    {staffPacingData.map(s => (
+                    {displayStaff.map(s => (
                       <option key={s.id} value={s.id}>Officer B: {s.name} ({s.district})</option>
                     ))}
                   </select>
@@ -439,7 +447,7 @@ export default function StaffPacingTab({
                 onClick={() => setPacingFilterStatus('ALL')}
                 className={`px-3 py-1.5 rounded-lg transition-all ${pacingFilterStatus === 'ALL' ? 'bg-white text-slate-800 shadow-2xs font-black' : 'text-slate-500 hover:text-slate-800'}`}
               >
-                All ({staffPacingData.length})
+                All ({pacingStats.totalStaff ?? staffPacingData.length})
               </button>
               <button
                 onClick={() => setPacingFilterStatus('ON_TRACK')}
@@ -488,7 +496,7 @@ export default function StaffPacingTab({
               <button
                 type="button"
                 onClick={() => setPacingViewMode('matrix')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${pacingViewMode === 'matrix' ? 'bg-white text-slate-800 shadow-2xs' : 'text-slate-500'}`}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${pacingViewMode !== 'cards' ? 'bg-white text-slate-800 shadow-2xs' : 'text-slate-500'}`}
                 title="Matrix Table View"
               >
                 📊 Table
@@ -506,7 +514,7 @@ export default function StaffPacingTab({
         </div>
 
         {/* Pacing Matrix: Table View */}
-        {pacingViewMode === 'matrix' && (
+        {pacingViewMode !== 'cards' && (
           <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">

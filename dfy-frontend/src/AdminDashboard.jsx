@@ -137,7 +137,7 @@ export default function AdminDashboard() {
   const [pacingFilterStatus, setPacingFilterStatus] = useState('ALL');
   const [pacingSearchQuery, setPacingSearchQuery] = useState('');
   const [pacingSortConfig, setPacingSortConfig] = useState({ key: 'pacingPct', direction: 'desc' });
-  const [pacingViewMode, setPacingViewMode] = useState('grid');
+  const [pacingViewMode, setPacingViewMode] = useState('matrix');
   const [copiedCoachingOfficer, setCopiedCoachingOfficer] = useState(null);
 
   // --- Strict Token Retrieval & Authenticated Fetch ---
@@ -284,6 +284,7 @@ export default function AdminDashboard() {
     tableTotals,
     workingDaysInfo,
     staffPacingData,
+    filteredStaffPacing,
     districtPacingData,
     pacingStats,
     effectiveDistrictTarget,
@@ -310,7 +311,10 @@ export default function AdminDashboard() {
     showToast,
     activeMetric,
     performanceMetricFilter,
-    staffList
+    staffList,
+    pacingFilterStatus,
+    pacingSearchQuery,
+    pacingSortConfig
   });
 
   // --- Custom Hook 3: Reports & Workbook Downloads Engine ---
@@ -940,7 +944,7 @@ export default function AdminDashboard() {
           comparatorOfficerB={comparatorOfficerB}
           setComparatorOfficerB={setComparatorOfficerB}
           staffPacingData={staffPacingData}
-          filteredStaffPacing={staffPacingData}
+          filteredStaffPacing={filteredStaffPacing}
           pacingFilterStatus={pacingFilterStatus}
           setPacingFilterStatus={setPacingFilterStatus}
           pacingSearchQuery={pacingSearchQuery}
