@@ -617,7 +617,7 @@ export default function AdminDashboard() {
     setError('');
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await fetch(`${API_BASE_URL}/admin/login`, {
+      const res = await fetch(`${API_BASE_URL}/admin/auth/user-login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: loginUsername, password })

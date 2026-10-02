@@ -103,6 +103,8 @@ async def init_default_super_admin():
         print(f"Super admin init notice: {e}")
 
 @router.post("/admin/auth/user-login")
+@router.post("/admin/login")
+@router.post("/login")
 async def admin_user_login(req: AdminUserLoginReq, request: Request):
     try:
         clean_user = req.username.strip().lower()
