@@ -37,9 +37,12 @@ def test_simple_ttl_cache_excludes_shared_raw_month_from_disk_persist(tmp_path):
     
     # Wait for background thread flush to complete
     import time
-    time.sleep(0.3)
-    
     disk_file = tmp_path / "l2_persistent_cache.json"
+    for _ in range(30):
+        if disk_file.exists():
+            break
+        time.sleep(0.1)
+    
     assert disk_file.exists(), "l2_persistent_cache.json should be created"
     
     import json
