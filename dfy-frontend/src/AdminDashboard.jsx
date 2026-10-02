@@ -817,11 +817,11 @@ export default function AdminDashboard() {
           setShowAdminFeedModal={modals.setShowAdminFeedModal}
           setFeedDistrict={modals.setFeedDistrict}
           setFeedFoName={modals.setFeedFoName}
-          setFeedDate={modals.setDate}
+          setFeedDate={modals.setFeedDate}
           setFeedError={modals.setFeedError}
           setFeedSuccess={modals.setFeedSuccess}
-          setFeedCategoryInputs={modals.setCategoryInputs}
-          setFeedRemarks={modals.setRemarks}
+          setFeedCategoryInputs={modals.setFeedCategoryInputs}
+          setFeedRemarks={modals.setFeedRemarks}
           availableDistrictsForFeed={availableKpiDistricts}
           fetchAttendanceRadar={fetchAttendance}
           setShowAttendanceModal={modals.setShowAttendanceModal}
