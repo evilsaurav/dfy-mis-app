@@ -243,6 +243,7 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
             except Exception as se:
                 print(f"Failed to update staff_directory_snapshot.json: {se}")
         
+        cache.delete_prefix("staff_list_")
         invalidate_staff_directory_cache()
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("attendance_")
@@ -296,8 +297,14 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }))
         
+        cache.delete_prefix("staff_list_")
         cache.delete(f"pin_{doc_id}")
         invalidate_staff_directory_cache()
+        cache.delete_prefix("statewide_top_")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
+        evict_officer_profile_cache(clean_dist, clean_name, get_ist_now().strftime("%Y-%m"))
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -401,6 +408,7 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
             diff_info["target"] = target_val
             diff_info["month"] = current_month
             
+        cache.delete_prefix("staff_list_")
         cache.delete(f"pin_{doc_id}")
         invalidate_staff_directory_cache()
         cache.delete_prefix("statewide_top_")
@@ -467,10 +475,14 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
             except Exception as se:
                 print(f"Failed to update staff_directory_snapshot.json: {se}")
         
+        cache.delete_prefix("staff_list_")
         cache.delete(f"pin_{doc_id}")
         invalidate_staff_directory_cache()
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("attendance_")
+        cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
+        evict_officer_profile_cache(clean_dist, clean_name, get_ist_now().strftime("%Y-%m"))
         
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
@@ -591,11 +603,15 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
                 print(f"Failed to update staff_directory_snapshot.json: {se}")
 
         # Invalidate caches
+        cache.delete_prefix("staff_list_")
         cache.delete(f"pin_{target_doc_id}")
         cache.delete(f"pin_{primary_id}")
         invalidate_staff_directory_cache()
+        cache.delete_prefix("targets_")
+        cache.delete_prefix("staff_targets_raw_")
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("attendance_")
+        evict_officer_profile_cache(clean_dist, clean_fo, get_ist_now().strftime("%Y-%m"))
 
         # Admin Activity Logging
         actor_name = admin.get("name") or admin.get("username", "Admin")
