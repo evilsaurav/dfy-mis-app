@@ -13,6 +13,7 @@ import {
 } from './offlineQueue'
 import { downloadOrShareCanvas } from './canvasShare'
 import { getOperationalMonth } from './utils/operationalMonth'
+import TravelAllowanceCard from './components/Fo/TravelAllowanceCard'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
 const getLocalYMD = (d = new Date()) => {
@@ -6709,13 +6710,24 @@ function App() {
               />
             </div>
           ) : currentView === 'profile' ? (
-            <MyProfileDashboard 
-              formData={formData} 
-              showToast={showToast} 
-              stats={foMonthlyHistory}
-              setStats={setFoMonthlyHistory}
-              onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
-            />
+            <>
+              <MyProfileDashboard 
+                formData={formData} 
+                showToast={showToast} 
+                stats={foMonthlyHistory}
+                setStats={setFoMonthlyHistory}
+                onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
+              />
+              {/* Travel Allowance Card */}
+              <div className="px-4 pt-4">
+                <TravelAllowanceCard
+                  foName={formData.fo_name}
+                  workingPlace={formData.working_place}
+                  month={getOperationalMonth().operationalMonth}
+                  authToken={formData.pin}
+                />
+              </div>
+            </>
           ) : currentView === 'tracker' ? (
             <PatientJourneyTracker 
               formData={formData}
