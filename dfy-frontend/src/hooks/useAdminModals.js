@@ -17,6 +17,9 @@ export function useAdminModals({
   staffList = [],
   setStaffList,
   fetchStaffList,
+  fetchDirectory,
+  loadTargets,
+  selectedDistrict = 'All',
   activeBroadcasts = [],
   setActiveBroadcasts,
   fetchActiveBroadcasts,
@@ -26,7 +29,6 @@ export function useAdminModals({
   setTempOfficialTargets,
   topPerformersPeriod = 'weekly',
   setTopPerformersPeriod,
-  loadTargets,
   adminTargetViewMode = 'official',
   topPerformersData,
   loadingTopPerformers = false,
@@ -1283,17 +1285,12 @@ export function useAdminModals({
         body: JSON.stringify(payload)
       });
       if (res.ok) {
-        if (typeof setStaffList === 'function') {
-          setStaffList(prev => prev.map(s => (s.name === name && s.district === district ? {
-            ...s,
-            pin: newPin.trim(),
-            designation: designation || s.designation
-          } : s)));
-        }
-        if (typeof loadTargets === 'function') loadTargets('All', month);
-        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
+        await Promise.all([
+          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
+          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve()
+        ]);
         setPinChangeModal(null);
-        if (showToast) showToast("✓ Staff details updated!", "success");
+        if (showToast) showToast("✓ Staff details updated successfully!", "success");
       } else {
         const data = await res.json();
         setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update staff.", loading: false }));
@@ -1330,9 +1327,13 @@ export function useAdminModals({
         })
       });
       if (res.ok) {
-        if (typeof fetchStaffList === 'function') fetchStaffList();
-        if (typeof fetchAttendance === 'function') fetchAttendance(true);
-        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
+        await Promise.all([
+          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
+          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
+          typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
+          typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve(),
+          typeof fetchTopPerformers === 'function' ? fetchTopPerformers(topPerformersPeriod) : Promise.resolve()
+        ]);
         setAddStaffModal(null);
         if (showToast) showToast("✓ New staff officer registered!", "success");
       } else {
@@ -1357,11 +1358,13 @@ export function useAdminModals({
         body: JSON.stringify({ district, name })
       });
       if (res.ok) {
-        if (typeof setStaffList === 'function') {
-          setStaffList(prev => prev.filter(s => !(s.name === name && s.district === district)));
-        }
-        if (typeof fetchStaffList === 'function') fetchStaffList();
-        if (typeof fetchAttendance === 'function') fetchAttendance(true);
+        if (typeof setStaffList === 'function') setStaffList(prev => prev.filter(s => !(s.name === name && s.district === district)));
+        await Promise.all([
+          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
+          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
+          typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
+          typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
+        ]);
         setDeleteStaffModal(null);
         if (showToast) showToast(`✓ Officer ${name} removed from registry.`, "success");
       } else {
@@ -1392,15 +1395,14 @@ export function useAdminModals({
         })
       });
       if (res.ok) {
-        if (typeof setStaffList === 'function') {
-          setStaffList(prev => prev.map(s => s.name === officer.name && s.district === officer.district ? {
-            ...s,
-            status: targetStatus,
-            is_active: targetStatus === 'active'
-          } : s));
-        }
+        await Promise.all([
+          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
+          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
+          typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
+          typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
+        ]);
         setStaffToggleModal(null);
-        if (showToast) showToast(`✓ Status updated to ${targetStatus} for ${officer.name}`, "success");
+        if (showToast) showToast(`✓ Officer status set to ${targetStatus}!`, "success");
       }
     } catch (err) {
       alert("Error toggling staff status");
