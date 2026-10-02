@@ -10,6 +10,7 @@ export function useAdminModals({
   targetModalDistricts = [],
   availableKpiDistricts = [],
   staffDirectory = {},
+  setStaffDirectory,
   targetsData = [],
   setTargetsData,
   rawRecords = [],
@@ -1311,43 +1312,76 @@ export function useAdminModals({
     if (!addStaffModal) return;
     const { district, name, pin, designation, target } = addStaffModal;
     if (!name || !name.trim()) {
-      setAddStaffModal(prev => ({ ...prev, error: "Please enter Officer Name." }));
+      setAddStaffModal(prev => ({ ...prev, error: "Officer Name is required." }));
       return;
     }
     if (!pin || pin.trim().length !== 4 || !/^\d+$/.test(pin.trim())) {
       setAddStaffModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits." }));
       return;
     }
-    setAddStaffModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    const cleanDist = district || 'Jamui';
+    const cleanName = name.trim();
+    const cleanPin = pin.trim();
+    const cleanDesig = designation || 'Field Officer';
+    const numTarget = Number(target) || 50;
+
+    // ⚡ Optimistic UI Update (0ms perceived latency)
+    const newOfficer = {
+      district: cleanDist,
+      name: cleanName,
+      pin: cleanPin,
+      designation: cleanDesig,
+      target: numTarget,
+      status: 'active',
+      is_active: true
+    };
+
+    if (typeof setStaffList === 'function') {
+      setStaffList(prev => [...(prev || []).filter(s => !(s.name === cleanName && s.district === cleanDist)), newOfficer]);
+    }
+    if (typeof setStaffDirectory === 'function') {
+      setStaffDirectory(prev => {
+        const distOfficers = prev?.[cleanDist] ? [...prev[cleanDist]] : [];
+        if (!distOfficers.includes(cleanName)) distOfficers.push(cleanName);
+        return { ...(prev || {}), [cleanDist]: distOfficers.sort() };
+      });
+    }
+
+    setAddStaffModal(null);
+    if (showToast) showToast("✓ New staff officer registered!", "success");
+
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await authFetch(`${API_BASE_URL}/admin/staff/add`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          district: district || 'Jamui',
-          name: name.trim(),
-          pin: pin.trim(),
-          designation: designation || 'Field Officer',
-          target: Number(target) || 50
+          district: cleanDist,
+          name: cleanName,
+          pin: cleanPin,
+          designation: cleanDesig,
+          target: numTarget
         })
       });
       if (res.ok) {
-        await Promise.all([
+        Promise.all([
           typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
           typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
           typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
           typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve(),
           typeof fetchTopPerformers === 'function' ? fetchTopPerformers(topPerformersPeriod) : Promise.resolve()
-        ]);
-        setAddStaffModal(null);
-        if (showToast) showToast("✓ New staff officer registered!", "success");
+        ]).catch(e => console.warn("Background staff refresh error:", e));
       } else {
         const data = await res.json();
-        setAddStaffModal(prev => ({ ...prev, error: data.detail || "Failed to add officer.", loading: false }));
+        if (showToast) showToast(data.detail || "Failed to add officer on server.", "error");
+        if (typeof fetchStaffList === 'function') fetchStaffList();
+        if (typeof fetchDirectory === 'function') fetchDirectory();
       }
     } catch (err) {
-      setAddStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+      if (showToast) showToast("Network error registering staff.", "error");
+      if (typeof fetchStaffList === 'function') fetchStaffList();
+      if (typeof fetchDirectory === 'function') fetchDirectory();
     }
   };
 
@@ -1355,7 +1389,21 @@ export function useAdminModals({
     if (e && e.preventDefault) e.preventDefault();
     if (!deleteStaffModal) return;
     const { name, district } = deleteStaffModal;
-    setDeleteStaffModal(prev => ({ ...prev, loading: true, error: "" }));
+
+    // ⚡ Optimistic UI Update (0ms latency)
+    if (typeof setStaffList === 'function') {
+      setStaffList(prev => (prev || []).filter(s => !(s.name === name && s.district === district)));
+    }
+    if (typeof setStaffDirectory === 'function') {
+      setStaffDirectory(prev => {
+        const distOfficers = (prev?.[district] || []).filter(n => n !== name);
+        return { ...(prev || {}), [district]: distOfficers };
+      });
+    }
+
+    setDeleteStaffModal(null);
+    if (showToast) showToast(`✓ Officer ${name} removed from registry.`, "success");
+
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await authFetch(`${API_BASE_URL}/admin/staff/delete`, {
@@ -1364,21 +1412,22 @@ export function useAdminModals({
         body: JSON.stringify({ district, name })
       });
       if (res.ok) {
-        if (typeof setStaffList === 'function') setStaffList(prev => prev.filter(s => !(s.name === name && s.district === district)));
-        await Promise.all([
+        Promise.all([
           typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
           typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
           typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
           typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
-        ]);
-        setDeleteStaffModal(null);
-        if (showToast) showToast(`✓ Officer ${name} removed from registry.`, "success");
+        ]).catch(e => console.warn("Background staff delete refresh error:", e));
       } else {
         const data = await res.json();
-        setDeleteStaffModal(prev => ({ ...prev, error: data.detail || "Failed to delete.", loading: false }));
+        if (showToast) showToast(data.detail || "Failed to delete on server.", "error");
+        if (typeof fetchStaffList === 'function') fetchStaffList();
+        if (typeof fetchDirectory === 'function') fetchDirectory();
       }
     } catch (err) {
-      setDeleteStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+      if (showToast) showToast("Network error deleting staff.", "error");
+      if (typeof fetchStaffList === 'function') fetchStaffList();
+      if (typeof fetchDirectory === 'function') fetchDirectory();
     }
   };
 
@@ -1386,6 +1435,21 @@ export function useAdminModals({
     if (e && e.preventDefault) e.preventDefault();
     if (!staffToggleModal || !staffToggleModal.officer) return;
     const { officer, targetStatus, effectiveDate } = staffToggleModal;
+    const isAct = targetStatus === 'active';
+
+    // ⚡ Optimistic UI Update (0ms latency)
+    if (typeof setStaffList === 'function') {
+      setStaffList(prev => (prev || []).map(s => {
+        if (s.name === officer.name && s.district === officer.district) {
+          return { ...s, status: targetStatus, is_active: isAct };
+        }
+        return s;
+      }));
+    }
+
+    setStaffToggleModal(null);
+    if (showToast) showToast(`✓ Officer status set to ${targetStatus}!`, "success");
+
     setIsTogglingStaff(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -1401,17 +1465,18 @@ export function useAdminModals({
         })
       });
       if (res.ok) {
-        await Promise.all([
+        Promise.all([
           typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
           typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
           typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
           typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
-        ]);
-        setStaffToggleModal(null);
-        if (showToast) showToast(`✓ Officer status set to ${targetStatus}!`, "success");
+        ]).catch(e => console.warn("Background toggle refresh error:", e));
+      } else {
+        if (typeof fetchStaffList === 'function') fetchStaffList();
       }
     } catch (err) {
-      alert("Error toggling staff status");
+      if (showToast) showToast("Error toggling staff status", "error");
+      if (typeof fetchStaffList === 'function') fetchStaffList();
     } finally {
       setIsTogglingStaff(false);
     }

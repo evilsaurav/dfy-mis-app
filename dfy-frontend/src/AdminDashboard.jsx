@@ -683,7 +683,7 @@ export default function AdminDashboard() {
   // --- Hook 4: All 24 Admin Modals State & Handlers Engine ---
   const modals = useAdminModals({
     month, currentUser, districts, targetModalDistricts, availableKpiDistricts,
-    staffDirectory, fetchDirectory, targetsData, rawRecords, setRawRecords, staffList, fetchStaffList,
+    staffDirectory, setStaffDirectory, fetchDirectory, targetsData, rawRecords, setRawRecords, staffList, setStaffList, fetchStaffList,
     selectedDistrict,
     activeBroadcasts, fetchActiveBroadcasts,
     officialDistrictTarget, setOfficialDistrictTarget, tempOfficialTargets, setTempOfficialTargets,
