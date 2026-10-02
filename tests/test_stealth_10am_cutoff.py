@@ -106,8 +106,8 @@ async def test_resolve_effective_reporting_date_after_10am():
     original_db = main.db
     main.db = mock_db
     try:
-        # Yesterday doc does NOT exist, but time is 10:15 AM
-        mock_now = datetime(2026, 9, 25, 10, 15, tzinfo=main.IST_TIMEZONE)
+        # Yesterday doc does NOT exist, but time is after cutoff (e.g. 11:15 AM)
+        mock_now = datetime(2026, 9, 25, 11, 15, tzinfo=main.IST_TIMEZONE)
         with patch("main.get_ist_now", return_value=mock_now):
             resolved = await main.resolve_effective_reporting_date(
                 fo_name="Raja Kumar",

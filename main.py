@@ -89,6 +89,7 @@ from backend.routers.targets import (
 )
 from backend.routers.backup import (
     router as backup_router,
+    BackupRestoreReq,
     ensure_daily_backup_scheduled,
     check_and_trigger_daily_backup,
     get_backup_status,
@@ -96,10 +97,16 @@ from backend.routers.backup import (
     download_backup_file,
     restore_database_backup
 )
-from backend.routers.broadcasts import router as broadcasts_router
+from backend.routers.broadcasts import (
+    router as broadcasts_router,
+    BroadcastCreateReq,
+    BroadcastDeleteReq
+)
 from backend.routers.attendance import (
     router as attendance_router,
     AttendanceRemarkReq,
+    MarkLeaveReq,
+    UnmarkLeaveReq,
     get_attendance_staff_roster,
     format_attendance_response,
     legacy_get_today_attendance,
@@ -125,6 +132,11 @@ from backend.routers.kpi import (
 )
 from backend.routers.staff import (
     router as staff_router,
+    AddStaffReq,
+    UpdatePinReq,
+    UpdateStaffDetailsReq,
+    DeleteStaffReq,
+    ToggleStaffStatusReq,
     get_staff_directory,
     get_staff_full_list,
     add_staff_member,
@@ -146,6 +158,7 @@ from backend.routers.nikshay import (
 )
 from backend.routers.duplicates import (
     router as duplicates_router,
+    RepairDuplicateRequest,
     duplicate_audit,
     get_district_notification_registry,
     scan_duplicate_notifications,
@@ -153,6 +166,10 @@ from backend.routers.duplicates import (
 )
 from backend.routers.admin_feed import (
     router as admin_feed_router,
+    EditIdRequest,
+    AdminFeedDataRequest,
+    DeleteDayReportReq,
+    EditDayReportReq,
     admin_feed_officer_data,
     admin_delete_day_report,
     admin_edit_day_report,
@@ -161,6 +178,10 @@ from backend.routers.admin_feed import (
 )
 from backend.routers.rbac_audit import (
     router as rbac_audit_router,
+    AdminUserLoginReq,
+    AdminUserCreateReq,
+    AdminUserUpdateReq,
+    AuditLogQueryReq,
     init_default_super_admin,
     prune_expired_audit_logs,
     manual_prune_audit_logs,
@@ -176,6 +197,7 @@ from backend.routers.reports import (
     DashboardRequest,
     DailyActivityReport,
     CheckStatusRequest,
+    ProfileStatsRequest,
     PacingSettingsReq,
     DASHBOARD_DATA_SEMAPHORE,
     normalize_timestamp_str,

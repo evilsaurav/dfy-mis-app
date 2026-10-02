@@ -6,13 +6,16 @@ import json
 import asyncio
 import calendar
 import logging
-from datetime import datetime, timedelta, date as dt_date
+from datetime import datetime, timedelta, date as dt_date, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
+from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -615,10 +618,16 @@ async def reconcile_nikshay(
                         "outcome": ""
                     }
                     
-        ledger_sync_res = {"total_processed": 0, "written": 0, "unchanged": 0}
         try:
+            sync_fn = sync_nikshay_cumulative_ledger_sync
+            import sys
+            main_mod = sys.modules.get("main")
+            if main_mod and hasattr(main_mod, "sync_nikshay_cumulative_ledger_sync"):
+                custom = getattr(main_mod, "sync_nikshay_cumulative_ledger_sync")
+                if custom is not sync_nikshay_cumulative_ledger_sync:
+                    sync_fn = custom
             ledger_sync_res = await asyncio.to_thread(
-                sync_nikshay_cumulative_ledger_sync,
+                sync_fn,
                 patients_to_sync,
                 admin.get("username", "Admin")
             )

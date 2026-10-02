@@ -58,9 +58,9 @@ async def get_cached_staff_directory_raw(force_refresh: bool = False) -> List[di
             d["id"] = doc_id
             d["doc_id"] = doc_id
             records.append(d)
-        if records:
+        if records and not is_mock:
             cache.set(STAFF_CACHE_KEY_RAW, records, ttl=3600)
-            return records
+        return records
     except Exception as fe:
         print(f"[Staff Cache] Firestore stream failed (quota/network): {fe}")
 
@@ -275,30 +275,49 @@ def record_report_mutation(
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
         elif month_prefix:
+            cache.delete_prefix(f"shared_raw_month_{month_prefix}")
             cache.delete_prefix(f"dash_{month_prefix}_")
             cache.delete_prefix(f"dupe_scan_{month_prefix}")
+        else:
+            cache.delete_prefix("shared_raw_month_")
+            cache.delete_prefix("dash_")
+            cache.delete_prefix("dupe_scan_")
             
         # 3. Targeted Attendance Radar Invalidation
-        if date:
+        if date and len(str(date).strip()) >= 10:
             clean_date = str(date).strip()[:10]
-            if clean_dist:
-                cache.delete_prefix(f"attendance_{clean_date}_{clean_dist}_")
-                cache.delete_prefix(f"attendance_{clean_date}_All_")
-                cache.delete_prefix(f"attendance_{clean_date}_all_")
-            else:
-                cache.delete_prefix(f"attendance_{clean_date}_")
+            cache.delete_prefix(f"attendance_{clean_date}")
+        elif date and len(str(date).strip()) >= 7:
+            clean_date = str(date).strip()[:7]
+            cache.delete_prefix(f"attendance_{clean_date}")
+        else:
+            cache.delete_prefix("attendance_")
 
-        # 4. Top Performers Cache Invalidation
+        # 4. Cascade Alerts (Scoped by District)
+        if target_districts:
+            for td in target_districts:
+                cache.delete_prefix(f"cascade_alerts_{td}_")
+        else:
+            cache.delete_prefix("cascade_alerts_")
+
+        # 5. Top Performers Cache Invalidation
         if month_prefix:
             cache.delete_prefix(f"statewide_top_performers_{month_prefix}_")
             cache.delete_prefix("statewide_top_performers_")
             cache.delete_prefix(f"statewide_top_{month_prefix}")
             cache.delete_prefix("statewide_top_")
 
-        # 5. Append deletion tombstone for Delta Sync
+        # 6. Duplicate Audit Cache (Scoped by Month)
+        if month_prefix:
+            cache.delete_prefix(f"dupe_audit_{month_prefix}")
+        else:
+            cache.delete_prefix("dupe_audit_")
+
+        # 7. Append deletion tombstone for Delta Sync
         if action == "delete" and doc_id:
             DELETED_REPORTS_TOMBSTONES.append({
-                "id": doc_id,
+                "doc_id": str(doc_id).strip(),
+                "id": str(doc_id).strip(),
                 "district": clean_dist,
                 "deleted_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
             })

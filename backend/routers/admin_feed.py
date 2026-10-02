@@ -1,3 +1,4 @@
+import os
 import re
 import json
 import asyncio
@@ -16,6 +17,7 @@ from backend.core.security import get_current_admin, get_optional_admin, require
 from backend.core.helpers import (
     get_ist_now,
     canonicalize_district,
+    canonicalize_fo_name,
     normalize_staff_key,
     is_officer_name_match,
     evict_officer_profile_cache,

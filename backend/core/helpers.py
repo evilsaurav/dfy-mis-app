@@ -3,7 +3,7 @@ import re
 import json
 import asyncio
 from datetime import datetime, timedelta, timezone, date
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from backend.core.cache import cache
 from backend.core.database import db
 

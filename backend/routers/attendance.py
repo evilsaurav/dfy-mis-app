@@ -29,10 +29,12 @@ from backend.core.helpers import (
     get_profile_cache_key,
     evict_officer_profile_cache,
     log_admin_activity,
+    load_baseline_staff_directory,
 )
 from backend.core.master_ledger import (
     get_cached_staff_directory_raw,
     get_raw_monthly_reports,
+    get_directory,
 )
 from backend.core.styles import (
     safe_filename,
