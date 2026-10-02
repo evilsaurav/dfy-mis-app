@@ -192,7 +192,7 @@ export function useAdminModals({
   const [nikshayMonth, setNikshayMonth] = useState(month || new Date().toISOString().slice(0, 7));
   const [nikshayActiveTab, setNikshayActiveTab] = useState('summary');
   const [ledgerViewMode, setLedgerViewMode] = useState('table');
-  const [ledgerData, setLedgerData] = useState([]);
+  const [ledgerData, setLedgerData] = useState(null);
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [ledgerDistrict, setLedgerDistrict] = useState('All');
   const [ledgerLoading, setLedgerLoading] = useState(false);
@@ -853,7 +853,7 @@ export function useAdminModals({
       const res = await authFetch(`${API_BASE_URL}/admin/nikshay/cumulative-ledger${q}`);
       if (res.ok) {
         const data = await res.json();
-        setLedgerData(data.records || []);
+        setLedgerData(data || { patients: [], metrics: {}, total_records: 0, total_pages: 1 });
       }
     } catch (e) {
       console.error("Cumulative ledger fetch error", e);
