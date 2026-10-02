@@ -62,8 +62,19 @@ export function useAdminAnalytics({
     };
     return records.reduce((acc, curr) => {
       for (let key in init) {
-        if (key === 'overrides') acc[key] += curr.is_override ? 1 : 0;
-        else acc[key] += (curr[key] || 0);
+        if (key === 'overrides') {
+          acc[key] += (curr.is_override || curr.is_override_used) ? 1 : 0;
+        } else if (key === 'home_visits') {
+          acc[key] += (curr.home_visits || curr.home_visit || (Array.isArray(curr.home_visit_ids) ? curr.home_visit_ids.length : 0) || 0);
+        } else if (key === 'follow_ups') {
+          acc[key] += (curr.follow_ups || curr.follow_up || (Array.isArray(curr.follow_up_ids) ? curr.follow_up_ids.length : 0) || 0);
+        } else if (key === 'tests') {
+          acc[key] += (curr.tests || curr.sample_tested || (Array.isArray(curr.sample_tested_ids) ? curr.sample_tested_ids.length : 0) || 0);
+        } else if (key === 'notifications') {
+          acc[key] += (curr.notifications || curr.notification || (Array.isArray(curr.notification_ids) ? curr.notification_ids.length : 0) || 0);
+        } else {
+          acc[key] += (curr[key] || 0);
+        }
       }
       return acc;
     }, init);
@@ -409,10 +420,20 @@ export function useAdminAnalytics({
       }
       for (let k in map[key]) {
         if (k !== 'name' && k !== 'overrides' && !k.endsWith('_cur') && !k.endsWith('_prev') && k !== 'target') {
-          map[key][k] += (r[k] || 0);
+          if (k === 'home_visits') {
+            map[key][k] += (r.home_visits || r.home_visit || (Array.isArray(r.home_visit_ids) ? r.home_visit_ids.length : 0) || 0);
+          } else if (k === 'follow_ups') {
+            map[key][k] += (r.follow_ups || r.follow_up || (Array.isArray(r.follow_up_ids) ? r.follow_up_ids.length : 0) || 0);
+          } else if (k === 'tests') {
+            map[key][k] += (r.tests || r.sample_tested || (Array.isArray(r.sample_tested_ids) ? r.sample_tested_ids.length : 0) || 0);
+          } else if (k === 'notifications') {
+            map[key][k] += (r.notifications || r.notification || (Array.isArray(r.notification_ids) ? r.notification_ids.length : 0) || 0);
+          } else {
+            map[key][k] += (r[k] || 0);
+          }
         }
       }
-      if (r.is_override) map[key].overrides += 1;
+      if (r.is_override || r.is_override_used) map[key].overrides += 1;
 
       // Cohort breakdown for this record's IDs
       (r.hiv_dm_ids || []).forEach(id => {
@@ -714,17 +735,17 @@ export function useAdminAnalytics({
         if (canonicalizeDistrict(r.working_place) !== cDist) return false;
         return isOfficerNameMatch(r.fo_name, c.name, cDist);
       });
-      const achieved = officerRecords.reduce((sum, r) => sum + (r.notifications || 0), 0);
+      const achieved = officerRecords.reduce((sum, r) => sum + (r.notifications || (Array.isArray(r.notification_ids) ? r.notification_ids.length : 0) || 0), 0);
       const activeDaysCount = new Set(officerRecords.map(r => r.date_of_reporting || r.date).filter(Boolean)).size;
 
       // Clinical indicators
-      const tests = officerRecords.reduce((sum, r) => sum + (r.tests || 0), 0);
+      const tests = officerRecords.reduce((sum, r) => sum + (r.tests || (Array.isArray(r.sample_tested_ids) ? r.sample_tested_ids.length : 0) || 0), 0);
       const dbt = officerRecords.reduce((sum, r) => sum + (r.dbt || 0), 0);
       const hiv_dm = officerRecords.reduce((sum, r) => sum + (r.hiv_dm || 0), 0);
       const tpt = officerRecords.reduce((sum, r) => sum + (r.tpt_treatment_start || 0), 0);
       const doctor_visits = officerRecords.reduce((sum, r) => sum + (r.doctor_visits || 0), 0);
       const total_km = officerRecords.reduce((sum, r) => sum + (r.total_km || 0), 0);
-      const home_visits = officerRecords.reduce((sum, r) => sum + (r.home_visits || 0), 0);
+      const home_visits = officerRecords.reduce((sum, r) => sum + (r.home_visits || r.home_visit || (Array.isArray(r.home_visit_ids) ? r.home_visit_ids.length : 0) || 0), 0);
 
       // Pacing Calculations
       const expectedPace = Math.min(target, Math.round((target / Math.max(1, totalWorkingDays)) * elapsedWorkingDays));
