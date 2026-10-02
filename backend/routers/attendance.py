@@ -602,6 +602,7 @@ async def get_today_attendance(
 
 
 @router.get("/admin/export-staff-attendance")
+@router.get("/admin/export-attendance")
 async def export_staff_attendance(
     month: Optional[str] = None,
     district: Optional[str] = None,
@@ -1106,6 +1107,19 @@ async def export_staff_attendance(
             safe_fn_dist = safe_filename(c_fn_dist)
             filename = f"DFY_Staff_Attendance_{safe_fn_dist}_{target_month}.xlsx"
             headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+
+            date_str = target_month
+            actor_name = admin.get("name") or admin.get("username", "Admin")
+            actor_id = admin.get("user_id") or admin.get("username", "admin")
+            actor_role = admin.get("role", "SUB_ADMIN")
+            await log_admin_activity(
+                action_type="REPORT_DOWNLOADED",
+                details=f"Admin {actor_name} downloaded Attendance Excel for {date_str}",
+                user_name=actor_name,
+                user_id=actor_id,
+                role=actor_role,
+                diff={"report_type": "Attendance Excel", "date": date_str}
+            )
 
             return ExcelStreamingResponse(
                 content_bytes,

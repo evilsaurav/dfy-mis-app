@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 
 export const formatAuditTimestamp = (ts, tsFormatted) => {
   if (tsFormatted && (tsFormatted.includes('AM') || tsFormatted.includes('PM'))) {
@@ -55,6 +55,19 @@ export default function AuditTrailModal({
   setAuditSearchQuery,
   auditLogsList = []
 }) {
+  const downloadStats = useMemo(() => {
+    const downloadLogs = (auditLogsList || []).filter(l => l.action_type === 'REPORT_DOWNLOADED');
+    const userCounts = {};
+    downloadLogs.forEach(l => {
+      const key = l.user_name || l.user_id || 'Unknown';
+      userCounts[key] = (userCounts[key] || 0) + 1;
+    });
+    return {
+      totalDownloads: downloadLogs.length,
+      byUser: userCounts
+    };
+  }, [auditLogsList]);
+
   if (!show) return null;
 
   return (
@@ -206,6 +219,26 @@ export default function AuditTrailModal({
             </button>
           </div>
         </div>
+
+        {/* Report Download Frequency Counter Banner */}
+        {downloadStats.totalDownloads > 0 && (
+          <div className="px-5 py-2.5 bg-emerald-50/80 border-b border-emerald-100 flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-black text-emerald-900 flex items-center gap-1">
+              <span>📥</span> Report Downloads Breakdown ({downloadStats.totalDownloads} Total):
+            </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {Object.entries(downloadStats.byUser).map(([userName, count]) => (
+                <span
+                  key={userName}
+                  className="bg-white border border-emerald-200 text-emerald-800 font-bold px-2 py-0.5 rounded-lg shadow-2xs flex items-center gap-1"
+                >
+                  <span className="text-slate-600">{userName}:</span>
+                  <span className="font-black text-emerald-700">{count}x</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Audit Log Table */}
         <div className="p-5 sm:p-6 overflow-y-auto flex-1 custom-scrollbar">
