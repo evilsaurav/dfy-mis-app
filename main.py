@@ -192,6 +192,11 @@ from backend.routers.top_performers import (
     router as top_performers_router,
     get_statewide_top_performers
 )
+from backend.routers import travel_allowance
+from backend.routers.travel_allowance import (
+    router as travel_allowance_router,
+    calculate_log_totals
+)
 from backend.routers.reports import (
     router as reports_router,
     DashboardRequest,
@@ -242,6 +247,7 @@ app.include_router(admin_feed_router)
 app.include_router(rbac_audit_router)
 app.include_router(top_performers_router)
 app.include_router(reports_router)
+app.include_router(travel_allowance_router)
 # Target cache eviction: cache.delete_prefix("profile_") implemented in backend.routers.targets
 
 @app.get("/")

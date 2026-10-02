@@ -52,3 +52,6 @@ def check_in_memory_derivation() -> bool:
             return bool(val)
     return ENABLE_IN_MEMORY_DERIVATION
 
+def get_db():
+    return db
+

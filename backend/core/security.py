@@ -79,6 +79,13 @@ def require_super_admin(admin: dict = Depends(get_current_admin)) -> dict:
         raise HTTPException(status_code=403, detail="Access denied. Super Admin authority required.")
     return admin
 
+def get_current_user(
+    authorization: Optional[str] = Header(None),
+    token: Optional[str] = Query(None)
+) -> dict:
+    """Security dependency alias for standard admin authentication."""
+    return get_current_admin(authorization=authorization, token=token)
+
 def get_optional_admin(
     authorization: Optional[str] = Header(None),
     token: Optional[str] = Query(None)
