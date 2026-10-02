@@ -1287,7 +1287,8 @@ export function useAdminModals({
       if (res.ok) {
         await Promise.all([
           typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
-          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve()
+          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
+          typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve()
         ]);
         setPinChangeModal(null);
         if (showToast) showToast("✓ Staff details updated successfully!", "success");

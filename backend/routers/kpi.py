@@ -679,6 +679,20 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
                 'Content-Disposition': f'attachment; filename="KPI_Report_{safe_dist}_{month_tag}.xlsx"'
             }
             gc.collect()
+
+            actor_name = admin.get("name") or admin.get("username", "Admin")
+            actor_id = admin.get("user_id") or admin.get("username", "admin")
+            actor_role = admin.get("role", "SUB_ADMIN")
+            await log_admin_activity(
+                action_type="REPORT_DOWNLOADED",
+                details=f"Admin {actor_name} downloaded KPI Workbook for {district} ({month_tag})",
+                district=district if district and district != "All" else "",
+                user_name=actor_name,
+                user_id=actor_id,
+                role=actor_role,
+                diff={"report_type": "KPI Workbook", "district": district, "month": month_tag}
+            )
+
             return StreamingResponse(
                 io.BytesIO(excel_bytes), 
                 headers=headers,
@@ -951,11 +965,11 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
         actor_role = admin.get("role", "SUB_ADMIN")
         await log_admin_activity(
             action_type="REPORT_DOWNLOADED",
-            details=f"Admin {actor_name} downloaded Bulk 33-District KPI ZIP for {target_month}",
+            details=f"Admin {actor_name} downloaded Bulk 33-District KPI ZIP for {month_tag}",
             user_name=actor_name,
             user_id=actor_id,
             role=actor_role,
-            diff={"report_type": "Bulk KPI ZIP", "month": target_month}
+            diff={"report_type": "Bulk KPI ZIP", "month": month_tag}
         )
 
         return FileResponse(
