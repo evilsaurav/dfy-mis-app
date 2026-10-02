@@ -43,6 +43,32 @@ router = APIRouter(tags=["nikshay"])
 logger = logging.getLogger("nikshay")
 
 
+# --- Nikshay Column Header Matching Helpers ---
+# =========================================================================
+def is_name_header(c: Any) -> bool:
+    if c is None or (isinstance(c, float) and math.isnan(c)):
+        return False
+    h = str(c).strip().lower().replace(" ", "_").replace(".", "").replace("'", "")
+    # Exclude institutional or administrative names
+    if any(k in h for k in ["district", "facility", "hospital", "phi", "state", "tu_name", "unit_name", "user_name", "username"]):
+        return False
+    if any(k in h for k in ["patient_name", "patientname", "beneficiary_name", "case_name", "client_name"]):
+        return True
+    if "name" in h and any(k in h for k in ["patient", "beneficiary", "case", "client", "person"]):
+        return True
+    if h in ["name", "patient", "patient_name", "name_of_patient", "name_of_the_patient", "beneficiary", "case_name", "client_name"]:
+        return True
+    return False
+
+def is_phone_header(c: Any) -> bool:
+    if c is None or (isinstance(c, float) and math.isnan(c)):
+        return False
+    h = str(c).strip().lower().replace(" ", "_").replace(".", "").replace("'", "")
+    if any(k in h for k in ["tracing", "trace", "outcome", "status", "date", "action"]):
+        return False
+    return any(k in h for k in ["primaryphone", "phone", "mobile", "contact", "cell"])
+
+
 # --- Nikshay Cumulative Verification Ledger Helper ---
 # =========================================================================
 def sync_nikshay_cumulative_ledger_sync(
@@ -99,8 +125,17 @@ def sync_nikshay_cumulative_ledger_sync(
             udst_val = bool(existing.get("udst_done", False) or current.get("udst_done", False))
             contact_val = bool(existing.get("contact_tracing_done", False) or current.get("contact_tracing_done", False))
 
-            curr_name = current.get("name") or current.get("patient_name") or ""
-            curr_phone = current.get("phone") or ""
+            existing_name = str(existing.get("patient_name") or "").strip()
+            existing_phone = str(existing.get("phone") or "").strip()
+            curr_name = str(current.get("name") or current.get("patient_name") or "").strip()
+            curr_phone = str(current.get("phone") or "").strip()
+
+            final_name = curr_name if curr_name else existing_name
+            final_phone = curr_phone if curr_phone else existing_phone
+
+            name_changed = bool(curr_name and curr_name != existing_name)
+            phone_changed = bool(curr_phone and curr_phone != existing_phone)
+
             has_changes = (
                 is_new or
                 (not existing.get("notification_verified") and notif_val) or
@@ -110,10 +145,8 @@ def sync_nikshay_cumulative_ledger_sync(
                 (not existing.get("bank_validated") and bank_val) or
                 (not existing.get("udst_done") and udst_val) or
                 (not existing.get("contact_tracing_done") and contact_val) or
-                (not existing.get("patient_name") and curr_name) or
-                (not existing.get("phone") and curr_phone) or
-                (curr_name and existing.get("patient_name") != curr_name) or
-                (curr_phone and existing.get("phone") != curr_phone)
+                name_changed or
+                phone_changed
             )
 
             if not has_changes:
@@ -122,8 +155,8 @@ def sync_nikshay_cumulative_ledger_sync(
 
             merged_record = {
                 "patient_id": str(pid),
-                "patient_name": curr_name or existing.get("patient_name", ""),
-                "phone": curr_phone or existing.get("phone", ""),
+                "patient_name": final_name,
+                "phone": final_phone,
                 "district": current.get("district") or existing.get("district", ""),
                 "notification_verified": notif_val,
                 "hiv_tested": hiv_val,
@@ -220,10 +253,9 @@ async def reconcile_nikshay(
             id_col = df.columns[0]
 
         # 3. Detect demographics, district & date columns
-        clean_hdr = lambda c: str(c).strip().lower().replace(" ", "_").replace(".", "")
-        phone_col = cols_lower.get("primaryphone") or cols_lower.get("phone") or cols_lower.get("mobile") or next((c for c in df.columns if any(p in clean_hdr(c) for p in ["primaryphone", "phone", "mobile", "contact_no", "contact_number", "beneficiary_mobile", "patient_mobile", "cell"])), None)
-        name_col = cols_lower.get("patient_name") or next((c for c in df.columns if any(n in clean_hdr(c) for n in ["patient_name", "patientname", "beneficiary_name", "case_name"]) or (clean_hdr(c) in ["name", "patient"])), None)
-        address_col = cols_lower.get("address") or next((c for c in df.columns if "address" in clean_hdr(c)), None)
+        phone_col = next((c for c in df.columns if is_phone_header(c)), None)
+        name_col = next((c for c in df.columns if is_name_header(c)), None)
+        address_col = cols_lower.get("address") or next((c for c in df.columns if "address" in str(c).strip().lower()), None)
 
         district_col = None
         for candidate in ["spectrum_enrolment_district", "spectrum_diagnosing_district", "district", "district_name"]:
@@ -255,17 +287,30 @@ async def reconcile_nikshay(
             s = str(val).strip().lower()
             return s in ["yes", "y", "done", "true", "1", "reactive", "positive", "tested", "validated"]
 
-        # 5. Parse Nikshay Master Records
+        # 5. Parse Nikshay Master Records & Full-Sheet Demographics Lookup
         nikshay_patients = {}
+        nikshay_demographics_lookup = {}
         for _, row in df.iterrows():
             val = row.get(id_col)
             if val is None or pd.isna(val):
                 continue
             s = str(val).strip().split(".")[0]
-            if not (s and s.isalnum() and len(s) >= 5):
+            s_clean = s.replace("_", "").replace("-", "").replace("/", "")
+            if not (s and s_clean.isalnum() and len(s_clean) >= 5):
                 continue
 
             row_dist = str(row.get(district_col, "")).strip() if district_col and not pd.isna(row.get(district_col)) else ""
+            p_phone = re.sub(r'\D', '', str(row.get(phone_col, "")).split(".")[0])[-10:] if phone_col and not pd.isna(row.get(phone_col)) else ""
+            p_name = str(row.get(name_col, "")).strip() if name_col and not pd.isna(row.get(name_col)) else ""
+
+            # Capture demographics across the ENTIRE sheet (regardless of month or district filter)
+            if p_name or p_phone:
+                nikshay_demographics_lookup[s] = {
+                    "name": p_name,
+                    "phone": p_phone,
+                    "district": row_dist
+                }
+
             if district and district != "All" and row_dist and row_dist.lower() != district.lower():
                 continue
 
@@ -273,9 +318,6 @@ async def reconcile_nikshay(
                 row_dt = str(row.get(date_col, "")).strip()
                 if row_dt and len(row_dt) >= 7 and not row_dt.startswith(month):
                     continue
-
-            p_phone = re.sub(r'\D', '', str(row.get(phone_col, "")).split(".")[0])[-10:] if phone_col and not pd.isna(row.get(phone_col)) else ""
-            p_name = str(row.get(name_col, "")).strip() if name_col and not pd.isna(row.get(name_col)) else ""
 
             nikshay_patients[s] = {
                 "id": s,
@@ -366,6 +408,17 @@ async def reconcile_nikshay(
                         dfy_details[clean_pid]["has_udst"] = True
                     elif cat_key == "contact_tracing_ids":
                         dfy_details[clean_pid]["has_contact"] = True
+
+        # Enrich DFY reported patients with demographics resolved from the full Nikshay upload
+        for clean_pid, d_info in dfy_details.items():
+            if clean_pid in nikshay_demographics_lookup:
+                demo = nikshay_demographics_lookup[clean_pid]
+                if demo.get("name"):
+                    d_info["patient_name"] = demo["name"]
+                if demo.get("phone"):
+                    d_info["phone"] = demo["phone"]
+                if not d_info.get("district") and demo.get("district"):
+                    d_info["district"] = demo["district"]
 
         # 7. Compute Set Reconciliation & Multi-Cascade Breakdown
         matched = list(nikshay_ids.intersection(dfy_reported_ids))
@@ -535,10 +588,14 @@ async def reconcile_nikshay(
                     
             services_claimed_str = ", ".join(sorted(list(dfy_info.get("services", [])))) or "Reported in MIS"
             
+            demo = nikshay_demographics_lookup.get(pid, {})
+            pt_name = dfy_info.get("patient_name") or demo.get("name") or "Unregistered / Not in Nikshay"
+            pt_phone = dfy_info.get("phone") or demo.get("phone") or "-"
+
             record = {
                 "id": pid,
-                "patient_name": "Unregistered / Not in Nikshay",
-                "phone": "-",
+                "patient_name": pt_name,
+                "phone": pt_phone,
                 "district": dfy_info.get("district", ""),
                 "fo_name": dfy_info.get("fo_name", ""),
                 "date": rep_date_str,
@@ -583,10 +640,12 @@ async def reconcile_nikshay(
             
             if (is_matched_pt or n_hiv or n_dm or d_hiv_dm or n_bank or d_bank or 
                 n_udst or d_udst or n_ct or d_ct or np.get("outcome")):
+                p_name = np.get("name") or (dfy_info.get("patient_name") if has_dfy else "") or nikshay_demographics_lookup.get(pid, {}).get("name", "")
+                p_phone = np.get("phone") or (dfy_info.get("phone") if has_dfy else "") or nikshay_demographics_lookup.get(pid, {}).get("phone", "")
                 patients_to_sync[pid] = {
-                    "name": np["name"] or "",
-                    "patient_name": np["name"] or "",
-                    "phone": np["phone"] or "",
+                    "name": p_name,
+                    "patient_name": p_name,
+                    "phone": p_phone,
                     "district": np["district"] or (dfy_info["district"] if has_dfy else ""),
                     "notification_verified": is_matched_pt or (dfy_info["has_notification"] if has_dfy else False),
                     "hiv_tested": n_hiv or d_hiv_dm,
@@ -603,10 +662,13 @@ async def reconcile_nikshay(
                 has_any_service = (dfy_info["has_notification"] or dfy_info["has_hiv_dm"] or 
                                    dfy_info["has_dbt"] or dfy_info["has_udst"] or dfy_info["has_contact"])
                 if has_any_service:
+                    demo = nikshay_demographics_lookup.get(pid, {})
+                    p_name = dfy_info.get("patient_name") or demo.get("name", "")
+                    p_phone = dfy_info.get("phone") or demo.get("phone", "")
                     patients_to_sync[pid] = {
-                        "name": "",
-                        "patient_name": "",
-                        "phone": "",
+                        "name": p_name,
+                        "patient_name": p_name,
+                        "phone": p_phone,
                         "district": dfy_info.get("district", ""),
                         "notification_verified": dfy_info.get("has_notification", False),
                         "hiv_tested": dfy_info.get("has_hiv_dm", False),
@@ -618,6 +680,7 @@ async def reconcile_nikshay(
                         "outcome": ""
                     }
                     
+        ledger_sync_res = {"total_processed": 0, "written": 0, "unchanged": 0}
         try:
             sync_fn = sync_nikshay_cumulative_ledger_sync
             import sys
