@@ -795,7 +795,24 @@ export function useAdminModals({
             date_raw: rawDate.slice(0, 10),
             date_formatted: ddmmyyyy,
             district: dist,
-            days_elapsed: daysElapsed
+            days_elapsed: daysElapsed,
+            presumptive: r.presumptive || 0,
+            sample_tested: r.sample_tested || 0,
+            notifications: r.notifications || 0,
+            dbt: r.dbt || 0,
+            hiv_dm: r.hiv_dm || 0,
+            fdc_provided: r.fdc_provided || 0,
+            follow_ups: r.follow_ups || r.follow_up || 0,
+            home_visits: r.home_visits || r.home_visit || 0,
+            contact_tracing: r.contact_tracing || 0,
+            differentiated_tb: r.differentiated_tb || 0,
+            documents: r.documents || 0,
+            kit_consumption: r.kit_consumption || 0,
+            tpt_treatment_start: r.tpt_treatment_start || 0,
+            tpt_presumptive: r.tpt_presumptive || 0,
+            adhar_face_auth: r.adhar_face_auth || r.adhar_face_authentication || 0,
+            consent_with_id: r.consent_with_id || 0,
+            culture_dst: r.culture_dst || 0
           });
         }
       });
