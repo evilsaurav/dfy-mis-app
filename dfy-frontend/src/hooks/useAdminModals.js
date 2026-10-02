@@ -721,20 +721,24 @@ export function useAdminModals({
     }
   };
 
+  const NOTIF_TRAY_24_HEADERS = [
+    "Sl No", "FO Name", "Date of Reporting (DD-MM-YYYY)", "District",
+    "TBU Name", "Mapped PHI Name", "Patient's Name", "ID",
+    "Vill", "Panchayat", "Block", "District",
+    "Land Mark", "Mob No", "X-ray Done (Y/N)", "Sample Collection (Y/N)",
+    "Report Delivered (Y/N)", "DM (Y/N)", "HIV (Y/N)", "Drug Source (NTEP/Private)",
+    "Others", "Address", "Diagnosis Date", "Enrollment Date"
+  ];
+
   const build24ColTsv = (items) => {
-    const headers = [
-      "Sl No", "FO Name", "Date", "District", "Presumptive", "Testing", "Diagnosed", "Episode ID",
-      "DBT", "HIV/DM", "FDC", "Outcome", "Home Visit", "Follow Up", "Face to Face", "Contact Tracing",
-      "Diff TB", "Docs", "Kit Cons", "TPT Start", "TPT Presump", "Aadhaar Face", "Consent ID", "Culture DST"
-    ];
-    const headerLine = headers.join('\t');
+    const headerLine = NOTIF_TRAY_24_HEADERS.join('\t');
     const rowLines = (items || []).map((item, idx) => {
       const row = new Array(24).fill('');
-      row[0] = String(idx + 1);
-      row[1] = item.fo_name || '';
-      row[2] = item.date_formatted || '';
-      row[3] = item.district || '';
-      row[7] = item.id || '';
+      row[0] = String(idx + 1);                       // Sl No
+      row[1] = item.fo_name || '';                    // FO Name
+      row[2] = item.date_formatted || '';             // Date of Reporting (DD-MM-YYYY)
+      row[3] = item.district || '';                   // District
+      row[7] = item.id || '';                         // ID (Episode ID)
       return row.join('\t');
     });
     return [headerLine, ...rowLines].join('\n');
@@ -747,22 +751,81 @@ export function useAdminModals({
   };
 
   const notifTrayData = useMemo(() => {
-    const allIds = [];
-    (rawRecords || []).forEach(r => {
+    const list = [];
+    const now = new Date();
+
+    const filteredRecords = (rawRecords || []).filter(r => {
       const dist = canonicalizeDistrict(r.working_place || r.district || '');
-      if (notifTrayDistricts.length > 0 && !notifTrayDistricts.includes(dist)) return;
-      const ids = r.notification_ids || [];
-      ids.forEach(id => {
-        allIds.push({
-          id,
-          fo_name: r.fo_name || 'Field Officer',
-          district: dist,
-          date_formatted: r.date_of_reporting || r.date || ''
-        });
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        const allowed = currentUser.allowed_districts.map(canonicalizeDistrict);
+        if (!allowed.includes(dist)) return false;
+      }
+      if (notifTrayDistricts && notifTrayDistricts.length > 0 && !notifTrayDistricts.includes('All')) {
+        const canonicalNotifDistricts = notifTrayDistricts.map(canonicalizeDistrict);
+        if (!canonicalNotifDistricts.includes(dist)) return false;
+      }
+      return true;
+    });
+
+    filteredRecords.forEach(r => {
+      const dist = canonicalizeDistrict(r.working_place || r.district || '');
+      const fo = r.fo_name || r.officer_name || 'Field Officer';
+      const rawDate = r.date_of_reporting || r.date || '';
+      const ids = Array.isArray(r.notification_ids) ? r.notification_ids : [];
+
+      let daysElapsed = 0;
+      let ddmmyyyy = rawDate;
+      if (rawDate && rawDate.length >= 10) {
+        try {
+          const parts = rawDate.slice(0, 10).split('-');
+          if (parts.length === 3) {
+            ddmmyyyy = `${parts[2]}-${parts[1]}-${parts[0]}`; // DD-MM-YYYY
+            const repDt = new Date(`${parts[0]}-${parts[1]}-${parts[2]}`);
+            daysElapsed = Math.max(0, Math.floor((now - repDt) / (1000 * 60 * 60 * 24)));
+          }
+        } catch (e) {}
+      }
+
+      ids.forEach(idStr => {
+        const cleanId = String(idStr).trim();
+        if (cleanId) {
+          list.push({
+            id: cleanId,
+            fo_name: fo,
+            date_raw: rawDate.slice(0, 10),
+            date_formatted: ddmmyyyy,
+            district: dist,
+            days_elapsed: daysElapsed
+          });
+        }
       });
     });
-    return { allIds };
-  }, [rawRecords, notifTrayDistricts]);
+
+    // Sort descending by date_raw (latest dates first), then fo_name
+    list.sort((a, b) => {
+      const dateCmp = (b.date_raw || '').localeCompare(a.date_raw || '');
+      if (dateCmp !== 0) return dateCmp;
+      return (a.fo_name || '').localeCompare(b.fo_name || '');
+    });
+
+    const latestDateRaw = list.length > 0 ? list[0].date_raw : null;
+    const latestDateFormatted = list.length > 0 ? list[0].date_formatted : null;
+
+    const lastDayItems = latestDateRaw ? list.filter(item => item.date_raw === latestDateRaw) : [];
+    const lastDayIds = Array.from(new Set(lastDayItems.map(i => i.id)));
+    const allIds = Array.from(new Set(list.map(i => i.id)));
+    const uniqueFOs = Array.from(new Set(list.map(i => i.fo_name)));
+
+    return {
+      allItems: list,
+      lastDayItems,
+      lastDayIds,
+      allIds,
+      latestDateRaw,
+      latestDateFormatted,
+      uniqueFOCount: uniqueFOs.length
+    };
+  }, [rawRecords, notifTrayDistricts, currentUser]);
 
   // 13. Nikshay Reconciler Handlers
   const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
@@ -2038,7 +2101,7 @@ export function useAdminModals({
     notifTraySearch: notifTraySearchQuery, setNotifTraySearch: setNotifTraySearchQuery,
     notifTrayCategoryFilter, setCategoryFilter: setNotifTrayCategoryFilter,
     isExportingNotifTray, notifTrayCopiedNotice, notifTrayDistricts,
-    notifTrayData, copyToClipboardWithFallback, build24ColTsv,
+    notifTrayData, copyToClipboardWithFallback, build24ColTsv, NOTIF_TRAY_24_HEADERS,
     handleClearNotifDistricts, handleSelectAllNotifDistricts, handleToggleNotifDistrict,
 
     // 12. App Guide SOP
