@@ -1,47 +1,52 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { downloadOrShareCanvas } from '../canvasShare';
-import { feedCategoriesConfig, formatAuditTimestamp, TOP_PERFORMER_MESSAGES } from '../utils/districtHelpers';
+import { feedCategoriesConfig, formatAuditTimestamp, TOP_PERFORMER_MESSAGES, canonicalizeDistrict, isOfficerNameMatch } from '../utils/districtHelpers';
+import { getPreviousMonth } from '../utils/operationalMonth';
 
 export function useAdminModals({
   month,
   currentUser,
-  districts,
-  targetModalDistricts,
-  availableKpiDistricts,
-  staffDirectory,
-  targetsData,
-  rawRecords,
-  staffList,
+  districts = [],
+  targetModalDistricts = [],
+  availableKpiDistricts = [],
+  staffDirectory = {},
+  targetsData = [],
+  setTargetsData,
+  rawRecords = [],
+  setRawRecords,
+  staffList = [],
+  setStaffList,
   fetchStaffList,
-  activeBroadcasts,
+  activeBroadcasts = [],
+  setActiveBroadcasts,
   fetchActiveBroadcasts,
-  officialDistrictTarget,
+  officialDistrictTarget = 0,
   setOfficialDistrictTarget,
-  tempOfficialTargets,
+  tempOfficialTargets = {},
   setTempOfficialTargets,
-  topPerformersPeriod,
+  topPerformersPeriod = 'weekly',
   setTopPerformersPeriod,
   loadTargets,
-  adminTargetViewMode,
+  adminTargetViewMode = 'official',
   topPerformersData,
-  loadingTopPerformers,
-  topPerformerRandomMsg,
+  loadingTopPerformers = false,
+  topPerformerRandomMsg = '',
   setTopPerformerRandomMsg,
   fetchTopPerformers,
   attendance,
-  chronicDefaulters,
-  attendanceDistrictFilter,
+  chronicDefaulters = [],
+  attendanceDistrictFilter = 'All',
   setAttendanceDistrictFilter,
-  attendanceTimeFilter,
+  attendanceTimeFilter = 'all',
   setAttendanceTimeFilter,
-  attendanceSearchQuery,
+  attendanceSearchQuery = '',
   setAttendanceSearchQuery,
-  inactiveStaffNamesSet,
+  inactiveStaffNamesSet = new Set(),
   attendanceDate,
   setAttendanceDate,
   fetchAttendance,
-  isAttendanceLoading,
-  activeAttendanceTab,
+  isAttendanceLoading = false,
+  activeAttendanceTab = 'missing',
   setActiveAttendanceTab,
   leaveActionModal,
   setLeaveActionModal,
@@ -50,34 +55,34 @@ export function useAdminModals({
   attendanceRemarkModal,
   setAttendanceRemarkModal,
   handleExecuteAttendanceRemark,
-  isSavingAttendanceRemark,
+  isSavingAttendanceRemark = false,
   getSubmissionTimeClassification,
-  reportsDistrict,
+  reportsDistrict = '',
   setReportsDistrict,
-  selectedKpiDistricts,
+  selectedKpiDistricts = [],
   handleToggleKpiDistrict,
   handleSelectAllKpiDistricts,
   handleClearKpiDistricts,
-  isDownloadingKpi,
+  isDownloadingKpi = false,
   handleDownloadKpi,
-  canDownloadBulkZip,
+  canDownloadBulkZip = false,
   handleDownloadScopedZip,
   handleDownloadSequentialQueue,
   kpiQueueProgress,
-  selectedMedDistricts,
+  selectedMedDistricts = [],
   handleToggleMedDistrict,
   handleSelectAllMedDistricts,
   handleClearMedDistricts,
-  isDownloadingMedicineReport,
+  isDownloadingMedicineReport = false,
   handleDownloadMedicineReport,
   handleDownloadMedicineReportScopedZip,
   handleDownloadMedicineReportQueue,
   medQueueProgress,
-  selectedAttendanceDistricts,
+  selectedAttendanceDistricts = [],
   handleToggleAttendanceDistrict,
   handleSelectAllAttendanceDistricts,
   handleClearAttendanceDistricts,
-  isDownloadingAttendance,
+  isDownloadingAttendance = false,
   handleDownloadAttendanceSingleOrScoped,
   handleDownloadStaffAttendanceQueue,
   attendanceQueueProgress,
@@ -86,8 +91,11 @@ export function useAdminModals({
   authFetch,
   getAdminToken,
   showToast,
-  fetchData
+  fetchData,
+  setPassword
 }) {
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
+
   // 1. Security Settings
   const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [changeCurrentPw, setChangeCurrentPw] = useState("");
@@ -137,10 +145,7 @@ export function useAdminModals({
   const [showAdminUsersModal, setShowAdminUsersModal] = useState(false);
   const [adminUsersList, setAdminUsersList] = useState([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
-  const [adminUserEditModal, setAdminUserEditModal] = useState(null);
-  const [newAdminModal, setNewAdminModal] = useState(null);
-  const [deleteAdminModal, setDeleteAdminModal] = useState(null);
-  const [isSavingAdminUser, setIsSavingAdminUser] = useState(false);
+  const [userFormModal, setUserFormModal] = useState(null);
 
   // 9. Audit Trail
   const [showAuditModal, setShowAuditModal] = useState(false);
@@ -150,6 +155,7 @@ export function useAdminModals({
   const [auditFilterAdmin, setAuditFilterAdmin] = useState('All');
   const [auditFilterTarget, setAuditFilterTarget] = useState('All');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  const [isPruningAudit, setIsPruningAudit] = useState(false);
 
   // 10. Broadcast Studio & Unread Popup
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
@@ -166,6 +172,8 @@ export function useAdminModals({
   const [notifTraySearchQuery, setNotifTraySearchQuery] = useState('');
   const [notifTrayCategoryFilter, setNotifTrayCategoryFilter] = useState('all');
   const [isExportingNotifTray, setIsExportingNotifTray] = useState(false);
+  const [notifTrayCopiedNotice, setNotifTrayCopiedNotice] = useState(false);
+  const [notifTrayDistricts, setNotifTrayDistricts] = useState([]);
 
   // 12. App Guide SOP
   const [showAppGuideModal, setShowAppGuideModal] = useState(false);
@@ -174,17 +182,22 @@ export function useAdminModals({
 
   // 13. Nikshay Reconciler
   const [showNikshayModal, setShowNikshayModal] = useState(false);
-  const [nikshayRecords, setNikshayRecords] = useState([]);
+  const [nikshayFile, setNikshayFile] = useState(null);
+  const [nikshayResult, setNikshayResult] = useState(null);
+  const [nikshayError, setNikshayError] = useState('');
   const [nikshayLoading, setNikshayLoading] = useState(false);
   const [nikshaySyncing, setNikshaySyncing] = useState(false);
-  const [nikshayFilterDist, setNikshayFilterDist] = useState('All');
-  const [nikshayFilterMonth, setNikshayFilterMonth] = useState(new Date().toISOString().slice(0, 7));
-  const [nikshaySearch, setNikshaySearch] = useState('');
-  const [nikshaySelectedPatient, setNikshaySelectedPatient] = useState(null);
-  const [nikshayEditForm, setNikshayEditForm] = useState(null);
-  const [nikshaySaving, setNikshaySaving] = useState(false);
-  const [nikshayFilterStatus, setNikshayFilterStatus] = useState('all');
-  const [isExportingNikshay, setIsExportingNikshay] = useState(false);
+  const [nikshayDistrict, setNikshayDistrict] = useState('All');
+  const [nikshayMonth, setNikshayMonth] = useState(month || new Date().toISOString().slice(0, 7));
+  const [nikshayActiveTab, setNikshayActiveTab] = useState('summary');
+  const [ledgerViewMode, setLedgerViewMode] = useState('table');
+  const [ledgerData, setLedgerData] = useState([]);
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerDistrict, setLedgerDistrict] = useState('All');
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  const [ledgerExporting, setLedgerExporting] = useState(false);
+  const [reviewExporting, setReviewExporting] = useState(false);
+  const [nikshaySyncStatus, setNikshaySyncStatus] = useState(null);
 
   // 14. Admin Backdated Feeding
   const [showAdminFeedModal, setShowAdminFeedModal] = useState(false);
@@ -199,12 +212,14 @@ export function useAdminModals({
   const [feedEveningKm, setFeedEveningKm] = useState('');
   const [feedIsNextDay, setFeedIsNextDay] = useState(false);
   const [feedSubmissionCount, setFeedSubmissionCount] = useState(1);
-  const [feedSubmitting, setFeedSubmitting] = useState(false);
+  const [feedLoading, setFeedLoading] = useState(false);
   const [feedError, setFeedError] = useState('');
   const [feedSuccess, setFeedSuccess] = useState('');
+  const [feedShowAllCategories, setFeedShowAllCategories] = useState(false);
 
   // 15. Target Setting
-  const [targetModalMonth, setTargetModalMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [showTargetModal, setShowTargetModal] = useState(false);
+  const [targetModalMonth, setTargetModalMonth] = useState(month || new Date().toISOString().slice(0, 7));
   const [targetModalDistrict, setTargetModalDistrict] = useState('All');
   const [isSavingTargets, setIsSavingTargets] = useState(false);
   const [bulkTargetValue, setBulkTargetValue] = useState("");
@@ -248,7 +263,52 @@ export function useAdminModals({
   const [showReportsStudio, setShowReportsStudio] = useState(false);
   const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks");
 
-  // --- Handlers & Fetchers for Modals ---
+  // ==========================================
+  // HANDLERS FOR ALL 24 ADMIN MODALS
+  // ==========================================
+
+  const availableFosForFeed = useMemo(() => {
+    if (!feedDistrict) return [];
+    const fromDir = staffDirectory[feedDistrict] || [];
+    if (fromDir.length > 0) return fromDir;
+    const fromRecs = Array.from(new Set((rawRecords || []).filter(r => r.working_place === feedDistrict).map(r => r.fo_name))).filter(Boolean).sort();
+    return fromRecs;
+  }, [staffDirectory, feedDistrict, rawRecords]);
+
+  // 1. Security / Password Update
+  const handleUpdatePassword = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setSecurityStatusMsg('');
+    if (!changeCurrentPw || !changeNewPw) {
+      setSecurityStatusMsg('Please enter both current and new password.');
+      return;
+    }
+    setIsSavingSecurity(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/auth/update-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ current_password: changeCurrentPw, new_password: changeNewPw })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        if (typeof setPassword === 'function') setPassword(changeNewPw);
+        setSecurityStatusMsg('✓ Password updated successfully!');
+        setChangeCurrentPw('');
+        setChangeNewPw('');
+        if (showToast) showToast('✓ Password updated successfully!', 'success');
+      } else {
+        setSecurityStatusMsg(`Error: ${data.detail || 'Failed to update'}`);
+      }
+    } catch (err) {
+      setSecurityStatusMsg('Failed to connect to server.');
+    } finally {
+      setIsSavingSecurity(false);
+    }
+  };
+
+  // 2. Cascade Alerts Fetcher
   const fetchCascadeAlerts = useCallback(async () => {
     setLoadingCascade(true);
     try {
@@ -265,6 +325,7 @@ export function useAdminModals({
     }
   }, [month, authFetch]);
 
+  // 3. Recent ID Edits Fetcher
   const fetchRecentIdEdits = useCallback(async () => {
     setRecentIdEditsLoading(true);
     try {
@@ -281,6 +342,749 @@ export function useAdminModals({
     }
   }, [month, authFetch]);
 
+  // 5. Patient Journey Fetcher
+  const handleFetchJourney = useCallback(async (patientIdToFetch) => {
+    const pId = patientIdToFetch || journeyPatientId;
+    if (!pId || !pId.trim()) return;
+    setJourneyLoading(true);
+    setJourneyError('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/api/nikshay/patient-journey?patient_id=${encodeURIComponent(pId.trim())}`);
+      const data = await res.json();
+      if (res.ok) {
+        setJourneyResult(data);
+      } else {
+        setJourneyError(data.detail || "Patient journey not found");
+      }
+    } catch (e) {
+      setJourneyError("Failed to connect to server");
+    } finally {
+      setJourneyLoading(false);
+    }
+  }, [journeyPatientId, authFetch]);
+
+  // 6. Automated Backup Handlers
+  const fetchBackupStatus = useCallback(async () => {
+    setBackupLoading(true);
+    setBackupActionMsg('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/backup/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setBackupStatus(data);
+      }
+    } catch (err) {
+      setBackupActionMsg(`⚠️ ${err.message}`);
+    } finally {
+      setBackupLoading(false);
+    }
+  }, [authFetch]);
+
+  const handleTriggerBackupNow = async () => {
+    setBackupTriggerLoading(true);
+    setBackupActionMsg('');
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/backup/trigger-now`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Backup generation failed");
+      if (showToast) showToast(`✓ Cloud Backup created: ${data.filename} (${data.size_kb} KB)`, "success");
+      setBackupActionMsg(`✓ Snapshot saved to Cloud Storage: ${data.filename}`);
+      fetchBackupStatus();
+    } catch (err) {
+      setBackupActionMsg(`⚠️ Error: ${err.message}`);
+    } finally {
+      setBackupTriggerLoading(false);
+    }
+  };
+
+  const handleDownloadBackup = async (filename) => {
+    try {
+      if (showToast) showToast(`📥 Downloading ${filename}...`, "info");
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const url = `${API_BASE_URL}/admin/backup/download/${encodeURIComponent(filename)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+      const res = await fetch(url, { headers: token ? { 'Authorization': `Bearer ${token}` } : {} });
+      if (!res.ok) throw new Error("Download request failed");
+      const blob = await res.blob();
+      const a = document.createElement('a');
+      a.href = window.URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      if (showToast) showToast(`✓ Downloaded ${filename} successfully!`, "success");
+    } catch (err) {
+      if (showToast) showToast(`⚠️ Download failed: ${err.message}`, "error");
+    }
+  };
+
+  const handleExecuteRestore = async () => {
+    if (!restoreTargetFile) return;
+    if (restoreConfirmText.trim() !== 'RESTORE-CONFIRM') {
+      alert("Please type RESTORE-CONFIRM exactly into the confirmation box to proceed.");
+      return;
+    }
+    if (!window.confirm(`⚠️ CAUTION: Restore database from ${restoreTargetFile}?`)) return;
+    setRestoreLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/backup/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: restoreTargetFile, confirmation_code: restoreConfirmText.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Restore operation failed");
+      alert(`✓ Database restore successful! ${data.restored_documents || 0} documents restored.`);
+      setRestoreTargetFile(null);
+      setRestoreConfirmText('');
+      if (typeof fetchData === 'function') fetchData(true);
+    } catch (err) {
+      alert(`⚠️ Restore Error: ${err.message}`);
+    } finally {
+      setRestoreLoading(false);
+    }
+  };
+
+  // 8. Admin Users Handlers
+  const fetchAdminUsers = useCallback(async () => {
+    setAdminUsersLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/users/list`);
+      if (res.ok) {
+        const data = await res.json();
+        setAdminUsersList(data.users || []);
+      }
+    } catch (e) {
+      console.error("Failed to load admin users", e);
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  }, [authFetch]);
+
+  const saveAdminUser = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!userFormModal) return;
+    setUserFormModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const endpoint = userFormModal.mode === 'create' ? "/admin/users/create" : "/admin/users/update";
+      const payload = userFormModal.mode === 'create' ? {
+        username: userFormModal.username,
+        name: userFormModal.name,
+        password: userFormModal.password,
+        role: userFormModal.role,
+        allowed_districts: userFormModal.allowed_districts,
+        permissions: userFormModal.permissions,
+        status: "ACTIVE",
+        created_by: currentUser?.name || "Super Admin"
+      } : {
+        user_id: userFormModal.user_id,
+        name: userFormModal.name,
+        password: userFormModal.password || undefined,
+        role: userFormModal.role,
+        allowed_districts: userFormModal.allowed_districts,
+        permissions: userFormModal.permissions,
+        status: "ACTIVE"
+      };
+
+      const res = await authFetch(`${API_BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Failed to save user");
+      setUserFormModal(null);
+      fetchAdminUsers();
+      if (showToast) showToast(userFormModal.mode === 'create' ? "New Admin User created!" : "Admin User updated!", "success");
+    } catch (err) {
+      setUserFormModal(prev => ({ ...prev, error: err.message, loading: false }));
+    }
+  };
+
+  const deleteAdminUser = async (userId) => {
+    if (!window.confirm(`Are you sure you want to delete admin user "${userId}"?`)) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/users/delete?user_id=${encodeURIComponent(userId)}`, { method: "POST" });
+      if (res.ok) {
+        fetchAdminUsers();
+        if (showToast) showToast(`User ${userId} deleted successfully.`, "success");
+      } else {
+        const d = await res.json();
+        if (showToast) showToast(d.detail || "Error deleting user.", "error");
+      }
+    } catch (err) {
+      if (showToast) showToast("Network error while deleting user.", "error");
+    }
+  };
+
+  // 9. Audit Trail Handlers
+  const fetchAuditLogs = useCallback(async (overrideAction, overrideDist, overrideUser, overrideSearch) => {
+    setAuditLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/audit-logs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action_filter: overrideAction !== undefined ? overrideAction : auditFilterAction,
+          district_filter: overrideDist !== undefined ? overrideDist : auditFilterTarget,
+          user_filter: overrideUser !== undefined ? overrideUser : auditFilterAdmin,
+          search: overrideSearch !== undefined ? overrideSearch : auditSearchQuery,
+          limit: 100
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAuditLogs(data.logs || []);
+      }
+    } catch (e) {
+      console.error("Failed to load audit logs", e);
+    } finally {
+      setAuditLoading(false);
+    }
+  }, [auditFilterAction, auditFilterTarget, auditFilterAdmin, auditSearchQuery, authFetch]);
+
+  const exportAuditLogsExcel = () => {
+    if (!auditLogs || auditLogs.length === 0) {
+      if (showToast) showToast("No audit logs to export.", "info");
+      return;
+    }
+    const headers = ["Timestamp", "Actor", "Role", "Action", "Target", "Details", "IP Address"];
+    const rows = auditLogs.map(l => [
+      formatAuditTimestamp(l.timestamp),
+      l.actor_username || "Unknown",
+      l.actor_role || "—",
+      l.action || "—",
+      l.target_identifier || "—",
+      JSON.stringify(l.details || {}),
+      l.ip_address || "—"
+    ]);
+    const tsvContent = [headers.join("\t"), ...rows.map(r => r.join("\t"))].join("\n");
+    const blob = new Blob([tsvContent], { type: "text/tab-separated-values;charset=utf-8;" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.tsv`;
+    link.click();
+    if (showToast) showToast("✓ Audit logs exported successfully!", "success");
+  };
+
+  const handleManualPruneAuditLogs = async () => {
+    if (!window.confirm("Purge audit logs older than 90 days?")) return;
+    setIsPruningAudit(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/audit-logs/prune`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        if (showToast) showToast(`✓ ${data.pruned_count || 0} old audit logs pruned.`, "success");
+        fetchAuditLogs();
+      } else {
+        if (showToast) showToast(data.detail || "Failed to prune audit logs.", "error");
+      }
+    } catch (err) {
+      if (showToast) showToast("Network error during audit log pruning.", "error");
+    } finally {
+      setIsPruningAudit(false);
+    }
+  };
+
+  // 10. Broadcast Bulletin Handlers
+  const dismissBroadcastPopup = (id) => {
+    try {
+      const seenIds = JSON.parse(localStorage.getItem('dfy_seen_broadcasts') || '[]');
+      if (!seenIds.includes(id)) {
+        seenIds.push(id);
+        localStorage.setItem('dfy_seen_broadcasts', JSON.stringify(seenIds));
+      }
+    } catch (e) {}
+    setUnreadBroadcastPopup(null);
+  };
+
+  const fetchAllBroadcasts = useCallback(async () => {
+    try {
+      setBroadcastLoading(true);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let distParam = '';
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        distParam = `?districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/all${distParam}`);
+      if (res.ok) {
+        const data = await res.json();
+        setBroadcastHistory(data.broadcasts || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch all broadcasts", e);
+    } finally {
+      setBroadcastLoading(false);
+    }
+  }, [currentUser, authFetch]);
+
+  const handleCreateBroadcast = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!newBroadcastModal) return;
+    const { title, message, priority, target_audience, target_districts } = newBroadcastModal;
+    if (!title || !title.trim()) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please enter announcement title." }));
+      return;
+    }
+    if (!message || !message.trim()) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please enter announcement message body." }));
+      return;
+    }
+    if (!target_districts || target_districts.length === 0) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Please select at least one district." }));
+      return;
+    }
+
+    setNewBroadcastModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          message: message.trim(),
+          priority: priority || "MEDIUM",
+          target_audience: target_audience || "ALL",
+          target_districts,
+          created_by_user: currentUser?.name || currentUser?.username || "Admin",
+          created_by_role: currentUser?.role || "SUPER_ADMIN",
+          allowed_districts: currentUser?.allowed_districts || ["All"]
+        })
+      });
+      if (res.ok) {
+        setNewBroadcastModal(null);
+        fetchAllBroadcasts();
+        if (typeof fetchActiveBroadcasts === 'function') fetchActiveBroadcasts();
+      } else {
+        const data = await res.json();
+        setNewBroadcastModal(prev => ({ ...prev, error: data.detail || "Failed to create broadcast.", loading: false }));
+      }
+    } catch (err) {
+      setNewBroadcastModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleDeleteBroadcast = async (broadcast_id) => {
+    if (!window.confirm("Delete this broadcast alert?")) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/api/broadcasts/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          broadcast_id,
+          requested_by_user: currentUser?.username || "admin",
+          requested_by_role: currentUser?.role || "SUPER_ADMIN",
+          allowed_districts: currentUser?.allowed_districts || ["All"]
+        })
+      });
+      if (res.ok) {
+        setBroadcastHistory(prev => prev.filter(b => b.id !== broadcast_id));
+        if (unreadBroadcastPopup && unreadBroadcastPopup.id === broadcast_id) {
+          setUnreadBroadcastPopup(null);
+        }
+      }
+    } catch (e) {
+      alert("Network error while deleting broadcast.");
+    }
+  };
+
+  // 11. Notif Tray Helpers
+  const copyToClipboardWithFallback = async (text, successMsg) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
+      setNotifTrayCopiedNotice(true);
+      setTimeout(() => setNotifTrayCopiedNotice(false), 3000);
+      if (showToast) showToast(successMsg || "Copied to clipboard!", "success");
+    } catch (e) {
+      if (showToast) showToast("Failed to copy", "error");
+    }
+  };
+
+  const build24ColTsv = (items) => {
+    const headers = [
+      "Sl No", "FO Name", "Date", "District", "Presumptive", "Testing", "Diagnosed", "Episode ID",
+      "DBT", "HIV/DM", "FDC", "Outcome", "Home Visit", "Follow Up", "Face to Face", "Contact Tracing",
+      "Diff TB", "Docs", "Kit Cons", "TPT Start", "TPT Presump", "Aadhaar Face", "Consent ID", "Culture DST"
+    ];
+    const headerLine = headers.join('\t');
+    const rowLines = (items || []).map((item, idx) => {
+      const row = new Array(24).fill('');
+      row[0] = String(idx + 1);
+      row[1] = item.fo_name || '';
+      row[2] = item.date_formatted || '';
+      row[3] = item.district || '';
+      row[7] = item.id || '';
+      return row.join('\t');
+    });
+    return [headerLine, ...rowLines].join('\n');
+  };
+
+  const handleClearNotifDistricts = () => setNotifTrayDistricts([]);
+  const handleSelectAllNotifDistricts = () => setNotifTrayDistricts(availableKpiDistricts || districts || []);
+  const handleToggleNotifDistrict = (d) => {
+    setNotifTrayDistricts(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+  };
+
+  const notifTrayData = useMemo(() => {
+    const allIds = [];
+    (rawRecords || []).forEach(r => {
+      const dist = canonicalizeDistrict(r.working_place || r.district || '');
+      if (notifTrayDistricts.length > 0 && !notifTrayDistricts.includes(dist)) return;
+      const ids = r.notification_ids || [];
+      ids.forEach(id => {
+        allIds.push({
+          id,
+          fo_name: r.fo_name || 'Field Officer',
+          district: dist,
+          date_formatted: r.date_of_reporting || r.date || ''
+        });
+      });
+    });
+    return { allIds };
+  }, [rawRecords, notifTrayDistricts]);
+
+  // 13. Nikshay Reconciler Handlers
+  const fetchCumulativeLedger = useCallback(async (page = 1, search = '', dist = ledgerDistrict) => {
+    setLedgerLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const q = `?page=${page}&limit=50&district=${encodeURIComponent(dist || 'All')}&search=${encodeURIComponent(search)}`;
+      const res = await authFetch(`${API_BASE_URL}/admin/nikshay/cumulative-ledger${q}`);
+      if (res.ok) {
+        const data = await res.json();
+        setLedgerData(data.records || []);
+      }
+    } catch (e) {
+      console.error("Cumulative ledger fetch error", e);
+    } finally {
+      setLedgerLoading(false);
+    }
+  }, [ledgerDistrict, authFetch]);
+
+  const handleReconcileNikshay = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!nikshayFile) {
+      setNikshayError('Please select a Nikshay Excel file first.');
+      return;
+    }
+    setNikshayLoading(true);
+    setNikshayError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', nikshayFile);
+      formData.append('month', nikshayMonth || month);
+      formData.append('district', nikshayDistrict);
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const res = await fetch(`${API_BASE_URL}/admin/reconcile-nikshay`, {
+        method: 'POST',
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        body: formData
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.detail || 'Reconciliation failed');
+      }
+      const data = await res.json();
+      setNikshayResult(data);
+      fetchCumulativeLedger(1, '', nikshayDistrict);
+    } catch (err) {
+      setNikshayError(err.message || 'Error running reconciliation');
+    } finally {
+      setNikshayLoading(false);
+    }
+  };
+
+  const handleDownloadReviewSheet = async () => {
+    setReviewExporting(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const res = await fetch(`${API_BASE_URL}/admin/nikshay/download-review-sheet?district=${encodeURIComponent(nikshayDistrict || 'All')}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error('Failed to download review sheet');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `DFY_Field_Review_Sheet_${nikshayDistrict || 'All'}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      alert('Failed to download review sheet: ' + err.message);
+    } finally {
+      setReviewExporting(false);
+    }
+  };
+
+  const handleExportCumulativeLedger = async () => {
+    setLedgerExporting(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const res = await fetch(`${API_BASE_URL}/admin/nikshay/cumulative-ledger/export?district=${encodeURIComponent(ledgerDistrict || 'All')}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
+      if (!res.ok) throw new Error('Ledger export failed');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Nikshay_Cumulative_Ledger_${ledgerDistrict || 'All'}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      alert('Failed to export cumulative ledger: ' + err.message);
+    } finally {
+      setLedgerExporting(false);
+    }
+  };
+
+  // 14. Admin Backdated Feeding Handler
+  const handleAdminFeedSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setFeedError('');
+    setFeedSuccess('');
+    if (!feedDistrict || feedDistrict === 'All') {
+      setFeedError('Please select a specific District.');
+      return;
+    }
+    if (!feedFoName || !feedFoName.trim()) {
+      setFeedError('Please select or specify a Field Officer name.');
+      return;
+    }
+    if (!feedDate || !/^\d{4}-\d{2}-\d{2}$/.test(feedDate)) {
+      setFeedError('Please enter a valid reporting date (YYYY-MM-DD).');
+      return;
+    }
+
+    const payload = {
+      district: feedDistrict.trim(),
+      fo_name: feedFoName.trim(),
+      date_of_reporting: feedDate.trim(),
+      remark: feedRemarks ? feedRemarks.trim() : `Admin feed by ${currentUser?.name || 'Admin'}`
+    };
+
+    let totalIdsCount = 0;
+    const invalidTokens = [];
+    const idKeys = [
+      'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_tested_ids',
+      'sample_collection_ids', 'contact_tracing_ids', 'differentiated_tb_ids',
+      'outcome_assigned_ids', 'home_visit_ids', 'follow_up_ids',
+      'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+      'kit_consumption_ids', 'tpt_treatment_start_ids', 'tpt_presumptive_ids',
+      'adhar_face_authentication_ids', 'consent_with_id_ids', 'culture_dst_ids'
+    ];
+
+    idKeys.forEach(k => {
+      const rawText = feedCategoryInputs[k] || '';
+      if (rawText && rawText.trim()) {
+        const tokens = rawText.split(/[\s,;\n\r\t]+/).map(t => t.trim()).filter(Boolean);
+        const is8or9 = (k === 'fdc_provided_ids' || k === 'outcome_assigned_ids');
+        const tokenRegex = is8or9 ? /^\d{8,9}$/ : /^\d{9}$/;
+        const validList = [];
+        tokens.forEach(tok => {
+          if (tokenRegex.test(tok)) validList.push(tok);
+          else invalidTokens.push(tok);
+        });
+        const uniqueList = Array.from(new Set(validList));
+        payload[k] = uniqueList;
+        totalIdsCount += uniqueList.length;
+      } else {
+        payload[k] = [];
+      }
+    });
+
+    if (totalIdsCount === 0) {
+      setFeedError('Please enter at least one valid Patient ID in any category.');
+      return;
+    }
+    if (invalidTokens.length > 0) {
+      setFeedError(`The following item(s) are NOT valid 9-digit numeric IDs: ${invalidTokens.slice(0, 5).join(', ')}`);
+      return;
+    }
+
+    setFeedLoading(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/feed-officer-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setFeedSuccess(`✓ Saved successfully for ${feedFoName} on ${feedDate}!`);
+        setFeedCategoryInputs({});
+        setFeedRemarks('');
+        if (typeof fetchData === 'function') fetchData(true);
+        if (showToast) showToast("✓ Admin feed saved successfully!", "success");
+      } else {
+        const data = await res.json();
+        setFeedError(data.detail || "Failed to submit feed data.");
+      }
+    } catch (err) {
+      setFeedError("Network error while submitting feed data.");
+    } finally {
+      setFeedLoading(false);
+    }
+  };
+
+  // 15. Target Setting Handlers
+  const frontlineAllocated = useMemo(() => {
+    return (targetsData || []).reduce((acc, t) => acc + (Number(t.target) || 0), 0);
+  }, [targetsData]);
+
+  const handleTargetChange = (districtName, foName, value) => {
+    if (typeof setTargetsData !== 'function') return;
+    setTargetsData(prev => {
+      const cDist = canonicalizeDistrict(districtName);
+      const parsed = value === '' ? '' : Number(value);
+      const idx = (prev || []).findIndex(t => 
+        canonicalizeDistrict(t.district) === cDist && 
+        isOfficerNameMatch(t.fo_name, foName, cDist)
+      );
+      if (idx >= 0) {
+        const updated = [...prev];
+        updated[idx] = { ...updated[idx], target: parsed };
+        return updated;
+      } else {
+        return [...(prev || []), { fo_name: foName, district: districtName, target: parsed }];
+      }
+    });
+  };
+
+  const handleCopyFromLastMonth = async () => {
+    const prevM = getPreviousMonth(targetModalMonth);
+    if (!prevM) return;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      let q = `?month=${prevM}`;
+      if (currentUser?.role === 'SUB_ADMIN' && currentUser?.allowed_districts && !currentUser.allowed_districts.includes('All')) {
+        q += `&districts=${encodeURIComponent(currentUser.allowed_districts.join(','))}`;
+      }
+      if (showToast) showToast(`Loading targets from ${prevM}...`, 'info');
+      const res = await authFetch(`${API_BASE_URL}/admin/targets${q}`);
+      const data = await res.json();
+      if (data && Array.isArray(data.targets) && typeof setTargetsData === 'function') {
+        const copied = data.targets.map(t => ({ ...t, month: targetModalMonth }));
+        setTargetsData(copied);
+        if (showToast) showToast(`✓ Copied targets from ${prevM}!`, 'success');
+      }
+    } catch (e) {
+      if (showToast) showToast('Failed to copy targets from last month', 'error');
+    }
+  };
+
+  const handleSaveSingleDistrictTarget = useCallback(async (distName, targetVal) => {
+    if (!distName) return;
+    const val = Number(targetVal);
+    if (isNaN(val) || val < 0) {
+      if (showToast) showToast('Target must be a non-negative number', 'error');
+      return;
+    }
+    setIsSavingDistrictTarget(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ month: targetModalMonth, district: distName, official_target: val })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (showToast) showToast(`Official target for ${distName} saved (${val})!`, 'success');
+        if (targetModalDistrict === distName && setOfficialDistrictTarget) {
+          setOfficialDistrictTarget(val);
+        }
+      } else {
+        if (showToast) showToast(data.detail || `Failed to save target for ${distName}`, 'error');
+      }
+    } catch (err) {
+      if (showToast) showToast('Network error saving district target', 'error');
+    } finally {
+      setIsSavingDistrictTarget(false);
+    }
+  }, [getAdminToken, currentUser, targetModalMonth, showToast, targetModalDistrict, setOfficialDistrictTarget]);
+
+  const handleSaveBulkDistrictTargets = useCallback(async () => {
+    setIsSavingBulkDistrictTargets(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const payloadTargets = (targetModalDistricts || []).map(dist => ({
+        district: dist,
+        official_target: Math.max(0, Number(tempOfficialTargets?.[dist] ?? officialDistrictTarget ?? 0))
+      }));
+      const res = await fetch(`${API_BASE_URL}/update-district-targets-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ month: targetModalMonth, targets: payloadTargets })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (showToast) showToast(`✓ All ${payloadTargets.length} district official targets saved!`, 'success');
+      } else {
+        if (showToast) showToast(data.detail || 'Failed to bulk save district targets', 'error');
+      }
+    } catch (err) {
+      if (showToast) showToast('Network error saving bulk targets', 'error');
+    } finally {
+      setIsSavingBulkDistrictTargets(false);
+    }
+  }, [getAdminToken, currentUser, targetModalDistricts, tempOfficialTargets, officialDistrictTarget, targetModalMonth, showToast]);
+
+  const saveAllTargets = useCallback(async () => {
+    setIsSavingTargets(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const res = await fetch(`${API_BASE_URL}/update-targets-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({ month: targetModalMonth, targets: targetsData })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (showToast) showToast('✓ Frontline targets saved successfully!', 'success');
+      }
+    } catch (err) {
+      console.error("saveAllTargets error", err);
+    } finally {
+      setIsSavingTargets(false);
+    }
+  }, [getAdminToken, currentUser, targetModalMonth, targetsData, showToast]);
+
+  const handleSaveAllTargetsCombined = useCallback(async () => {
+    await handleSaveBulkDistrictTargets();
+    await saveAllTargets();
+    if (showToast) showToast('✓ All Official Targets & Frontline Allocations Saved!', 'success');
+  }, [handleSaveBulkDistrictTargets, saveAllTargets, showToast]);
+
+  // 16. Duplicate Radar Handlers
   const fetchDuplicateAudit = useCallback(async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -311,7 +1115,331 @@ export function useAdminModals({
     }
   }, [month, authFetch]);
 
-const generateTopPerformersPosterCanvas = useCallback(async () => {
+  const handleRepairDuplicate = async (instance) => {
+    if (!instance || !instance.repeat_doc_id || repairingDocId) return;
+    setRepairingDocId(instance.repeat_doc_id);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const targetMonth = duplicateScanData?.month || month;
+      const res = await authFetch(`${API_BASE_URL}/admin/repair-duplicate-notifications`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: targetMonth,
+          district: instance.district,
+          instance_doc_id: instance.repeat_doc_id,
+          duplicate_ids: instance.duplicate_ids
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'success') {
+        const removed = data.removed_count || instance.duplicate_ids?.length || 0;
+        if (showToast) showToast(`✓ Removed ${removed} duplicate notification ID(s)!`, 'success');
+        await Promise.all([
+          fetchDuplicateScan(true),
+          fetchDuplicateAudit(),
+          typeof fetchData === 'function' ? fetchData(true) : Promise.resolve()
+        ]);
+      } else {
+        if (showToast) showToast(data.detail || "Failed to repair duplicates.", "error");
+      }
+    } catch (err) {
+      if (showToast) showToast("Network error during repair.", "error");
+    } finally {
+      setRepairingDocId(null);
+    }
+  };
+
+  // 18. Staff Management Handlers
+  const handleExecuteUpdatePin = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!pinChangeModal) return;
+    const { name, district, newPin, designation, target } = pinChangeModal;
+    if (!newPin || newPin.trim().length !== 4 || !/^\d+$/.test(newPin.trim())) {
+      setPinChangeModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits." }));
+      return;
+    }
+    setPinChangeModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const payload = {
+        district,
+        name,
+        new_pin: newPin.trim(),
+        designation: designation || "Field Officer"
+      };
+      if (target !== undefined && target !== null && !isNaN(Number(target))) {
+        payload.target = Number(target);
+      }
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/update-details`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        if (typeof setStaffList === 'function') {
+          setStaffList(prev => prev.map(s => (s.name === name && s.district === district ? {
+            ...s,
+            pin: newPin.trim(),
+            designation: designation || s.designation
+          } : s)));
+        }
+        if (typeof loadTargets === 'function') loadTargets('All', month);
+        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
+        setPinChangeModal(null);
+        if (showToast) showToast("✓ Staff details updated!", "success");
+      } else {
+        const data = await res.json();
+        setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update staff.", loading: false }));
+      }
+    } catch (err) {
+      setPinChangeModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteAddStaff = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!addStaffModal) return;
+    const { district, name, pin, designation, target } = addStaffModal;
+    if (!name || !name.trim()) {
+      setAddStaffModal(prev => ({ ...prev, error: "Please enter Officer Name." }));
+      return;
+    }
+    if (!pin || pin.trim().length !== 4 || !/^\d+$/.test(pin.trim())) {
+      setAddStaffModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits." }));
+      return;
+    }
+    setAddStaffModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district: district || 'Jamui',
+          name: name.trim(),
+          pin: pin.trim(),
+          designation: designation || 'Field Officer',
+          target: Number(target) || 50
+        })
+      });
+      if (res.ok) {
+        if (typeof fetchStaffList === 'function') fetchStaffList();
+        if (typeof fetchAttendance === 'function') fetchAttendance(true);
+        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
+        setAddStaffModal(null);
+        if (showToast) showToast("✓ New staff officer registered!", "success");
+      } else {
+        const data = await res.json();
+        setAddStaffModal(prev => ({ ...prev, error: data.detail || "Failed to add officer.", loading: false }));
+      }
+    } catch (err) {
+      setAddStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteDeleteStaff = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!deleteStaffModal) return;
+    const { name, district } = deleteStaffModal;
+    setDeleteStaffModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district, name })
+      });
+      if (res.ok) {
+        if (typeof setStaffList === 'function') {
+          setStaffList(prev => prev.filter(s => !(s.name === name && s.district === district)));
+        }
+        if (typeof fetchStaffList === 'function') fetchStaffList();
+        if (typeof fetchAttendance === 'function') fetchAttendance(true);
+        setDeleteStaffModal(null);
+        if (showToast) showToast(`✓ Officer ${name} removed from registry.`, "success");
+      } else {
+        const data = await res.json();
+        setDeleteStaffModal(prev => ({ ...prev, error: data.detail || "Failed to delete.", loading: false }));
+      }
+    } catch (err) {
+      setDeleteStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteToggleStaffStatus = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!staffToggleModal || !staffToggleModal.officer) return;
+    const { officer, targetStatus, effectiveDate } = staffToggleModal;
+    setIsTogglingStaff(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const effDate = targetStatus === 'inactive' ? (effectiveDate || new Date().toISOString().slice(0, 10)) : undefined;
+      const res = await authFetch(`${API_BASE_URL}/admin/staff/toggle-status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district: officer.district,
+          fo_name: officer.name,
+          status: targetStatus,
+          ...(effDate ? { effective_date: effDate } : {})
+        })
+      });
+      if (res.ok) {
+        if (typeof setStaffList === 'function') {
+          setStaffList(prev => prev.map(s => s.name === officer.name && s.district === officer.district ? {
+            ...s,
+            status: targetStatus,
+            is_active: targetStatus === 'active'
+          } : s));
+        }
+        setStaffToggleModal(null);
+        if (showToast) showToast(`✓ Status updated to ${targetStatus} for ${officer.name}`, "success");
+      }
+    } catch (err) {
+      alert("Error toggling staff status");
+    } finally {
+      setIsTogglingStaff(false);
+    }
+  };
+
+  // 19. Admin Day Report Edits / Deletes Handlers
+  const handleAdminExecuteIdEdit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!adminEditModal) return;
+    const { fo_name, district, date, category, action, oldId, newId } = adminEditModal;
+    if (action !== 'delete' && (!newId || newId.trim().length !== 9 || !/^\d+$/.test(newId.trim()))) {
+      setAdminEditModal(prev => ({ ...prev, error: "Patient ID must be exactly 9 digits." }));
+      return;
+    }
+    setAdminEditModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/api/reports/edit-id`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          working_place: district,
+          fo_name,
+          date,
+          category,
+          action,
+          old_id: oldId,
+          new_id: newId ? newId.trim() : "",
+          edited_by: currentUser?.name || "Admin"
+        })
+      });
+      if (res.ok) {
+        setAdminEditModal(null);
+        if (showToast) showToast("✓ Patient ID updated successfully!", "success");
+        if (typeof fetchData === 'function') fetchData(true);
+      } else {
+        const data = await res.json();
+        setAdminEditModal(prev => ({ ...prev, error: data.detail || "Failed to update ID", loading: false }));
+      }
+    } catch (err) {
+      setAdminEditModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteDeleteDay = async () => {
+    if (!deleteDayModal) return;
+    const { district, fo_name, date } = deleteDayModal;
+    setDeleteDayModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/reports/delete-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district, fo_name, date })
+      });
+      if (res.ok) {
+        if (typeof setRawRecords === 'function') {
+          setRawRecords(prev => prev.filter(r => {
+            const matchFo = (r.fo_name || '').trim().toLowerCase() === fo_name.trim().toLowerCase();
+            const matchDist = canonicalizeDistrict(r.working_place || '') === canonicalizeDistrict(district);
+            const matchDate = (r.date_of_reporting || r.date) === date;
+            return !(matchFo && matchDist && matchDate);
+          }));
+        }
+        setDeleteDayModal(null);
+        if (showToast) showToast(`✓ Report for ${fo_name} on ${date} deleted.`, "success");
+        if (typeof fetchAttendance === 'function') fetchAttendance();
+      } else {
+        const data = await res.json();
+        setDeleteDayModal(prev => ({ ...prev, error: data.detail || "Failed to delete report.", loading: false }));
+      }
+    } catch (err) {
+      setDeleteDayModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  const handleExecuteEditDay = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!editDayModal) return;
+    setEditDayModal(prev => ({ ...prev, loading: true, error: "" }));
+    try {
+      const { district, fo_name, date, morning_km, evening_km, travel_expenses, visited_names, remark, category_inputs } = editDayModal;
+      const category_ids = {};
+      Object.keys(category_inputs || {}).forEach(catKey => {
+        const raw = category_inputs[catKey] || '';
+        const is8or9 = (catKey === 'fdc_provided_ids' || catKey === 'outcome_assigned_ids');
+        const parsed = raw.split(/[\n,]+/).map(s => s.trim()).filter(s => {
+          const validLen = is8or9 ? (s.length === 8 || s.length === 9) : (s.length === 9);
+          return validLen && /^\d+$/.test(s);
+        });
+        category_ids[catKey] = Array.from(new Set(parsed));
+      });
+
+      const cleanVisited = visited_names ? visited_names.split(',').map(s => s.trim()).filter(Boolean) : [];
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/reports/edit-day`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          district,
+          fo_name,
+          date,
+          morning_km: Number(morning_km) || 0,
+          evening_km: Number(evening_km) || 0,
+          travel_expenses: Number(travel_expenses) || 0,
+          visited_names: cleanVisited,
+          remark: remark || '',
+          category_ids
+        })
+      });
+      if (res.ok) {
+        if (typeof setRawRecords === 'function') {
+          setRawRecords(prev => prev.map(r => {
+            const matchFo = (r.fo_name || '').trim().toLowerCase() === fo_name.trim().toLowerCase();
+            const matchDist = canonicalizeDistrict(r.working_place || '') === canonicalizeDistrict(district);
+            const matchDate = (r.date_of_reporting || r.date) === date;
+            if (matchFo && matchDist && matchDate) {
+              return {
+                ...r,
+                morning_km: Number(morning_km) || 0,
+                evening_km: Number(evening_km) || 0,
+                travel_expenses: Number(travel_expenses) || 0,
+                visited_names: cleanVisited,
+                remark: remark || ''
+              };
+            }
+            return r;
+          }));
+        }
+        setEditDayModal(null);
+        if (showToast) showToast(`✓ Report for ${fo_name} updated!`, "success");
+      } else {
+        const data = await res.json();
+        setEditDayModal(prev => ({ ...prev, error: data.detail || "Failed to edit report.", loading: false }));
+      }
+    } catch (err) {
+      setEditDayModal(prev => ({ ...prev, error: "Network error.", loading: false }));
+    }
+  };
+
+  // Top Performers Canvas Generation Engine
+  const generateTopPerformersPosterCanvas = useCallback(async () => {
     const canvas = topPerformersCanvasRef.current;
     if (!canvas || !topPerformersData) return;
     const ctx = canvas.getContext('2d');
@@ -453,13 +1581,15 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     };
 
     // 1. Q1: Top 5 Districts
-    drawQuadrant(col1X, row1Y, 'TOP 5 DISTRICTS', 'Target Achievement & Volume', '🏛️', '#38bdf8', topPerformersData.top_districts || [], (d, startX, startY) => {
+    const distSub = adminTargetViewMode === 'frontline' ? 'Frontline Stretch & Volume' : 'Official Quota & Volume';
+    drawQuadrant(col1X, row1Y, 'TOP 5 DISTRICTS', distSub, '🏛️', '#38bdf8', topPerformersData.top_districts || [], (d, startX, startY) => {
       ctx.textAlign = 'left';
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
       ctx.fillText(d.district, startX, startY + 28);
 
-      const pctText = `${d.percentage}% Target`;
+      const modeTag = adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official';
+      const pctText = `${d.percentage}% ${modeTag} Target (${d.target || 0})`;
       ctx.fillStyle = d.percentage >= 100 ? '#10b981' : '#f59e0b';
       ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
       ctx.fillText(pctText, startX, startY + 54);
@@ -668,254 +1798,102 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     ctx.fillStyle = '#64748b';
     ctx.font = 'bold 13px system-ui, -apple-system, sans-serif';
     ctx.fillText(`Generated on ${nowStr} (IST) • Doctors For You State Monitoring Operations`, width / 2, 1935);
-  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg, adminTargetViewMode]);
 
-  
   const handleDownloadTopPerformersPoster = useCallback(async () => {
     try {
+      // Pick a fresh random congratulatory message on each export
       const nextMsg = TOP_PERFORMER_MESSAGES[Math.floor(Math.random() * TOP_PERFORMER_MESSAGES.length)];
-      setTopPerformerRandomMsg?.(nextMsg);
+      setTopPerformerRandomMsg(nextMsg);
       await generateTopPerformersPosterCanvas();
       const canvas = topPerformersCanvasRef.current;
       if (!canvas) return;
       const filename = `DFY_Top_Performers_${topPerformersPeriod}_${month}.png`;
-      await downloadOrShareCanvas(canvas, filename);
-      showToast("✓ Poster downloaded successfully!", "success");
-    } catch (e) {
-      console.error("handleDownloadTopPerformersPoster error", e);
+      const result = await downloadOrShareCanvas(canvas, filename, `DFY Bihar Statewide Top Performers - ${topPerformersPeriod} (${month})`);
+      if (result.success) {
+        showToast(result.method === 'share' ? '✓ Poster ready in Apple Share Sheet!' : '✓ Poster downloaded successfully!', 'success');
+      }
+    } catch (err) {
+      console.error('Download poster failed', err);
+      showToast('Failed to download poster', 'error');
     }
-  }, [generateTopPerformersPosterCanvas, topPerformersCanvasRef, topPerformersPeriod, month, showToast, setTopPerformerRandomMsg]);
+  }, [generateTopPerformersPosterCanvas, topPerformersPeriod, month, showToast]);
 
   const handleShareTopPerformersWhatsApp = useCallback(() => {
-    if (!topPerformersData) return;
-    let text = `*🏆 BIHAR STATEWIDE TOP PERFORMERS STUDIO — ${month.toUpperCase()}*\n`;
-    text += `_Reporting Horizon: ${topPerformersPeriod.toUpperCase()}_\n\n`;
-    text += `${topPerformerRandomMsg}\n\n`;
-    
-    if (topPerformersData.top_districts?.length > 0) {
-      text += `*🏛️ TOP DISTRICTS:*\n`;
-      topPerformersData.top_districts.slice(0, 5).forEach((d, i) => {
-        text += `${i+1}. *${d.district}*: ${d.score}% (${d.achieved}/${d.target})\n`;
+    const periodName = topPerformersPeriod === 'weekly' ? 'Weekly Sprint (Last 7 Days)' : topPerformersPeriod === 'fortnightly' ? '15-Day Drive' : `Monthly (${month})`;
+    const modeLabel = adminTargetViewMode === 'frontline' ? 'FRONTLINE STRETCH' : 'OFFICIAL QUOTA';
+    let text = `*🏆 DOCTORS FOR YOU — BIHAR TB MISSION*\n`;
+    text += `*🌟 STATEWIDE TOP PERFORMERS LEADERBOARD (${periodName} • ${modeLabel})*\n\n`;
+
+    const activeTribute = topPerformerRandomMsg || TOP_PERFORMER_MESSAGES[0];
+    text += `*✨ STATEWIDE LEADERSHIP TRIBUTE:*\n_"${activeTribute}"_\n\n`;
+
+    // 1. Top 5 Districts
+    text += `*🏛️ TOP 5 DISTRICTS (${modeLabel} & VOLUME):*\n`;
+    const dists = topPerformersData?.top_districts || [];
+    if (dists.length === 0) {
+      text += `_No district data recorded_\n`;
+    } else {
+      dists.slice(0, 5).forEach((d, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        const targetLabel = adminTargetViewMode === 'frontline' ? 'Frontline' : 'Official';
+        text += `${medal} *${d.district}*: ${d.notifications} Notifs (${d.percentage}% ${targetLabel}: ${d.target || 0})\n`;
       });
-      text += `\n`;
     }
 
-    if (topPerformersData.top_fo?.length > 0) {
-      text += `*🛵 TOP FIELD OFFICERS:*\n`;
-      topPerformersData.top_fo.slice(0, 5).forEach((f, i) => {
-        text += `${i+1}. *${f.fo_name}* (${f.district}): ${f.notifications} Notif (${f.pct}%)\n`;
+    // 2. Top 5 FO & Hub Agents
+    text += `\n*📋 TOP 5 FIELD OFFICERS & HUB AGENTS:*\n`;
+    const foList = topPerformersData?.top_fo || topPerformersData?.top_staff || [];
+    if (foList.length === 0) {
+      text += `_No FO/Hub records recorded_\n`;
+    } else {
+      foList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        const badge = (s.designation === 'Hub Agent' || String(s.designation || '').toUpperCase().includes('HUB')) ? ' [HUB AGENT]' : '';
+        text += `${medal} *${s.fo_name}* (${s.district})${badge}: ${s.notifications} Notifs\n`;
       });
-      text += `\n`;
     }
 
-    text += `_Congratulations to all clinical champions leading Bihar's TB elimination drive! 🏥_`;
+    // 3. Top 5 Treatment Coordinators
+    text += `\n*🏠 TOP 5 TREATMENT COORDINATORS (TC HOME VISITS):*\n`;
+    const tcList = topPerformersData?.top_tc || [];
+    if (tcList.length === 0) {
+      text += `_No TC home visit records recorded_\n`;
+    } else {
+      tcList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.home_visits ?? s.metric_value ?? 0} Home Visits\n`;
+      });
+    }
+
+    // 4. Top 5 Lab Technicians
+    text += `\n*🔬 TOP 5 LAB TECHNICIANS (LT TESTS):*\n`;
+    const ltList = topPerformersData?.top_lt || [];
+    if (ltList.length === 0) {
+      text += `_No LT test records recorded_\n`;
+    } else {
+      ltList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.tests || s.metric_value || 0} Tests\n`;
+      });
+    }
+
+    // 4. Top 5 SCT Agents
+    text += `\n*🧪 TOP 5 SCT AGENTS (SPUTUM COLLECTIONS):*\n`;
+    const sctList = topPerformersData?.top_sct || [];
+    if (sctList.length === 0) {
+      text += `_No SCT collection records recorded_\n`;
+    } else {
+      sctList.slice(0, 5).forEach((s, i) => {
+        const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+        text += `${medal} *${s.fo_name}* (${s.district}): ${s.samples_collected || s.metric_value || 0} Collections\n`;
+      });
+    }
+
+    text += `\n_Congratulations to all clinical champions leading Bihar's TB elimination drive! 🏥_`;
+
     window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, '_blank');
-  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg]);
-
-  useEffect(() => {
-    if (showDuplicateModal) {
-      fetchDuplicateAudit();
-      fetchDuplicateScan();
-    }
-  }, [showDuplicateModal, fetchDuplicateAudit, fetchDuplicateScan]);
-
-  const handleSaveSingleDistrictTarget = useCallback(async (distName, targetVal) => {
-    if (!distName) return;
-    const val = Number(targetVal);
-    if (isNaN(val) || val < 0) {
-      showToast?.('Official target must be a non-negative number', 'error');
-      return;
-    }
-    setIsSavingDistrictTarget(true);
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("token") || currentUser?.token);
-      const res = await fetch(`${API_BASE_URL}/update-district-target`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          month: targetModalMonth,
-          district: distName,
-          official_target: val
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast?.(`Official target for ${distName} saved (${val})!`, 'success');
-        if (targetModalDistrict === distName && setOfficialDistrictTarget) {
-          setOfficialDistrictTarget(val);
-        }
-      } else {
-        showToast?.(data.detail || `Failed to save target for ${distName}`, 'error');
-      }
-    } catch (err) {
-      console.error("handleSaveSingleDistrictTarget error", err);
-      showToast?.('Network error while saving official district target', 'error');
-    } finally {
-      setIsSavingDistrictTarget(false);
-    }
-  }, [getAdminToken, currentUser, targetModalMonth, showToast, targetModalDistrict, setOfficialDistrictTarget]);
-
-  const handleSaveBulkDistrictTargets = useCallback(async () => {
-    setIsSavingBulkDistrictTargets(true);
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("token") || currentUser?.token);
-      const payloadTargets = (targetModalDistricts || []).map(dist => ({
-        district: dist,
-        official_target: Math.max(0, Number(tempOfficialTargets?.[dist] ?? officialDistrictTarget ?? 0))
-      }));
-      const res = await fetch(`${API_BASE_URL}/update-district-targets-bulk`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          month: targetModalMonth,
-          targets: payloadTargets
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast?.(`✓ All ${payloadTargets.length} district official targets saved successfully!`, 'success');
-      } else {
-        showToast?.(data.detail || 'Failed to bulk save official district targets', 'error');
-      }
-    } catch (err) {
-      console.error("handleSaveBulkDistrictTargets error", err);
-      showToast?.('Network error while bulk saving official district targets', 'error');
-    } finally {
-      setIsSavingBulkDistrictTargets(false);
-    }
-  }, [getAdminToken, currentUser, targetModalDistricts, tempOfficialTargets, officialDistrictTarget, targetModalMonth, showToast]);
-
-  const saveAllTargets = useCallback(async () => {
-    setIsSavingTargets(true);
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("token") || currentUser?.token);
-      const res = await fetch(`${API_BASE_URL}/update-targets-bulk`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          month: targetModalMonth,
-          targets: targetsData
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast?.('✓ Frontline targets saved successfully!', 'success');
-      }
-    } catch (err) {
-      console.error("saveAllTargets error", err);
-    } finally {
-      setIsSavingTargets(false);
-    }
-  }, [getAdminToken, currentUser, targetModalMonth, targetsData, showToast]);
-
-  const handleSaveAllTargetsCombined = useCallback(async () => {
-    await handleSaveBulkDistrictTargets();
-    await saveAllTargets();
-    showToast?.('✓ All Official Targets & Frontline Allocations Saved!', 'success');
-  }, [handleSaveBulkDistrictTargets, saveAllTargets, showToast]);
-
-  useEffect(() => {
-    if (showDuplicateModal && duplicateRadarTab === 'repair' && !duplicateScanData) {
-      fetchDuplicateScan();
-    }
-  }, [showDuplicateModal, duplicateRadarTab, duplicateScanData, fetchDuplicateScan]);
-
-  const handleExecuteUpdatePin = async (e) => {
-    e.preventDefault();
-    if (!pinChangeModal) return;
-    const { name, district, newPin, designation, target } = pinChangeModal;
-    if (!newPin || newPin.trim().length !== 4 || !/^\d+$/.test(newPin.trim())) {
-      setPinChangeModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits (numbers only)." }));
-      return;
-    }
-    setPinChangeModal(prev => ({ ...prev, loading: true, error: "" }));
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const payload = {
-        district,
-        name,
-        new_pin: newPin.trim(),
-        designation: designation || "Field Officer"
-      };
-      if (target !== undefined && target !== null && !isNaN(Number(target))) {
-        payload.target = Number(target);
-      }
-      const res = await authFetch(`${API_BASE_URL}/admin/staff/update-details`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (typeof setStaffList === 'function') {
-          setStaffList(prev => prev.map(s => (s.name === name && s.district === district ? {
-            ...s,
-            pin: newPin.trim(),
-            designation: designation || s.designation
-          } : s)));
-        }
-        if (typeof loadTargets === 'function') loadTargets('All', month);
-        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
-        setPinChangeModal(null);
-      } else {
-        setPinChangeModal(prev => ({ ...prev, error: data.detail || "Failed to update staff details.", loading: false }));
-      }
-    } catch (err) {
-      setPinChangeModal(prev => ({ ...prev, error: "Network error.", loading: false }));
-    }
-  };
-
-  const handleExecuteAddStaff = async (e) => {
-    e.preventDefault();
-    if (!addStaffModal) return;
-    const { district, name, pin, designation, target } = addStaffModal;
-    if (!name || !name.trim()) {
-      setAddStaffModal(prev => ({ ...prev, error: "Please enter Officer Name." }));
-      return;
-    }
-    if (!pin || pin.trim().length !== 4 || !/^\d+$/.test(pin.trim())) {
-      setAddStaffModal(prev => ({ ...prev, error: "PIN must be exactly 4 digits." }));
-      return;
-    }
-    setAddStaffModal(prev => ({ ...prev, loading: true, error: "" }));
-    try {
-      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
-      const res = await authFetch(`${API_BASE_URL}/admin/staff/add`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          district: district || 'Jamui',
-          name: name.trim(),
-          pin: pin.trim(),
-          designation: designation || 'Field Officer',
-          target: Number(target) || 50
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (typeof fetchStaffList === 'function') fetchStaffList();
-        if (typeof fetchAttendance === 'function') fetchAttendance(true);
-        if (typeof fetchTopPerformers === 'function') fetchTopPerformers(topPerformersPeriod);
-        setAddStaffModal(null);
-      } else {
-        setAddStaffModal(prev => ({ ...prev, error: data.detail || "Failed to add officer.", loading: false }));
-      }
-    } catch (err) {
-      setAddStaffModal(prev => ({ ...prev, error: "Network error.", loading: false }));
-    }
-  };
+  }, [topPerformersData, topPerformersPeriod, month, topPerformerRandomMsg, adminTargetViewMode]);
 
   return {
     // 1. Security
@@ -923,7 +1901,7 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     changeCurrentPw, setChangeCurrentPw,
     changeNewPw, setChangeNewPw,
     securityStatusMsg, setSecurityStatusMsg,
-    isSavingSecurity,
+    isSavingSecurity, handleUpdatePassword,
 
     // 2. Cascade Alerts
     showCascadeModal, setShowCascadeModal,
@@ -946,13 +1924,15 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     showJourneyModal, setShowJourneyModal,
     journeyPatientId, setJourneyPatientId,
     journeyLoading, journeyResult, journeyError,
+    handleFetchJourney,
 
     // 6. Automated Backup
     showBackupModal, setShowBackupModal,
-    backupStatus, backupLoading, backupTriggerLoading, backupActionMsg,
+    backupStatus, backupLoading, backupTriggerLoading, backupActionMsg, setBackupActionMsg,
     restoreConfirmText, setRestoreConfirmText,
     restoreTargetFile, setRestoreTargetFile,
-    restoreLoading,
+    restoreLoading, fetchBackupStatus,
+    handleTriggerBackupNow, handleDownloadBackup, handleExecuteRestore,
 
     // 7. Top Performers Studio
     showTopPerformersModal, setShowTopPerformersModal,
@@ -964,77 +1944,99 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     // 8. Admin Users
     showAdminUsersModal, setShowAdminUsersModal,
     adminUsersList, adminUsersLoading, currentUser,
-    adminUserEditModal, setAdminUserEditModal,
-    newAdminModal, setNewAdminModal,
-    deleteAdminModal, setDeleteAdminModal,
-    isSavingAdminUser,
+    loadingAdminUsers: adminUsersLoading,
+    userFormModal, setUserFormModal,
+    fetchAdminUsers, saveAdminUser, deleteAdminUser,
 
     // 9. Audit Trail
     showAuditModal, setShowAuditModal,
     auditLogs, auditLoading,
+    loadingAuditLogs: auditLoading,
     auditFilterAction, setAuditFilterAction,
     auditFilterTarget, setAuditFilterTarget,
+    auditFilterDistrict: auditFilterTarget, setAuditFilterDistrict: setAuditFilterTarget,
     auditFilterAdmin, setAuditFilterAdmin,
+    auditFilterUser: auditFilterAdmin, setAuditFilterUser: setAuditFilterAdmin,
     auditSearchQuery, setAuditSearchQuery,
-    formatAuditTimestamp,
+    auditLogsList: auditLogs,
+    formatAuditTimestamp, isPruningAudit,
+    fetchAuditLogs, exportAuditLogsExcel, handleManualPruneAuditLogs,
 
     // 10. Broadcast Studio & Unread Popup
     unreadBroadcastPopup, setUnreadBroadcastPopup,
+    dismissBroadcastPopup,
     showBroadcastModal, setShowBroadcastModal,
     activeBroadcasts, broadcastHistory, broadcastLoading, isSendingBroadcast,
+    broadcastsList: broadcastHistory,
+    loadingBroadcasts: broadcastLoading,
     newBroadcastModal, setNewBroadcastModal,
     deleteBroadcastModal, setDeleteBroadcastModal,
-    fetchActiveBroadcasts,
+    fetchAllBroadcasts, handleCreateBroadcast, handleDeleteBroadcast,
 
     // 11. Notif Tray
     showNotifTrayModal, setShowNotifTrayModal,
     notifTrayFilterDistrict, setNotifTrayFilterDistrict,
     notifTraySearchQuery, setNotifTraySearchQuery,
+    notifTraySearch: notifTraySearchQuery, setNotifTraySearch: setNotifTraySearchQuery,
     notifTrayCategoryFilter, setCategoryFilter: setNotifTrayCategoryFilter,
-    isExportingNotifTray, setIsExportingNotifTray,
+    isExportingNotifTray, notifTrayCopiedNotice, notifTrayDistricts,
+    notifTrayData, copyToClipboardWithFallback, build24ColTsv,
+    handleClearNotifDistricts, handleSelectAllNotifDistricts, handleToggleNotifDistrict,
 
     // 12. App Guide SOP
     showAppGuideModal, setShowAppGuideModal,
     appGuideActiveTopic, setAppGuideActiveTopic,
     appGuideSearchQuery, setAppGuideSearchQuery,
+    appGuideSearch: appGuideSearchQuery, setAppGuideSearch: setAppGuideSearchQuery,
 
     // 13. Nikshay Reconciler
     showNikshayModal, setShowNikshayModal,
-    nikshayFilterMonth, setNikshayFilterMonth,
-    nikshayRecords, nikshayLoading, nikshaySyncing,
-    nikshayFilterDist, setNikshayFilterDist,
-    nikshaySearch, setNikshaySearch,
-    nikshayFilterStatus, setNikshayFilterStatus,
-    nikshaySelectedPatient, setNikshaySelectedPatient,
-    nikshayEditForm, setNikshayEditForm,
-    nikshaySaving, isExportingNikshay, setIsExportingNikshay,
+    nikshayFile, setNikshayFile,
+    nikshayResult, setNikshayResult,
+    nikshayError, setNikshayError,
+    nikshayLoading, nikshaySyncing,
+    nikshayDistrict, setNikshayDistrict,
+    nikshayMonth, setNikshayMonth,
+    nikshayActiveTab, setNikshayActiveTab,
+    ledgerViewMode, setLedgerViewMode,
+    ledgerData, ledgerSearch, setLedgerSearch,
+    ledgerDistrict, setLedgerDistrict,
+    ledgerLoading, ledgerExporting, reviewExporting,
+    nikshaySyncStatus, handleReconcileNikshay,
+    handleDownloadReviewSheet, handleExportCumulativeLedger,
+    fetchCumulativeLedger,
+    isSubAdmin: currentUser?.role === 'SUB_ADMIN',
 
     // 14. Admin Backdated Feeding
     showAdminFeedModal, setShowAdminFeedModal,
     feedDistrict, setFeedDistrict,
     feedFoName, setFeedFoName,
-    feedDate, setDate: setFeedDate,
-    categoryInputs: feedCategoryInputs, setCategoryInputs: setFeedCategoryInputs,
-    visitedNames: feedVisitedNames, setVisitedNames: setFeedVisitedNames,
-    feedRemarks, setRemarks: setFeedRemarks,
-    travelExpense, setTravelExpense,
-    morningKm, setMorningKm,
-    eveningKm, setEveningKm,
-    isNextDay, setIsNextDay,
-    submissionCount, setSubmissionCount,
-    isSubmitting: feedSubmitting,
-    feedError, feedSuccess,
+    feedDate, setFeedDate,
+    feedCategoryInputs, setFeedCategoryInputs,
+    feedVisitedNames, setFeedVisitedNames,
+    feedRemarks, setFeedRemarks,
+    feedTravelExpense, setFeedTravelExpense,
+    feedMorningKm, setFeedMorningKm,
+    feedEveningKm, setFeedEveningKm,
+    feedIsNextDay, setFeedIsNextDay,
+    feedSubmissionCount, setFeedSubmissionCount,
+    feedLoading, feedError, setFeedError,
+    feedSuccess, setFeedSuccess,
+    feedShowAllCategories, setFeedShowAllCategories,
     availableDistrictsForFeed: availableKpiDistricts,
-    feedCategoriesConfig,
-    fetchData,
+    availableFosForFeed,
+    feedCategoriesConfig, handleAdminFeedSubmit,
 
     // 15. Target Setting
+    showTargetModal, setShowTargetModal,
     targetModalMonth, setTargetModalMonth,
     targetModalDistrict, setTargetModalDistrict,
     targetModalTab, setTargetModalTab,
     targetSearchQuery, setTargetSearchQuery,
     targetModalDistricts, officialDistrictTarget, setOfficialDistrictTarget,
     tempOfficialTargets, setTempOfficialTargets,
+    officialTargetsByDistrict: tempOfficialTargets,
+    targets: tempOfficialTargets,
     targetsData, isSavingTargets,
     isSavingDistrictTarget, isSavingBulkDistrictTargets,
     bulkTargetValue, setBulkTargetValue,
@@ -1042,6 +2044,7 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     handleSaveBulkDistrictTargets,
     saveAllTargets,
     handleSaveAllTargetsCombined,
+    handleTargetChange, handleCopyFromLastMonth, frontlineAllocated,
 
     // 16. Attendance Radar
     showAttendanceModal, setShowAttendanceModal,
@@ -1062,7 +2065,10 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     showDuplicateModal, setShowDuplicateModal,
     duplicateRadarTab, setDuplicateRadarTab,
     duplicateAudit, duplicateScanData, duplicateScanLoading,
-    repairingDocId, fetchDuplicateScan,
+    repairingDocId, fetchDuplicateAudit, fetchDuplicateScan,
+    duplicateRepairing: repairingDocId,
+    handleRepairDuplicate,
+    handleRepairDuplicates: handleRepairDuplicate,
     compareDistA, setCompareDistA,
     compareDistB, setCompareDistB,
 
@@ -1081,16 +2087,20 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     staffToggleModal, setStaffToggleModal,
     isTogglingStaff, showPinMap, setShowPinMap,
     handleExecuteUpdatePin, handleExecuteAddStaff,
+    handleExecuteDeleteStaff, handleExecuteToggleStaffStatus,
     fetchStaffList,
 
     // 20. Admin Edit ID
     adminEditModal, setAdminEditModal,
+    handleAdminExecuteIdEdit,
 
     // 21. Delete Day Report
     deleteDayModal, setDeleteDayModal,
+    handleExecuteDeleteDay,
 
     // 22. Edit Day Report
     editDayModal, setEditDayModal,
+    handleExecuteEditDay,
 
     // 23. Reports Studio
     showReportsStudio, setShowReportsStudio,
@@ -1105,13 +2115,17 @@ const generateTopPerformersPosterCanvas = useCallback(async () => {
     handleSelectAllMedDistricts, handleClearMedDistricts,
     isDownloadingMedicineReport, handleDownloadMedicineReport,
     handleDownloadMedicineReportScopedZip, handleDownloadMedicineReportQueue,
+    handleDownloadSequentialMedQueue: handleDownloadMedicineReportQueue,
     medQueueProgress, selectedAttendanceDistricts,
     handleToggleAttendanceDistrict, handleSelectAllAttendanceDistricts,
     handleClearAttendanceDistricts, isDownloadingAttendance,
     handleDownloadAttendanceSingleOrScoped, handleDownloadStaffAttendanceQueue,
     attendanceQueueProgress, copyWhatsAppBulletin, liveWhatsAppBulletin,
+    availableAttendanceDistricts: availableKpiDistricts,
+    totals: {},
 
     // Shared & Context
-    districts, authFetch, getAdminToken, showToast
+    districts, authFetch, getAdminToken, showToast,
+    isSuperAdmin: currentUser?.role === 'SUPER_ADMIN'
   };
 }

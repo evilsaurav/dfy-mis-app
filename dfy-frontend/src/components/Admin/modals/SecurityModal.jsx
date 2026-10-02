@@ -2,6 +2,7 @@ import React from 'react';
 
 export default function SecurityModal({
   isOpen,
+  show,
   onClose,
   handleUpdatePassword,
   changeCurrentPw,
@@ -11,7 +12,8 @@ export default function SecurityModal({
   securityStatusMsg,
   isSavingSecurity
 }) {
-  if (!isOpen) return null;
+  const isModalOpen = isOpen ?? show;
+  if (!isModalOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">

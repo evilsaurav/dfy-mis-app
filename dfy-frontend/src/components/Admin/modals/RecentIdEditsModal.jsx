@@ -2,6 +2,7 @@ import React from 'react';
 
 export default function RecentIdEditsModal({
   isOpen,
+  show,
   onClose,
   recentIdEditsFilterAction,
   setRecentIdEditsFilterAction,
@@ -11,7 +12,8 @@ export default function RecentIdEditsModal({
   fetchRecentIdEdits,
   recentIdEdits = []
 }) {
-  if (!isOpen) return null;
+  const isModalOpen = isOpen ?? show;
+  if (!isModalOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-sans">

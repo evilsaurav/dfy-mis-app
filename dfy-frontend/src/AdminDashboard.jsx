@@ -638,7 +638,7 @@ export default function AdminDashboard() {
   // --- Hook 4: All 24 Admin Modals State & Handlers Engine ---
   const modals = useAdminModals({
     month, currentUser, districts, targetModalDistricts, availableKpiDistricts,
-    staffDirectory, targetsData, rawRecords, staffList, fetchStaffList,
+    staffDirectory, targetsData, rawRecords, setRawRecords, staffList, fetchStaffList,
     activeBroadcasts, fetchActiveBroadcasts,
     officialDistrictTarget, setOfficialDistrictTarget, tempOfficialTargets, setTempOfficialTargets,
     loadTargets,
@@ -663,7 +663,7 @@ export default function AdminDashboard() {
     isDownloadingAttendance, handleDownloadAttendanceSingleOrScoped,
     handleDownloadStaffAttendanceQueue, attendanceQueueProgress,
     copyWhatsAppBulletin, liveWhatsAppBulletin,
-    authFetch, getAdminToken, showToast, fetchData
+    authFetch, getAdminToken, showToast, fetchData, setPassword
   });
 
   // Trigger useEffects (Strict TDZ Order)
@@ -793,25 +793,40 @@ export default function AdminDashboard() {
           setShowAttendanceModal={modals.setShowAttendanceModal}
           setActiveMainTab={setActiveMainTab}
           setShowNotifTrayModal={modals.setShowNotifTrayModal}
-          notifTrayData={{ allIds: [] }}
+          notifTrayData={modals.notifTrayData}
           setShowNikshayModal={modals.setShowNikshayModal}
           setShowJourneyModal={modals.setShowJourneyModal}
           fetchDuplicateAudit={modals.fetchDuplicateAudit}
           fetchDuplicateScan={modals.fetchDuplicateScan}
           setShowDuplicateModal={modals.setShowDuplicateModal}
-          setShowTopPerformersModal={modals.setShowTopPerformersModal}
-          setShowReportsStudio={modals.setShowReportsStudio}
+          duplicateAudit={modals.duplicateAudit}
+          duplicateScanData={modals.duplicateScanData}
           setShowCascadeModal={modals.setShowCascadeModal}
-          setShowBackupModal={modals.setShowBackupModal}
-          fetchBackupStatus={() => {}}
+          cascadeAlerts={modals.cascadeData?.alerts || []}
+          canEditTargets={isSuperAdmin || (currentUser?.role === 'SUB_ADMIN')}
+          setShowTargetModal={modals.setShowTargetModal}
+          setTargetModalDistrict={modals.setTargetModalDistrict}
+          officialTargetsByDistrict={officialTargetsByDistrict}
+          setOfficialDistrictTarget={setOfficialDistrictTarget}
+          canManageStaff={isSuperAdmin}
           setShowStaffSuite={modals.setShowStaffSuite}
+          fetchAdminUsers={modals.fetchAdminUsers}
           setShowAdminUsersModal={modals.setShowAdminUsersModal}
+          fetchRecentIdEdits={modals.fetchRecentIdEdits}
+          setShowRecentIdEditsModal={modals.setShowRecentIdEditsModal}
+          setShowReportsStudio={modals.setShowReportsStudio}
+          setShowTopPerformersModal={modals.setShowTopPerformersModal}
+          fetchBackupStatus={modals.fetchBackupStatus}
+          setShowBackupModal={modals.setShowBackupModal}
+          fetchAuditLogs={modals.fetchAuditLogs}
           setShowAuditModal={modals.setShowAuditModal}
-          fetchAuditLogs={() => {}}
-          setShowBroadcastModal={modals.setShowBroadcastModal}
-          activeBroadcasts={activeBroadcasts}
+          fetchAllBroadcasts={modals.fetchAllBroadcasts}
+          setShowBroadcastStudio={modals.setShowBroadcastModal}
+          activeAdminBroadcasts={activeBroadcasts}
+          handleDeleteBroadcast={modals.handleDeleteBroadcast}
           activeMainTab={activeMainTab}
           workingDaysInfo={workingDaysInfo}
+          pacingStats={pacingStats}
         />
 
         {/* Tab 1: Overview & State Analytics */}
@@ -860,7 +875,7 @@ export default function AdminDashboard() {
           activeMetric={activeMetric}
           setActiveMetric={setActiveMetric}
           dailyTrendStats={dailyTrendStats}
-          trendGradient="from-indigo-500 to-blue-500"
+          trendGradient={"from-indigo-500 to-blue-500"}
           compareDistA={comparatorOfficerA}
           setCompareDistA={setComparatorOfficerA}
           compareDistB={comparatorOfficerB}

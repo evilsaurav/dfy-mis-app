@@ -1,9 +1,10 @@
-import React from 'react';
+const DEFAULT_CASCADE_DATA = { summary: {}, alerts: [] };
 
 export default function CascadeAlertsModal({
   isOpen,
+  show,
   onClose,
-  cascadeData = { summary: {}, alerts: [] },
+  cascadeData = DEFAULT_CASCADE_DATA,
   month,
   cascadeFilterDist,
   setCascadeFilterDist,
@@ -15,7 +16,8 @@ export default function CascadeAlertsModal({
   currentUser,
   loadingCascade
 }) {
-  if (!isOpen) return null;
+  const isModalOpen = isOpen ?? show;
+  if (!isModalOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
