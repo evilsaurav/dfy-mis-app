@@ -8,7 +8,10 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from firebase_admin import storage
+try:
+    from firebase_admin import storage
+except Exception:
+    storage = None
 
 from backend.core.database import db
 from backend.core.cache import cache
