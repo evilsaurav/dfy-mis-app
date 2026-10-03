@@ -61,6 +61,12 @@ if (!journeyModalSrc.includes('handleFetchJourney()') && !journeyModalSrc.includ
   failures++;
 }
 
+// 4. Check JourneyModal.jsx has z-[100] to popup in front of parent modals (e.g. NikshayModal z-50)
+if (!journeyModalSrc.includes('z-[100]')) {
+  console.error('FAIL: JourneyModal.jsx must have z-[100] so it stacks on top of parent modals like NikshayModal');
+  failures++;
+}
+
 if (failures === 0) {
   console.log('PASS: Patient journey modal handler wiring verified successfully');
   process.exit(0);

@@ -12,7 +12,6 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import pandas as pd
 from google.cloud import firestore
 
 from backend.core.database import db, project_id, ENABLE_IN_MEMORY_DERIVATION
@@ -1324,6 +1323,7 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
             data["Target %"] = f"{round((ach / tgt) * 100)}%" if tgt > 0 else "0%"
             rows.append(data)
             
+        import pandas as pd  # lazy import
         df = pd.DataFrame(rows)
         
         output = io.BytesIO()
@@ -1611,7 +1611,7 @@ async def export_cascade_alerts(month: Optional[str] = None, district: Optional[
                 "Contact Tracing": "Completed" if a.get("has_contact") else "PENDING",
                 "Diff TB Status": "Completed" if a.get("has_diff_tb") else "PENDING"
             })
-            
+        import pandas as pd  # lazy import
         df = pd.DataFrame(rows)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { canonicalizeDistrict } from '../../../utils/districtHelpers';
 
@@ -67,6 +67,18 @@ export default function OverviewTab({
   fetchData = () => {},
   isSuperAdmin = false
 }) {
+  const [showExtendedColumns, setShowExtendedColumns] = useState(false);
+  const [masterTableSearch, setMasterTableSearch] = useState('');
+
+  const displayedTableData = useMemo(() => {
+    if (!masterTableSearch.trim()) return tableData;
+    const q = masterTableSearch.trim().toLowerCase();
+    return tableData.filter(row => 
+      String(row.name || '').toLowerCase().includes(q) ||
+      String(row.district || '').toLowerCase().includes(q)
+    );
+  }, [tableData, masterTableSearch]);
+
   if (activeMainTab !== 'overview') return null;
 
   const attendance = todayAttendance;
@@ -157,77 +169,119 @@ export default function OverviewTab({
             })()}
 
         {/* Live Attendance Banner */}
-        {attendance && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col md:flex-row items-center justify-between gap-4 animate-fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-xl shrink-0">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
-                  Today's Field Officer Attendance 
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
-                </h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
-                  <span>| Submitted: <strong className="text-emerald-600">{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)}</strong></span>
-                  <span>| Pending: <strong className="text-red-500">{attendance.missing_count}</strong></span>
-                  <span>| On Leave: <strong className="text-amber-600">{attendance.on_leave_count || 0}</strong></span>
-                  {chronicDefaulters.length > 0 && (
-                    <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
-                      <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
+        {attendance && (() => {
+          const submitted = attendance.submitted_count || ((attendance.submitted_full_count || 0) + (attendance.submitted_partial_count || 0)) || 0;
+          const missing = attendance.missing_count || 0;
+          const onLeave = attendance.on_leave_count || 0;
+          const total = Math.max(attendance.total_staff || (submitted + missing + onLeave), 1);
+          const submittedPct = Math.round((submitted / total) * 100);
+          const onLeavePct = Math.round((onLeave / total) * 100);
+          const missingPct = Math.max(0, 100 - submittedPct - onLeavePct);
 
-            <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
-              <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
-                <button
-                  onClick={() => { setActiveAttendanceTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view submitted officers with time"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span>{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)} Submitted</span>
-                </button>
-                <button
-                  onClick={() => { setActiveAttendanceTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view pending officers"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                  <span>{attendance.missing_count} Missing</span>
-                </button>
-                <button
-                  onClick={() => { setActiveAttendanceTab('on_leave'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3.5 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view officers on leave or absent"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                  <span>{attendance.on_leave_count || 0} On Leave / Absent</span>
-                </button>
-                {chronicDefaulters.length > 0 && (
-                  <button
-                    onClick={() => { setActiveAttendanceTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                    className="bg-purple-50 hover:bg-purple-100 text-purple-800 px-3 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
-                    title="View chronic defaulters (2+ consecutive days missed)"
+          return (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col gap-3.5 animate-fade-in">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 w-full">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-xl shrink-0">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
+                      Today's Field Officer Attendance 
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
+                      <span>| Submitted: <strong className="text-emerald-600">{submitted}</strong></span>
+                      <span>| Pending: <strong className="text-red-500">{missing}</strong></span>
+                      <span>| On Leave: <strong className="text-amber-600">{onLeave}</strong></span>
+                      {chronicDefaulters.length > 0 && (
+                        <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
+                          <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+                  <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
+                    <button
+                      onClick={() => { setActiveAttendanceTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view submitted officers with time"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <span>{submitted} Submitted</span>
+                    </button>
+                    <button
+                      onClick={() => { setActiveAttendanceTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view pending officers"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                      <span>{missing} Missing</span>
+                    </button>
+                    <button
+                      onClick={() => { setActiveAttendanceTab('on_leave'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3.5 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view officers on leave or absent"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                      <span>{onLeave} On Leave / Absent</span>
+                    </button>
+                    {chronicDefaulters.length > 0 && (
+                      <button
+                        onClick={() => { setActiveAttendanceTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                        className="bg-purple-50 hover:bg-purple-100 text-purple-800 px-3 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                        title="View chronic defaulters (2+ consecutive days missed)"
+                      >
+                        <span>⚠️</span>
+                        <span>{chronicDefaulters.length} Defaulters</span>
+                      </button>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => { setAttendanceSearchQuery(''); setAttendanceDistrictFilter('All'); setShowAttendanceModal(true); }}
+                    className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm cursor-pointer"
                   >
-                    <span>⚠️</span>
-                    <span>{chronicDefaulters.length} Defaulters</span>
+                    View Radar
                   </button>
-                )}
+                </div>
               </div>
-              <button 
-                onClick={() => { setAttendanceSearchQuery(''); setAttendanceDistrictFilter('All'); setShowAttendanceModal(true); }}
-                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm"
-              >
-                View Radar
-              </button>
+
+              {/* Coverage Progress Bar */}
+              <div className="w-full pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold">
+                  <span className="text-slate-600 flex items-center gap-1.5">
+                    <span>Field Duty Submission Coverage:</span>
+                    <span className="text-emerald-700 font-extrabold">{submittedPct}% Completed</span>
+                  </span>
+                  <span className="text-slate-400 font-medium">
+                    {submitted} of {total} Field Staff Active Today
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden flex shadow-inner">
+                  <div 
+                    className="bg-emerald-500 h-full transition-all duration-700" 
+                    style={{ width: `${submittedPct}%` }}
+                    title={`Submitted: ${submitted} (${submittedPct}%)`}
+                  />
+                  <div 
+                    className="bg-amber-400 h-full transition-all duration-700" 
+                    style={{ width: `${onLeavePct}%` }}
+                    title={`On Leave / Absent: ${onLeave} (${onLeavePct}%)`}
+                  />
+                  <div 
+                    className="bg-red-400/80 h-full transition-all duration-700" 
+                    style={{ width: `${missingPct}%` }}
+                    title={`Missing / Pending: ${missing} (${missingPct}%)`}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {isLoading ? (
           <div className="w-full space-y-6 py-4 animate-fade-in">
@@ -429,9 +483,24 @@ export default function OverviewTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
                   
                   {/* CARD 1: TB Notifications */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('notifications')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'notifications' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view TB Notifications trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                        {activeMetric === 'notifications' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         {notifAchievedPct !== null ? (
                           <span className={`text-[10px] font-black px-2 py-0.5 rounded-full tabular-num ${
@@ -468,9 +537,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 2: UDST Lab Testing */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('tests')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'tests' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view UDST Lab Testing trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">UDST Lab Testing</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">UDST Lab Testing</span>
+                        {activeMetric === 'tests' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-indigo text-[10px] font-black px-2 py-0.5 rounded-full">
                           UDST
@@ -499,9 +583,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 3: Core Clinical Cascade */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('presumptive')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'presumptive' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view Presumptive cases trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Clinical Cascade</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Clinical Cascade</span>
+                        {activeMetric === 'presumptive' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-teal text-[10px] font-black px-2 py-0.5 rounded-full">
                           Cascade
@@ -526,9 +625,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 4: Field Footprint & Travel */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('total_km')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'total_km' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view Field Travel KM trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Field Travel</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Field Travel</span>
+                        {activeMetric === 'total_km' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-amber text-[10px] font-black px-2 py-0.5 rounded-full">
                           {activeStaffCount} Staff
@@ -561,7 +675,7 @@ export default function OverviewTab({
             {/* Secondary Metrics Grid */}
             <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
               <div className="flex items-center justify-between mb-3.5">
-                <h3 className="text-slate-800 text-xs sm:text-sm font-black flex items-center gap-2">
+                <h3 className="text-slate-900 text-xs sm:text-sm font-bold flex items-center gap-2">
                   <span>⚡</span>
                   <span>Secondary Clinical &amp; Operational Indicators</span>
                 </h3>
@@ -569,7 +683,7 @@ export default function OverviewTab({
                   12 Metrics
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 xl:grid-cols-12 gap-2.5">
                 {[
                   { k: 'hiv_dm', l: 'HIV & DM', icon: '🩸' }, { k: 'dbt', l: 'DBT', icon: '💰' }, { k: 'sample_collection', l: 'Sample Col', icon: '🧪' },
                   { k: 'outcome_assigned', l: 'Outcomes', icon: '🎯' }, { k: 'home_visits', l: 'Home Visits', icon: '🏠' }, { k: 'contact_tracing', l: 'Contact Tr', icon: '👥' },
@@ -577,7 +691,7 @@ export default function OverviewTab({
                   { k: 'fdc_provided', l: 'FDC Prov', icon: '💊' }, { k: 'kit_consumption', l: 'Kits', icon: '📦' }, { k: 'overrides', l: 'Overrides', icon: '⚠️' }
                 ].map(metric => (
                   <div key={metric.k} className="p-2.5 bg-slate-50/80 hover:bg-white hover:border-slate-300 border border-slate-200/70 rounded-xl transition-all shadow-2xs hover:shadow-xs group text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 leading-tight flex items-center justify-center gap-1">
+                    <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-1 leading-tight flex items-center justify-center gap-1">
                       <span className="text-[10px]">{metric.icon}</span>
                       <span className="truncate">{metric.l}</span>
                     </p>
@@ -587,7 +701,117 @@ export default function OverviewTab({
               </div>
             </div>
 
-            {/* TOP: Full-Width Bihar Statewide Top Performers Studio */}
+            {/* Visual Zone Divider: Operational Progression */}
+            <div className="flex items-center gap-3 my-3 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+              <span>Operational Progression &amp; Broadcasts</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
+            </div>
+
+            {/* Daily Progression Trend — operational data first */}
+            <div className="w-full bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100 mb-6">
+              <div>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">📈</span>
+                      <h3 className="text-slate-800 font-black text-base sm:text-lg">
+                        Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
+                      </h3>
+                    </div>
+                    <p className="text-slate-400 text-xs font-semibold mt-0.5">
+                      {selectedDistrict !== 'All' 
+                        ? `Day-by-day progression for ${selectedDistrict}` 
+                        : (isSubAdmin 
+                            ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
+                            : 'Day-by-day statewide performance progression across Bihar')}
+                    </p>
+                  </div>
+
+                  {/* Metric Switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
+                    {[
+                      { key: 'notifications', label: '🔔 Notif' },
+                      { key: 'tests', label: '🔬 Tests' },
+                      { key: 'total_km', label: '🚗 KM' },
+                      { key: 'presumptive', label: '🩺 Presump' }
+                    ].map(m => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => setActiveMetric(m.key)}
+                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                          activeMetric === m.key
+                            ? 'bg-indigo-600 text-white shadow-sm font-black'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Trend Badges */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    Daily Avg: {dailyTrendStats.avgDaily} / day
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
+                    Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* AreaChart - Spacious h-72 sm:h-80 Container */}
+              <div className="h-72 sm:h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dailyTrendStats.chartData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="day" 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={{ stroke: '#e2e8f0' }} 
+                      tickLine={false}
+                      interval={0}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
+                      labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
+                      formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke="#6366f1" 
+                      strokeWidth={2.5} 
+                      fillOpacity={1} 
+                      fill="url(#trendGradient)" 
+                      dot={{ r: 2.5, fill: '#6366f1' }}
+                      activeDot={{ r: 5, fill: '#4338ca' }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Bihar Statewide Top Performers Studio */}
             <div className="w-full mb-6">
               <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md border border-indigo-900/60 relative overflow-hidden">
                 {/* Decorative background glow */}
@@ -1006,107 +1230,11 @@ export default function OverviewTab({
               </div>
             </div>
 
-            {/* BOTTOM: Full-Width Daily Progression Trend */}
-            <div className="w-full bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100 mb-6">
-              <div>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">📈</span>
-                      <h3 className="text-slate-800 font-black text-base sm:text-lg">
-                        Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
-                      </h3>
-                    </div>
-                    <p className="text-slate-400 text-xs font-semibold mt-0.5">
-                      {selectedDistrict !== 'All' 
-                        ? `Day-by-day progression for ${selectedDistrict}` 
-                        : (isSubAdmin 
-                            ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
-                            : 'Day-by-day statewide performance progression across Bihar')}
-                    </p>
-                  </div>
-
-                  {/* Metric Switcher */}
-                  <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
-                    {[
-                      { key: 'notifications', label: '🔔 Notif' },
-                      { key: 'tests', label: '🔬 Tests' },
-                      { key: 'total_km', label: '🚗 KM' },
-                      { key: 'presumptive', label: '🩺 Presump' }
-                    ].map(m => (
-                      <button
-                        key={m.key}
-                        type="button"
-                        onClick={() => setActiveMetric(m.key)}
-                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                          activeMetric === m.key
-                            ? 'bg-indigo-600 text-white shadow-sm font-black'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Trend Badges */}
-                <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
-                  </span>
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                    Daily Avg: {dailyTrendStats.avgDaily} / day
-                  </span>
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
-                    Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
-                  </span>
-                </div>
-              </div>
-
-              {/* AreaChart - Spacious h-72 sm:h-80 Container */}
-              <div className="h-72 sm:h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={dailyTrendStats.chartData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
-                    <defs>
-                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis 
-                      dataKey="day" 
-                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
-                      axisLine={{ stroke: '#e2e8f0' }} 
-                      tickLine={false}
-                      interval={0}
-                    />
-                    <YAxis 
-                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
-                      axisLine={false} 
-                      tickLine={false} 
-                    />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
-                      labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
-                      formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="value" 
-                      stroke="#6366f1" 
-                      strokeWidth={2.5} 
-                      fillOpacity={1} 
-                      fill="url(#trendGradient)" 
-                      dot={{ r: 2.5, fill: '#6366f1' }}
-                      activeDot={{ r: 5, fill: '#4338ca' }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+            {/* Visual Zone Divider: Target Achievement & Clinical Benchmarks */}
+            <div className="flex items-center gap-3 my-4 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+              <span>Target Achievement &amp; Clinical Benchmarks</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
             </div>
 
             {/* Unified Section: Target vs Achievement & Performance */}
@@ -1209,13 +1337,20 @@ export default function OverviewTab({
               {/* Render View 1: Bar Chart */}
               {performanceViewMode === 'chart' && (
                 <div>
-                  <div style={{ height: `${performanceChartHeight}px` }} className="w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        layout="vertical"
-                        data={performanceData}
-                        margin={{ top: 5, right: 60, left: 15, bottom: 5 }}
-                      >
+                  {(!performanceData || performanceData.length === 0) ? (
+                    <div className="py-16 text-center bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                      <div className="text-3xl mb-2">📊</div>
+                      <h4 className="text-sm font-bold text-slate-700">No Target or Performance Data Available</h4>
+                      <p className="text-xs text-slate-400 font-medium mt-1">There are no records matching the selected district or officer filter for this operational period.</p>
+                    </div>
+                  ) : (
+                    <div style={{ height: `${performanceChartHeight}px` }} className="w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          layout="vertical"
+                          data={performanceData}
+                          margin={{ top: 5, right: 60, left: 15, bottom: 5 }}
+                        >
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                         <XAxis 
                           type="number" 
@@ -1331,12 +1466,20 @@ export default function OverviewTab({
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {/* Render View 2: Grid Cards */}
-            {performanceViewMode === 'cards' && (
-              <div className="space-y-4">
+              {/* Render View 2: Grid Cards */}
+              {performanceViewMode === 'cards' && (
+                (!performanceData || performanceData.length === 0) ? (
+                  <div className="py-16 text-center bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                    <div className="text-3xl mb-2">🗂️</div>
+                    <h4 className="text-sm font-bold text-slate-700">No Performance Cards to Display</h4>
+                    <p className="text-xs text-slate-400 font-medium mt-1">There are no records matching the selected scope for this operational period.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider justify-end">
                   <span className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-100">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span> &gt;=100% Target Complete
@@ -1403,7 +1546,8 @@ export default function OverviewTab({
                   })}
                 </div>
               </div>
-            )}
+            )
+          )}
           </div>
 
                         {/* Target Pacing Forecaster & District Benchmarking */}
@@ -1660,7 +1804,14 @@ export default function OverviewTab({
 
             </div>
 
-{/* Master Data Table */}
+            {/* Visual Zone Divider: Granular Field Ledger */}
+            <div className="flex items-center gap-3 my-4 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span>Granular Master Field Ledger</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
+            </div>
+
+            {/* Master Data Table */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200/90 overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50/60">
                 <div className="flex flex-wrap items-center gap-3">
@@ -1674,7 +1825,7 @@ export default function OverviewTab({
                         </span>
                       )}
                     </h3>
-                    <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {tableData.length} records</p>
+                    <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {displayedTableData.length}{displayedTableData.length !== tableData.length ? ` of ${tableData.length}` : ''} records</p>
                   </div>
 
                   {selectedDistrict !== 'All' && (
@@ -1693,6 +1844,27 @@ export default function OverviewTab({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Master Table In-Table Search Input */}
+                  <div className="relative inline-flex items-center">
+                    <input
+                      type="text"
+                      value={masterTableSearch}
+                      onChange={(e) => setMasterTableSearch(e.target.value)}
+                      placeholder={selectedDistrict === 'All' ? "Search district..." : "Search officer..."}
+                      className="pl-7 pr-7 py-1 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium placeholder:text-slate-400 w-32 sm:w-44 transition-all shadow-2xs"
+                    />
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">🔍</span>
+                    {masterTableSearch && (
+                      <button 
+                        type="button" 
+                        onClick={() => setMasterTableSearch('')} 
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer"
+                        title="Clear search"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                   {/* Cohort Switcher */}
                   <div className="inline-flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-2xs text-[11px] font-bold">
                     <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider px-2 hidden md:inline">Cohort:</span>
@@ -1734,6 +1906,20 @@ export default function OverviewTab({
                     </button>
                   </div>
 
+                  {/* Extended Indicators Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowExtendedColumns(prev => !prev)}
+                    className={`px-3 py-1 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                      showExtendedColumns
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                    title={showExtendedColumns ? "Switch to Standard View (hides 7 specialized indicators)" : "Show 7 Extended Indicators (Diff TB, TPT, Adhar, Consent, etc.)"}
+                  >
+                    <span>{showExtendedColumns ? '👁️ Standard View' : '✨ Extended Indicators (7)'}</span>
+                  </button>
+
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-white px-3 py-1.5 rounded-full shadow-2xs border border-slate-200/80 hidden sm:inline-block">
                     Click column header to sort
                   </span>
@@ -1759,9 +1945,11 @@ export default function OverviewTab({
                       <th colSpan={8} className="th-band-outreach py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider border-r border-amber-200/80">
                         Visits &amp; Field Logistics
                       </th>
-                      <th colSpan={7} className="th-band-special py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider">
-                        Special Indicators
-                      </th>
+                      {showExtendedColumns && (
+                        <th colSpan={7} className="th-band-special py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider">
+                          Special Indicators
+                        </th>
+                      )}
                     </tr>
 
                     {/* Tier 2: Column Headers */}
@@ -1781,17 +1969,28 @@ export default function OverviewTab({
                       <TH label="F2F" sortKey="face_to_face" />
                       <TH label="Docs" sortKey="documents" />
                       <TH label="FDC" sortKey="fdc_provided" />
-                      <TH label="Kits" sortKey="kit_consumption" />
-                      <TH label="Diff TB" sortKey="differentiated_tb" />
-                      <TH label="TPT Start" sortKey="tpt_treatment_start" />
-                      <TH label="TPT Presumptive" sortKey="tpt_presumptive" />
-                      <TH label="Adhar Auth" sortKey="adhar_face_auth" />
-                      <TH label="Consent" sortKey="consent_with_id" />
-                      <TH label="Override" sortKey="overrides" />
+                      {showExtendedColumns && (
+                        <>
+                          <TH label="Kits" sortKey="kit_consumption" />
+                          <TH label="Diff TB" sortKey="differentiated_tb" />
+                          <TH label="TPT Start" sortKey="tpt_treatment_start" />
+                          <TH label="TPT Presumptive" sortKey="tpt_presumptive" />
+                          <TH label="Adhar Auth" sortKey="adhar_face_auth" />
+                          <TH label="Consent" sortKey="consent_with_id" />
+                          <TH label="Override" sortKey="overrides" />
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {tableData.map((row, idx) => (
+                    {displayedTableData.length === 0 ? (
+                      <tr>
+                        <td colSpan={showExtendedColumns ? 23 : 16} className="text-center py-12 text-slate-400 text-xs font-bold bg-slate-50/50">
+                          🔍 No matching records found for "{masterTableSearch}"
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedTableData.map((row, idx) => (
                       <tr 
                         key={idx} 
                         className={`transition-colors border-b border-slate-100/90 last:border-none text-xs font-semibold text-slate-700 group ${
@@ -1948,42 +2147,46 @@ export default function OverviewTab({
                         <td className="p-3 tabular-num font-medium">
                           {row.fdc_provided > 0 ? row.fdc_provided : <span className="text-slate-300 font-normal">—</span>}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-pink-600">
-                          {masterTableCohortFilter === 'current_cohort'
-                            ? (row.differentiated_tb_cur > 0 ? row.differentiated_tb_cur : <span className="text-slate-300 font-normal">—</span>)
-                            : masterTableCohortFilter === 'backlog'
-                            ? (row.differentiated_tb_prev > 0 ? row.differentiated_tb_prev : <span className="text-slate-300 font-normal">—</span>)
-                            : (
-                              <span>
-                                {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
-                                {row.differentiated_tb > 0 && (row.differentiated_tb_cur > 0 || row.differentiated_tb_prev > 0) && (
-                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
-                                    C:{row.differentiated_tb_cur} | P:{row.differentiated_tb_prev}
+                        {showExtendedColumns && (
+                          <>
+                            <td className="p-3 tabular-num font-medium">
+                              {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-pink-600">
+                              {masterTableCohortFilter === 'current_cohort'
+                                ? (row.differentiated_tb_cur > 0 ? row.differentiated_tb_cur : <span className="text-slate-300 font-normal">—</span>)
+                                : masterTableCohortFilter === 'backlog'
+                                ? (row.differentiated_tb_prev > 0 ? row.differentiated_tb_prev : <span className="text-slate-300 font-normal">—</span>)
+                                : (
+                                  <span>
+                                    {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
+                                    {row.differentiated_tb > 0 && (row.differentiated_tb_cur > 0 || row.differentiated_tb_prev > 0) && (
+                                      <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                        C:{row.differentiated_tb_cur} | P:{row.differentiated_tb_prev}
+                                      </span>
+                                    )}
                                   </span>
                                 )}
-                              </span>
-                            )}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-teal-600">
-                          {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-cyan-600">
-                          {row.tpt_presumptive > 0 ? row.tpt_presumptive : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-orange-600">
-                          {row.adhar_face_auth > 0 ? row.adhar_face_auth : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-indigo-500">
-                          {row.consent_with_id > 0 ? row.consent_with_id : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num text-red-500 font-bold">
-                          {row.overrides > 0 ? row.overrides : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-teal-600">
+                              {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-cyan-600">
+                              {row.tpt_presumptive > 0 ? row.tpt_presumptive : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-orange-600">
+                              {row.adhar_face_auth > 0 ? row.adhar_face_auth : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-indigo-500">
+                              {row.consent_with_id > 0 ? row.consent_with_id : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num text-red-500 font-bold">
+                              {row.overrides > 0 ? row.overrides : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                          </>
+                        )}
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                   <tfoot className="bg-slate-100/95 border-t-2 border-slate-300 text-xs font-black text-slate-900 sticky bottom-0 z-10 shadow-[0_-4px_12px_-2px_rgba(0,0,0,0.06)]">
                     <tr>
@@ -2115,28 +2318,32 @@ export default function OverviewTab({
                           )}
                       </td>
                       <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.fdc_provided}</td>
-                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.kit_consumption}</td>
-                      <td className="p-3 tabular-num font-black text-pink-700">
-                        {masterTableCohortFilter === 'current_cohort'
-                          ? tableTotals.differentiated_tb_cur
-                          : masterTableCohortFilter === 'backlog'
-                          ? tableTotals.differentiated_tb_prev
-                          : (
-                            <span>
-                              {tableTotals.differentiated_tb}
-                              {(tableTotals.differentiated_tb_cur > 0 || tableTotals.differentiated_tb_prev > 0) && (
-                                <span className="text-[9px] font-bold text-pink-900/60 block -mt-0.5">
-                                  C:{tableTotals.differentiated_tb_cur} | P:{tableTotals.differentiated_tb_prev}
+                      {showExtendedColumns && (
+                        <>
+                          <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.kit_consumption}</td>
+                          <td className="p-3 tabular-num font-black text-pink-700">
+                            {masterTableCohortFilter === 'current_cohort'
+                              ? tableTotals.differentiated_tb_cur
+                              : masterTableCohortFilter === 'backlog'
+                              ? tableTotals.differentiated_tb_prev
+                              : (
+                                <span>
+                                  {tableTotals.differentiated_tb}
+                                  {(tableTotals.differentiated_tb_cur > 0 || tableTotals.differentiated_tb_prev > 0) && (
+                                    <span className="text-[9px] font-bold text-pink-900/60 block -mt-0.5">
+                                      C:{tableTotals.differentiated_tb_cur} | P:{tableTotals.differentiated_tb_prev}
+                                    </span>
+                                  )}
                                 </span>
                               )}
-                            </span>
-                          )}
-                      </td>
-                      <td className="p-3 tabular-num font-black text-teal-700">{tableTotals.tpt_treatment_start}</td>
-                      <td className="p-3 tabular-num font-black text-cyan-700">{tableTotals.tpt_presumptive}</td>
-                      <td className="p-3 tabular-num font-black text-orange-700">{tableTotals.adhar_face_auth}</td>
-                      <td className="p-3 tabular-num font-black text-indigo-700">{tableTotals.consent_with_id}</td>
-                      <td className="p-3 tabular-num font-black text-red-600">{tableTotals.overrides}</td>
+                          </td>
+                          <td className="p-3 tabular-num font-black text-teal-700">{tableTotals.tpt_treatment_start}</td>
+                          <td className="p-3 tabular-num font-black text-cyan-700">{tableTotals.tpt_presumptive}</td>
+                          <td className="p-3 tabular-num font-black text-orange-700">{tableTotals.adhar_face_auth}</td>
+                          <td className="p-3 tabular-num font-black text-indigo-700">{tableTotals.consent_with_id}</td>
+                          <td className="p-3 tabular-num font-black text-red-600">{tableTotals.overrides}</td>
+                        </>
+                      )}
                     </tr>
                   </tfoot>
                 </table>

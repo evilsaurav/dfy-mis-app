@@ -697,15 +697,15 @@ export default function AdminHeader({
         )}
 
         {/* Primary Dashboard Navigation Tabs */}
-        <div className="bg-white/95 backdrop-blur-md p-2 sm:p-2.5 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 animate-fade-in">
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="sticky top-[72px] sm:top-[76px] z-30 bg-white/95 backdrop-blur-md p-2 sm:p-2.5 rounded-2xl shadow-sm border border-slate-200/90 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 animate-fade-in transition-all">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto pb-1 md:pb-0 custom-scrollbar">
             <button
               type="button"
               onClick={() => setActiveMainTab('overview')}
-              className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer ${
+              className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 shrink-0 cursor-pointer ${
                 activeMainTab === 'overview'
                   ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
-                  : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
+                  : 'bg-slate-50 hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
               }`}
             >
               <span>📊</span>
@@ -714,10 +714,10 @@ export default function AdminHeader({
             <button
               type="button"
               onClick={() => setActiveMainTab('staff_pacing')}
-              className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 relative cursor-pointer ${
+              className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 shrink-0 relative cursor-pointer ${
                 activeMainTab === 'staff_pacing'
                   ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
-                  : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
+                  : 'bg-slate-50 hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
               }`}
             >
               <span>🎯</span>
@@ -732,10 +732,10 @@ export default function AdminHeader({
               <button
                 type="button"
                 onClick={() => setActiveMainTab('district_benchmarks')}
-                className={`px-4 py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 cursor-pointer ${
+                className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 shrink-0 cursor-pointer ${
                   activeMainTab === 'district_benchmarks'
                     ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
-                    : 'bg-white hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
+                    : 'bg-slate-50 hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
                 }`}
               >
                 <span>🏢</span>
