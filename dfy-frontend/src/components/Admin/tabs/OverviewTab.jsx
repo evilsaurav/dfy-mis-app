@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { canonicalizeDistrict } from '../../../utils/districtHelpers';
 
@@ -67,6 +67,8 @@ export default function OverviewTab({
   fetchData = () => {},
   isSuperAdmin = false
 }) {
+  const [showExtendedColumns, setShowExtendedColumns] = useState(false);
+
   if (activeMainTab !== 'overview') return null;
 
   const attendance = todayAttendance;
@@ -561,7 +563,7 @@ export default function OverviewTab({
             {/* Secondary Metrics Grid */}
             <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-slate-200/80 p-4 sm:p-5">
               <div className="flex items-center justify-between mb-3.5">
-                <h3 className="text-slate-800 text-xs sm:text-sm font-black flex items-center gap-2">
+                <h3 className="text-slate-900 text-xs sm:text-sm font-bold flex items-center gap-2">
                   <span>⚡</span>
                   <span>Secondary Clinical &amp; Operational Indicators</span>
                 </h3>
@@ -569,7 +571,7 @@ export default function OverviewTab({
                   12 Metrics
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-6 xl:grid-cols-12 gap-2.5">
                 {[
                   { k: 'hiv_dm', l: 'HIV & DM', icon: '🩸' }, { k: 'dbt', l: 'DBT', icon: '💰' }, { k: 'sample_collection', l: 'Sample Col', icon: '🧪' },
                   { k: 'outcome_assigned', l: 'Outcomes', icon: '🎯' }, { k: 'home_visits', l: 'Home Visits', icon: '🏠' }, { k: 'contact_tracing', l: 'Contact Tr', icon: '👥' },
@@ -577,7 +579,7 @@ export default function OverviewTab({
                   { k: 'fdc_provided', l: 'FDC Prov', icon: '💊' }, { k: 'kit_consumption', l: 'Kits', icon: '📦' }, { k: 'overrides', l: 'Overrides', icon: '⚠️' }
                 ].map(metric => (
                   <div key={metric.k} className="p-2.5 bg-slate-50/80 hover:bg-white hover:border-slate-300 border border-slate-200/70 rounded-xl transition-all shadow-2xs hover:shadow-xs group text-center">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1 leading-tight flex items-center justify-center gap-1">
+                    <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-wider mb-1 leading-tight flex items-center justify-center gap-1">
                       <span className="text-[10px]">{metric.icon}</span>
                       <span className="truncate">{metric.l}</span>
                     </p>
@@ -587,7 +589,110 @@ export default function OverviewTab({
               </div>
             </div>
 
-            {/* TOP: Full-Width Bihar Statewide Top Performers Studio */}
+            {/* Daily Progression Trend — operational data first */}
+            <div className="w-full bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100 mb-6">
+              <div>
+                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">📈</span>
+                      <h3 className="text-slate-800 font-black text-base sm:text-lg">
+                        Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
+                      </h3>
+                    </div>
+                    <p className="text-slate-400 text-xs font-semibold mt-0.5">
+                      {selectedDistrict !== 'All' 
+                        ? `Day-by-day progression for ${selectedDistrict}` 
+                        : (isSubAdmin 
+                            ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
+                            : 'Day-by-day statewide performance progression across Bihar')}
+                    </p>
+                  </div>
+
+                  {/* Metric Switcher */}
+                  <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
+                    {[
+                      { key: 'notifications', label: '🔔 Notif' },
+                      { key: 'tests', label: '🔬 Tests' },
+                      { key: 'total_km', label: '🚗 KM' },
+                      { key: 'presumptive', label: '🩺 Presump' }
+                    ].map(m => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        onClick={() => setActiveMetric(m.key)}
+                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                          activeMetric === m.key
+                            ? 'bg-indigo-600 text-white shadow-sm font-black'
+                            : 'text-slate-600 hover:text-slate-900'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Trend Badges */}
+                <div className="flex flex-wrap items-center gap-2 mb-4">
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                    Daily Avg: {dailyTrendStats.avgDaily} / day
+                  </span>
+                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
+                    Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
+                  </span>
+                </div>
+              </div>
+
+              {/* AreaChart - Spacious h-72 sm:h-80 Container */}
+              <div className="h-72 sm:h-80 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={dailyTrendStats.chartData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis 
+                      dataKey="day" 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={{ stroke: '#e2e8f0' }} 
+                      tickLine={false}
+                      interval={0}
+                    />
+                    <YAxis 
+                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
+                      labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
+                      formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
+                    />
+                    <Area 
+                      type="monotone" 
+                      dataKey="value" 
+                      stroke="#6366f1" 
+                      strokeWidth={2.5} 
+                      fillOpacity={1} 
+                      fill="url(#trendGradient)" 
+                      dot={{ r: 2.5, fill: '#6366f1' }}
+                      activeDot={{ r: 5, fill: '#4338ca' }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Bihar Statewide Top Performers Studio */}
             <div className="w-full mb-6">
               <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md border border-indigo-900/60 relative overflow-hidden">
                 {/* Decorative background glow */}
@@ -1005,108 +1110,420 @@ export default function OverviewTab({
                 </div>
               </div>
             </div>
+              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 rounded-2xl shadow-md border border-indigo-900/60 relative overflow-hidden">
+                {/* Decorative background glow */}
+                <div className="absolute -top-12 -right-12 w-48 h-48 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
 
-            {/* BOTTOM: Full-Width Daily Progression Trend */}
-            <div className="w-full bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100 mb-6">
-              <div>
-                <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-3 pb-3 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">📈</span>
-                      <h3 className="text-slate-800 font-black text-base sm:text-lg">
-                        Daily Progression Trend (Day 1 - {dailyTrendStats.totalDays})
-                      </h3>
+                <div>
+                  {/* Studio Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-white/10">
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl sm:text-3xl">🏆</span>
+                      <div>
+                        <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex flex-wrap items-center gap-2">
+                          Bihar Statewide Top Performers Studio
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wider">
+                            Statewide Broadcast
+                          </span>
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${
+                            adminTargetViewMode === 'frontline'
+                              ? 'bg-purple-500/20 text-purple-300 border-purple-500/40'
+                              : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                          }`}>
+                            {adminTargetViewMode === 'frontline' ? '🛵 Frontline Operational' : '🏛️ Official Quota'}
+                          </span>
+                        </h3>
+                        <p className="text-xs text-slate-400 font-medium">
+                          Statewide leaderboards recognizing Field Officers, Hub Agents, Lab Technicians, SCT Agents &amp; Districts
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-slate-400 text-xs font-semibold mt-0.5">
-                      {selectedDistrict !== 'All' 
-                        ? `Day-by-day progression for ${selectedDistrict}` 
-                        : (isSubAdmin 
-                            ? `Day-by-day progression for ${(currentUser?.allowed_districts || []).join(', ')}` 
-                            : 'Day-by-day statewide performance progression across Bihar')}
-                    </p>
-                  </div>
 
-                  {/* Metric Switcher */}
-                  <div className="flex items-center gap-1 bg-slate-100/80 p-1 rounded-xl border border-slate-200/60 text-xs font-bold">
-                    {[
-                      { key: 'notifications', label: '🔔 Notif' },
-                      { key: 'tests', label: '🔬 Tests' },
-                      { key: 'total_km', label: '🚗 KM' },
-                      { key: 'presumptive', label: '🩺 Presump' }
-                    ].map(m => (
+                    <div className="flex items-center gap-2 shrink-0">
                       <button
-                        key={m.key}
                         type="button"
-                        onClick={() => setActiveMetric(m.key)}
-                        className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                          activeMetric === m.key
-                            ? 'bg-indigo-600 text-white shadow-sm font-black'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
+                        onClick={handleShareTopPerformersWhatsApp}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                        title="Quick Share Top Performers to WhatsApp"
                       >
-                        {m.label}
+                        <span>📲</span>
+                        <span>WhatsApp Share</span>
                       </button>
-                    ))}
+                      <button
+                        type="button"
+                        onClick={() => setShowTopPerformersModal(true)}
+                        className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-black text-xs shadow-sm flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                        title="Generate and Share High-Res Poster"
+                      >
+                        <span>🎨</span>
+                        <span>Poster Studio</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Controls bar: Timeframe Switchers & Date Range */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-white/5 p-2.5 rounded-xl border border-white/10 mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-300">Period:</span>
+                      <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10 text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('weekly');
+                            fetchTopPerformers('weekly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'weekly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Weekly (7 Days)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('fortnightly');
+                            fetchTopPerformers('fortnightly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'fortnightly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          15 Days
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTopPerformersPeriod('monthly');
+                            fetchTopPerformers('monthly');
+                          }}
+                          className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                            topPerformersPeriod === 'monthly'
+                              ? 'bg-indigo-600 text-white shadow-xs font-black'
+                              : 'text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          Monthly ({month})
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                      <span>📅 Active Range: <strong className="text-white font-mono">{topPerformersData?.start_date || `${month}-01`}</strong> to <strong className="text-white font-mono">{topPerformersData?.end_date || 'Today'}</strong></span>
+                    </div>
+                  </div>
+
+                  {/* 5 Clinical Role Tabs */}
+                  <div className="flex flex-wrap items-center gap-2 border-b border-white/10 pb-3 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('districts')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'districts'
+                          ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🏛️</span>
+                      <span>Top Districts (DC)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('fo')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'fo'
+                          ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>📋</span>
+                      <span>Top FO &amp; Hub Agents</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('tc')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'tc'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🏠</span>
+                      <span>Top Treatment Coordinators (TC)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('lt')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'lt'
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🔬</span>
+                      <span>Top Lab Technicians (LT)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTopPerformersTab('sct')}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                        topPerformersTab === 'sct'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                          : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                      }`}
+                    >
+                      <span>🧪</span>
+                      <span>Top SCT Agents</span>
+                    </button>
+                  </div>
+
+                  {/* Top Performers Showcase Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 min-h-[140px]">
+                    {loadingTopPerformers ? (
+                      <div className="col-span-full py-12 flex items-center justify-center text-xs text-slate-400 gap-2 bg-white/5 rounded-2xl border border-white/5">
+                        <span className="animate-spin text-lg">🌀</span> Loading Champions...
+                      </div>
+                    ) : topPerformersTab === 'districts' ? (
+                      (topPerformersData?.top_districts || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No district records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_districts || []).slice(0, 5).map((dist, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                                  dist.percentage >= 100 
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
+                                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                                }`}>
+                                  {dist.percentage}% Target
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-1" title={dist.district}>
+                                {dist.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-teal-300 font-black">{dist.notifications} notifs</span>
+                              <span className="text-slate-400 text-[10px]">
+                                {adminTargetViewMode === 'frontline' ? 'Frontline:' : 'Official:'} {dist.target || 0}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    ) : topPerformersTab === 'fo' ? (
+                      (topPerformersData?.top_fo || topPerformersData?.top_staff || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Field Officer or Hub Agent records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_fo || topPerformersData?.top_staff || []).slice(0, 5).map((staff, idx) => {
+                          const isHub = staff.designation === 'Hub Agent' || String(staff.designation || '').toUpperCase().includes('HUB');
+                          return (
+                            <div 
+                              key={idx}
+                              className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                                idx === 0 
+                                  ? 'bg-purple-500/15 border-purple-500/35 text-purple-200 shadow-sm' 
+                                  : idx === 1 
+                                  ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                  : idx === 2 
+                                  ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                  : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  <span className="text-xl font-black">
+                                    {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                  </span>
+                                  {isHub ? (
+                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 border border-amber-400/30 uppercase tracking-wider">
+                                      HUB AGENT
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 uppercase tracking-wider">
+                                      FO
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                  {staff.fo_name}
+                                </div>
+                                <div className="text-[10px] text-slate-400 truncate mb-1">
+                                  📍 {staff.district}
+                                </div>
+                              </div>
+                              <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                                <span className="text-purple-300 font-black">{staff.notifications ?? staff.metric_value ?? 0} notifs</span>
+                                <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )
+                    ) : topPerformersTab === 'tc' ? (
+                      (topPerformersData?.top_tc || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Treatment Coordinator records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_tc || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-amber-500/15 border-amber-500/35 text-amber-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wider">
+                                  Treatment Coordinator
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-amber-300 font-black">{staff.home_visits ?? staff.metric_value ?? 0} visits</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    ) : topPerformersTab === 'lt' ? (
+                      (topPerformersData?.top_lt || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No Lab Technician records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_lt || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider">
+                                  Lab Technician
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-emerald-300 font-black">{staff.tests ?? staff.metric_value ?? 0} tests</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    ) : (
+                      (topPerformersData?.top_sct || []).length === 0 ? (
+                        <div className="col-span-full py-10 text-center text-xs text-slate-400 bg-white/5 rounded-2xl border border-white/5">
+                          No SCT Agent records found for this period
+                        </div>
+                      ) : (
+                        (topPerformersData?.top_sct || []).slice(0, 5).map((staff, idx) => (
+                          <div 
+                            key={idx}
+                            className={`p-3.5 rounded-2xl border transition-all flex flex-col justify-between ${
+                              idx === 0 
+                                ? 'bg-rose-500/15 border-rose-500/35 text-rose-200 shadow-sm' 
+                                : idx === 1 
+                                ? 'bg-slate-300/10 border-slate-300/25 text-slate-100' 
+                                : idx === 2 
+                                ? 'bg-amber-700/15 border-amber-700/25 text-amber-200' 
+                                : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-2 mb-2">
+                                <span className="text-xl font-black">
+                                  {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                                </span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 uppercase tracking-wider">
+                                  SCT Agent
+                                </span>
+                              </div>
+                              <div className="font-bold text-sm text-white truncate mb-0.5" title={staff.fo_name}>
+                                {staff.fo_name}
+                              </div>
+                              <div className="text-[10px] text-slate-400 truncate mb-1">
+                                📍 {staff.district}
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-between text-xs pt-2 mt-auto border-t border-white/10 font-mono">
+                              <span className="text-rose-300 font-black">{staff.samples_collected ?? staff.metric_value ?? 0} collections</span>
+                              <span className="text-slate-400 text-[10px]">Rank #{idx + 1}</span>
+                            </div>
+                          </div>
+                        ))
+                      )
+                    )}
                   </div>
                 </div>
 
-                {/* Trend Badges */}
-                <div className="flex flex-wrap items-center gap-2 mb-4">
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    Peak: {dailyTrendStats.peakDay.day !== '-' && dailyTrendStats.peakDay.value > 0 ? `Day ${Number(dailyTrendStats.peakDay.day)} (${dailyTrendStats.peakDay.value} ${activeMetric === 'total_km' ? 'KM' : 'IDs'})` : 'No Activity Yet'}
-                  </span>
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                    Daily Avg: {dailyTrendStats.avgDaily} / day
-                  </span>
-                  <span className="text-xs font-bold px-3 py-1 rounded-lg bg-slate-50 text-slate-700 border border-slate-200 ml-auto">
-                    Total: {dailyTrendStats.totalVal} {activeMetric === 'total_km' ? 'KM' : ''}
-                  </span>
+                {/* Bottom Quick Share Trigger */}
+                <div className="pt-3 mt-4 border-t border-white/10 flex flex-wrap items-center justify-between text-xs text-slate-400 gap-2">
+                  <span>Statewide Bihar TB Elimination Mission • Doctors For You MIS</span>
+                  <button 
+                    type="button"
+                    onClick={() => setShowTopPerformersModal(true)}
+                    className="text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer text-xs"
+                  >
+                    Share Poster / Download Card →
+                  </button>
                 </div>
-              </div>
-
-              {/* AreaChart - Spacious h-72 sm:h-80 Container */}
-              <div className="h-72 sm:h-80 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={dailyTrendStats.chartData} margin={{ top: 10, right: 20, left: -10, bottom: 5 }}>
-                    <defs>
-                      <linearGradient id="trendGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis 
-                      dataKey="day" 
-                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
-                      axisLine={{ stroke: '#e2e8f0' }} 
-                      tickLine={false}
-                      interval={0}
-                    />
-                    <YAxis 
-                      tick={{ fill: '#64748b', fontSize: 11, fontWeight: 700 }} 
-                      axisLine={false} 
-                      tickLine={false} 
-                    />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', fontWeight: 'bold' }}
-                      labelFormatter={(day) => `Day ${day} (${month}-${String(day).padStart(2, '0')})`}
-                      formatter={(val) => [val, activeMetric === 'total_km' ? 'KM Travelled' : activeMetric.toUpperCase()]}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="value" 
-                      stroke="#6366f1" 
-                      strokeWidth={2.5} 
-                      fillOpacity={1} 
-                      fill="url(#trendGradient)" 
-                      dot={{ r: 2.5, fill: '#6366f1' }}
-                      activeDot={{ r: 5, fill: '#4338ca' }}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
             </div>
 
             {/* Unified Section: Target vs Achievement & Performance */}
@@ -1209,13 +1626,20 @@ export default function OverviewTab({
               {/* Render View 1: Bar Chart */}
               {performanceViewMode === 'chart' && (
                 <div>
-                  <div style={{ height: `${performanceChartHeight}px` }} className="w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        layout="vertical"
-                        data={performanceData}
-                        margin={{ top: 5, right: 60, left: 15, bottom: 5 }}
-                      >
+                  {(!performanceData || performanceData.length === 0) ? (
+                    <div className="py-16 text-center bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                      <div className="text-3xl mb-2">📊</div>
+                      <h4 className="text-sm font-bold text-slate-700">No Target or Performance Data Available</h4>
+                      <p className="text-xs text-slate-400 font-medium mt-1">There are no records matching the selected district or officer filter for this operational period.</p>
+                    </div>
+                  ) : (
+                    <div style={{ height: `${performanceChartHeight}px` }} className="w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          layout="vertical"
+                          data={performanceData}
+                          margin={{ top: 5, right: 60, left: 15, bottom: 5 }}
+                        >
                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                         <XAxis 
                           type="number" 
@@ -1331,12 +1755,20 @@ export default function OverviewTab({
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            {/* Render View 2: Grid Cards */}
-            {performanceViewMode === 'cards' && (
-              <div className="space-y-4">
+              {/* Render View 2: Grid Cards */}
+              {performanceViewMode === 'cards' && (
+                (!performanceData || performanceData.length === 0) ? (
+                  <div className="py-16 text-center bg-slate-50/60 rounded-2xl border border-dashed border-slate-200">
+                    <div className="text-3xl mb-2">🗂️</div>
+                    <h4 className="text-sm font-bold text-slate-700">No Performance Cards to Display</h4>
+                    <p className="text-xs text-slate-400 font-medium mt-1">There are no records matching the selected scope for this operational period.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
                 <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-wider justify-end">
                   <span className="flex items-center gap-1 bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-100">
                     <span className="w-2 h-2 rounded-full bg-emerald-500"></span> &gt;=100% Target Complete
@@ -1403,7 +1835,8 @@ export default function OverviewTab({
                   })}
                 </div>
               </div>
-            )}
+            )
+          )}
           </div>
 
                         {/* Target Pacing Forecaster & District Benchmarking */}
@@ -1734,6 +2167,20 @@ export default function OverviewTab({
                     </button>
                   </div>
 
+                  {/* Extended Indicators Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowExtendedColumns(prev => !prev)}
+                    className={`px-3 py-1 rounded-xl text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                      showExtendedColumns
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-slate-900'
+                    }`}
+                    title={showExtendedColumns ? "Switch to Standard View (hides 7 specialized indicators)" : "Show 7 Extended Indicators (Diff TB, TPT, Adhar, Consent, etc.)"}
+                  >
+                    <span>{showExtendedColumns ? '👁️ Standard View' : '✨ Extended Indicators (7)'}</span>
+                  </button>
+
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider bg-white px-3 py-1.5 rounded-full shadow-2xs border border-slate-200/80 hidden sm:inline-block">
                     Click column header to sort
                   </span>
@@ -1759,9 +2206,11 @@ export default function OverviewTab({
                       <th colSpan={8} className="th-band-outreach py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider border-r border-amber-200/80">
                         Visits &amp; Field Logistics
                       </th>
-                      <th colSpan={7} className="th-band-special py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider">
-                        Special Indicators
-                      </th>
+                      {showExtendedColumns && (
+                        <th colSpan={7} className="th-band-special py-2 px-3 text-center text-[10px] font-black uppercase tracking-wider">
+                          Special Indicators
+                        </th>
+                      )}
                     </tr>
 
                     {/* Tier 2: Column Headers */}
@@ -1781,13 +2230,17 @@ export default function OverviewTab({
                       <TH label="F2F" sortKey="face_to_face" />
                       <TH label="Docs" sortKey="documents" />
                       <TH label="FDC" sortKey="fdc_provided" />
-                      <TH label="Kits" sortKey="kit_consumption" />
-                      <TH label="Diff TB" sortKey="differentiated_tb" />
-                      <TH label="TPT Start" sortKey="tpt_treatment_start" />
-                      <TH label="TPT Presumptive" sortKey="tpt_presumptive" />
-                      <TH label="Adhar Auth" sortKey="adhar_face_auth" />
-                      <TH label="Consent" sortKey="consent_with_id" />
-                      <TH label="Override" sortKey="overrides" />
+                      {showExtendedColumns && (
+                        <>
+                          <TH label="Kits" sortKey="kit_consumption" />
+                          <TH label="Diff TB" sortKey="differentiated_tb" />
+                          <TH label="TPT Start" sortKey="tpt_treatment_start" />
+                          <TH label="TPT Presumptive" sortKey="tpt_presumptive" />
+                          <TH label="Adhar Auth" sortKey="adhar_face_auth" />
+                          <TH label="Consent" sortKey="consent_with_id" />
+                          <TH label="Override" sortKey="overrides" />
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -1948,40 +2401,44 @@ export default function OverviewTab({
                         <td className="p-3 tabular-num font-medium">
                           {row.fdc_provided > 0 ? row.fdc_provided : <span className="text-slate-300 font-normal">—</span>}
                         </td>
-                        <td className="p-3 tabular-num font-medium">
-                          {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-pink-600">
-                          {masterTableCohortFilter === 'current_cohort'
-                            ? (row.differentiated_tb_cur > 0 ? row.differentiated_tb_cur : <span className="text-slate-300 font-normal">—</span>)
-                            : masterTableCohortFilter === 'backlog'
-                            ? (row.differentiated_tb_prev > 0 ? row.differentiated_tb_prev : <span className="text-slate-300 font-normal">—</span>)
-                            : (
-                              <span>
-                                {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
-                                {row.differentiated_tb > 0 && (row.differentiated_tb_cur > 0 || row.differentiated_tb_prev > 0) && (
-                                  <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
-                                    C:{row.differentiated_tb_cur} | P:{row.differentiated_tb_prev}
+                        {showExtendedColumns && (
+                          <>
+                            <td className="p-3 tabular-num font-medium">
+                              {row.kit_consumption > 0 ? row.kit_consumption : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-pink-600">
+                              {masterTableCohortFilter === 'current_cohort'
+                                ? (row.differentiated_tb_cur > 0 ? row.differentiated_tb_cur : <span className="text-slate-300 font-normal">—</span>)
+                                : masterTableCohortFilter === 'backlog'
+                                ? (row.differentiated_tb_prev > 0 ? row.differentiated_tb_prev : <span className="text-slate-300 font-normal">—</span>)
+                                : (
+                                  <span>
+                                    {row.differentiated_tb > 0 ? row.differentiated_tb : <span className="text-slate-300 font-normal">—</span>}
+                                    {row.differentiated_tb > 0 && (row.differentiated_tb_cur > 0 || row.differentiated_tb_prev > 0) && (
+                                      <span className="text-[9px] font-medium text-slate-400 block -mt-0.5">
+                                        C:{row.differentiated_tb_cur} | P:{row.differentiated_tb_prev}
+                                      </span>
+                                    )}
                                   </span>
                                 )}
-                              </span>
-                            )}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-teal-600">
-                          {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-cyan-600">
-                          {row.tpt_presumptive > 0 ? row.tpt_presumptive : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-orange-600">
-                          {row.adhar_face_auth > 0 ? row.adhar_face_auth : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num font-bold text-indigo-500">
-                          {row.consent_with_id > 0 ? row.consent_with_id : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
-                        <td className="p-3 tabular-num text-red-500 font-bold">
-                          {row.overrides > 0 ? row.overrides : <span className="text-slate-300 font-normal">—</span>}
-                        </td>
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-teal-600">
+                              {row.tpt_treatment_start > 0 ? row.tpt_treatment_start : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-cyan-600">
+                              {row.tpt_presumptive > 0 ? row.tpt_presumptive : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-orange-600">
+                              {row.adhar_face_auth > 0 ? row.adhar_face_auth : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num font-bold text-indigo-500">
+                              {row.consent_with_id > 0 ? row.consent_with_id : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                            <td className="p-3 tabular-num text-red-500 font-bold">
+                              {row.overrides > 0 ? row.overrides : <span className="text-slate-300 font-normal">—</span>}
+                            </td>
+                          </>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -2115,28 +2572,32 @@ export default function OverviewTab({
                           )}
                       </td>
                       <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.fdc_provided}</td>
-                      <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.kit_consumption}</td>
-                      <td className="p-3 tabular-num font-black text-pink-700">
-                        {masterTableCohortFilter === 'current_cohort'
-                          ? tableTotals.differentiated_tb_cur
-                          : masterTableCohortFilter === 'backlog'
-                          ? tableTotals.differentiated_tb_prev
-                          : (
-                            <span>
-                              {tableTotals.differentiated_tb}
-                              {(tableTotals.differentiated_tb_cur > 0 || tableTotals.differentiated_tb_prev > 0) && (
-                                <span className="text-[9px] font-bold text-pink-900/60 block -mt-0.5">
-                                  C:{tableTotals.differentiated_tb_cur} | P:{tableTotals.differentiated_tb_prev}
+                      {showExtendedColumns && (
+                        <>
+                          <td className="p-3 tabular-num font-bold text-slate-800">{tableTotals.kit_consumption}</td>
+                          <td className="p-3 tabular-num font-black text-pink-700">
+                            {masterTableCohortFilter === 'current_cohort'
+                              ? tableTotals.differentiated_tb_cur
+                              : masterTableCohortFilter === 'backlog'
+                              ? tableTotals.differentiated_tb_prev
+                              : (
+                                <span>
+                                  {tableTotals.differentiated_tb}
+                                  {(tableTotals.differentiated_tb_cur > 0 || tableTotals.differentiated_tb_prev > 0) && (
+                                    <span className="text-[9px] font-bold text-pink-900/60 block -mt-0.5">
+                                      C:{tableTotals.differentiated_tb_cur} | P:{tableTotals.differentiated_tb_prev}
+                                    </span>
+                                  )}
                                 </span>
                               )}
-                            </span>
-                          )}
-                      </td>
-                      <td className="p-3 tabular-num font-black text-teal-700">{tableTotals.tpt_treatment_start}</td>
-                      <td className="p-3 tabular-num font-black text-cyan-700">{tableTotals.tpt_presumptive}</td>
-                      <td className="p-3 tabular-num font-black text-orange-700">{tableTotals.adhar_face_auth}</td>
-                      <td className="p-3 tabular-num font-black text-indigo-700">{tableTotals.consent_with_id}</td>
-                      <td className="p-3 tabular-num font-black text-red-600">{tableTotals.overrides}</td>
+                          </td>
+                          <td className="p-3 tabular-num font-black text-teal-700">{tableTotals.tpt_treatment_start}</td>
+                          <td className="p-3 tabular-num font-black text-cyan-700">{tableTotals.tpt_presumptive}</td>
+                          <td className="p-3 tabular-num font-black text-orange-700">{tableTotals.adhar_face_auth}</td>
+                          <td className="p-3 tabular-num font-black text-indigo-700">{tableTotals.consent_with_id}</td>
+                          <td className="p-3 tabular-num font-black text-red-600">{tableTotals.overrides}</td>
+                        </>
+                      )}
                     </tr>
                   </tfoot>
                 </table>
