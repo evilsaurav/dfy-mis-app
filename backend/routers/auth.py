@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from backend.core.database import db
 from backend.core.cache import cache
+from backend.core.supabase import fetch_admin_user
 from backend.core.security import (
     hash_password,
     verify_password,
@@ -38,17 +39,13 @@ class PinCheck(BaseModel):
     pin: str
 
 def get_or_init_admin_auth() -> dict:
-    doc_ref = db.collection("admin_config").document("auth_settings")
-    doc = doc_ref.get()
-    if doc.exists:
-        return doc.to_dict()
-    
-    default_auth = {
+    user = fetch_admin_user("admin")
+    if user and user.get("password"):
+        return {"password": user["password"]}
+    return {
         "password": hash_password("dfyadmin2026"),
         "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    doc_ref.set(default_auth)
-    return default_auth
 
 @router.post("/admin/auth/login")
 async def admin_login(req: AdminLoginReq, request: Request):

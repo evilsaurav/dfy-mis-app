@@ -7,3 +7,5 @@ python-multipart
 pyjwt
 bcrypt
 slowapi
+psycopg2-binary
+supabase

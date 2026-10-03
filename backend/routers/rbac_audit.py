@@ -11,6 +11,12 @@ from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache
+from backend.core.supabase import (
+    fetch_admin_user,
+    update_admin_user_login_info,
+    fetch_all_admin_users,
+    get_default_super_admin
+)
 from backend.core.security import (
     hash_password,
     verify_password,
@@ -77,31 +83,9 @@ class AuditLogQueryReq(BaseModel):
 
 
 async def init_default_super_admin():
+    """No-op safety hook for startup tasks; default super admin is provided by backend.core.supabase."""
     try:
-        doc_ref = db.collection("admin_users").document("admin")
-        doc = await asyncio.to_thread(doc_ref.get)
-        if not doc.exists:
-            default_super = {
-                "user_id": "admin",
-                "username": "admin",
-                "name": "Super Admin (Master)",
-                "password": hash_password("dfyadmin2026"),
-                "role": "SUPER_ADMIN",
-                "allowed_districts": ["All"],
-                "permissions": {
-                    "can_view_dashboard": True,
-                    "can_edit_targets": True,
-                    "can_manage_staff": True,
-                    "can_edit_patient_ids": True,
-                    "can_export_reports": True,
-                    "can_view_audit_logs": True
-                },
-                "status": "ACTIVE",
-                "created_by": "System Root",
-                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "last_login": ""
-            }
-            await asyncio.to_thread(lambda: doc_ref.set(default_super))
+        return get_default_super_admin()
     except Exception as e:
         print(f"Super admin init notice: {e}")
 
@@ -120,30 +104,14 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
             await log_admin_activity("LOGIN_BLOCKED", f"Brute-force lockout triggered for '{clean_user}' from {client_device} (Account locked for 10m)", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=429, detail="Too many failed login attempts. Account locked for 10 minutes.")
             
-        try:
-            await init_default_super_admin()
-        except Exception:
-            pass
-
-        user_doc = None
-        try:
-            user_doc_ref = db.collection("admin_users").document(clean_user)
-            user_doc = await asyncio.to_thread(user_doc_ref.get)
-        except Exception as fe:
-            print(f"Firestore user lookup notice (quota/network): {fe}")
-            raise HTTPException(status_code=503, detail="Database currently unavailable. Please try again later.")
+        # Fetch user from Supabase / PostgreSQL table with resilient default fallback
+        user_data = await asyncio.to_thread(lambda: fetch_admin_user(clean_user))
         
-        if not user_doc or not user_doc.exists:
-            # Fallback check for query by username
-            docs = await asyncio.to_thread(lambda: list(db.collection("admin_users").where("username", "==", clean_user).stream()))
-            if docs:
-                user_doc = docs[0]
-            else:
-                login_rate_limiter.record_failure(clean_user)
-                await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
-                raise HTTPException(status_code=401, detail="Invalid username or password.")
+        if not user_data:
+            login_rate_limiter.record_failure(clean_user)
+            await log_admin_activity("LOGIN_FAILED", f"Failed login attempt for nonexistent user '{req.username}' from {client_device}", user_name=req.username, user_id=clean_user, role="UNKNOWN", ip_address=client_ip, diff=client_diff, location=client_location)
+            raise HTTPException(status_code=401, detail="Invalid username or password.")
                 
-        user_data = user_doc.to_dict()
         if user_data.get("status") != "ACTIVE":
             await log_admin_activity("LOGIN_FAILED", f"Disabled user '{clean_user}' attempted login from {client_device}", user_name=user_data.get("name", clean_user), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff, location=client_location)
             raise HTTPException(status_code=403, detail="Your admin account has been disabled. Contact Super Admin.")
@@ -157,12 +125,13 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
         login_rate_limiter.reset(clean_user)
         
         # Auto-upgrade stored password to bcrypt hash if plain text
-        update_fields = {"last_login": get_ist_now().strftime("%Y-%m-%d %I:%M:%S %p")}
+        now_str = get_ist_now().strftime("%Y-%m-%d %I:%M:%S %p")
+        new_hash = None
         if not str(stored_pw).startswith(("$2b$", "$2a$")):
-            update_fields["password"] = hash_password(req.password)
+            new_hash = hash_password(req.password)
             
-        # Update last login timestamp and hashed password
-        await asyncio.to_thread(lambda: user_doc.reference.update(update_fields))
+        # Update last login timestamp and hashed password in Supabase / PostgreSQL
+        await asyncio.to_thread(lambda: update_admin_user_login_info(clean_user, now_str, new_hash))
         
         # Don't return password in payload
         safe_user = {k: v for k, v in user_data.items() if k != "password"}
@@ -178,11 +147,9 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
 @router.get("/admin/users/list")
 async def list_admin_users(admin: dict = Depends(require_super_admin)):
     try:
-        await init_default_super_admin()
-        docs = await asyncio.to_thread(lambda: list(db.collection("admin_users").stream()))
+        users_raw = await asyncio.to_thread(fetch_all_admin_users)
         users = []
-        for doc in docs:
-            d = doc.to_dict()
+        for d in users_raw:
             safe_d = {k: v for k, v in d.items() if k != "password"}
             users.append(safe_d)
             
