@@ -7,7 +7,8 @@ from pydantic import BaseModel
 
 from backend.core.database import db
 from backend.core.cache import cache
-from backend.core.supabase import fetch_admin_user
+from backend.core.supabase import fetch_admin_user, pg_fetch_one, pg_upsert_row, pg_update_row
+
 from backend.core.security import (
     hash_password,
     verify_password,
@@ -92,12 +93,13 @@ async def admin_update_credentials(req: AdminChangePasswordReq, request: Request
         if not req.new_password or len(req.new_password.strip()) < 6:
             raise HTTPException(status_code=400, detail="New password must be at least 6 characters long.")
             
-        user_doc_ref = db.collection("admin_users").document(user_id)
-        user_doc = await asyncio.to_thread(user_doc_ref.get)
+        user_row = pg_fetch_one("admin_users", filters={"username": user_id})
+        if not user_row:
+            user_row = pg_fetch_one("admin_users", filters={"user_id": user_id})
         
         current_hash = None
-        if user_doc.exists:
-            current_hash = user_doc.to_dict().get("password")
+        if user_row:
+            current_hash = user_row.get("password")
         else:
             auth_data = await asyncio.to_thread(get_or_init_admin_auth)
             current_hash = auth_data.get("password")
@@ -108,17 +110,19 @@ async def admin_update_credentials(req: AdminChangePasswordReq, request: Request
         new_hashed = hash_password(req.new_password.strip())
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        await asyncio.to_thread(lambda: user_doc_ref.set({
+        pg_update_row("admin_users", {
             "password": new_hashed,
             "last_password_change": now_str
-        }, merge=True))
+        }, {"username": user_id})
 
         if user_id == "admin":
-            auth_doc_ref = db.collection("admin_config").document("auth_settings")
-            await asyncio.to_thread(lambda: auth_doc_ref.set({
+            pg_upsert_row("admin_config", {
+                "id": "auth_settings",
+                "key": "auth_settings",
                 "password": new_hashed,
                 "last_updated": now_str
-            }, merge=True))
+            }, conflict_columns=["id"])
+
 
         client_ip, client_device = extract_client_info(request)
         client_location = await get_ip_location(client_ip)
@@ -173,9 +177,9 @@ async def verify_pin(data: PinCheck):
 
         try:
             for doc_id in candidate_ids:
-                staff_doc = await asyncio.to_thread(db.collection("staff_directory").document(doc_id).get)
-                if staff_doc.exists:
-                    doc_data = staff_doc.to_dict() or {}
+                staff_row = pg_fetch_one("staff_directory", filters={"id": doc_id})
+                if staff_row:
+                    doc_data = staff_row
                     if doc_data.get("is_active") is False or doc_data.get("status") == "inactive":
                         cache.set(cache_key, "__DEACTIVATED__", ttl=3600)
                         pin_rate_limiter.record_failure(primary_id)
@@ -188,7 +192,8 @@ async def verify_pin(data: PinCheck):
                     pin_rate_limiter.record_failure(primary_id)
                     return {"valid": False}
         except Exception as fe:
-            print(f"PIN Firestore check notice (quota/network): {fe}")
+            print(f"PIN PostgreSQL check notice: {fe}")
+
             if cached_pin == "__DEACTIVATED__":
                 pin_rate_limiter.record_failure(primary_id)
                 return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}

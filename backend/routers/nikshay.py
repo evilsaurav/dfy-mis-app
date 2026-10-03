@@ -25,6 +25,15 @@ from backend.core.helpers import (
 from backend.core.master_ledger import (
     get_raw_monthly_reports
 )
+from backend.core.supabase import (
+    pg_query_table,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    pg_delete_rows,
+    pg_execute_raw,
+    get_active_db,
+)
 from backend.core.styles import (
     safe_filename,
     ExcelStreamingResponse,
@@ -87,23 +96,37 @@ def sync_nikshay_cumulative_ledger_sync(
     total_unchanged = 0
     now_iso = datetime.utcnow().isoformat()
     now_date = datetime.utcnow().strftime("%Y-%m-%d")
-
+    active_db = get_active_db()
     for i in range(0, len(pids), chunk_size):
         chunk_pids = pids[i:i + chunk_size]
         chunk_doc_map = {pid: str(pid).strip().replace("/", "_").replace(".", "_") for pid in chunk_pids}
-        chunk_refs = [db.collection("nikshay_verified_patients").document(chunk_doc_map[pid]) for pid in chunk_pids]
+        chunk_refs = [active_db.collection("nikshay_verified_patients").document(chunk_doc_map[pid]) for pid in chunk_pids]
+        doc_ids_list = list(chunk_doc_map.values())
 
         existing_docs = {}
         try:
-            snapshots = db.get_all(chunk_refs)
-            for snap in snapshots:
-                if snap.exists:
-                    existing_docs[snap.id] = snap.to_dict()
+            pg_existing = pg_execute_raw(
+                "SELECT * FROM nikshay_verified_patients WHERE id = ANY(%s)",
+                [doc_ids_list],
+                fetch=True
+            )
+            if pg_existing:
+                for row in pg_existing:
+                    existing_docs[row.get("id")] = dict(row)
         except Exception as err:
-            print(f"[Ledger Sync] Batch get_all warning: {err}")
+            print(f"[Ledger Sync] PG select warning: {err}")
             existing_docs = {}
 
-        batch = db.batch()
+        if not existing_docs:
+            try:
+                snapshots = active_db.get_all(chunk_refs) if hasattr(active_db, "get_all") else [r.get() for r in chunk_refs]
+                for snap in snapshots:
+                    if getattr(snap, "exists", False):
+                        existing_docs[snap.id] = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+            except Exception as err:
+                print(f"[Ledger Sync] Batch get_all warning: {err}")
+
+        batch = active_db.batch() if hasattr(active_db, "batch") else None
         batch_count = 0
 
         for pid in chunk_pids:
@@ -150,6 +173,7 @@ def sync_nikshay_cumulative_ledger_sync(
                 continue
 
             merged_record = {
+                "id": doc_id,
                 "patient_id": str(pid),
                 "patient_name": final_name,
                 "phone": final_phone,
@@ -180,19 +204,27 @@ def sync_nikshay_cumulative_ledger_sync(
             if contact_val and not existing.get("contact_verified_date"):
                 merged_record["contact_verified_date"] = now_date
 
-            doc_ref = db.collection("nikshay_verified_patients").document(doc_id)
-            batch.set(doc_ref, merged_record, merge=True)
-            batch_count += 1
+            pg_upsert_row("nikshay_verified_patients", merged_record, conflict_columns=["id"])
+            if batch is not None and hasattr(batch, "set"):
+                try:
+                    batch.set(active_db.collection("nikshay_verified_patients").document(doc_id), merged_record, merge=True)
+                    batch_count += 1
+                except Exception:
+                    pass
             total_written += 1
 
-        if batch_count > 0:
-            batch.commit()
+        if batch is not None and batch_count > 0 and hasattr(batch, "commit"):
+            try:
+                batch.commit()
+            except Exception:
+                pass
 
     if total_written > 0:
         cache.delete_prefix("ledger_")
         cache.delete_prefix("journey_")
 
     return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
+
 
 # =========================================================================
 # --- Nikshay Official Excel/CSV Importer & Auto-Reconciler ---
@@ -339,18 +371,11 @@ async def reconcile_nikshay(
         except Exception:
             pass
 
-        # 6. Fetch reported IDs in DFY MIS from Firestore
+        # 6. Fetch reported IDs in DFY MIS
         if not month:
             month = datetime.now().strftime("%Y-%m")
-        start_date = f"{month}-01"
-        end_date = f"{month}-31"
         
-        report_docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
+        report_docs = await get_raw_monthly_reports(month)
         
         dfy_reported_ids = set()
         dfy_details = {} # id -> metadata & boolean flags
@@ -366,7 +391,8 @@ async def reconcile_nikshay(
         }
 
         for doc in report_docs:
-            d = doc.to_dict()
+            d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
+
             doc_dist = d.get("working_place", "")
             if district != "All" and doc_dist.lower() != district.lower():
                 continue
@@ -739,13 +765,21 @@ async def reconcile_nikshay(
             "match_rate_pct": summary.get("match_rate_pct", 0),
             "flagged_records": flagged_review_list[:500],
             "grace_records": grace_window_list[:300],
-            "last_updated": firestore.SERVER_TIMESTAMP
+            "last_updated": now_utc.strftime("%Y-%m-%d %H:%M:%S")
         }
         try:
-            await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").set(sync_meta_doc, merge=True))
+            import json as _json
+            pg_upsert_row("admin_config", {
+                "id": "nikshay_sync_meta",
+                "key": "nikshay_sync_meta",
+                "value": _json.dumps(sync_meta_doc),
+                "data": _json.dumps(sync_meta_doc),
+                "updated_at": now_utc.strftime("%Y-%m-%d %H:%M:%S")
+            }, conflict_columns=["id"])
             cache.delete("nikshay_sync_meta_light")
         except Exception as meta_err:
             logger.warning(f"Error persisting nikshay_sync_meta: {meta_err}")
+
 
         # Cache the review sheet data for rapid Excel export (2h TTL, 0 DB storage)
         cache_data_review = {
@@ -814,9 +848,22 @@ async def get_nikshay_sync_status(admin: dict = Depends(get_current_admin)):
     if cached is not None:
         return cached
     try:
-        doc = await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").get())
-        if doc.exists:
-            d = doc.to_dict()
+        row = pg_fetch_one("admin_config", filters={"id": "nikshay_sync_meta"})
+        if not row:
+            row = pg_fetch_one("admin_config", filters={"key": "nikshay_sync_meta"})
+        if row:
+            import json as _json
+            d = row
+            if "data" in row and isinstance(row["data"], str):
+                try:
+                    d = _json.loads(row["data"])
+                except Exception:
+                    pass
+            elif "value" in row and isinstance(row["value"], str):
+                try:
+                    d = _json.loads(row["value"])
+                except Exception:
+                    pass
             res = {
                 "success": True,
                 "has_sync": True,
@@ -857,10 +904,23 @@ async def download_nikshay_review_sheet(
             cached = cache.get("review_sheet_latest")
             
         if not cached or "records" not in cached:
-            # 🛡️ Resilient Persistence Fallback: Read from Firestore admin_config/nikshay_sync_meta
-            sync_doc = await asyncio.to_thread(lambda: db.collection("admin_config").document("nikshay_sync_meta").get())
-            if sync_doc.exists:
-                doc_data = sync_doc.to_dict()
+            # 🛡️ Resilient Persistence Fallback: Read from admin_config/nikshay_sync_meta
+            row = pg_fetch_one("admin_config", filters={"id": "nikshay_sync_meta"})
+            if not row:
+                row = pg_fetch_one("admin_config", filters={"key": "nikshay_sync_meta"})
+            if row:
+                import json as _json
+                doc_data = row
+                if "data" in row and isinstance(row["data"], str):
+                    try:
+                        doc_data = _json.loads(row["data"])
+                    except Exception:
+                        pass
+                elif "value" in row and isinstance(row["value"], str):
+                    try:
+                        doc_data = _json.loads(row["value"])
+                    except Exception:
+                        pass
                 cached = {
                     "records": doc_data.get("flagged_records", []),
                     "month": doc_data.get("month", datetime.now().strftime("%Y-%m")),
@@ -872,6 +932,7 @@ async def download_nikshay_review_sheet(
                     status_code=400,
                     detail="No review sheet data available. Please ask Super Admin to upload and reconcile an official Nikshay dump first."
                 )
+
             
         records = cached.get("records", [])
         sheet_month = cached.get("month", datetime.now().strftime("%Y-%m"))
@@ -979,14 +1040,14 @@ async def get_cumulative_ledger(
             print(f"\n[FIRESTORE AUDIT] >>> Cumulative Ledger: CACHE HIT for '{cache_key}' (0 Firestore reads)")
             return cached
 
-        # Fast Path: Exact Episode ID Search (Direct document get -> 1 read instead of full collection stream)
+        # Fast Path: Exact Episode ID Search (Direct row get)
         s_clean = search.strip() if search else None
         if s_clean and (" " not in s_clean) and (len(s_clean) >= 4):
             doc_id = s_clean.replace("/", "_").replace(".", "_")
-            exact_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(doc_id).get())
-            print(f"\n[FIRESTORE AUDIT] >>> FAST PATH SEARCH: Exact Episode ID '{doc_id}' -> 1 Document Read (Exists: {exact_doc.exists})")
-            if exact_doc.exists:
-                doc_dict = exact_doc.to_dict() or {}
+            doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"id": doc_id})
+            if not doc_dict:
+                doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": s_clean})
+            if doc_dict:
                 p_dist = canonicalize_district(doc_dict.get("district", ""))
                 if not district or district == "All" or p_dist.lower() == canonicalize_district(district).lower():
                     exact_res = {
@@ -1008,25 +1069,21 @@ async def get_cumulative_ledger(
                     cache.set(cache_key, exact_res, ttl=300)
                     return exact_res
 
-        # Paginated Bounded Query with District Filtering
-        query = db.collection("nikshay_verified_patients")
+        # Paginated Bounded Query with District Filtering from PostgreSQL
+        filters = {}
         if district and district != "All":
-            c_dist = canonicalize_district(district)
-            query = query.where("district", "==", c_dist)
+            filters["district"] = canonicalize_district(district)
 
-        # Apply server-side pagination with order_by and limit
-        try:
-            bounded_query = query.order_by("first_verified_at", direction=firestore.Query.DESCENDING).limit(limit).offset((page - 1) * limit)
-            docs = await asyncio.to_thread(lambda: list(bounded_query.stream()))
-        except Exception:
-            # Fallback if composite index on first_verified_at is building
-            bounded_query = query.limit(limit).offset((page - 1) * limit)
-            docs = await asyncio.to_thread(lambda: list(bounded_query.stream()))
+        paginated = pg_query_table(
+            "nikshay_verified_patients",
+            filters=filters if filters else None,
+            order_by="first_verified_at",
+            order_desc=True,
+            limit=limit,
+            offset=(page - 1) * limit
+        )
 
-        paginated = [d.to_dict() if hasattr(d, "to_dict") else d for d in docs]
-        print(f"\n[FIRESTORE AUDIT] >>> BOUNDED PAGE QUERY: District '{district}', Page {page}, Limit {limit} -> Exactly {len(paginated)} Document Reads from Firestore")
-
-        # Calculate metrics from the current bounded page and cached district summaries
+        # Calculate metrics from the current bounded page
         total_hiv_dm = sum(1 for d in paginated if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"))
         total_bank = sum(1 for d in paginated if d.get("bank_validated"))
         total_udst = sum(1 for d in paginated if d.get("udst_done"))
@@ -1062,15 +1119,19 @@ async def export_cumulative_ledger(
 ):
     try:
         async with NIKSHAY_EXPORT_SEMAPHORE:
-            query = db.collection("nikshay_verified_patients")
+            filters = {}
             if district and district != "All":
-                query = query.where("district", "==", district)
+                filters["district"] = canonicalize_district(district)
 
-            docs = await asyncio.to_thread(lambda: list(query.limit(5000).stream()))
+            docs = pg_query_table(
+                "nikshay_verified_patients",
+                filters=filters if filters else None,
+                limit=5000
+            )
 
             rows = []
-            for doc in docs:
-                d = doc.to_dict()
+            for d in docs:
+
                 rows.append({
                     "Episode ID": d.get("patient_id", ""),
                     "Patient Name": d.get("patient_name", ""),
@@ -1133,14 +1194,15 @@ async def get_patient_journey(patient_id: Optional[str] = None):
         known_district = ""
         ledger_data = None
         try:
-            ledger_doc = await asyncio.to_thread(lambda: db.collection("nikshay_verified_patients").document(ledger_doc_id).get())
-            if ledger_doc.exists:
-                ledger_data = ledger_doc.to_dict()
+            ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"id": ledger_doc_id})
+            if not ledger_data:
+                ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": clean_id})
+            if ledger_data:
                 known_district = canonicalize_district(ledger_data.get("district", ""))
         except Exception:
             pass
 
-        # Step 2: Search in-memory cached reports for recent months first (0 Firestore reads)
+        # Step 2: Search in-memory cached reports for recent months first
         now = get_ist_now()
         cur_m = now.strftime("%Y-%m")
         prev_m = (now.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
@@ -1160,38 +1222,33 @@ async def get_patient_journey(patient_id: Optional[str] = None):
             if found_in_cache:
                 break
 
-        # Step 3: Targeted Firestore query if not resolved from in-memory cache
+        # Step 3: Targeted PostgreSQL query if not resolved from in-memory cache
         if not found_in_cache:
             start_date = (now - timedelta(days=180)).strftime("%Y-%m-01")
             if known_district:
                 target_places = list(dict.fromkeys([known_district, known_district.title(), known_district.lower()]))[:10]
-                docs = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_field_reports")
-                    .where("working_place", "in", target_places)
-                    .where("date_of_reporting", ">=", start_date)
-                    .stream()
-                ))
+                docs = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s",
+                    [target_places, start_date],
+                    fetch=True
+                ) or []
             else:
-                notif_docs = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_field_reports")
-                    .where("notification_ids", "array_contains", clean_id)
-                    .stream()
-                ))
-                if notif_docs:
-                    first_d = notif_docs[0].to_dict() if hasattr(notif_docs[0], "to_dict") else notif_docs[0]
-                    found_wp = canonicalize_district(first_d.get("working_place", ""))
-                    if found_wp:
-                        target_places = list(dict.fromkeys([found_wp, found_wp.title(), found_wp.lower()]))[:10]
-                        docs = await asyncio.to_thread(lambda: list(
-                            db.collection("daily_field_reports")
-                            .where("working_place", "in", target_places)
-                            .where("date_of_reporting", ">=", start_date)
-                            .stream()
-                        ))
-                    else:
-                        docs = notif_docs
-                else:
-                    docs = []
+                docs = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND (notification_ids::text LIKE %s OR sample_tested_ids::text LIKE %s OR dbt_ids::text LIKE %s)",
+                    [start_date, f"%{clean_id}%", f"%{clean_id}%", f"%{clean_id}%"],
+                    fetch=True
+                ) or []
+            # Normalize JSON list fields if PostgreSQL returned them as strings
+            import json as _json
+            for doc_item in docs:
+                for col in ["notification_ids", "sample_tested_ids", "dbt_ids", "hiv_dm_ids", "contact_tracing_ids", "differentiated_tb_ids"]:
+                    val = doc_item.get(col)
+                    if isinstance(val, str):
+                        try:
+                            doc_item[col] = _json.loads(val)
+                        except Exception:
+                            doc_item[col] = []
+
         
         milestones = []
         patient_meta = {

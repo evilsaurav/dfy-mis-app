@@ -9,6 +9,13 @@ from backend.core.database import db
 from backend.core.cache import cache
 from backend.core.security import get_current_admin
 from backend.core.helpers import log_admin_activity
+from backend.core.supabase import (
+    pg_query_table,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_delete_rows,
+    get_active_db,
+)
 
 router = APIRouter(tags=["broadcasts"])
 
@@ -64,7 +71,13 @@ async def create_broadcast(req: BroadcastCreateReq, admin: dict = Depends(get_cu
             "is_active": True
         }
 
-        await asyncio.to_thread(lambda: db.collection("broadcast_alerts").document(broadcast_id).set(doc_data))
+        pg_upsert_row("broadcast_alerts", doc_data, conflict_columns=["id"])
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                await asyncio.to_thread(lambda: active_db.collection("broadcast_alerts").document(broadcast_id).set(doc_data))
+            except Exception:
+                pass
         cache.delete_prefix("broadcasts_")
 
         actor_name = admin.get("name") or admin.get("username") or req.created_by_user or "Admin"
@@ -98,17 +111,24 @@ async def get_active_broadcasts(
         if cached is not None:
             return cached
 
-        docs = await asyncio.to_thread(lambda: list(db.collection("broadcast_alerts")
-            .where("is_active", "==", True)
-            .stream()))
+        docs_data = pg_query_table("broadcast_alerts", filters={"is_active": True}, order_by="created_at", order_desc=True)
+        if not docs_data:
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    docs = await asyncio.to_thread(lambda: list(active_db.collection("broadcast_alerts")
+                        .where("is_active", "==", True)
+                        .stream()))
+                    docs_data = [d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else dict(d) for d in docs]
+                except Exception:
+                    docs_data = []
 
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
 
         active_list = []
-        for doc in docs:
-            d = doc.to_dict()
+        for d in docs_data:
             target_aud = d.get("target_audience", "ALL").upper()
             target_dists = d.get("target_districts", ["All"])
 
@@ -145,18 +165,25 @@ async def get_active_broadcasts(
 @router.get("/api/broadcasts/all")
 async def get_all_broadcasts(districts: Optional[str] = None, role: Optional[str] = None):
     try:
-        docs = await asyncio.to_thread(lambda: list(db.collection("broadcast_alerts")
-            .order_by("created_at", direction=firestore.Query.DESCENDING)
-            .limit(100)
-            .stream()))
+        docs_data = pg_query_table("broadcast_alerts", limit=100, order_by="created_at", order_desc=True)
+        if not docs_data:
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    docs = await asyncio.to_thread(lambda: list(active_db.collection("broadcast_alerts")
+                        .order_by("created_at", direction=firestore.Query.DESCENDING)
+                        .limit(100)
+                        .stream()))
+                    docs_data = [d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else dict(d) for d in docs]
+                except Exception:
+                    docs_data = []
 
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":
             allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
 
         broadcasts = []
-        for doc in docs:
-            d = doc.to_dict()
+        for d in docs_data:
             target_dists = d.get("target_districts", ["All"])
             if allowed_dist_set:
                 if "All" not in target_dists and not any(td in allowed_dist_set for td in target_dists):
@@ -172,12 +199,20 @@ async def get_all_broadcasts(districts: Optional[str] = None, role: Optional[str
 @router.post("/api/broadcasts/delete")
 async def delete_broadcast(req: BroadcastDeleteReq, admin: dict = Depends(get_current_admin)):
     try:
-        doc_ref = db.collection("broadcast_alerts").document(req.broadcast_id)
-        doc = await asyncio.to_thread(doc_ref.get)
-        if not doc.exists:
+        d = pg_fetch_one("broadcast_alerts", filters={"id": req.broadcast_id})
+        active_db = get_active_db()
+        if not d and active_db and hasattr(active_db, "collection"):
+            try:
+                doc_ref = active_db.collection("broadcast_alerts").document(req.broadcast_id)
+                doc = await asyncio.to_thread(doc_ref.get)
+                if doc and getattr(doc, "exists", False):
+                    d = doc.to_dict() if hasattr(doc, "to_dict") and callable(doc.to_dict) else dict(doc)
+            except Exception:
+                pass
+
+        if not d:
             raise HTTPException(status_code=404, detail="Broadcast not found.")
 
-        d = doc.to_dict()
         user_role = (req.requested_by_role or "SUPER_ADMIN").upper()
 
         if user_role != "SUPER_ADMIN":
@@ -189,7 +224,12 @@ async def delete_broadcast(req: BroadcastDeleteReq, admin: dict = Depends(get_cu
                 if not any(td in allowed for td in target_dists):
                     raise HTTPException(status_code=403, detail="Permission denied to delete this broadcast.")
 
-        await asyncio.to_thread(doc_ref.delete)
+        pg_delete_rows("broadcast_alerts", filters={"id": req.broadcast_id})
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                await asyncio.to_thread(lambda: active_db.collection("broadcast_alerts").document(req.broadcast_id).delete())
+            except Exception:
+                pass
         cache.delete_prefix("broadcasts_")
 
         actor_name = admin.get("name") or admin.get("username") or req.requested_by_user or "Admin"

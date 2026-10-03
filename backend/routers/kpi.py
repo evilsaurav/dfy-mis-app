@@ -28,6 +28,15 @@ from backend.core.master_ledger import (
     get_cached_staff_targets_for_month,
     get_raw_monthly_reports
 )
+from backend.core.supabase import (
+    pg_query_table,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    pg_delete_rows,
+    pg_execute_raw,
+)
+
 from backend.core.styles import (
     safe_filename,
     ExcelStreamingResponse,
@@ -258,28 +267,29 @@ def generate_district_kpi_bytes(
                 if isinstance(raw_val, (int, float)) and raw_val > 0:
                     official_target = int(raw_val)
             else:
-                # Single-district download — 3-fallback Firestore reads (original behavior)
-                dt_doc = db.collection("district_targets").document(dt_doc_id).get()
-                if dt_doc and getattr(dt_doc, "exists", False) is True:
-                    raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
+                # Single-district download — 3-fallback PostgreSQL reads
+                dt_doc = pg_fetch_one("district_targets", filters={"id": dt_doc_id})
+                if dt_doc:
+                    raw_val = dt_doc.get("official_target")
                     if isinstance(raw_val, (int, float)) and raw_val > 0:
                         official_target = int(raw_val)
                 if official_target is None or official_target <= 0:
                     prev_m = get_previous_month(month_prefix)
                     if prev_m:
                         prev_id = f"{prev_m}_{c_dist}".replace(" ", "").lower()
-                        prev_doc = db.collection("district_targets").document(prev_id).get()
-                        if prev_doc and getattr(prev_doc, "exists", False) is True:
-                            raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
+                        prev_doc = pg_fetch_one("district_targets", filters={"id": prev_id})
+                        if prev_doc:
+                            raw_val = prev_doc.get("official_target")
                             if isinstance(raw_val, (int, float)) and raw_val > 0:
                                 official_target = int(raw_val)
                 if official_target is None or official_target <= 0:
                     fb_id = c_dist.replace(" ", "").lower()
-                    fb_doc = db.collection("district_targets").document(fb_id).get()
-                    if fb_doc and getattr(fb_doc, "exists", False) is True:
-                        raw_val = fb_doc.to_dict().get("official_target") if hasattr(fb_doc, "to_dict") and callable(fb_doc.to_dict) and fb_doc.to_dict() else None
+                    fb_doc = pg_fetch_one("district_targets", filters={"id": fb_id})
+                    if fb_doc:
+                        raw_val = fb_doc.get("official_target")
                         if isinstance(raw_val, (int, float)) and raw_val > 0:
                             official_target = int(raw_val)
+
         except Exception as e:
             print(f"Notice: Target fetch exception for {district}: {e}")
             official_target = None
@@ -314,9 +324,8 @@ def generate_district_kpi_bytes(
                             target_map[f_name] = t_val
         else:
             try:
-                t_docs = db.collection("staff_targets").where("district", "==", district).stream()
-                for td in t_docs:
-                    t_data = td.to_dict() if hasattr(td, "to_dict") else dict(td)
+                t_rows = pg_query_table("staff_targets", filters={"district": district})
+                for t_data in t_rows:
                     f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
                     if f_name:
                         t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
@@ -352,23 +361,15 @@ def generate_district_kpi_bytes(
                 alias_queries.extend(["BHOJPUR", "Bhojpur"])
             alias_queries = list(dict.fromkeys(alias_queries))
 
-            seen_report_ids = set()
             start_date = f"{month_prefix}-01"
             end_date = f"{month_prefix}-31"
-            for aq in alias_queries:
-                docs = db.collection("daily_field_reports")\
-                    .where("working_place", "==", aq)\
-                    .where("date_of_reporting", ">=", start_date)\
-                    .where("date_of_reporting", "<=", end_date)\
-                    .stream()
-                for doc in docs:
-                    doc_id = getattr(doc, "id", None)
-                    if not doc_id:
-                        d_dict = doc.to_dict() if hasattr(doc, "to_dict") else dict(doc)
-                        doc_id = d_dict.get("id") or d_dict.get("doc_id") or str(d_dict)
-                    if doc_id not in seen_report_ids:
-                        seen_report_ids.add(doc_id)
-                        reports.append(doc.to_dict() if hasattr(doc, "to_dict") else dict(doc))
+            docs = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+                [alias_queries, start_date, end_date],
+                fetch=True
+            ) or []
+            reports = [dict(d) for d in docs]
+
 
         reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
 
@@ -953,14 +954,13 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
                 dt_cache_key = f"district_targets_map_{month_tag}"
                 district_targets_map = cache.get(dt_cache_key)
                 if district_targets_map is None:
-                    dt_docs = await asyncio.to_thread(
-                        lambda: list(db.collection("district_targets").stream())
-                    )
+                    dt_rows = pg_query_table("district_targets")
                     district_targets_map = {}
-                    for d in dt_docs:
-                        dd = d.to_dict() if hasattr(d, "to_dict") else {}
-                        district_targets_map[d.id] = dd.get("official_target", 0)
+                    for d in dt_rows:
+                        if d.get("id"):
+                            district_targets_map[d["id"]] = d.get("official_target", 0)
                     cache.set(dt_cache_key, district_targets_map, ttl=600)
+
 
                 with zipfile.ZipFile(tmp_zip_path, "w", zipfile.ZIP_DEFLATED) as zip_file:
                     for dist in bihar_districts:

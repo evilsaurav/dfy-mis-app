@@ -452,14 +452,18 @@ async def admin_feed_officer_data(
                     .where("fo_name", "==", clean_fo)
                     .where("date_of_reporting", "==", clean_date)
                     .stream()))
-                matching = [d for d in query_docs if canonicalize_district(d.to_dict().get("working_place", "")) == clean_wp]
+                matching = [
+                    d for d in query_docs
+                    if canonicalize_district(d.to_dict().get("working_place", "")) == clean_wp
+                    and str(d.to_dict().get("date_of_reporting", "")).strip() == clean_date
+                    and (str(d.to_dict().get("fo_name", "")).strip().lower() == clean_fo.lower() or is_officer_name_match(d.to_dict().get("fo_name", ""), clean_fo))
+                ]
                 if matching:
-                    # Deterministic selection: sort by doc ID so canonical format is always picked first
                     if len(matching) > 1:
-                        matching.sort(key=lambda d: d.id)
-                    doc_ref = matching[0].reference
-                    doc_snap = matching[0]
+                        matching.sort(key=lambda d: getattr(d, "id", ""))
                     doc_id = matching[0].id
+                    doc_ref = getattr(matching[0], "reference", None) or db.collection("daily_field_reports").document(doc_id)
+                    doc_snap = matching[0]
             except Exception as qe:
                 print(f"[Admin Feed Fallback Notice] {qe}")
 
@@ -717,7 +721,8 @@ async def admin_delete_day_report(
             deleted_metrics["contact_tracing"] += len(d_dict.get("contact_tracing_ids", []))
             deleted_metrics["diff_tb"] += len(d_dict.get("differentiated_tb_ids", []))
             # Delete document
-            await asyncio.to_thread(doc_snap.reference.delete)
+            ref = getattr(doc_snap, "reference", None) or db.collection("daily_field_reports").document(doc_snap.id)
+            await asyncio.to_thread(ref.delete)
 
         # 4. Atomic Rollback in daily_district_rollups
         try:
@@ -855,7 +860,7 @@ async def admin_edit_day_report(
             raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
 
         target_snap = matching_docs[0]
-        doc_ref = target_snap.reference
+        doc_ref = getattr(target_snap, "reference", None) or db.collection("daily_field_reports").document(target_snap.id)
         old_data = target_snap.to_dict()
 
         # 3. Calculate category deltas and prepare updates

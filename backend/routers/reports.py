@@ -58,6 +58,14 @@ from backend.core.styles import (
 )
 from backend.routers.backup import ensure_daily_backup_scheduled
 from backend.routers.targets import get_targets
+from backend.core.supabase import (
+    pg_query_table,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    pg_delete_rows,
+    pg_execute_raw,
+)
 
 router = APIRouter(tags=["reports"])
 
@@ -321,14 +329,12 @@ async def check_today_status(req: CheckStatusRequest):
         res = {"status": "not_started"}
         try:
             for cid in candidate_ids:
-                doc_ref = db.collection("daily_field_reports").document(cid)
-                doc = await asyncio.to_thread(doc_ref.get)
-                if doc.exists:
-                    d = doc.to_dict()
-                    res = {"status": "completed", "submission_count": 1, "data": d}
+                doc = pg_fetch_one("daily_field_reports", filters={"id": cid})
+                if doc:
+                    res = {"status": "completed", "submission_count": 1, "data": doc}
                     break
         except Exception as fe:
-            print(f"Check status read notice (quota/network): {fe}")
+            print(f"Check status read notice (PG): {fe}")
 
         now_ist = get_ist_now()
         today_str = now_ist.strftime("%Y-%m-%d")
@@ -351,10 +357,9 @@ async def check_today_status(req: CheckStatusRequest):
 
             try:
                 for ycid in yesterday_candidate_ids:
-                    ydoc_ref = db.collection("daily_field_reports").document(ycid)
-                    ydoc = await asyncio.to_thread(ydoc_ref.get)
-                    if ydoc.exists:
-                        yd = ydoc.to_dict()
+                    ydoc = pg_fetch_one("daily_field_reports", filters={"id": ycid})
+                    if ydoc:
+                        yd = ydoc
                         created_today = False
                         for field in ("timestamp_completed", "submitted_at", "created_at", "updated_at"):
                             val = yd.get(field)
@@ -365,6 +370,7 @@ async def check_today_status(req: CheckStatusRequest):
                                 elif today_str in str(val):
                                     created_today = True
                                     break
+
                         if created_today:
                             res = {"status": "completed", "submission_count": 1, "data": yd}
                             break
@@ -404,23 +410,34 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
         clean_dist.upper()
     ]))[:10]
 
-    # Fast targeted district stream (0.1s vs 20s full state stream)
-    docs = await asyncio.to_thread(lambda: list(
-        db.collection("daily_field_reports")
-        .where("working_place", "in", target_places)
-        .where("date_of_reporting", ">=", start_date)
-        .stream()
-    ))
-    # District fallback: Check legacy 'district' field with strict district bounds (never statewide unbounded)
+    # Fast targeted district query from PostgreSQL
+    docs = pg_execute_raw(
+        "SELECT * FROM daily_field_reports WHERE (working_place = ANY(%s) OR district = ANY(%s)) AND date_of_reporting >= %s",
+        [target_places, target_places, start_date],
+        fetch=True
+    ) or []
+
     if not docs:
-        docs = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("district", "in", target_places)
-            .where("date_of_reporting", ">=", start_date)
-            .stream()
-        ))
+        try:
+            docs = await asyncio.to_thread(lambda: list(
+                db.collection("daily_field_reports")
+                .where("working_place", "in", target_places)
+                .where("date_of_reporting", ">=", start_date)
+                .stream()
+            ))
+            if not docs:
+                docs = await asyncio.to_thread(lambda: list(
+                    db.collection("daily_field_reports")
+                    .where("district", "in", target_places)
+                    .where("date_of_reporting", ">=", start_date)
+                    .stream()
+                ))
+        except Exception as fe:
+            print(f"Registry Firestore fallback notice: {fe}")
 
     registry = {}
+    import json as _json
+
     for doc in docs:
         d = doc.to_dict() if hasattr(doc, "to_dict") else doc
         doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
@@ -432,6 +449,11 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
         if not did:
             did = f"{doc_dist}_{fo}_{dt}".replace(" ", "_").lower()
         notifs = d.get("notification_ids", []) or []
+        if isinstance(notifs, str):
+            try:
+                notifs = _json.loads(notifs)
+            except Exception:
+                notifs = []
         for nid in notifs:
             clean_nid = str(nid).strip()
             if clean_nid and len(clean_nid) >= 5:
@@ -520,7 +542,6 @@ async def submit_daily_report(report: DailyActivityReport):
             )
 
         doc_id = f"{report.working_place}_{report.fo_name}_{report.date_of_reporting}".replace(" ", "_").lower()
-        doc_ref = db.collection("daily_field_reports").document(doc_id)
 
         # Idempotency Guard: Prevent concurrent double-tap submissions from inflating rollup metrics
         # A 10-second lock ensures two simultaneous requests don't both increment the rollup counters
@@ -585,10 +606,17 @@ async def submit_daily_report(report: DailyActivityReport):
         }
 
         try:
-            doc = await asyncio.to_thread(doc_ref.get)
-            if doc.exists:
+            doc = pg_fetch_one("daily_field_reports", filters={"id": doc_id})
+            if doc:
                 is_new_submission = False
-                d = doc.to_dict()
+                d = dict(doc)
+                import json as _json
+                for col in ["notification_ids", "sample_tested_ids", "hiv_dm_ids", "dbt_ids", "contact_tracing_ids", "differentiated_tb_ids", "visited_names", "fdc_details"]:
+                    if isinstance(d.get(col), str):
+                        try:
+                            d[col] = _json.loads(d[col])
+                        except Exception:
+                            d[col] = []
                 
                 # Compute delta for each category to ensure accurate rollup increments
                 old_notifs = set(d.get("notification_ids", []))
@@ -614,10 +642,10 @@ async def submit_daily_report(report: DailyActivityReport):
 
                 for k, v in payload.items():
                     if isinstance(v, list) and k.endswith("_ids"):
-                        combined = d.get(k, []) + v
+                        combined = (d.get(k) or []) + v
                         payload[k] = list(dict.fromkeys(combined))
                     elif k == "visited_names" and isinstance(v, list):
-                        combined = d.get(k, []) + v
+                        combined = (d.get(k) or []) + v
                         payload[k] = list(dict.fromkeys(combined))
                     elif k == "fdc_details" and isinstance(v, list):
                         old_fdc = d.get("fdc_details", [])
@@ -651,35 +679,71 @@ async def submit_daily_report(report: DailyActivityReport):
                     payload["submitted_morning_time"] = d.get("submitted_morning_time", "")
                     payload["morning_submission_label"] = d.get("morning_submission_label", "")
         except Exception as read_err:
-            print(f"[Submit Notice] Read existing report skipped (quota or offline): {read_err}")
+            print(f"[Submit Notice] Read existing report skipped: {read_err}")
                         
-        await asyncio.to_thread(lambda: doc_ref.set(payload, merge=True))
+        payload["id"] = doc_id
+        import json as _json
+        pg_payload = dict(payload)
+        for col in [
+            "visited_names", "notification_ids", "hiv_dm_ids", "dbt_ids",
+            "sample_tested_ids", "sample_collection_ids", "contact_tracing_ids",
+            "differentiated_tb_ids", "outcome_assigned_ids", "home_visit_ids",
+            "follow_up_ids", "face_to_face_ids", "presumptive_ids",
+            "documents_ids", "fdc_provided_ids", "kit_consumption_ids",
+            "tpt_treatment_start_ids", "tpt_presumptive_ids",
+            "adhar_face_authentication_ids", "consent_with_id_ids", "culture_dst_ids"
+        ]:
+            if col in pg_payload and isinstance(pg_payload[col], list):
+                pg_payload[col] = _json.dumps(pg_payload[col])
+        pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["id"])
+        try:
+            doc_ref = db.collection("daily_field_reports").document(doc_id)
+            await asyncio.to_thread(lambda: doc_ref.set(payload, merge=True))
+        except Exception:
+            pass
         
-        # Update daily_district_rollups using Firestore atomic operations (cuts read costs by 95%)
+        # Update daily_district_rollups in PostgreSQL
         try:
             clean_wp = report.working_place.strip()
             clean_date = report.date_of_reporting
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+            existing_rollup = pg_fetch_one("daily_district_rollups", filters={"id": rollup_id})
+            submitted_fos = []
+            if existing_rollup:
+                raw_fos = existing_rollup.get("submitted_fos")
+                if isinstance(raw_fos, list):
+                    submitted_fos = raw_fos
+                elif isinstance(raw_fos, str):
+                    try:
+                        submitted_fos = _json.loads(raw_fos)
+                    except Exception:
+                        pass
+            if report.fo_name not in submitted_fos:
+                submitted_fos.append(report.fo_name)
+
+            sub_count = (existing_rollup.get("submission_count") or 0) + (1 if is_new_submission else 0) if existing_rollup else (1 if is_new_submission else 0)
 
             rollup_update = {
+                "id": rollup_id,
                 "date": clean_date,
                 "district": clean_wp,
-                "submitted_fos": firestore.ArrayUnion([report.fo_name]),
-                "last_updated": firestore.SERVER_TIMESTAMP
+                "submitted_fos": _json.dumps(submitted_fos),
+                "submission_count": sub_count,
+                "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            # Only increment submission count on the first report of the day
-            if is_new_submission:
-                rollup_update["submission_count"] = firestore.Increment(1)
-
-            # Only increment metrics by newly added IDs
             for metric_k, delta_v in delta_counts.items():
-                if delta_v > 0:
-                    rollup_update[metric_k] = firestore.Increment(delta_v)
+                old_val = (existing_rollup.get(metric_k) or 0) if existing_rollup else 0
+                rollup_update[metric_k] = old_val + max(0, delta_v)
 
-            await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
+            pg_upsert_row("daily_district_rollups", rollup_update, conflict_columns=["id"])
+            try:
+                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
+            except Exception:
+                pass
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
+
 
         cached_payload = dict(payload)
         cached_payload["id"] = doc_id
@@ -783,33 +847,18 @@ async def compute_profile_response(
         start_date = f"{req_month}-01"
         end_date = f"{req_month}-31"
         try:
-            leave_docs = await asyncio.to_thread(lambda: list(
-                db.collection("daily_staff_leaves")
-                .where("district", "==", c_wp)
-                .where("date", ">=", start_date)
-                .where("date", "<=", end_date)
-                .stream()
-            ))
+            leave_rows = pg_execute_raw(
+                "SELECT * FROM daily_staff_leaves WHERE district = %s AND date >= %s AND date <= %s",
+                [c_wp, start_date, end_date],
+                fetch=True
+            ) or []
+            leave_records = [dict(r) for r in leave_rows]
         except Exception as l_err:
-            print(f"Notice: Failed to query daily_staff_leaves by range: {l_err}")
-            try:
-                leave_docs = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_staff_leaves")
-                    .where("district", "==", c_wp)
-                    .stream()
-                ))
-            except Exception as l_err2:
-                print(f"Notice: Fallback daily_staff_leaves query failed: {l_err2}")
-                leave_docs = []
+            print(f"Notice: Failed to query daily_staff_leaves from PG: {l_err}")
+            leave_records = []
 
-        leave_records = []
-        for l_doc in (leave_docs or []):
-            l_data = l_doc.to_dict() if hasattr(l_doc, "to_dict") else (l_doc if isinstance(l_doc, dict) else {})
-            if isinstance(l_data, dict) and l_data:
-                rec = dict(l_data)
-                rec["id"] = getattr(l_doc, "id", rec.get("id", ""))
-                leave_records.append(rec)
         cache.set(leave_cache_key, leave_records, ttl=1800)
+
 
     for l_data in leave_records:
         if not isinstance(l_data, dict):
@@ -890,17 +939,18 @@ async def compute_profile_response(
             declared_holidays = int(cached_pacing.get("declared_holidays", 1))
         else:
             dist_doc_id = f"{req_month}_{c_wp}"
-            doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(dist_doc_id).get())
-            if doc_snap.exists:
-                declared_holidays = int(doc_snap.to_dict().get("declared_holidays", 1))
+            doc_snap = pg_fetch_one("pacing_settings", filters={"id": dist_doc_id})
+            if doc_snap:
+                declared_holidays = int(doc_snap.get("declared_holidays", 1))
                 cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
             else:
-                state_doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(req_month).get())
-                if state_doc_snap.exists:
-                    declared_holidays = int(state_doc_snap.to_dict().get("declared_holidays", 1))
+                state_doc_snap = pg_fetch_one("pacing_settings", filters={"id": req_month})
+                if state_doc_snap:
+                    declared_holidays = int(state_doc_snap.get("declared_holidays", 1))
                 else:
                     declared_holidays = 1
                 cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
+
     except Exception as p_err:
         print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
         declared_holidays = 1
@@ -998,13 +1048,13 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
             candidate_ids.extend([f"bhojpur_{clean_fo}"])
         candidate_ids = list(dict.fromkeys(candidate_ids))
 
-        # Step 1: Verify PIN in background thread
+        # Step 1: Verify PIN via PostgreSQL
         pin_valid = False
         for doc_id in candidate_ids:
             try:
-                pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
-                if pin_doc.exists:
-                    real_pin = pin_doc.to_dict().get("pin", "")
+                pin_row = pg_fetch_one("staff_directory", filters={"id": doc_id})
+                if pin_row:
+                    real_pin = pin_row.get("pin", "")
                     if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
                         pin_valid = True
                         break
@@ -1035,42 +1085,33 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
         if not target_found:
             try:
                 for tid in [f"{req_month}_{clean_wp}_{req.fo_name}".replace(" ", "").lower(), f"{clean_wp}_{req.fo_name}".replace(" ", "").lower()]:
-                    m_doc = await asyncio.to_thread(db.collection("staff_targets").document(tid).get)
-                    if m_doc.exists:
-                        target_val = int(m_doc.to_dict().get("target", 50))
+                    m_row = pg_fetch_one("staff_targets", filters={"id": tid})
+                    if m_row:
+                        target_val = int(m_row.get("target", 50))
                         break
             except Exception:
                 target_val = 50
+
             
         # Step 3: Fetch all reports for the month asynchronously
         start_date = f"{req_month}-01"
         end_date = f"{req_month}-31"
-        reports = await asyncio.to_thread(lambda: list(
-            db.collection("daily_field_reports")
-            .where("fo_name", "==", req.fo_name)
-            .where("date_of_reporting", ">=", start_date)
-            .where("date_of_reporting", "<=", end_date)
-            .stream()
-        ))
-        if not reports and req.fo_name.strip() != req.fo_name:
-            reports = await asyncio.to_thread(lambda: list(
-                db.collection("daily_field_reports")
-                .where("fo_name", "==", req.fo_name.strip())
-                .where("date_of_reporting", ">=", start_date)
-                .where("date_of_reporting", "<=", end_date)
-                .stream()
-            ))
+        reports = pg_execute_raw(
+            "SELECT * FROM daily_field_reports WHERE (fo_name = %s OR fo_name = %s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+            [req.fo_name, req.fo_name.strip(), start_date, end_date],
+            fetch=True
+        ) or []
 
         clean_target_wp = clean_wp.lower()
         clean_target_fo = clean_fo
 
         filtered_reports = []
         for rep in reports:
-            rep_data = rep.to_dict() if hasattr(rep, "to_dict") else rep
+            rep_data = rep if isinstance(rep, dict) else (rep.to_dict() if hasattr(rep, "to_dict") else {})
             rep_wp = canonicalize_district(rep_data.get("working_place", "")).lower()
-            doc_id_lower = getattr(rep, "id", "").lower()
+            doc_id_lower = str(rep_data.get("id", "")).lower()
             if rep_wp == clean_target_wp or doc_id_lower.startswith(f"{clean_target_wp}_"):
-                filtered_reports.append(rep)
+                filtered_reports.append(rep_data)
         reports = filtered_reports
 
         if not reports:
@@ -1086,19 +1127,17 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
                 target_places = list(dict.fromkeys([
                     clean_wp, clean_wp.title(), clean_wp.lower(), clean_wp.upper()
                 ]))[:10]
-                dist_reports = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_field_reports")
-                    .where("working_place", "in", target_places)
-                    .where("date_of_reporting", ">=", start_date)
-                    .where("date_of_reporting", "<=", end_date)
-                    .stream()
-                ))
-                for r_doc in dist_reports:
-                    r = r_doc.to_dict() if hasattr(r_doc, "to_dict") else r_doc
+                dist_reports = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+                    [target_places, start_date, end_date],
+                    fetch=True
+                ) or []
+                for r in dist_reports:
                     r_fo = re.sub(r'[^a-zA-Z0-9]', '', r.get("fo_name", "")).lower()
                     if r_fo == clean_target_fo:
                         fallback_matches.append(r)
             if fallback_matches:
+
                 reports = fallback_matches
 
         res = await compute_profile_response(reports, target_val, req_month, clean_wp, clean_fo)
@@ -1165,10 +1204,9 @@ async def my_profile_stats(req: ProfileStatsRequest):
 
                 for doc_id in candidate_ids:
                     try:
-                        pin_doc = await asyncio.to_thread(lambda d_id=doc_id: db.collection("staff_directory").document(d_id).get())
-                        if pin_doc.exists:
-                            doc_d = pin_doc.to_dict() or {}
-                            real_pin = doc_d.get("pin", "")
+                        pin_row = pg_fetch_one("staff_directory", filters={"id": doc_id})
+                        if pin_row:
+                            real_pin = pin_row.get("pin", "")
                             if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
                                 pin_valid = True
                                 # Warm up staff directory cache with new officer
@@ -1183,6 +1221,7 @@ async def my_profile_stats(req: ProfileStatsRequest):
                                 break
                     except Exception:
                         pass
+
 
             if not pin_valid:
                 if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
@@ -1366,17 +1405,11 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
         
     if fo_name:
         raw_fo = fo_name.strip()
-        q = db.collection("daily_field_reports")\
-            .where("fo_name", "==", raw_fo)\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)
-        docs = list(q.stream())
-        if not docs and raw_fo != fo_name:
-            docs = list(db.collection("daily_field_reports")
-                .where("fo_name", "==", fo_name)
-                .where("date_of_reporting", ">=", start_date)
-                .where("date_of_reporting", "<=", end_date)
-                .stream())
+        docs = pg_execute_raw(
+            "SELECT * FROM daily_field_reports WHERE (fo_name = %s OR fo_name = %s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+            [raw_fo, fo_name, start_date, end_date],
+            fetch=True
+        ) or []
     elif clean_district != "All":
         alias_dists = [clean_district]
         if "aurangabad" in clean_district.lower():
@@ -1387,30 +1420,26 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             alias_dists.extend(["BHOJPUR", "Bhojpur"])
         alias_dists = list(dict.fromkeys(alias_dists))
 
-        seen_ids = set()
-        docs = []
-        for ad in alias_dists:
-            q_docs = db.collection("daily_field_reports")\
-                .where("working_place", "==", ad)\
-                .where("date_of_reporting", ">=", start_date)\
-                .where("date_of_reporting", "<=", end_date)\
-                .stream()
-            for doc in q_docs:
-                if doc.id not in seen_ids:
-                    seen_ids.add(doc.id)
-                    docs.append(doc)
+        docs = pg_execute_raw(
+            "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+            [alias_dists, start_date, end_date],
+            fetch=True
+        ) or []
     else:
-        docs = list(db.collection("daily_field_reports")\
-            .where("date_of_reporting", ">=", start_date)\
-            .where("date_of_reporting", "<=", end_date)\
-            .stream())
+        docs = pg_execute_raw(
+            "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
+            [start_date, end_date],
+            fetch=True
+        ) or []
         
     patient_map = {}
+    import json as _json
     
     for doc in docs:
-        d = doc.to_dict()
+        d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
         doc_dist = canonicalize_district(d.get("working_place", ""))
         doc_fo = d.get("fo_name", "").strip()
+
         doc_date = d.get("date_of_reporting", "")
         
         if allowed_dist_set and doc_dist.lower() not in allowed_dist_set:
@@ -1431,7 +1460,13 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
             ("differentiated_tb_ids", "differentiated_tb")
         ]:
             ids = d.get(cat_key, [])
+            if isinstance(ids, str):
+                try:
+                    ids = _json.loads(ids)
+                except Exception:
+                    ids = []
             if isinstance(ids, list):
+
                 for pid in ids:
                     pid_clean = str(pid).strip()
                     if len(pid_clean) >= 5:
@@ -1658,30 +1693,28 @@ async def get_pacing_settings(
 
         # Resolution logic:
         # 1. If district is provided and canonical district != "all":
-        # Check Firestore collection pacing_settings document f"{clean_month}_{clean_dist}".
+        # Check PostgreSQL pacing_settings record f"{clean_month}_{clean_dist}".
         if clean_dist:
-            doc = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(f"{clean_month}_{clean_dist}").get())
-            if doc.exists:
-                d = doc.to_dict() or {}
+            doc = pg_fetch_one("pacing_settings", filters={"id": f"{clean_month}_{clean_dist}"})
+            if doc:
                 res = {
                     "success": True,
                     "month": clean_month,
                     "district": clean_dist,
-                    "declared_holidays": d.get("declared_holidays", 1),
+                    "declared_holidays": doc.get("declared_holidays", 1),
                     "is_override": True
                 }
                 cache.set(cache_key, res, ttl=1800)
                 return res
 
         # 2. Check state default document f"{clean_month}".
-        state_doc = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(clean_month).get())
-        if state_doc.exists:
-            d = state_doc.to_dict() or {}
+        state_doc = pg_fetch_one("pacing_settings", filters={"id": clean_month})
+        if state_doc:
             res = {
                 "success": True,
                 "month": clean_month,
                 "district": "all",
-                "declared_holidays": d.get("declared_holidays", 1),
+                "declared_holidays": state_doc.get("declared_holidays", 1),
                 "is_override": False
             }
             cache.set(cache_key, res, ttl=1800)
@@ -1736,6 +1769,7 @@ async def update_pacing_settings(
         updated_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
 
         doc_data = {
+            "id": doc_id,
             "month": clean_month,
             "district": clean_dist,
             "declared_holidays": clamped_holidays,
@@ -1745,7 +1779,8 @@ async def update_pacing_settings(
             "updated_at": updated_at
         }
 
-        await asyncio.to_thread(lambda: db.collection("pacing_settings").document(doc_id).set(doc_data, merge=True))
+        pg_upsert_row("pacing_settings", doc_data, conflict_columns=["id"])
+
 
         # Cache eviction
         cache.delete(f"pacing_settings_{clean_month}_{clean_dist}")

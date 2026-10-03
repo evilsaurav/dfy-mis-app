@@ -33,6 +33,15 @@ from backend.core.master_ledger import (
     get_raw_monthly_reports,
     get_directory,
 )
+from backend.core.supabase import (
+    pg_query_table,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    pg_delete_rows,
+    pg_execute_raw,
+)
+
 from backend.core.styles import (
     safe_filename,
     ExcelStreamingResponse,
@@ -407,35 +416,41 @@ async def legacy_get_today_attendance(
         except Exception:
             next_date = ""
 
-    report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", target_date).stream()))
-    if not report_docs:
-        report_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", target_date).stream()))
-
-    all_candidate_docs = list(report_docs)
-    seen_doc_ids = set()
-    for doc in report_docs:
-        doc_id = getattr(doc, "id", None)
-        if doc_id:
-            seen_doc_ids.add(doc_id)
+    report_rows = pg_execute_raw(
+        "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s OR date = %s",
+        [target_date, target_date],
+        fetch=True
+    ) or []
+    all_candidate_docs = [dict(r) for r in report_rows]
+    seen_doc_ids = {str(d.get("id")) for d in all_candidate_docs if d.get("id")}
 
     if next_date:
         try:
-            next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date_of_reporting", "==", next_date).stream()))
-            if not next_day_docs:
-                next_day_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").where("date", "==", next_date).stream()))
-            for ndoc in next_day_docs:
-                ndoc_id = getattr(ndoc, "id", None)
+            next_day_rows = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s OR date = %s",
+                [next_date, next_date],
+                fetch=True
+            ) or []
+            for ndoc in next_day_rows:
+                ndoc_dict = dict(ndoc)
+                ndoc_id = str(ndoc_dict.get("id", ""))
                 if not ndoc_id or ndoc_id not in seen_doc_ids:
-                    all_candidate_docs.append(ndoc)
+                    all_candidate_docs.append(ndoc_dict)
         except Exception as e:
             print(f"Notice fetching next_day_docs in today-attendance: {e}")
 
     leave_docs = []
     try:
-        leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
+        leave_rows = pg_execute_raw(
+            "SELECT * FROM daily_staff_leaves WHERE date = %s",
+            [target_date],
+            fetch=True
+        ) or []
+        leave_docs = [dict(r) for r in leave_rows]
     except Exception as le:
-        print(f"Firestore daily_staff_leaves stream notice: {le}")
+        print(f"PG daily_staff_leaves query notice: {le}")
         leave_docs = []
+
 
     res = format_attendance_response(
         staff_list=staff_list,
@@ -558,12 +573,17 @@ async def get_today_attendance(
                 leave_docs = cached_leaves
             else:
                 try:
-                    leave_docs_raw = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").where("date", "==", target_date).stream()))
-                    leave_docs = [ld.to_dict() if hasattr(ld, "to_dict") else dict(ld) for ld in leave_docs_raw]
+                    leave_rows = pg_execute_raw(
+                        "SELECT * FROM daily_staff_leaves WHERE date = %s",
+                        [target_date],
+                        fetch=True
+                    ) or []
+                    leave_docs = [dict(ld) for ld in leave_rows]
                     cache.set(leave_cache_key, leave_docs, ttl=300)
                 except Exception as le:
-                    print(f"Firestore daily_staff_leaves stream notice: {le}")
+                    print(f"PG daily_staff_leaves query notice: {le}")
                     leave_docs = []
+
 
             result = format_attendance_response(
                 staff_list=staff_list,
@@ -658,17 +678,16 @@ async def export_staff_attendance(
             staff_docs = await get_cached_staff_directory_raw()
             
             try:
-                leave_docs = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_staff_leaves")
-                    .where("date", ">=", start_date)
-                    .where("date", "<=", end_date)
-                    .stream()
-                ))
+                leave_rows = pg_execute_raw(
+                    "SELECT * FROM daily_staff_leaves WHERE date >= %s AND date <= %s",
+                    [start_date, end_date],
+                    fetch=True
+                ) or []
+                leave_docs = [dict(r) for r in leave_rows]
             except Exception as le:
-                try:
-                    leave_docs = await asyncio.to_thread(lambda: list(db.collection("daily_staff_leaves").stream()))
-                except Exception:
-                    leave_docs = []
+                print(f"PG daily_staff_leaves monthly query notice: {le}")
+                leave_docs = []
+
 
             # 4. Normalize & Index Officers
             def norm_fo_name(name: str) -> str:
@@ -1187,6 +1206,7 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
         marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
 
         leave_data = {
+            "id": doc_id,
             "date": clean_date,
             "district": clean_dist,
             "fo_name": req.fo_name.strip(),
@@ -1199,7 +1219,7 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
             "marked_at": marked_at
         }
 
-        await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
+        pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["id"])
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
@@ -1249,7 +1269,8 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
                 raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
 
         doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
-        await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).delete())
+        pg_delete_rows("daily_staff_leaves", filters={"id": doc_id})
+
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
@@ -1320,54 +1341,38 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
         action_type = "ATTENDANCE_REMARK_ADDED" if req.action == "remark" else "ATTENDANCE_LEAVE_OVERRIDDEN"
 
         if req.action == "remark":
-            # Attach remark to daily report if exists
-            candidate_doc_ids = [
-                f"{clean_dist}_{req.fo_name.strip()}_{clean_date}".replace(" ", "_").lower(),
-                f"{clean_dist}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-                f"{clean_dist}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
-            ]
-            matching_reports = []
-            seen_cand_ids = set()
-            for cid in candidate_doc_ids:
-                cand_ref = db.collection("daily_field_reports").document(cid)
-                snap = await asyncio.to_thread(cand_ref.get)
-                if snap.exists and cid not in seen_cand_ids:
-                    matching_reports.append(cand_ref)
-                    seen_cand_ids.add(cid)
+            # Attach remark to daily report in PostgreSQL
+            try:
+                pg_execute_raw(
+                    "UPDATE daily_field_reports SET admin_remark = %s, admin_remark_by = %s, admin_remark_at = %s WHERE date_of_reporting = %s AND (fo_name = %s OR fo_name = %s)",
+                    [req.remark.strip(), actor_name, marked_at, clean_date, req.fo_name.strip(), clean_fo]
+                )
+            except Exception as upd_err:
+                print(f"Notice: Failed to update admin_remark on PG report: {upd_err}")
 
-            if not matching_reports:
-                try:
-                    query_docs = await asyncio.to_thread(lambda: list(
-                        db.collection("daily_field_reports")
-                        .where("date_of_reporting", "==", clean_date)
-                        .stream()
-                    ))
-                    for d in query_docs:
-                        d_dict = d.to_dict() if hasattr(d, "to_dict") else {}
-                        d_fo = re.sub(r'[^a-zA-Z0-9]', '', d_dict.get("fo_name", "")).lower()
-                        d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
-                        if d_fo == clean_fo and d_wp == clean_dist.lower():
-                            if hasattr(d, "reference"):
-                                matching_reports.append(d.reference)
-                            else:
-                                doc_id_target = getattr(d, "id", None)
-                                if doc_id_target:
-                                    matching_reports.append(db.collection("daily_field_reports").document(doc_id_target))
-                except Exception as q_err:
-                    print(f"Notice: daily_field_reports search failed: {q_err}")
-
-            for r_ref in matching_reports:
-                try:
-                    await asyncio.to_thread(lambda ref=r_ref: ref.update({
-                        "admin_remark": req.remark.strip(),
-                        "admin_remark_by": actor_name,
-                        "admin_remark_at": marked_at
-                    }))
-                except Exception as upd_err:
-                    print(f"Notice: Failed to update admin_remark on report doc: {upd_err}")
+            # Also update candidate docs in db / mock store
+            try:
+                cand_ids = [
+                    f"{clean_dist.lower()}_{clean_fo}_{clean_date}",
+                    f"{clean_dist}_{req.fo_name.strip()}_{clean_date}".replace(" ", "_").lower(),
+                    f"{canonicalize_district(clean_dist).lower()}_{clean_fo}_{clean_date}"
+                ]
+                for cid in cand_ids:
+                    doc_ref = db.collection("daily_field_reports").document(cid)
+                    doc = await asyncio.to_thread(doc_ref.get)
+                    if getattr(doc, "exists", False):
+                        await asyncio.to_thread(lambda ref=doc_ref: ref.update({
+                            "admin_remark": req.remark.strip(),
+                            "admin_remark_by": actor_name,
+                            "admin_remark_at": marked_at
+                        }))
+                        break
+            except Exception as q_err:
+                print(f"Notice: daily_field_reports search failed: {q_err}")
 
             # Also store/merge in daily_staff_leaves so remark is preserved across views
             leave_remark_data = {
+                "id": doc_id,
                 "date": clean_date,
                 "district": clean_dist,
                 "fo_name": req.fo_name.strip(),
@@ -1380,13 +1385,14 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "is_inspection_remark": True,
                 "is_override": False
             }
-            await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_remark_data, merge=True))
+            pg_upsert_row("daily_staff_leaves", leave_remark_data, conflict_columns=["id"])
 
             details = f"Added admin inspection remark for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
             msg = "Attendance remark recorded successfully."
         else:
             # req.action == "override_leave"
             leave_data = {
+                "id": doc_id,
                 "date": clean_date,
                 "district": clean_dist,
                 "fo_name": req.fo_name.strip(),
@@ -1400,9 +1406,10 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "is_override": True,
                 "is_inspection_remark": False
             }
-            await asyncio.to_thread(lambda: db.collection("daily_staff_leaves").document(doc_id).set(leave_data, merge=True))
+            pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["id"])
             details = f"Overrode attendance to {req.status or 'leave'} ({req.reason_type or 'Casual'}) for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
             msg = "Leave status overridden successfully."
+
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")

@@ -15,7 +15,12 @@ from backend.core.supabase import (
     fetch_admin_user,
     update_admin_user_login_info,
     fetch_all_admin_users,
-    get_default_super_admin
+    get_default_super_admin,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    pg_delete_rows,
+    pg_execute_raw,
 )
 from backend.core.security import (
     hash_password,
@@ -166,12 +171,14 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
         clean_user = req.username.strip().lower()
         if not clean_user or not req.password:
             raise HTTPException(status_code=400, detail="Username and password are required.")
-            
-        doc_ref = db.collection("admin_users").document(clean_user)
-        existing = await asyncio.to_thread(doc_ref.get)
-        if existing.exists:
+
+        # Check for existing user in PG
+        existing_pg = pg_fetch_one("admin_users", filters={"username": clean_user})
+        if not existing_pg:
+            existing_pg = pg_fetch_one("admin_users", filters={"user_id": clean_user})
+        if existing_pg:
             raise HTTPException(status_code=400, detail=f"Username '{clean_user}' is already taken.")
-            
+
         new_user = {
             "user_id": clean_user,
             "username": clean_user,
@@ -192,7 +199,13 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "last_login": ""
         }
-        await asyncio.to_thread(lambda: doc_ref.set(new_user))
+        import json as _json
+        pg_upsert_row("admin_users", {
+            **new_user,
+            "allowed_districts": _json.dumps(new_user["allowed_districts"]),
+            "permissions": _json.dumps(new_user["permissions"]),
+        }, conflict_columns=["username"])
+
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
@@ -204,15 +217,19 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.post("/admin/users/update")
 async def update_admin_user(req: AdminUserUpdateReq, admin: dict = Depends(require_super_admin)):
     try:
         clean_user = req.user_id.strip().lower()
-        doc_ref = db.collection("admin_users").document(clean_user)
-        doc = await asyncio.to_thread(doc_ref.get)
-        if not doc.exists:
+
+        existing_pg = pg_fetch_one("admin_users", filters={"username": clean_user})
+        if not existing_pg:
+            existing_pg = pg_fetch_one("admin_users", filters={"user_id": clean_user})
+        if not existing_pg:
             raise HTTPException(status_code=404, detail=f"Admin user '{clean_user}' not found.")
             
+        import json as _json
         update_data = {"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
         if req.name is not None:
             update_data["name"] = req.name.strip()
@@ -221,13 +238,13 @@ async def update_admin_user(req: AdminUserUpdateReq, admin: dict = Depends(requi
         if req.role is not None:
             update_data["role"] = req.role
         if req.allowed_districts is not None:
-            update_data["allowed_districts"] = req.allowed_districts
+            update_data["allowed_districts"] = _json.dumps(req.allowed_districts)
         if req.permissions is not None:
-            update_data["permissions"] = req.permissions
+            update_data["permissions"] = _json.dumps(req.permissions)
         if req.status is not None:
             update_data["status"] = req.status
             
-        await asyncio.to_thread(lambda: doc_ref.update(update_data))
+        pg_update_row("admin_users", update_data, {"username": clean_user})
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity("PERMISSIONS_UPDATED", f"Updated settings/permissions for admin user '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
@@ -244,8 +261,7 @@ async def delete_admin_user(user_id: str, admin: dict = Depends(require_super_ad
         if clean_user == "admin":
             raise HTTPException(status_code=400, detail="Cannot delete master root admin account.")
             
-        doc_ref = db.collection("admin_users").document(clean_user)
-        await asyncio.to_thread(doc_ref.delete)
+        pg_delete_rows("admin_users", {"username": clean_user})
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity("ADMIN_USER_DELETED", f"Deleted admin user account '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
@@ -254,6 +270,8 @@ async def delete_admin_user(user_id: str, admin: dict = Depends(require_super_ad
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # =========================================================================
 # --- Enterprise Audit Retention & Auto-Pruning Engine (30-Day Policy) ---
@@ -264,31 +282,19 @@ AUDIT_RETENTION_DAYS = 30
 async def prune_expired_audit_logs(retention_days: int = AUDIT_RETENTION_DAYS) -> int:
     """
     Auto-prune audit logs older than retention_days (default 30 days / 1 month).
-    Deletes expired records in Firestore batches to prevent database bloat.
+    Deletes expired records via PostgreSQL.
     """
     global _last_audit_prune_epoch
     _last_audit_prune_epoch = time.time()
     try:
         cutoff_str = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
-        expired_docs = await asyncio.to_thread(lambda: list(
-            db.collection("admin_audit_logs")
-            .where("timestamp", "<", cutoff_str)
-            .limit(300)
-            .stream()
-        ))
-        
-        if not expired_docs:
-            return 0
-            
-        deleted_count = 0
-        batch = db.batch()
-        for doc in expired_docs:
-            batch.delete(doc.reference)
-            deleted_count += 1
-            
-        await asyncio.to_thread(batch.commit)
-        print(f"[Audit Retention] Successfully auto-pruned {deleted_count} expired audit logs older than {cutoff_str}")
-        return deleted_count
+        result = pg_execute_raw(
+            "DELETE FROM admin_audit_logs WHERE timestamp < %s",
+            [cutoff_str],
+            fetch=False
+        )
+        print(f"[Audit Retention] Auto-pruned expired audit logs older than {cutoff_str}")
+        return 1 if result else 0
     except Exception as e:
         print(f"[Audit Retention Notice] Pruning skipped or error: {e}")
         return 0
@@ -303,7 +309,7 @@ async def manual_prune_audit_logs(days: Optional[int] = 30, admin: dict = Depend
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity(
             action_type="AUDIT_PRUNED",
-            details=f"Super Admin {actor_name} manually pruned {deleted} audit log(s) older than {days or 30} days",
+            details=f"Super Admin {actor_name} manually pruned audit log(s) older than {days or 30} days",
             user_name=actor_name,
             user_id=actor_id,
             role="SUPER_ADMIN"
@@ -312,7 +318,7 @@ async def manual_prune_audit_logs(days: Optional[int] = 30, admin: dict = Depend
             "success": True, 
             "deleted_count": deleted, 
             "retention_days": days or 30,
-            "message": f"Successfully pruned {deleted} audit log(s) older than {days or 30} days."
+            "message": f"Successfully pruned audit log(s) older than {days or 30} days."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -328,18 +334,21 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         # Enforce 30-day retention cutoff so client never receives expired logs
         cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
-        # Fetch audit logs ordered chronologically descending
-        docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
-            .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(query.limit or 300)
-            .stream()))
+        # Fetch audit logs from PostgreSQL ordered by timestamp DESC
+        pg_rows = pg_query_table(
+            "admin_audit_logs",
+            order_by="timestamp",
+            order_desc=True,
+            limit=query.limit or 300,
+        )
+        docs = [dict(r) for r in pg_rows]
             
         def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
             if not ts_str:
                 return ""
             try:
-                if "AM" in ts_str or "PM" in ts_str:
-                    return ts_str
+                if "AM" in str(ts_str) or "PM" in str(ts_str):
+                    return str(ts_str)
                 clean_ts = str(ts_str).strip().replace("T", " ")[:19]
                 dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
                 if not is_ist:
@@ -353,12 +362,10 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         effective_user = query.user_id or query.user_filter or "All"
 
         logs = []
-        for doc in docs:
-            d = doc.to_dict()
-            
+        for d in docs:
             # Retention check: Skip records older than 30 days
             log_time = d.get("timestamp", "")
-            if log_time and log_time < cutoff_str:
+            if log_time and str(log_time) < cutoff_str:
                 continue
 
             # Apply filters in memory
@@ -389,17 +396,21 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
     try:
         cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
 
-        docs = await asyncio.to_thread(lambda: list(db.collection("admin_audit_logs")
-            .order_by("timestamp", direction=firestore.Query.DESCENDING)
-            .limit(1000)
-            .stream()))
+        pg_rows = pg_query_table(
+            "admin_audit_logs",
+            order_by="timestamp",
+            order_desc=True,
+            limit=1000,
+        )
+        docs = [dict(r) for r in pg_rows]
 
         def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
             if not ts_str:
                 return ""
             try:
-                if "AM" in ts_str or "PM" in ts_str:
-                    return ts_str
+                if "AM" in str(ts_str) or "PM" in str(ts_str):
+                    return str(ts_str)
+
                 clean_ts = str(ts_str).strip().replace("T", " ")[:19]
                 dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
                 if not is_ist:
@@ -409,9 +420,8 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
                 return str(ts_str)
             
         rows = []
-        for idx, doc in enumerate(docs):
-            d = doc.to_dict()
-            if d.get("timestamp", "") < cutoff_str:
+        for idx, d in enumerate(docs):
+            if str(d.get("timestamp", "")) < cutoff_str:
                 continue
             if action_type and action_type != "All" and d.get("action_type") != action_type:
                 continue

@@ -19,6 +19,7 @@ from backend.core.master_ledger import (
     get_directory,
     invalidate_staff_directory_cache
 )
+from backend.core.supabase import pg_fetch_one, pg_upsert_row, pg_query_table, pg_execute_raw
 
 router = APIRouter(tags=["targets"])
 
@@ -163,20 +164,22 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
         if district and district != "All":
             clean_dist = canonicalize_district(district.strip())
             dt_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
-            dt_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(dt_doc_id).get())
+
+            # Primary: PostgreSQL
+            dt_data = pg_fetch_one("district_targets", filters={"id": dt_doc_id})
             official_target = None
             inherited_from_month = None
-            if dt_doc and getattr(dt_doc, "exists", False) is True:
-                raw_val = dt_doc.to_dict().get("official_target") if hasattr(dt_doc, "to_dict") and callable(dt_doc.to_dict) and dt_doc.to_dict() else None
+            if dt_data:
+                raw_val = dt_data.get("official_target")
                 if isinstance(raw_val, (int, float)) and raw_val > 0:
                     official_target = int(raw_val)
 
-            # Fallback 1: Previous month (last month)
+            # Fallback 1: Previous month
             if (official_target is None or official_target <= 0) and prev_month:
                 prev_doc_id = f"{prev_month}_{clean_dist}".replace(" ", "").lower()
-                prev_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(prev_doc_id).get())
-                if prev_doc and getattr(prev_doc, "exists", False) is True:
-                    raw_val = prev_doc.to_dict().get("official_target") if hasattr(prev_doc, "to_dict") and callable(prev_doc.to_dict) and prev_doc.to_dict() else None
+                prev_data = pg_fetch_one("district_targets", filters={"id": prev_doc_id})
+                if prev_data:
+                    raw_val = prev_data.get("official_target")
                     if isinstance(raw_val, (int, float)) and raw_val > 0:
                         official_target = int(raw_val)
                         inherited_from_month = prev_month
@@ -184,11 +187,12 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
             # Fallback 2: Generic fallback doc
             if official_target is None or official_target <= 0:
                 fallback_doc_id = clean_dist.replace(" ", "").lower()
-                fallback_doc = await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).get())
-                if fallback_doc and getattr(fallback_doc, "exists", False) is True:
-                    raw_val = fallback_doc.to_dict().get("official_target") if hasattr(fallback_doc, "to_dict") and callable(fallback_doc.to_dict) and fallback_doc.to_dict() else None
+                fallback_data = pg_fetch_one("district_targets", filters={"id": fallback_doc_id})
+                if fallback_data:
+                    raw_val = fallback_data.get("official_target")
                     if isinstance(raw_val, (int, float)) and raw_val > 0:
                         official_target = int(raw_val)
+
             
             staff_targets_sum = sum(t["target"] for t in targets)
             if official_target is None or official_target <= 0:
@@ -205,12 +209,12 @@ async def get_targets(district: Optional[str] = None, month: Optional[str] = Non
                 res["inherited_from_month"] = inherited_from_month
         else:
             staff_targets_sum = sum(t["target"] for t in targets)
-            dt_docs = await asyncio.to_thread(lambda: list(db.collection("district_targets").stream()))
+            dt_docs_pg = pg_query_table("district_targets")
             dist_map = {}
-            historical_dist_map = {} # c_dist -> (month, tgt_val)
+            historical_dist_map = {}  # c_dist -> (month, tgt_val)
             default_dist_map = {}
-            for d in dt_docs:
-                dd = d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) and d.to_dict() else {}
+            for dd in dt_docs_pg:
+
                 d_m = dd.get("month")
                 d_dist = dd.get("district")
                 if not d_dist or not isinstance(d_dist, str):
@@ -274,44 +278,49 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
                 raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update targets in district '{clean_dist}'.")
         clean_name = data.fo_name.strip()
         
-        # 1. Month-scoped document
+        # 1. Month-scoped record
         month_doc_id = f"{month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
-        await asyncio.to_thread(lambda: db.collection("staff_targets").document(month_doc_id).set({
+        pg_upsert_row("staff_targets", {
+            "id": month_doc_id,
             "month": month,
             "district": clean_dist,
             "fo_name": clean_name,
             "target": int(data.target),
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }, merge=True))
+        }, conflict_columns=["id"])
         
-        # 2. General fallback document
+        # 2. General fallback record
         fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
-        await asyncio.to_thread(lambda: db.collection("staff_targets").document(fallback_doc_id).set({
+        pg_upsert_row("staff_targets", {
+            "id": fallback_doc_id,
             "district": clean_dist,
             "fo_name": clean_name,
             "target": int(data.target),
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }, merge=True))
+        }, conflict_columns=["id"])
         
-        # 3. Synchronize alias documents if applicable
+        # 3. Synchronize alias records if applicable
         if clean_dist.lower() == "muzaffarpur" and clean_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
             for alias in ("Vinay Prakash", "Vinay Kumar"):
                 if alias.lower() != clean_name.lower():
                     a_mid = f"{month}_{clean_dist}_{alias}".replace(" ", "").lower()
                     a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
-                    await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_mid).set({
+                    pg_upsert_row("staff_targets", {
+                        "id": a_mid,
                         "month": month,
                         "district": clean_dist,
                         "fo_name": alias,
                         "target": int(data.target),
                         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, merge=True))
-                    await asyncio.to_thread(lambda: db.collection("staff_targets").document(a_fid).set({
+                    }, conflict_columns=["id"])
+                    pg_upsert_row("staff_targets", {
+                        "id": a_fid,
                         "district": clean_dist,
                         "fo_name": alias,
                         "target": int(data.target),
                         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, merge=True))
+                    }, conflict_columns=["id"])
+
         
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
@@ -356,31 +365,34 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         actor_role = admin.get("role", "SUB_ADMIN")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # 1. Month-scoped document: {month}_{clean_dist}
+        # 1. Month-scoped record: {month}_{clean_dist}
         month_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
-        await asyncio.to_thread(lambda: db.collection("district_targets").document(month_doc_id).set({
+        pg_upsert_row("district_targets", {
+            "id": month_doc_id,
             "month": month,
             "district": clean_dist,
             "official_target": target_val,
             "updated_at": now_str,
             "updated_by": actor_name,
             "updated_by_role": actor_role
-        }, merge=True))
+        }, conflict_columns=["id"])
 
-        # 2. General fallback document: {clean_dist}
+        # 2. General fallback record: {clean_dist}
         fallback_doc_id = clean_dist.replace(" ", "").lower()
-        await asyncio.to_thread(lambda: db.collection("district_targets").document(fallback_doc_id).set({
+        pg_upsert_row("district_targets", {
+            "id": fallback_doc_id,
             "district": clean_dist,
             "official_target": target_val,
             "updated_at": now_str,
             "updated_by": actor_name,
             "updated_by_role": actor_role
-        }, merge=True))
+        }, conflict_columns=["id"])
 
         cache.delete_prefix("targets_")
         cache.delete_prefix(f"district_targets_{month}_{clean_dist}".lower())
         cache.delete_prefix(f"pacing_settings_{month}")
         cache.delete_prefix("statewide_top_")
+
 
         await log_admin_activity(
             action_type="DISTRICT_TARGET_UPDATED",
@@ -427,46 +439,26 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
             valid_items.append((clean_dist, target_val))
 
         def _batch_district_write():
-            try:
-                batch = db.batch()
-                for cd, tv in valid_items:
-                    m_id = f"{month}_{cd}".replace(" ", "").lower()
-                    f_id = cd.replace(" ", "").lower()
-                    batch.set(db.collection("district_targets").document(m_id), {
-                        "month": month,
-                        "district": cd,
-                        "official_target": tv,
-                        "updated_at": now_str,
-                        "updated_by": actor_name,
-                        "updated_by_role": actor_role
-                    }, merge=True)
-                    batch.set(db.collection("district_targets").document(f_id), {
-                        "district": cd,
-                        "official_target": tv,
-                        "updated_at": now_str,
-                        "updated_by": actor_name,
-                        "updated_by_role": actor_role
-                    }, merge=True)
-                batch.commit()
-            except Exception:
-                for cd, tv in valid_items:
-                    m_id = f"{month}_{cd}".replace(" ", "").lower()
-                    f_id = cd.replace(" ", "").lower()
-                    db.collection("district_targets").document(m_id).set({
-                        "month": month,
-                        "district": cd,
-                        "official_target": tv,
-                        "updated_at": now_str,
-                        "updated_by": actor_name,
-                        "updated_by_role": actor_role
-                    }, merge=True)
-                    db.collection("district_targets").document(f_id).set({
-                        "district": cd,
-                        "official_target": tv,
-                        "updated_at": now_str,
-                        "updated_by": actor_name,
-                        "updated_by_role": actor_role
-                    }, merge=True)
+            for cd, tv in valid_items:
+                m_id = f"{month}_{cd}".replace(" ", "").lower()
+                f_id = cd.replace(" ", "").lower()
+                pg_upsert_row("district_targets", {
+                    "id": m_id,
+                    "month": month,
+                    "district": cd,
+                    "official_target": tv,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, conflict_columns=["id"])
+                pg_upsert_row("district_targets", {
+                    "id": f_id,
+                    "district": cd,
+                    "official_target": tv,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, conflict_columns=["id"])
 
         if valid_items:
             await asyncio.to_thread(_batch_district_write)
@@ -524,66 +516,44 @@ async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends
             valid_items.append((clean_dist, t.fo_name.strip(), t_val))
 
         def _batch_staff_write():
-            try:
-                for i in range(0, len(valid_items), 200):
-                    chunk = valid_items[i:i + 200]
-                    batch = db.batch()
-                    for c_dist, c_name, val in chunk:
-                        m_id = f"{month}_{c_dist}_{c_name}".replace(" ", "").lower()
-                        f_id = f"{c_dist}_{c_name}".replace(" ", "").lower()
-                        batch.set(db.collection("staff_targets").document(m_id), {
-                            "month": month,
-                            "district": c_dist,
-                            "fo_name": c_name,
-                            "target": val,
-                            "updated_at": now_str
-                        }, merge=True)
-                        batch.set(db.collection("staff_targets").document(f_id), {
-                            "district": c_dist,
-                            "fo_name": c_name,
-                            "target": val,
-                            "updated_at": now_str
-                        }, merge=True)
-                        if c_dist.lower() == "muzaffarpur" and c_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
-                            for alias in ("Vinay Prakash", "Vinay Kumar"):
-                                if alias.lower() != c_name.lower():
-                                    a_mid = f"{month}_{c_dist}_{alias}".replace(" ", "").lower()
-                                    a_fid = f"{c_dist}_{alias}".replace(" ", "").lower()
-                                    batch.set(db.collection("staff_targets").document(a_mid), {
-                                        "month": month, "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
-                                    }, merge=True)
-                                    batch.set(db.collection("staff_targets").document(a_fid), {
-                                        "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
-                                    }, merge=True)
-                    batch.commit()
-            except Exception:
-                for c_dist, c_name, val in valid_items:
-                    m_id = f"{month}_{c_dist}_{c_name}".replace(" ", "").lower()
-                    f_id = f"{c_dist}_{c_name}".replace(" ", "").lower()
-                    db.collection("staff_targets").document(m_id).set({
-                        "month": month,
-                        "district": c_dist,
-                        "fo_name": c_name,
-                        "target": val,
-                        "updated_at": now_str
-                    }, merge=True)
-                    db.collection("staff_targets").document(f_id).set({
-                        "district": c_dist,
-                        "fo_name": c_name,
-                        "target": val,
-                        "updated_at": now_str
-                    }, merge=True)
-                    if c_dist.lower() == "muzaffarpur" and c_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
-                        for alias in ("Vinay Prakash", "Vinay Kumar"):
-                            if alias.lower() != c_name.lower():
-                                a_mid = f"{month}_{c_dist}_{alias}".replace(" ", "").lower()
-                                a_fid = f"{c_dist}_{alias}".replace(" ", "").lower()
-                                db.collection("staff_targets").document(a_mid).set({
-                                    "month": month, "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
-                                }, merge=True)
-                                db.collection("staff_targets").document(a_fid).set({
-                                    "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
-                                }, merge=True)
+            for c_dist, c_name, val in valid_items:
+                m_id = f"{month}_{c_dist}_{c_name}".replace(" ", "").lower()
+                f_id = f"{c_dist}_{c_name}".replace(" ", "").lower()
+                pg_upsert_row("staff_targets", {
+                    "id": m_id,
+                    "month": month,
+                    "district": c_dist,
+                    "fo_name": c_name,
+                    "target": val,
+                    "updated_at": now_str
+                }, conflict_columns=["id"])
+                pg_upsert_row("staff_targets", {
+                    "id": f_id,
+                    "district": c_dist,
+                    "fo_name": c_name,
+                    "target": val,
+                    "updated_at": now_str
+                }, conflict_columns=["id"])
+                if c_dist.lower() == "muzaffarpur" and c_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
+                    for alias in ("Vinay Prakash", "Vinay Kumar"):
+                        if alias.lower() != c_name.lower():
+                            a_mid = f"{month}_{c_dist}_{alias}".replace(" ", "").lower()
+                            a_fid = f"{c_dist}_{alias}".replace(" ", "").lower()
+                            pg_upsert_row("staff_targets", {
+                                "id": a_mid,
+                                "month": month,
+                                "district": c_dist,
+                                "fo_name": alias,
+                                "target": val,
+                                "updated_at": now_str
+                            }, conflict_columns=["id"])
+                            pg_upsert_row("staff_targets", {
+                                "id": a_fid,
+                                "district": c_dist,
+                                "fo_name": alias,
+                                "target": val,
+                                "updated_at": now_str
+                            }, conflict_columns=["id"])
 
         if valid_items:
             await asyncio.to_thread(_batch_staff_write)

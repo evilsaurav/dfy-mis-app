@@ -17,6 +17,8 @@ from backend.core.helpers import (
     get_previous_month,
     load_baseline_staff_directory
 )
+from backend.core.supabase import pg_query_table, pg_fetch_one, pg_upsert_row, pg_execute_raw
+
 
 STAFF_CACHE_KEY_RAW = "staff_directory_raw_records"
 
@@ -45,6 +47,21 @@ async def get_cached_staff_directory_raw(force_refresh: bool = False) -> List[di
             return cached
 
     try:
+        # Primary: PostgreSQL via Supabase/psycopg2
+        pg_rows = pg_query_table("staff_directory")
+        if pg_rows:
+            records = []
+            for row in pg_rows:
+                d = dict(row)
+                doc_id = d.get("id") or d.get("doc_id") or f"{d.get('district','')}_{d.get('name','')}".replace(" ", "").lower()
+                d["id"] = str(doc_id)
+                d["doc_id"] = str(doc_id)
+                records.append(d)
+            if records and not is_mock:
+                cache.set(STAFF_CACHE_KEY_RAW, records, ttl=3600)
+            return records
+
+        # Fallback: Firestore stream (dummy no-ops locally)
         docs = await asyncio.to_thread(lambda: list(db.collection("staff_directory").stream()))
         records = []
         for doc in docs:
@@ -62,7 +79,8 @@ async def get_cached_staff_directory_raw(force_refresh: bool = False) -> List[di
             cache.set(STAFF_CACHE_KEY_RAW, records, ttl=3600)
         return records
     except Exception as fe:
-        print(f"[Staff Cache] Firestore stream failed (quota/network): {fe}")
+        print(f"[Staff Cache] Stream failed (quota/network): {fe}")
+
 
     # Fallback to existing cached if any
     cached = cache.get(STAFF_CACHE_KEY_RAW)
@@ -124,6 +142,22 @@ async def get_cached_staff_targets_for_month(month: str) -> List[dict]:
 
     try:
         prev_month = get_previous_month(clean_month)
+
+        # Primary: PostgreSQL via Supabase/psycopg2
+        pg_rows = pg_query_table("staff_targets", filters={"month": clean_month})
+        prev_pg_rows = pg_query_table("staff_targets", filters={"month": prev_month}) if prev_month else []
+        combined_pg = pg_rows + prev_pg_rows
+
+        if not combined_pg:
+            # Try all-records fallback from PG
+            combined_pg = pg_query_table("staff_targets")
+
+        if combined_pg:
+            target_records = [dict(r) for r in combined_pg]
+            cache.set(cache_key, target_records, ttl=600)
+            return target_records
+
+        # Fallback: Firestore (dummy no-ops locally)
         month_docs = await asyncio.to_thread(lambda: list(
             db.collection("staff_targets").where("month", "==", clean_month).stream()
         ))
@@ -156,6 +190,7 @@ async def get_cached_staff_targets_for_month(month: str) -> List[dict]:
     except Exception as e:
         print(f"[Staff Targets Cache] Query notice: {e}")
         return []
+
 
 LAST_REPORTS_MODIFIED_TS: float = time.time()
 DELETED_REPORTS_TOMBSTONES: List[Dict[str, Any]] = []
@@ -388,28 +423,72 @@ async def get_raw_monthly_reports(
     start_date = f"{month_prefix}-01"
     end_date = f"{month_prefix}-31"
 
-    # 3. Always stream from Firestore by date range to prevent exact-string match drops
-    docs = await asyncio.to_thread(lambda: list(
-        db.collection("daily_field_reports")
-        .where("date_of_reporting", ">=", start_date)
-        .where("date_of_reporting", "<=", end_date)
-        .stream()
-    ))
-
+    # 3. Try PostgreSQL primary source first
     raw_list = []
-    for d in docs:
-        item = d.to_dict() if hasattr(d, "to_dict") else dict(d)
-        did = getattr(d, "id", None) or item.get("id") or item.get("doc_id")
-        if not did:
-            c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
-            fo = str(item.get("fo_name", "")).strip()
-            dt = str(item.get("date_of_reporting", "")).strip()
-            did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
-        if "id" not in item:
-            item["id"] = did
-        if "doc_id" not in item:
-            item["doc_id"] = did
-        raw_list.append(item)
+    try:
+        pg_rows = pg_execute_raw(
+            "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
+            [start_date, end_date],
+            fetch=True
+        )
+        if pg_rows:
+            for row in pg_rows:
+                item = dict(row)
+                did = item.get("id") or item.get("doc_id")
+                if not did:
+                    c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+                    fo = str(item.get("fo_name", "")).strip()
+                    dt = str(item.get("date_of_reporting", "")).strip()
+                    did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+                item["id"] = did
+                item.setdefault("doc_id", did)
+                # Deserialize JSON columns if they came back as strings
+                for list_field in ("notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
+                                   "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
+                                   "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
+                                   "presumptive_ids", "fdc_provided_ids", "fdc_details",
+                                   "differentiated_tb_ids", "tpt_treatment_start_ids", "tpt_presumptive_ids",
+                                   "adhar_face_authentication_ids", "consent_with_id_ids",
+                                   "culture_dst_ids", "kit_consumption_ids", "visited_names",
+                                   "documents_ids"):
+                    val = item.get(list_field)
+                    if isinstance(val, str):
+                        try:
+                            import json as _json
+                            item[list_field] = _json.loads(val)
+                        except Exception:
+                            item[list_field] = []
+                    elif val is None:
+                        item[list_field] = []
+                raw_list.append(item)
+    except Exception as pge:
+        print(f"[get_raw_monthly_reports] PG query notice: {pge}")
+
+    # 3b. Fallback: Firestore stream if PG returned nothing (dummy no-ops locally)
+    if not raw_list:
+        try:
+            docs = await asyncio.to_thread(lambda: list(
+                db.collection("daily_field_reports")
+                .where("date_of_reporting", ">=", start_date)
+                .where("date_of_reporting", "<=", end_date)
+                .stream()
+            ))
+            for d in docs:
+                item = d.to_dict() if hasattr(d, "to_dict") else dict(d)
+                did = getattr(d, "id", None) or item.get("id") or item.get("doc_id")
+                if not did:
+                    c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+                    fo = str(item.get("fo_name", "")).strip()
+                    dt = str(item.get("date_of_reporting", "")).strip()
+                    did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+                if "id" not in item:
+                    item["id"] = did
+                if "doc_id" not in item:
+                    item["doc_id"] = did
+                raw_list.append(item)
+        except Exception as fe:
+            print(f"[get_raw_monthly_reports] Firestore fallback notice: {fe}")
+
 
     # Save statewide monthly cache
     cache.set(full_cache_key, raw_list, ttl=3600) # 1-hour shared cache
@@ -667,33 +746,18 @@ async def compute_profile_response(
         start_date = f"{req_month}-01"
         end_date = f"{req_month}-31"
         try:
-            leave_docs = await asyncio.to_thread(lambda: list(
-                db.collection("daily_staff_leaves")
-                .where("district", "==", c_wp)
-                .where("date", ">=", start_date)
-                .where("date", "<=", end_date)
-                .stream()
-            ))
+            leave_rows = pg_execute_raw(
+                "SELECT * FROM daily_staff_leaves WHERE district = %s AND date >= %s AND date <= %s",
+                [c_wp, start_date, end_date],
+                fetch=True
+            ) or []
+            leave_records = [dict(r) for r in leave_rows]
         except Exception as l_err:
-            print(f"Notice: Failed to query daily_staff_leaves by range: {l_err}")
-            try:
-                leave_docs = await asyncio.to_thread(lambda: list(
-                    db.collection("daily_staff_leaves")
-                    .where("district", "==", c_wp)
-                    .stream()
-                ))
-            except Exception as l_err2:
-                print(f"Notice: Fallback daily_staff_leaves query failed: {l_err2}")
-                leave_docs = []
+            print(f"Notice: Failed to query daily_staff_leaves from PG: {l_err}")
+            leave_records = []
 
-        leave_records = []
-        for l_doc in (leave_docs or []):
-            l_data = l_doc.to_dict() if hasattr(l_doc, "to_dict") else (l_doc if isinstance(l_doc, dict) else {})
-            if isinstance(l_data, dict) and l_data:
-                rec = dict(l_data)
-                rec["id"] = getattr(l_doc, "id", rec.get("id", ""))
-                leave_records.append(rec)
         cache.set(leave_cache_key, leave_records, ttl=1800)
+
 
     for l_data in leave_records:
         if not isinstance(l_data, dict):
@@ -774,17 +838,18 @@ async def compute_profile_response(
             declared_holidays = int(cached_pacing.get("declared_holidays", 1))
         else:
             dist_doc_id = f"{req_month}_{c_wp}"
-            doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(dist_doc_id).get())
-            if doc_snap.exists:
-                declared_holidays = int(doc_snap.to_dict().get("declared_holidays", 1))
+            doc_snap = pg_fetch_one("pacing_settings", filters={"id": dist_doc_id})
+            if doc_snap:
+                declared_holidays = int(doc_snap.get("declared_holidays", 1))
                 cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
             else:
-                state_doc_snap = await asyncio.to_thread(lambda: db.collection("pacing_settings").document(req_month).get())
-                if state_doc_snap.exists:
-                    declared_holidays = int(state_doc_snap.to_dict().get("declared_holidays", 1))
+                state_doc_snap = pg_fetch_one("pacing_settings", filters={"id": req_month})
+                if state_doc_snap:
+                    declared_holidays = int(state_doc_snap.get("declared_holidays", 1))
                 else:
                     declared_holidays = 1
                 cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
+
     except Exception as p_err:
         print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
         declared_holidays = 1
