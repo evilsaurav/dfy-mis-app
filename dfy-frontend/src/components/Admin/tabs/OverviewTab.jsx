@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, AreaChart, Area, LabelList, Cell } from 'recharts';
 import { canonicalizeDistrict } from '../../../utils/districtHelpers';
 
@@ -68,6 +68,16 @@ export default function OverviewTab({
   isSuperAdmin = false
 }) {
   const [showExtendedColumns, setShowExtendedColumns] = useState(false);
+  const [masterTableSearch, setMasterTableSearch] = useState('');
+
+  const displayedTableData = useMemo(() => {
+    if (!masterTableSearch.trim()) return tableData;
+    const q = masterTableSearch.trim().toLowerCase();
+    return tableData.filter(row => 
+      String(row.name || '').toLowerCase().includes(q) ||
+      String(row.district || '').toLowerCase().includes(q)
+    );
+  }, [tableData, masterTableSearch]);
 
   if (activeMainTab !== 'overview') return null;
 
@@ -159,77 +169,119 @@ export default function OverviewTab({
             })()}
 
         {/* Live Attendance Banner */}
-        {attendance && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col md:flex-row items-center justify-between gap-4 animate-fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-xl shrink-0">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              </div>
-              <div>
-                <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
-                  Today's Field Officer Attendance 
-                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
-                </h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
-                  <span>| Submitted: <strong className="text-emerald-600">{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)}</strong></span>
-                  <span>| Pending: <strong className="text-red-500">{attendance.missing_count}</strong></span>
-                  <span>| On Leave: <strong className="text-amber-600">{attendance.on_leave_count || 0}</strong></span>
-                  {chronicDefaulters.length > 0 && (
-                    <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
-                      <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
+        {attendance && (() => {
+          const submitted = attendance.submitted_count || ((attendance.submitted_full_count || 0) + (attendance.submitted_partial_count || 0)) || 0;
+          const missing = attendance.missing_count || 0;
+          const onLeave = attendance.on_leave_count || 0;
+          const total = Math.max(attendance.total_staff || (submitted + missing + onLeave), 1);
+          const submittedPct = Math.round((submitted / total) * 100);
+          const onLeavePct = Math.round((onLeave / total) * 100);
+          const missingPct = Math.max(0, 100 - submittedPct - onLeavePct);
 
-            <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
-              <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
-                <button
-                  onClick={() => { setActiveAttendanceTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view submitted officers with time"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
-                  <span>{attendance.submitted_count || (attendance.submitted_full_count + attendance.submitted_partial_count)} Submitted</span>
-                </button>
-                <button
-                  onClick={() => { setActiveAttendanceTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view pending officers"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
-                  <span>{attendance.missing_count} Missing</span>
-                </button>
-                <button
-                  onClick={() => { setActiveAttendanceTab('on_leave'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                  className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3.5 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
-                  title="Click to view officers on leave or absent"
-                >
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
-                  <span>{attendance.on_leave_count || 0} On Leave / Absent</span>
-                </button>
-                {chronicDefaulters.length > 0 && (
-                  <button
-                    onClick={() => { setActiveAttendanceTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
-                    className="bg-purple-50 hover:bg-purple-100 text-purple-800 px-3 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
-                    title="View chronic defaulters (2+ consecutive days missed)"
+          return (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 flex flex-col gap-3.5 animate-fade-in">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-4 w-full">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-black text-xl shrink-0">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800 tracking-tight flex items-center gap-2">
+                      Today's Field Officer Attendance 
+                      <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{attendance.date}</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-1.5">
+                      <span>Total Active FOs: <strong className="text-slate-700">{attendance.total_staff}</strong></span>
+                      <span>| Submitted: <strong className="text-emerald-600">{submitted}</strong></span>
+                      <span>| Pending: <strong className="text-red-500">{missing}</strong></span>
+                      <span>| On Leave: <strong className="text-amber-600">{onLeave}</strong></span>
+                      {chronicDefaulters.length > 0 && (
+                        <span className="font-bold text-rose-700 bg-rose-50 border border-rose-200/80 px-2 py-0.5 rounded-full text-[10px] inline-flex items-center gap-1 animate-pulse">
+                          <span>⚠️</span> {chronicDefaulters.length} Inactive (2+ Days)
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full md:w-auto justify-end flex-wrap">
+                  <div className="flex items-center gap-2 text-xs font-bold flex-wrap">
+                    <button
+                      onClick={() => { setActiveAttendanceTab('submitted'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 px-3.5 py-1.5 rounded-xl border border-emerald-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view submitted officers with time"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                      <span>{submitted} Submitted</span>
+                    </button>
+                    <button
+                      onClick={() => { setActiveAttendanceTab('missing'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-red-50 hover:bg-red-100 text-red-700 px-3.5 py-1.5 rounded-xl border border-red-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view pending officers"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+                      <span>{missing} Missing</span>
+                    </button>
+                    <button
+                      onClick={() => { setActiveAttendanceTab('on_leave'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                      className="bg-amber-50 hover:bg-amber-100 text-amber-800 px-3.5 py-1.5 rounded-xl border border-amber-200 flex items-center gap-2 shadow-sm transition-all cursor-pointer active:scale-95"
+                      title="Click to view officers on leave or absent"
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500"></span>
+                      <span>{onLeave} On Leave / Absent</span>
+                    </button>
+                    {chronicDefaulters.length > 0 && (
+                      <button
+                        onClick={() => { setActiveAttendanceTab('defaulters'); setAttendanceDistrictFilter('All'); setAttendanceSearchQuery(''); setShowAttendanceModal(true); }}
+                        className="bg-purple-50 hover:bg-purple-100 text-purple-800 px-3 py-1.5 rounded-xl border border-purple-200 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                        title="View chronic defaulters (2+ consecutive days missed)"
+                      >
+                        <span>⚠️</span>
+                        <span>{chronicDefaulters.length} Defaulters</span>
+                      </button>
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => { setAttendanceSearchQuery(''); setAttendanceDistrictFilter('All'); setShowAttendanceModal(true); }}
+                    className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm cursor-pointer"
                   >
-                    <span>⚠️</span>
-                    <span>{chronicDefaulters.length} Defaulters</span>
+                    View Radar
                   </button>
-                )}
+                </div>
               </div>
-              <button 
-                onClick={() => { setAttendanceSearchQuery(''); setAttendanceDistrictFilter('All'); setShowAttendanceModal(true); }}
-                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2 rounded-xl transition-all shrink-0 active:scale-95 shadow-sm"
-              >
-                View Radar
-              </button>
+
+              {/* Coverage Progress Bar */}
+              <div className="w-full pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold">
+                  <span className="text-slate-600 flex items-center gap-1.5">
+                    <span>Field Duty Submission Coverage:</span>
+                    <span className="text-emerald-700 font-extrabold">{submittedPct}% Completed</span>
+                  </span>
+                  <span className="text-slate-400 font-medium">
+                    {submitted} of {total} Field Staff Active Today
+                  </span>
+                </div>
+                <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden flex shadow-inner">
+                  <div 
+                    className="bg-emerald-500 h-full transition-all duration-700" 
+                    style={{ width: `${submittedPct}%` }}
+                    title={`Submitted: ${submitted} (${submittedPct}%)`}
+                  />
+                  <div 
+                    className="bg-amber-400 h-full transition-all duration-700" 
+                    style={{ width: `${onLeavePct}%` }}
+                    title={`On Leave / Absent: ${onLeave} (${onLeavePct}%)`}
+                  />
+                  <div 
+                    className="bg-red-400/80 h-full transition-all duration-700" 
+                    style={{ width: `${missingPct}%` }}
+                    title={`Missing / Pending: ${missing} (${missingPct}%)`}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {isLoading ? (
           <div className="w-full space-y-6 py-4 animate-fade-in">
@@ -431,9 +483,24 @@ export default function OverviewTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
                   
                   {/* CARD 1: TB Notifications */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('notifications')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'notifications' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view TB Notifications trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">TB Notifications</span>
+                        {activeMetric === 'notifications' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         {notifAchievedPct !== null ? (
                           <span className={`text-[10px] font-black px-2 py-0.5 rounded-full tabular-num ${
@@ -470,9 +537,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 2: UDST Lab Testing */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('tests')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'tests' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view UDST Lab Testing trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">UDST Lab Testing</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">UDST Lab Testing</span>
+                        {activeMetric === 'tests' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-indigo text-[10px] font-black px-2 py-0.5 rounded-full">
                           UDST
@@ -501,9 +583,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 3: Core Clinical Cascade */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('presumptive')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'presumptive' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view Presumptive cases trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Clinical Cascade</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Clinical Cascade</span>
+                        {activeMetric === 'presumptive' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-teal text-[10px] font-black px-2 py-0.5 rounded-full">
                           Cascade
@@ -528,9 +625,24 @@ export default function OverviewTab({
                   </div>
 
                   {/* CARD 4: Field Footprint & Travel */}
-                  <div className="glass-card p-4 sm:p-5 rounded-2xl border border-slate-200/90 shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden bg-white/95">
+                  <div 
+                    onClick={() => setActiveMetric('total_km')}
+                    className={`glass-card p-4 sm:p-5 rounded-2xl border shadow-xs hover:shadow-md hover:-translate-y-0.5 transition-all group relative overflow-hidden cursor-pointer ${
+                      activeMetric === 'total_km' 
+                        ? 'bg-indigo-50/50 border-indigo-400 ring-2 ring-indigo-500/20' 
+                        : 'bg-white/95 border-slate-200/90'
+                    }`}
+                    title="Click to view Field Travel KM trend below"
+                  >
                     <div className="flex items-center justify-between gap-2 mb-2">
-                      <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Field Travel</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-500 text-[10px] font-black uppercase tracking-wider">Field Travel</span>
+                        {activeMetric === 'total_km' && (
+                          <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100/90 px-1.5 py-0.2 rounded-md">
+                            Active Trend
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1.5">
                         <span className="badge-amber text-[10px] font-black px-2 py-0.5 rounded-full">
                           {activeStaffCount} Staff
@@ -587,6 +699,13 @@ export default function OverviewTab({
                   </div>
                 ))}
               </div>
+            </div>
+
+            {/* Visual Zone Divider: Operational Progression */}
+            <div className="flex items-center gap-3 my-3 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+              <span>Operational Progression &amp; Broadcasts</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
             </div>
 
             {/* Daily Progression Trend — operational data first */}
@@ -1526,6 +1645,13 @@ export default function OverviewTab({
                 </div>
             </div>
 
+            {/* Visual Zone Divider: Target Achievement & Clinical Benchmarks */}
+            <div className="flex items-center gap-3 my-4 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-teal-500"></span>
+              <span>Target Achievement &amp; Clinical Benchmarks</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
+            </div>
+
             {/* Unified Section: Target vs Achievement & Performance */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-5 pb-4 border-b border-slate-100">
@@ -2093,7 +2219,14 @@ export default function OverviewTab({
 
             </div>
 
-{/* Master Data Table */}
+            {/* Visual Zone Divider: Granular Field Ledger */}
+            <div className="flex items-center gap-3 my-4 text-[11px] font-black uppercase tracking-wider text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+              <span>Granular Master Field Ledger</span>
+              <div className="h-px bg-slate-200/80 flex-1"></div>
+            </div>
+
+            {/* Master Data Table */}
             <div className="bg-white rounded-3xl shadow-sm border border-slate-200/90 overflow-hidden">
               <div className="p-4 sm:p-5 border-b border-slate-200/80 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 bg-gradient-to-r from-slate-50 via-indigo-50/20 to-slate-50/60">
                 <div className="flex flex-wrap items-center gap-3">
@@ -2107,7 +2240,7 @@ export default function OverviewTab({
                         </span>
                       )}
                     </h3>
-                    <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {tableData.length} records</p>
+                    <p className="text-[11px] text-slate-400 font-medium">Sorted by: <span className="font-bold text-indigo-600">{sortConfig.key} ({sortConfig.direction.toUpperCase()})</span> &bull; {displayedTableData.length}{displayedTableData.length !== tableData.length ? ` of ${tableData.length}` : ''} records</p>
                   </div>
 
                   {selectedDistrict !== 'All' && (
@@ -2126,6 +2259,27 @@ export default function OverviewTab({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {/* Master Table In-Table Search Input */}
+                  <div className="relative inline-flex items-center">
+                    <input
+                      type="text"
+                      value={masterTableSearch}
+                      onChange={(e) => setMasterTableSearch(e.target.value)}
+                      placeholder={selectedDistrict === 'All' ? "Search district..." : "Search officer..."}
+                      className="pl-7 pr-7 py-1 text-xs rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-medium placeholder:text-slate-400 w-32 sm:w-44 transition-all shadow-2xs"
+                    />
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">🔍</span>
+                    {masterTableSearch && (
+                      <button 
+                        type="button" 
+                        onClick={() => setMasterTableSearch('')} 
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold text-xs cursor-pointer"
+                        title="Clear search"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                   {/* Cohort Switcher */}
                   <div className="inline-flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-2xs text-[11px] font-bold">
                     <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider px-2 hidden md:inline">Cohort:</span>
@@ -2244,7 +2398,14 @@ export default function OverviewTab({
                     </tr>
                   </thead>
                   <tbody>
-                    {tableData.map((row, idx) => (
+                    {displayedTableData.length === 0 ? (
+                      <tr>
+                        <td colSpan={showExtendedColumns ? 23 : 16} className="text-center py-12 text-slate-400 text-xs font-bold bg-slate-50/50">
+                          🔍 No matching records found for "{masterTableSearch}"
+                        </td>
+                      </tr>
+                    ) : (
+                      displayedTableData.map((row, idx) => (
                       <tr 
                         key={idx} 
                         className={`transition-colors border-b border-slate-100/90 last:border-none text-xs font-semibold text-slate-700 group ${
@@ -2440,7 +2601,7 @@ export default function OverviewTab({
                           </>
                         )}
                       </tr>
-                    ))}
+                    )))}
                   </tbody>
                   <tfoot className="bg-slate-100/95 border-t-2 border-slate-300 text-xs font-black text-slate-900 sticky bottom-0 z-10 shadow-[0_-4px_12px_-2px_rgba(0,0,0,0.06)]">
                     <tr>
