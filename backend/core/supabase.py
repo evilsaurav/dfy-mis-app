@@ -3,6 +3,18 @@ import json
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
+# Load dotenv if present
+try:
+    import dotenv
+    from pathlib import Path
+    _root = Path(__file__).resolve().parent.parent.parent
+    for _p in (_root / ".env", _root / "backend" / ".env"):
+        if _p.exists():
+            dotenv.load_dotenv(_p)
+            break
+except Exception:
+    pass
+
 _supabase_client = None
 
 def get_supabase_client():
@@ -28,7 +40,7 @@ def get_supabase_client():
     return None
 
 def get_postgres_connection():
-    """Establishes connection to PostgreSQL using standard connection URLs."""
+    """Establishes connection to PostgreSQL using standard connection URLs with SSL and timeout enforcement."""
     db_url = (
         os.environ.get("DATABASE_URL")
         or os.environ.get("POSTGRES_URL")
@@ -42,10 +54,18 @@ def get_postgres_connection():
         # Fix Heroku/Render standard postgres:// URI scheme for psycopg2
         if db_url.startswith("postgres://"):
             db_url = db_url.replace("postgres://", "postgresql://", 1)
-        conn = psycopg2.connect(db_url, connect_timeout=5)
+
+        # Enforce sslmode=require for remote connections (Supabase, AWS, Render)
+        conn_kwargs = {"connect_timeout": 10}
+        if "sslmode" not in db_url and not any(h in db_url for h in ("localhost", "127.0.0.1")):
+            conn_kwargs["sslmode"] = "require"
+
+        conn = psycopg2.connect(db_url, **conn_kwargs)
         return conn
     except Exception as e:
-        print(f"[PostgreSQL Connection Notice] {e}")
+        print(f"[PostgreSQL Connection Error] Failed connecting to database: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 def _normalize_admin_user_row(row: dict) -> dict:
@@ -310,7 +330,9 @@ def pg_query_table(
                 if rows:
                     return [dict(r) for r in rows]
         except Exception as e:
-            print(f"[pg_query_table:{table}] psycopg2 notice: {e}")
+            print(f"[pg_query_table:{table} Error] psycopg2 query failed: {e}\nSQL: {sql[:150]}")
+            import traceback
+            traceback.print_exc()
         finally:
             try:
                 conn.close()
@@ -892,12 +914,23 @@ def pg_execute_raw(sql: str, params: Optional[List] = None, fetch: bool = False)
                 conn.commit()
                 return True
         except Exception as e:
-            print(f"[pg_execute_raw] Notice: {e}")
+            print(f"[pg_execute_raw Error] Query execution failed: {e}\nSQL: {sql[:150]}\nParams: {params}")
+            import traceback
+            traceback.print_exc()
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
+    else:
+        db_url = (
+            os.environ.get("DATABASE_URL")
+            or os.environ.get("POSTGRES_URL")
+            or os.environ.get("SUPABASE_DB_URL")
+            or os.environ.get("POSTGRESQL_URL")
+        )
+        if db_url:
+            print(f"[pg_execute_raw WARNING] No PostgreSQL connection available despite DB URL configured! Query: {sql[:100]}")
 
     # Fallback when no PostgreSQL connection
     if not fetch:

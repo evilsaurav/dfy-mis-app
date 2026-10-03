@@ -1,6 +1,13 @@
 import pytest
 import asyncio
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 from backend.core.supabase import fetch_admin_user, _normalize_admin_user_row
 from backend.routers.rbac_audit import admin_user_login, AdminUserLoginReq
 from backend.core.security import hash_password
