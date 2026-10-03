@@ -1,47 +1,108 @@
 import os
 import json
-import firebase_admin
-from firebase_admin import credentials, firestore, storage
 
 ENABLE_IN_MEMORY_DERIVATION: bool = os.getenv("ENABLE_IN_MEMORY_DERIVATION", "true").lower() in ("true", "1", "yes")
 
-firebase_creds_env = os.environ.get("FIREBASE_CREDENTIALS")
-if firebase_creds_env:
-    cred_dict = json.loads(firebase_creds_env)
-    cred = credentials.Certificate(cred_dict)
-    project_id = cred_dict.get("project_id", "dfy-reporting-mis-18b9a")
-else:
-    cred = credentials.Certificate("firebase_key.json")
-    try:
-        with open("firebase_key.json", "r", encoding="utf-8") as f:
-            project_id = json.load(f).get("project_id", "dfy-reporting-mis-18b9a")
-    except Exception:
-        project_id = "dfy-reporting-mis-18b9a"
+# Decoupled project identifier (no JSON file dependency)
+project_id: str = os.environ.get("PROJECT_ID", os.environ.get("GCP_PROJECT_ID", "dfy-reporting-mis-18b9a"))
 
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred, {
-        'storageBucket': f'{project_id}.appspot.com'
-    })
+# Firebase initialization decommissioned
+_real_db = None
 
-db_id = os.environ.get("FIRESTORE_DATABASE_ID")
-if db_id:
-    _real_db = firestore.client(database_id=db_id)
-elif project_id == "dfy-reporting-mis-18b9a":
-    _real_db = firestore.client(database_id="default")
-else:
-    _real_db = firestore.client()
+
+class _DummyFirestoreDoc:
+    def __init__(self, doc_id="dummy", data=None):
+        self.id = doc_id
+        self._data = data or {}
+        self.exists = False
+        self.reference = self
+
+    def to_dict(self):
+        return self._data
+
+    def get(self, *args, **kwargs):
+        return self
+
+    def set(self, *args, **kwargs):
+        return None
+
+    def update(self, *args, **kwargs):
+        return None
+
+    def delete(self, *args, **kwargs):
+        return None
+
+
+class _DummyFirestoreCollection:
+    def __init__(self, name="dummy"):
+        self.name = name
+
+    def document(self, doc_id="dummy"):
+        return _DummyFirestoreDoc(doc_id=doc_id)
+
+    def where(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *args, **kwargs):
+        return self
+
+    def limit(self, *args, **kwargs):
+        return self
+
+    def offset(self, *args, **kwargs):
+        return self
+
+    def stream(self, *args, **kwargs):
+        return []
+
+    def get(self, *args, **kwargs):
+        return []
+
+    def add(self, *args, **kwargs):
+        return (None, _DummyFirestoreDoc())
+
 
 class _DatabaseProxy:
+    def collection(self, name: str = "default"):
+        import sys
+        main_mod = sys.modules.get("main")
+        if main_mod and hasattr(main_mod, "db"):
+            active = getattr(main_mod, "db")
+            if active is not self and active is not None and hasattr(active, "collection"):
+                return active.collection(name)
+        if _real_db is not None and hasattr(_real_db, "collection"):
+            return _real_db.collection(name)
+        return _DummyFirestoreCollection(name)
+
+    def batch(self):
+        return self
+
+    def commit(self):
+        return None
+
+    def set(self, *args, **kwargs):
+        return None
+
+    def update(self, *args, **kwargs):
+        return None
+
+    def delete(self, *args, **kwargs):
+        return None
+
     def __getattr__(self, name):
         import sys
         main_mod = sys.modules.get("main")
         if main_mod and hasattr(main_mod, "db"):
             active = getattr(main_mod, "db")
-            if active is not self and active is not None:
+            if active is not self and active is not None and hasattr(active, name):
                 return getattr(active, name)
-        return getattr(_real_db, name)
+        if _real_db is not None and hasattr(_real_db, name):
+            return getattr(_real_db, name)
+        return lambda *args, **kwargs: None
+
 
 db = _DatabaseProxy()
+
 
 def check_in_memory_derivation() -> bool:
     import sys
@@ -51,6 +112,7 @@ def check_in_memory_derivation() -> bool:
         if val is not None:
             return bool(val)
     return ENABLE_IN_MEMORY_DERIVATION
+
 
 def get_db():
     return db
