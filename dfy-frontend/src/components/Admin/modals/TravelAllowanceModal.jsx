@@ -280,7 +280,7 @@ export default function TravelAllowanceModal({
                           </button>
                           {isIncharge && staff.status === 'SUBMITTED' && (
                             <button
-                              onClick={() => handlePassStaff?.(staff.staff_key)}
+                              onClick={() => handlePassStaff?.(staff.staff_key || staff.doc_id)}
                               disabled={isSubmitting}
                               className="px-2 py-1 rounded-lg bg-emerald-100 hover:bg-emerald-200 text-emerald-700 font-bold disabled:opacity-50 transition-all"
                               title="Approve"
@@ -300,7 +300,7 @@ export default function TravelAllowanceModal({
                           )}
                           {isIncharge && staff.status === 'APPROVED' && (
                             <button
-                              onClick={() => handleUnlockStaff?.(staff.staff_key)}
+                              onClick={() => handleUnlockStaff?.(staff.staff_key || staff.doc_id)}
                               disabled={isSubmitting}
                               className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold disabled:opacity-50 transition-all"
                               title="Unlock"
@@ -401,7 +401,7 @@ export default function TravelAllowanceModal({
                   Cancel
                 </button>
                 <button
-                  onClick={() => handleRevertStaff?.(revertModalStaff.staff_key, revertReason)}
+                  onClick={() => handleRevertStaff?.(revertModalStaff.staff_key || revertModalStaff.doc_id, revertReason)}
                   disabled={isSubmitting || !revertReason.trim()}
                   className="px-4 py-2 rounded-xl bg-orange-500 text-white text-xs font-bold hover:bg-orange-600 disabled:opacity-50 transition-all"
                 >

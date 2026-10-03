@@ -56,6 +56,116 @@ def normalize_staff_slug(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '_', name.strip().lower()).strip('_')
 
 
+def clean_alphanumeric(s: str) -> str:
+    """Normalizes a string to lower alphanumeric characters only."""
+    return re.sub(r'[^a-z0-9]', '', (s or "").lower())
+
+
+def get_ta_doc_candidates(
+    month: str,
+    district: str,
+    staff_key: str,
+    staff_name: str = ""
+) -> List[str]:
+    """Generates all possible candidate Firestore document IDs for a staff TA log."""
+    canon_dist = canonicalize_district(district)
+    dist_clean = clean_alphanumeric(canon_dist)
+
+    candidates = []
+    raw_key = (staff_key or "").strip()
+    raw_name = (staff_name or "").strip()
+
+    # If key is already a full doc_id like 2026-10_jehanabad_surajkumar
+    if raw_key and raw_key.startswith(f"{month}_"):
+        candidates.append(raw_key)
+
+    slug_key = re.sub(r'[^a-z0-9_]', '', raw_key.lower())
+    clean_key = clean_alphanumeric(raw_key)
+
+    for k in [slug_key, clean_key]:
+        if not k:
+            continue
+        # If key already has district prefix (e.g. jehanabad_surajkumar or jehanabadsurajkumar)
+        if k.startswith(f"{dist_clean}_"):
+            candidates.append(f"{month}_{k}")
+            sub_k = k[len(dist_clean) + 1:]
+            candidates.append(f"{month}_{dist_clean}_{sub_k}")
+            candidates.append(f"{month}_{dist_clean}_{sub_k.replace('_', '')}")
+        elif k.startswith(dist_clean):
+            candidates.append(f"{month}_{dist_clean}_{k[len(dist_clean):]}")
+            candidates.append(f"{month}_{k}")
+            sub_k = k[len(dist_clean):]
+            candidates.append(f"{month}_{dist_clean}_{sub_k.replace('_', '')}")
+        else:
+            candidates.append(f"{month}_{dist_clean}_{k}")
+            candidates.append(f"{month}_{dist_clean}_{k.replace('_', '')}")
+
+    if raw_name:
+        name_clean = clean_alphanumeric(raw_name)
+        candidates.append(f"{month}_{dist_clean}_{name_clean}")
+        name_slug = re.sub(r'[^a-z0-9]+', '_', raw_name.lower()).strip('_')
+        candidates.append(f"{month}_{dist_clean}_{name_slug}")
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique_candidates = []
+    for c in candidates:
+        if c and c not in seen:
+            seen.add(c)
+            unique_candidates.append(c)
+
+    return unique_candidates
+
+
+def resolve_ta_log_doc_ref(
+    month: str,
+    district: str,
+    staff_key: str = "",
+    staff_name: str = ""
+):
+    """
+    Resolves the Firestore DocumentReference and DocumentSnapshot for a staff TA log.
+    Returns (doc_ref, doc_snapshot_or_none).
+    """
+    canon_dist = canonicalize_district(district)
+    candidates = get_ta_doc_candidates(month, canon_dist, staff_key, staff_name)
+
+    # 1. Direct candidate ID checks
+    for c_id in candidates:
+        ref = db.collection("travel_allowance_logs").document(c_id)
+        doc = ref.get()
+        if doc.exists:
+            return ref, doc
+
+    # 2. Query fallback within the month and district
+    try:
+        clean_k = clean_alphanumeric(staff_key)
+        clean_n = clean_alphanumeric(staff_name)
+
+        query = db.collection("travel_allowance_logs")\
+            .where("month", "==", month)\
+            .where("district", "==", canon_dist)
+        for doc in query.stream():
+            d = doc.to_dict() or {}
+            doc_k = clean_alphanumeric(d.get("staff_key") or "")
+            doc_n = clean_alphanumeric(d.get("staff_name") or "")
+            doc_id_clean = clean_alphanumeric(doc.id)
+
+            if (clean_k and (clean_k == doc_k or clean_k in doc_id_clean)) or \
+               (clean_n and (clean_n == doc_n or clean_n in doc_id_clean)):
+                return doc.reference, doc
+
+            if staff_name and is_officer_name_match(d.get("staff_name") or "", staff_name, canon_dist):
+                return doc.reference, doc
+    except Exception as e:
+        print(f"Notice during TA doc query fallback: {e}")
+
+    # Default fallback reference for new documents
+    default_id = candidates[0] if candidates else f"{month}_{clean_alphanumeric(canon_dist)}_{clean_alphanumeric(staff_key or staff_name)}"
+    return db.collection("travel_allowance_logs").document(default_id), None
+
+
+
 def check_district_access(admin: dict, district: str) -> str:
     """
     Validates Sub-Admin access to a specific district.
@@ -114,6 +224,7 @@ class TaPrefillReq(BaseModel):
     month: str
     district: str
     staff_name: Optional[str] = None
+    staff_key: Optional[str] = None
 
 
 class TaStaffActionReq(BaseModel):
@@ -152,7 +263,8 @@ class TaDisputeReq(BaseModel):
     month: str
     district: str
     fo_name: str
-    dispute_reason: str
+    dispute_reason: Optional[str] = None
+    reason: Optional[str] = None
 
 
 class TaResolveDisputeReq(BaseModel):
@@ -746,10 +858,13 @@ async def get_district_ta_roster(
                 continue
             s_dist = canonicalize_district(s.get("district") or "")
             if s_dist == canon_dist and s.get("name"):
+                name_clean = s.get("name").strip()
+                staff_id = s.get("id") or f"{clean_alphanumeric(canon_dist)}_{clean_alphanumeric(name_clean)}"
                 district_staff.append({
-                    "name": s.get("name").strip(),
+                    "name": name_clean,
                     "designation": s.get("designation") or "Field Officer",
-                    "key": normalize_staff_slug(s.get("name"))
+                    "id": staff_id,
+                    "key": staff_id
                 })
     except Exception as e:
         print(f"Error fetching staff directory for TA roster: {e}")
@@ -760,51 +875,86 @@ async def get_district_ta_roster(
             dir_dict = await get_directory()
             names = dir_dict.get(canon_dist, [])
             for n in names:
+                name_clean = str(n).strip()
+                staff_id = f"{clean_alphanumeric(canon_dist)}_{clean_alphanumeric(name_clean)}"
                 district_staff.append({
-                    "name": str(n).strip(),
+                    "name": name_clean,
                     "designation": "Field Officer",
-                    "key": normalize_staff_slug(str(n))
+                    "id": staff_id,
+                    "key": staff_id
                 })
         except Exception:
             pass
 
     # 2. Query saved travel allowance logs for month and district
-    saved_logs = {}
+    saved_list = []
     try:
         docs = db.collection("travel_allowance_logs")\
             .where("month", "==", month)\
             .where("district", "==", canon_dist)\
             .stream()
         for doc in docs:
-            d = doc.to_dict()
-            s_key = d.get("staff_key") or normalize_staff_slug(d.get("staff_name") or "")
-            if s_key:
-                saved_logs[s_key] = d
+            d = doc.to_dict() or {}
+            d["_doc_id"] = doc.id
+            saved_list.append(d)
     except Exception as e:
         print(f"Error querying travel_allowance_logs: {e}")
 
-    # 3. Build enriched roster
+    # 3. Match and Build deduplicated roster
     roster = []
-    seen_keys = set()
+    consumed_doc_ids = set()
+    seen_staff_identities = set()
 
     for s in district_staff:
-        s_key = s["key"]
-        if s_key in seen_keys:
+        s_id_clean = clean_alphanumeric(s["id"])
+        s_name_clean = clean_alphanumeric(s["name"])
+        if s_id_clean in seen_staff_identities:
             continue
-        seen_keys.add(s_key)
-        existing = saved_logs.get(s_key)
+        seen_staff_identities.add(s_id_clean)
 
-        if existing:
-            roster.append(existing)
+        # Find matching saved log
+        matched_log = None
+        for sl in saved_list:
+            if sl["_doc_id"] in consumed_doc_ids:
+                continue
+
+            log_doc_id = clean_alphanumeric(sl["_doc_id"])
+            log_key = clean_alphanumeric(sl.get("staff_key") or "")
+            log_name = clean_alphanumeric(sl.get("staff_name") or "")
+
+            # Check match conditions:
+            is_match = (
+                (s_id_clean and (s_id_clean == log_key or s_id_clean == log_doc_id or s_id_clean in log_doc_id)) or
+                (s_name_clean and (s_name_clean == log_name or s_name_clean == log_key or s_name_clean in log_doc_id or s_name_clean in log_key)) or
+                (sl.get("staff_name") and is_officer_name_match(s["name"], sl.get("staff_name"), canon_dist))
+            )
+            if is_match:
+                matched_log = sl
+                consumed_doc_ids.add(sl["_doc_id"])
+                break
+
+        if matched_log:
+            entry = dict(matched_log)
+            # Restore proper officer name if log stored technical key as name
+            if clean_alphanumeric(entry.get("staff_name")) in (s_id_clean, s_name_clean):
+                entry["staff_name"] = s["name"]
+            entry["doc_id"] = matched_log["_doc_id"]
+            entry["staff_key"] = matched_log.get("staff_key") or s["id"]
+            
+            # Ensure days and active_days are normalized
+            days_list = entry.get("days") or entry.get("daily_logs") or []
+            entry["days"] = days_list
+            entry["active_days"] = sum(1 for d in days_list if isinstance(d, dict) and float(d.get("total_km") or 0.0) > 0)
+            roster.append(entry)
         else:
             # Generate default draft skeleton
-            doc_id = f"{month}_{canon_dist.lower()}_{s_key}"
+            doc_id = f"{month}_{s['id']}"
             skeleton = {
                 "doc_id": doc_id,
                 "month": month,
                 "district": canon_dist,
                 "staff_name": s["name"],
-                "staff_key": s_key,
+                "staff_key": s["id"],
                 "designation": s["designation"],
                 "rate_per_km": current_rate,
                 "total_km": 0.0,
@@ -816,18 +966,25 @@ async def get_district_ta_roster(
                 "status": "DRAFT",
                 "is_locked": False,
                 "days": [],
+                "active_days": 0,
                 "created_at": None,
                 "updated_at": None
             }
             roster.append(skeleton)
 
-    # Also include any saved logs for staff not currently in active directory
-    for s_key, log in saved_logs.items():
-        if s_key not in seen_keys:
-            roster.append(log)
-            seen_keys.add(s_key)
+    # 4. Include any unconsumed saved logs (e.g. inactive or historical staff)
+    for sl in saved_list:
+        if sl["_doc_id"] not in consumed_doc_ids:
+            entry = dict(sl)
+            entry["doc_id"] = sl["_doc_id"]
+            entry["staff_key"] = sl.get("staff_key") or sl.get("_doc_id", "").split(f"{month}_")[-1] or normalize_staff_slug(sl.get("staff_name") or "")
+            days_list = entry.get("days") or entry.get("daily_logs") or []
+            entry["days"] = days_list
+            entry["active_days"] = sum(1 for d in days_list if isinstance(d, dict) and float(d.get("total_km") or 0.0) > 0)
+            roster.append(entry)
+            consumed_doc_ids.add(sl["_doc_id"])
 
-    # 4. District KPI Aggregations
+    # 5. District KPI Aggregations
     total_km = sum(float(r.get("total_km") or 0.0) for r in roster)
     gross_amount = sum(float(r.get("gross_amount") or 0.0) for r in roster)
     deduction_amount = sum(float(r.get("deduction_amount") or 0.0) for r in roster)
@@ -883,8 +1040,9 @@ def prefill_district_ta_from_reports(
         raise HTTPException(status_code=400, detail="Invalid month format. Expected YYYY-MM.")
 
     staff_name = req.staff_name.strip() if req.staff_name else ""
-    staff_key = normalize_staff_slug(staff_name) if staff_name else ""
-    doc_id = f"{req.month}_{canon_dist.lower()}_{staff_key}"
+    staff_key = (req.staff_key or "").strip() or normalize_staff_slug(staff_name)
+    doc_ref, existing_doc = resolve_ta_log_doc_ref(req.month, canon_dist, staff_key=staff_key, staff_name=staff_name)
+    doc_id = doc_ref.id
 
     # Read existing doc to preserve manual overrides or deductions
     existing_days_map = {}
@@ -892,13 +1050,12 @@ def prefill_district_ta_from_reports(
     existing_deduction_reason = ""
     existing_admin_remarks = ""
     try:
-        existing_doc = db.collection("travel_allowance_logs").document(doc_id).get()
-        if existing_doc.exists:
+        if existing_doc and existing_doc.exists:
             ex_data = existing_doc.to_dict() or {}
             existing_deduction = float(ex_data.get("deduction_amount") or 0.0)
             existing_deduction_reason = ex_data.get("deduction_reason") or ""
             existing_admin_remarks = ex_data.get("admin_remarks") or ""
-            for d in ex_data.get("days", []):
+            for d in ex_data.get("days", []) or ex_data.get("daily_logs", []):
                 day_num = d.get("day")
                 if day_num:
                     existing_days_map[int(day_num)] = d
@@ -1011,17 +1168,16 @@ def save_travel_allowance_log(
     """
     canon_dist = check_district_access(current_user, req.district)
     staff_key = req.staff_key or normalize_staff_slug(req.staff_name)
-    if not staff_key:
+    if not staff_key and not req.staff_name:
         raise HTTPException(status_code=400, detail="Staff name or key is required.")
 
-    doc_id = f"{req.month}_{canon_dist.lower()}_{staff_key}"
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
+    doc_ref, existing_doc = resolve_ta_log_doc_ref(req.month, canon_dist, staff_key, req.staff_name)
+    doc_id = doc_ref.id
 
     # Enforce locking and edit permissions check
     existing_status = "DRAFT"
     try:
-        existing_doc = doc_ref.get()
-        if existing_doc.exists:
+        if existing_doc and existing_doc.exists:
             ex_data = existing_doc.to_dict() or {}
             existing_status = ex_data.get("status", "DRAFT")
             allowed, err = validate_edit_permission(ex_data, current_user.get("role", ""))
@@ -1053,12 +1209,23 @@ def save_travel_allowance_log(
     now_str = datetime.utcnow().isoformat()
     actor_name = current_user.get("name") or current_user.get("username") or "Admin"
 
+    final_staff_key = (
+        (existing_doc.to_dict().get("staff_key") if existing_doc and existing_doc.exists else None)
+        or staff_key
+        or doc_id.split(f"{req.month}_")[-1]
+    )
+    final_staff_name = (
+        req.staff_name.strip()
+        if req.staff_name
+        else ((existing_doc.to_dict().get("staff_name") if existing_doc and existing_doc.exists else "") or staff_key)
+    )
+
     doc_data = {
         "doc_id": doc_id,
         "month": req.month,
         "district": canon_dist,
-        "staff_name": req.staff_name.strip(),
-        "staff_key": staff_key,
+        "staff_name": final_staff_name,
+        "staff_key": final_staff_key,
         "designation": req.designation or "Field Officer",
         "rate_per_km": current_rate,
         "total_km": totals["total_km"],
@@ -1188,10 +1355,8 @@ def pass_staff_record(
         }
 
     # Single staff passing
-    doc_id = f"{req.month}_{canon_dist.lower()}_{req.staff_key}"
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(req.month, canon_dist, req.staff_key, "")
+    if not doc or not doc.exists:
         raise HTTPException(status_code=404, detail="Staff TA record not found.")
 
     d = doc.to_dict() or {}
@@ -1231,10 +1396,8 @@ def revert_staff_record(
     canon_dist = check_district_access(current_user, req.district)
     actor_name = current_user.get("name") or current_user.get("username") or "Incharge"
 
-    doc_id = f"{req.month}_{canon_dist.lower()}_{req.staff_key}"
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(req.month, canon_dist, req.staff_key, "")
+    if not doc or not doc.exists:
         raise HTTPException(status_code=404, detail="Staff TA record not found.")
 
     d = doc.to_dict() or {}
@@ -1274,10 +1437,8 @@ def unlock_staff_record(
     canon_dist = check_district_access(current_user, req.district)
     actor_name = current_user.get("name") or current_user.get("username") or "Incharge"
 
-    doc_id = f"{req.month}_{canon_dist.lower()}_{req.staff_key}"
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(req.month, canon_dist, req.staff_key, "")
+    if not doc or not doc.exists:
         raise HTTPException(status_code=404, detail="Staff TA record not found.")
 
     d = doc.to_dict() or {}
@@ -1310,11 +1471,8 @@ def get_fo_monthly_summary(
     If approved, returns full financial breakdown and dispute window status.
     """
     canon_dist = canonicalize_district(district)
-    staff_key = normalize_staff_slug(fo_name)
-    doc_id = f"{month}_{canon_dist.lower()}_{staff_key}"
-
-    doc = db.collection("travel_allowance_logs").document(doc_id).get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(month, canon_dist, staff_key="", staff_name=fo_name)
+    if not doc or not doc.exists:
         return {
             "status": "UNDER_REVIEW",
             "message": "Monthly TA verification in progress",
@@ -1329,6 +1487,8 @@ def get_fo_monthly_summary(
             "data": None
         }
 
+    doc_id = doc.id if doc else (doc_ref.id if doc_ref else "")
+    staff_key = data.get("staff_key") or normalize_staff_slug(fo_name)
     dispute_active = is_dispute_window_open(data.get("approved_at"))
     return {
         "status": "APPROVED",
@@ -1364,16 +1524,13 @@ def raise_fo_ta_dispute(
     Allows Field Officer to raise a dispute within the 24-hour approval window.
     Dispatches dual-alert notification to Sub-Admin and Admin/Incharge.
     """
-    if not req.dispute_reason or not req.dispute_reason.strip():
+    effective_reason = (req.dispute_reason or req.reason or "").strip()
+    if not effective_reason:
         raise HTTPException(status_code=400, detail="Dispute reason is mandatory.")
 
     canon_dist = canonicalize_district(req.district)
-    staff_key = normalize_staff_slug(req.fo_name)
-    doc_id = f"{req.month}_{canon_dist.lower()}_{staff_key}"
-
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(req.month, canon_dist, staff_key="", staff_name=req.fo_name)
+    if not doc or not doc.exists:
         raise HTTPException(status_code=404, detail="TA record not found.")
 
     d = doc.to_dict() or {}
@@ -1387,7 +1544,8 @@ def raise_fo_ta_dispute(
         )
 
     now_str = datetime.utcnow().isoformat()
-    reason_clean = req.dispute_reason.strip()
+    reason_clean = effective_reason
+    staff_key = d.get("staff_key") or normalize_staff_slug(req.fo_name)
 
     d["dispute_status"] = "PENDING"
     d["dispute_reason"] = reason_clean
@@ -1447,10 +1605,8 @@ def resolve_ta_dispute(
     canon_dist = check_district_access(current_user, req.district)
     actor_name = current_user.get("name") or current_user.get("username") or "Incharge"
 
-    doc_id = f"{req.month}_{canon_dist.lower()}_{req.staff_key}"
-    doc_ref = db.collection("travel_allowance_logs").document(doc_id)
-    doc = doc_ref.get()
-    if not doc.exists:
+    doc_ref, doc = resolve_ta_log_doc_ref(req.month, canon_dist, req.staff_key, "")
+    if not doc or not doc.exists:
         raise HTTPException(status_code=404, detail="Staff TA record not found.")
 
     d = doc.to_dict() or {}

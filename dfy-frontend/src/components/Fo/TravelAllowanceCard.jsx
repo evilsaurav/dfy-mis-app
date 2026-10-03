@@ -49,6 +49,7 @@ export default function TravelAllowanceCard({ foName, workingPlace, month, authT
           month,
           district: workingPlace,
           fo_name: foName,
+          dispute_reason: disputeReason,
           reason: disputeReason,
         }),
       });

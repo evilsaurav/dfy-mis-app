@@ -4797,6 +4797,8 @@ const sanitizeIncomingFormData = (d, base) => {
     if (!Array.isArray(clean[k])) clean[k] = [];
   });
   if (!Array.isArray(clean.visited_names)) clean.visited_names = [];
+  if (clean.morning_km === undefined || clean.morning_km === null) clean.morning_km = "";
+  if (clean.evening_km === undefined || clean.evening_km === null) clean.evening_km = "";
   return clean;
 };
 
@@ -5138,7 +5140,8 @@ function App() {
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
     culture_dst_ids: [],
-    remark: "", visited_names: []
+    remark: "", visited_names: [],
+    morning_km: "", evening_km: ""
   });
 
       
@@ -5536,7 +5539,9 @@ function App() {
                   tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                   adhar_face_authentication_ids: [], consent_with_id_ids: [],
                   culture_dst_ids: [],
-                  remark: "", visited_names: []
+                  remark: "", visited_names: [],
+                  morning_km: data.data.morning_km !== undefined && data.data.morning_km !== null ? String(data.data.morning_km) : "",
+                  evening_km: data.data.evening_km !== undefined && data.data.evening_km !== null ? String(data.data.evening_km) : ""
                 }));
               }
             })
@@ -5768,7 +5773,8 @@ function App() {
       tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
       adhar_face_authentication_ids: [], consent_with_id_ids: [],
       culture_dst_ids: [],
-      remark: "", visited_names: []
+      remark: "", visited_names: [],
+      morning_km: "", evening_km: ""
     });
     setPinStatus(null);
     setCurrentView('form');
@@ -5809,7 +5815,9 @@ function App() {
                 tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                 adhar_face_authentication_ids: [], consent_with_id_ids: [],
                 culture_dst_ids: [],
-                remark: "", visited_names: []
+                remark: "", visited_names: [],
+                morning_km: d.morning_km !== undefined && d.morning_km !== null ? String(d.morning_km) : "",
+                evening_km: d.evening_km !== undefined && d.evening_km !== null ? String(d.evening_km) : ""
               }));
               try {
                 const canonicalWp = canonicalizeDistrict(formData.working_place);
@@ -6236,6 +6244,15 @@ function App() {
       text += '\nNone\n';
     }
 
+    const mKm = Number(formData.morning_km) || 0;
+    const eKm = Number(formData.evening_km) || 0;
+    if (mKm > 0 || eKm > 0) {
+      text += `\n*Bike Travel (TA):*\n`;
+      if (mKm > 0) text += `• Morning Reading: ${mKm} KM\n`;
+      if (eKm > 0) text += `• Evening Reading: ${eKm} KM\n`;
+      if (mKm > 0 && eKm > 0 && eKm >= mKm) text += `• Total Run: ${eKm - mKm} KM\n`;
+    }
+
     if (formData.remark && formData.remark.trim() !== '') {
       text += `\n*Remarks:*\n` + formData.remark.trim() + '\n';
     }
@@ -6259,11 +6276,17 @@ function App() {
     }
     
     setIsSubmitting(true);
+    const mKmVal = formData.morning_km !== '' && formData.morning_km !== undefined && !isNaN(Number(formData.morning_km)) ? Math.round(Number(formData.morning_km)) : 0;
+    const eKmVal = formData.evening_km !== '' && formData.evening_km !== undefined && !isNaN(Number(formData.evening_km)) ? Math.round(Number(formData.evening_km)) : 0;
+
     const payload = { 
       ...formData, 
       working_place: (formData.working_place || '').trim(),
       fo_name: (formData.fo_name || '').trim(),
-      date: formData.date_of_reporting || new Date().toISOString().split('T')[0] 
+      date: formData.date_of_reporting || new Date().toISOString().split('T')[0],
+      morning_km: mKmVal,
+      evening_km: eKmVal,
+      total_km: (eKmVal > 0 && mKmVal > 0 && eKmVal >= mKmVal) ? (eKmVal - mKmVal) : 0
     };
 
     // Keep credentials secured in offline vault
@@ -6315,7 +6338,9 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
-          remark: "", visited_names: []
+          remark: "", visited_names: [],
+          morning_km: payload.morning_km ? String(payload.morning_km) : "",
+          evening_km: payload.evening_km ? String(payload.evening_km) : ""
         }));
 
         setTodaySubmittedReport({
@@ -6372,7 +6397,9 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
-          remark: "", visited_names: []
+          remark: "", visited_names: [],
+          morning_km: payload.morning_km ? String(payload.morning_km) : "",
+          evening_km: payload.evening_km ? String(payload.evening_km) : ""
         }));
 
         setTodaySubmittedReport({
@@ -6999,6 +7026,7 @@ function App() {
                     { id: 'sec-fieldwork', label: '🏠 Visits' },
                     { id: 'sec-logistics', label: '💊 FDC / Logistics' },
                     { id: 'sec-special', label: '⭐ Special' },
+                    { id: 'sec-travel', label: '🛵 Travel (TA)' },
                     { id: 'sec-doctors', label: '🩺 Doctors' },
                     { id: 'sec-remarks', label: '📝 Remarks' },
                   ].map((cat) => (
@@ -7120,19 +7148,83 @@ function App() {
                     />
                   ))}
                 </Accordion>
-                <Accordion id="sec-remarks" title="6. Additional Remarks">
-                  <div className="p-4 sm:p-5">
-                    <textarea 
-                      value={formData.remark || ''} 
-                      onChange={e => setFormData({...formData, remark: e.target.value})} 
-                      placeholder="Koi extra information ya remark yahan likhein..." 
-                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-teal-500 transition-all placeholder:text-slate-400 min-h-[120px]"
-                    ></textarea>
-                  </div>
-                </Accordion>
 
-              {/* Travel & Doctors Section */}
-              <div id="sec-doctors" className="grid grid-cols-1 gap-4 mt-6 scroll-mt-36">
+              {/* Bike Travel & Odometer Section (Feeds Travel Allowance) */}
+              <div id="sec-travel" className="mt-6 scroll-mt-36">
+                <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-indigo-200/80 overflow-hidden">
+                  <div className="bg-indigo-50/70 px-5 py-3.5 border-b border-indigo-100/90 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">🛵</span>
+                      <div>
+                        <label className="block text-xs font-black text-indigo-950 tracking-wide uppercase">
+                          Bike Meter Reading (Travel Allowance)
+                        </label>
+                        <p className="text-[10px] text-indigo-700/80 font-medium">Daily bike odometer reading for TA reimbursement</p>
+                      </div>
+                    </div>
+                    {formData.morning_km !== '' && formData.evening_km !== '' && (
+                      <span className={`text-[11px] font-black px-2.5 py-1 rounded-lg border tabular-nums ${
+                        Number(formData.evening_km) >= Number(formData.morning_km)
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : 'bg-rose-50 text-rose-700 border-rose-200'
+                      }`}>
+                        {Number(formData.evening_km) >= Number(formData.morning_km)
+                          ? `+${Math.round(Number(formData.evening_km) - Number(formData.morning_km))} KM Run`
+                          : '⚠️ Invalid'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-4 sm:p-5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label htmlFor="morning_km" className="block text-[11px] font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                          <span>🌅 Morning KM</span>
+                          <span className="text-[10px] text-slate-400 font-normal">(Start)</span>
+                        </label>
+                        <input
+                          id="morning_km"
+                          name="morning_km"
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          value={formData.morning_km}
+                          onChange={(e) => setFormData({ ...formData, morning_km: e.target.value })}
+                          placeholder="e.g. 14250"
+                          className="w-full h-11 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-bold rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-nums"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="evening_km" className="block text-[11px] font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+                          <span>🌇 Evening KM</span>
+                          <span className="text-[10px] text-slate-400 font-normal">(End)</span>
+                        </label>
+                        <input
+                          id="evening_km"
+                          name="evening_km"
+                          type="number"
+                          inputMode="numeric"
+                          min="0"
+                          value={formData.evening_km}
+                          onChange={(e) => setFormData({ ...formData, evening_km: e.target.value })}
+                          placeholder="e.g. 14295"
+                          className="w-full h-11 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-bold rounded-xl px-3.5 py-2 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs tabular-nums"
+                        />
+                      </div>
+                    </div>
+                    {formData.morning_km !== '' && formData.evening_km !== '' && Number(formData.evening_km) < Number(formData.morning_km) && (
+                      <p className="mt-2 text-[11px] text-rose-600 font-semibold flex items-center gap-1">
+                        ⚠️ Evening KM subah ke meter se kam nahi ho sakta.
+                      </p>
+                    )}
+                    <p className="mt-2 text-[10px] text-slate-500 font-medium">
+                      💡 Yeh readings Admin Travel Allowance (TA) bill me auto-prefill hongi aur ₹/KM rate ke sath calculate hongi.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Doctor / Chemist Store Visits Section */}
+              <div id="sec-doctors" className="mt-6 scroll-mt-36">
                 <div className="bg-white/95 backdrop-blur-md rounded-2xl shadow-xs border border-emerald-200/80 overflow-hidden">
                   <div className="bg-emerald-50/70 px-5 py-4 border-b border-emerald-100/90 flex items-center gap-2">
                     <svg className="w-5 h-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
@@ -7181,8 +7273,22 @@ function App() {
                 </div>
               </div>
 
-              {/* Spacer for Sticky Footer */}
-              <div className="h-36 w-full pointer-events-none"></div>
+              {/* Additional Remarks Section */}
+              <div id="sec-remarks" className="mt-6 scroll-mt-36">
+                <Accordion id="acc-remarks" title="📝 Additional Remarks" defaultOpen={false}>
+                  <div className="p-4 sm:p-5">
+                    <textarea 
+                      value={formData.remark || ''} 
+                      onChange={e => setFormData({...formData, remark: e.target.value})} 
+                      placeholder="Koi extra information ya remark yahan likhein..." 
+                      className="w-full bg-slate-50 border border-slate-200 text-slate-800 text-sm rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-teal-500 transition-all placeholder:text-slate-400 min-h-[120px]"
+                    ></textarea>
+                  </div>
+                </Accordion>
+              </div>
+
+              {/* Generous Spacer for Sticky Footer & Bottom Navigation Dock */}
+              <div className="h-64 sm:h-72 w-full pointer-events-none" aria-hidden="true"></div>
 
               {/* Modern Sticky Bottom Action Bar (Sits right above bottom nav dock) */}
               <div className="fixed bottom-14 sm:bottom-16 left-0 right-0 bg-white/95 backdrop-blur-lg border-t border-slate-200/80 p-3 sm:p-3.5 shadow-[0_-10px_35px_rgba(0,0,0,0.06)] z-40">
@@ -7201,6 +7307,11 @@ function App() {
                       {liveVisitsCount > 0 && (
                         <span className="bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded-md font-black tabular-num">
                           🏥 {liveVisitsCount} Visits
+                        </span>
+                      )}
+                      {formData.morning_km && formData.evening_km && Number(formData.evening_km) >= Number(formData.morning_km) && (
+                        <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-1.5 py-0.5 rounded-md font-black tabular-num">
+                          🛵 {Math.round(Number(formData.evening_km) - Number(formData.morning_km))} KM
                         </span>
                       )}
                     </div>
@@ -7532,6 +7643,31 @@ function App() {
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs">
                   <span className="font-bold text-slate-400 uppercase text-[10px] block mb-1">Visited Doctors / Stores</span>
                   <p className="font-semibold text-slate-700">{formData.visited_names.join(', ')}</p>
+                </div>
+              )}
+
+              {(formData.morning_km !== '' || formData.evening_km !== '') && (
+                <div className="bg-indigo-50/80 p-3 rounded-2xl border border-indigo-200/70 text-xs">
+                  <span className="font-bold text-indigo-900 uppercase text-[10px] block mb-1 flex items-center gap-1">
+                    <span>🛵 Bike Odometer Reading (TA)</span>
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2 font-semibold text-slate-800 text-xs mt-1">
+                    {formData.morning_km !== '' && (
+                      <span className="bg-white border border-indigo-100 px-2 py-0.5 rounded-lg shadow-2xs">
+                        Start: <strong>{formData.morning_km} KM</strong>
+                      </span>
+                    )}
+                    {formData.evening_km !== '' && (
+                      <span className="bg-white border border-indigo-100 px-2 py-0.5 rounded-lg shadow-2xs">
+                        End: <strong>{formData.evening_km} KM</strong>
+                      </span>
+                    )}
+                    {formData.morning_km !== '' && formData.evening_km !== '' && Number(formData.evening_km) >= Number(formData.morning_km) && (
+                      <span className="bg-emerald-100 text-emerald-900 px-2.5 py-0.5 rounded-lg font-black text-[11px] border border-emerald-200">
+                        Total Run: +{Math.round(Number(formData.evening_km) - Number(formData.morning_km))} KM
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

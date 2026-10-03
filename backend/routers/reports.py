@@ -96,6 +96,7 @@ class DailyActivityReport(BaseModel):
     visited_names: List[str] = []
     morning_km: Optional[int] = 0
     evening_km: Optional[int] = 0
+    total_km: Optional[int] = 0
     morning_km_photo_url: Optional[str] = ""
     evening_km_photo_url: Optional[str] = ""
     is_override_used: Optional[bool] = False
@@ -558,6 +559,11 @@ async def submit_daily_report(report: DailyActivityReport):
         payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
         payload["submission_count"] = 1
         
+        m_val = payload.get("morning_km") or 0
+        e_val = payload.get("evening_km") or 0
+        if e_val and m_val and e_val >= m_val and not payload.get("total_km"):
+            payload["total_km"] = e_val - m_val
+        
         # Storage Guard: Prevent massive base64 strings from inflating Firestore document size
         if report.morning_km_photo_url and len(report.morning_km_photo_url) > 1000:
             payload["morning_km_photo_url"] = ""
@@ -642,7 +648,13 @@ async def submit_daily_report(report: DailyActivityReport):
                     payload["evening_km"] = d["evening_km"]
                 if d.get("evening_km_photo_url") and not payload.get("evening_km_photo_url"):
                     payload["evening_km_photo_url"] = d["evening_km_photo_url"]
-                if d.get("total_km") and not payload.get("total_km"):
+
+                # Recalculate total_km from merged morning/evening readings
+                merged_m = payload.get("morning_km") or 0
+                merged_e = payload.get("evening_km") or 0
+                if merged_e and merged_m and merged_e >= merged_m:
+                    payload["total_km"] = merged_e - merged_m
+                elif d.get("total_km") and not payload.get("total_km"):
                     payload["total_km"] = d["total_km"]
 
                 # Preserve preexisting next-day metadata if present in existing document and not set in payload
