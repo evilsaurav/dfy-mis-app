@@ -345,6 +345,85 @@ def get_current_ta_rate_value() -> float:
     return 4.0
 
 
+def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[str, Any]]:
+    """
+    Normalizes any format of daily logs (dict keyed by date/day or list of dicts)
+    into a standard array of 31 (or month length) day records.
+    Guarantees consistent structure with day, date, morning_km, evening_km, total_km,
+    visited_names, purpose, is_manual_override, admin_remarks.
+    """
+    year = 2026
+    month_num = 10
+    if month and isinstance(month, str) and "-" in month:
+        try:
+            parts = month.split("-")
+            year = int(parts[0])
+            month_num = int(parts[1])
+        except Exception:
+            pass
+    _, num_days = calendar.monthrange(year, month_num)
+
+    day_map: Dict[int, Dict[str, Any]] = {}
+    if isinstance(raw_days_or_logs, dict):
+        for k, v in raw_days_or_logs.items():
+            if not isinstance(v, dict):
+                continue
+            day_num = None
+            if "-" in str(k):
+                try:
+                    day_num = int(str(k).split("-")[2])
+                except Exception:
+                    pass
+            elif str(k).isdigit():
+                day_num = int(k)
+            else:
+                day_num = v.get("day")
+            if day_num:
+                day_map[int(day_num)] = v
+    elif isinstance(raw_days_or_logs, list):
+        for idx, d in enumerate(raw_days_or_logs, start=1):
+            if isinstance(d, dict):
+                day_num = d.get("day") or idx
+                try:
+                    day_map[int(day_num)] = d
+                except Exception:
+                    pass
+
+    normalized: List[Dict[str, Any]] = []
+    for day in range(1, num_days + 1):
+        date_str = f"{year:04d}-{month_num:02d}-{day:02d}"
+        d = day_map.get(day, {})
+        m_km = float(d.get("morning_km") if d.get("morning_km") is not None else (d.get("initial_reading") or 0.0))
+        e_km = float(d.get("evening_km") if d.get("evening_km") is not None else (d.get("final_reading") or 0.0))
+        
+        if d.get("total_km") is not None:
+            try:
+                t_km = float(d.get("total_km"))
+            except (ValueError, TypeError):
+                t_km = max(0.0, e_km - m_km)
+        else:
+            t_km = max(0.0, e_km - m_km)
+
+        visited = str(d.get("visited_names") or d.get("to_location") or d.get("places_visited") or "")
+        purpose = str(d.get("purpose") or d.get("remarks") or "")
+        override = bool(d.get("is_manual_override") or d.get("is_override") or False)
+        admin_remarks = str(d.get("admin_remarks") or "")
+
+        normalized.append({
+            "day": day,
+            "date": str(d.get("date") or date_str),
+            "morning_km": round(m_km, 2),
+            "evening_km": round(e_km, 2),
+            "total_km": round(t_km, 2),
+            "visited_names": visited,
+            "purpose": purpose,
+            "is_manual_override": override,
+            "admin_remarks": admin_remarks
+        })
+
+    return normalized
+
+
 # --- Workflow Helper Functions ---
 
 def apply_staff_status_transition(
@@ -425,6 +504,7 @@ def apply_staff_status_transition(
                 detail="Only Sub-Admin or Super Admin can submit staff records."
             )
         rec["status"] = "SUBMITTED"
+        rec["is_locked"] = True
         rec["submitted_at"] = iso_now
         rec["submitted_by"] = actor_name
         return rec
@@ -442,20 +522,20 @@ def validate_edit_permission(record: dict, user_role: str) -> tuple[bool, str]:
     - Super Admin: global override allowed.
     - Locked record: cannot be edited unless unlocked.
     - Main Incharge: read-only inspection.
-    - Sub-Admin: cannot edit if record is in SUBMITTED or APPROVED state.
+    - Sub-Admin: cannot edit if record is locked or in SUBMITTED or APPROVED state.
     """
     if user_role == "SUPER_ADMIN":
         return True, ""
 
     if bool(record.get("is_locked", False)):
-        return False, "Record is locked by Incharge after approval. Request Incharge to unlock."
+        return False, "Record is locked by Incharge. Request Incharge to unlock."
 
     if user_role == "MAIN_INCHARGE":
         return False, "Incharge role is read-only for inspection and approval. Edits must be made by Sub-Admin."
 
     status = record.get("status", "DRAFT")
     if user_role == "SUB_ADMIN" and status in ("APPROVED", "SUBMITTED"):
-        return False, f"Cannot edit record in {status} state."
+        return False, f"Cannot edit record in {status} state. Request Incharge to unlock."
 
     return True, ""
 
@@ -941,10 +1021,21 @@ async def get_district_ta_roster(
             entry["doc_id"] = matched_log["_doc_id"]
             entry["staff_key"] = matched_log.get("staff_key") or s["id"]
             
-            # Ensure days and active_days are normalized
-            days_list = entry.get("days") or entry.get("daily_logs") or []
+            # Ensure days and active_days are normalized to uniform 31-day list
+            days_list = normalize_days_to_list(entry.get("days") or entry.get("daily_logs"), month=month)
             entry["days"] = days_list
-            entry["active_days"] = sum(1 for d in days_list if isinstance(d, dict) and float(d.get("total_km") or 0.0) > 0)
+            entry["active_days"] = sum(1 for d in days_list if float(d.get("total_km") or 0.0) > 0)
+
+            # Reconcile totals from normalized days so phantom numbers never appear
+            recalc = calculate_log_totals(
+                days_list,
+                rate_per_km=entry.get("rate_per_km") or current_rate,
+                deduction_amount=entry.get("deduction_amount") or 0.0
+            )
+            entry["total_km"] = recalc["total_km"]
+            entry["gross_amount"] = recalc["gross_amount"]
+            entry["deduction_amount"] = recalc["deduction_amount"]
+            entry["final_payable_amount"] = recalc["final_payable_amount"]
             roster.append(entry)
         else:
             # Generate default draft skeleton
@@ -965,7 +1056,7 @@ async def get_district_ta_roster(
                 "admin_remarks": "",
                 "status": "DRAFT",
                 "is_locked": False,
-                "days": [],
+                "days": normalize_days_to_list([], month=month),
                 "active_days": 0,
                 "created_at": None,
                 "updated_at": None
@@ -978,9 +1069,18 @@ async def get_district_ta_roster(
             entry = dict(sl)
             entry["doc_id"] = sl["_doc_id"]
             entry["staff_key"] = sl.get("staff_key") or sl.get("_doc_id", "").split(f"{month}_")[-1] or normalize_staff_slug(sl.get("staff_name") or "")
-            days_list = entry.get("days") or entry.get("daily_logs") or []
+            days_list = normalize_days_to_list(entry.get("days") or entry.get("daily_logs"), month=month)
             entry["days"] = days_list
-            entry["active_days"] = sum(1 for d in days_list if isinstance(d, dict) and float(d.get("total_km") or 0.0) > 0)
+            entry["active_days"] = sum(1 for d in days_list if float(d.get("total_km") or 0.0) > 0)
+            recalc = calculate_log_totals(
+                days_list,
+                rate_per_km=entry.get("rate_per_km") or current_rate,
+                deduction_amount=entry.get("deduction_amount") or 0.0
+            )
+            entry["total_km"] = recalc["total_km"]
+            entry["gross_amount"] = recalc["gross_amount"]
+            entry["deduction_amount"] = recalc["deduction_amount"]
+            entry["final_payable_amount"] = recalc["final_payable_amount"]
             roster.append(entry)
             consumed_doc_ids.add(sl["_doc_id"])
 
@@ -1055,7 +1155,8 @@ def prefill_district_ta_from_reports(
             existing_deduction = float(ex_data.get("deduction_amount") or 0.0)
             existing_deduction_reason = ex_data.get("deduction_reason") or ""
             existing_admin_remarks = ex_data.get("admin_remarks") or ""
-            for d in ex_data.get("days", []) or ex_data.get("daily_logs", []):
+            ex_norm = normalize_days_to_list(ex_data.get("days") or ex_data.get("daily_logs"), req.month)
+            for d in ex_norm:
                 day_num = d.get("day")
                 if day_num:
                     existing_days_map[int(day_num)] = d
@@ -1510,7 +1611,7 @@ def get_fo_monthly_summary(
             "approved_at": data.get("approved_at"),
             "approved_by": data.get("approved_by"),
             "dispute_status": data.get("dispute_status", "NONE"),
-            "days": data.get("days", [])
+            "days": normalize_days_to_list(data.get("days") or data.get("daily_logs"), month=month)
         }
     }
 

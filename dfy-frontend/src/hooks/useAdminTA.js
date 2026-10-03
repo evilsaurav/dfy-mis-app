@@ -28,7 +28,7 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
   // ── Role checks ───────────────────────────────────────────────────────────
   const isSubAdmin = currentUser?.role === 'SUB_ADMIN' || currentUser?.role === 'SUPER_ADMIN';
   const isIncharge = currentUser?.role === 'MAIN_INCHARGE' || currentUser?.role === 'SUPER_ADMIN';
-  const canEdit = isSubAdmin && !selectedOfficer?.is_locked;
+  const canEdit = isSubAdmin && !selectedOfficer?.is_locked && selectedOfficer?.status !== 'SUBMITTED' && selectedOfficer?.status !== 'APPROVED';
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 

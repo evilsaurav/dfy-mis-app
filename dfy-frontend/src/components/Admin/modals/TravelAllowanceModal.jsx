@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const STATUS_STYLES = {
   DRAFT: 'bg-slate-100 text-slate-600',
@@ -55,6 +55,7 @@ export default function TravelAllowanceModal({
   currentUser,
 }) {
   const contextMenuRef = useRef(null);
+  const [showConfirmSubmitModal, setShowConfirmSubmitModal] = useState(false);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -99,23 +100,39 @@ export default function TravelAllowanceModal({
   // ── Handle officer inspect (load 31-day log) ──────────────────────────────
   const handleInspect = (officer) => {
     setSelectedOfficer(officer);
-    // Populate drilldown log from officer days or create blank 31-day template
-    const days = officer.days && officer.days.length > 0
-      ? officer.days
-      : Array.from({ length: 31 }, (_, i) => ({
-          day: i + 1,
-          date: '',
-          morning_km: '',
-          evening_km: '',
-          manual_total_km: '',
-          is_manual_override: false,
-          visited_names: '',
-          purpose: '',
-          admin_remarks: '',
-        }));
+    // Populate drilldown log from officer days, normalizing array or dictionary
+    let days = [];
+    if (Array.isArray(officer?.days) && officer.days.length > 0) {
+      days = officer.days;
+    } else if (officer?.days && typeof officer.days === 'object') {
+      days = Object.entries(officer.days).map(([k, v], idx) => ({
+        day: v.day || idx + 1,
+        date: v.date || k,
+        morning_km: v.morning_km ?? v.initial_reading ?? '',
+        evening_km: v.evening_km ?? v.final_reading ?? '',
+        total_km: v.total_km ?? '',
+        visited_names: v.visited_names ?? v.to_location ?? '',
+        purpose: v.purpose ?? v.remarks ?? '',
+        is_manual_override: !!(v.is_manual_override || v.is_override),
+        admin_remarks: v.admin_remarks ?? '',
+      }));
+    } else {
+      days = Array.from({ length: 31 }, (_, i) => ({
+        day: i + 1,
+        date: '',
+        morning_km: '',
+        evening_km: '',
+        total_km: 0,
+        manual_total_km: '',
+        is_manual_override: false,
+        visited_names: '',
+        purpose: '',
+        admin_remarks: '',
+      }));
+    }
     setDrilldownLog(days);
-    setDeductionAmount(officer.deduction_amount || 0);
-    setDeductionReason(officer.deduction_reason || '');
+    setDeductionAmount(officer?.deduction_amount || 0);
+    setDeductionReason(officer?.deduction_reason || '');
     setViewMode('DRILLDOWN');
   };
 
@@ -298,12 +315,12 @@ export default function TravelAllowanceModal({
                               ↩️
                             </button>
                           )}
-                          {isIncharge && staff.status === 'APPROVED' && (
+                          {isIncharge && (staff.is_locked || staff.status === 'APPROVED' || staff.status === 'SUBMITTED') && (
                             <button
                               onClick={() => handleUnlockStaff?.(staff.staff_key || staff.doc_id)}
                               disabled={isSubmitting}
-                              className="px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold disabled:opacity-50 transition-all"
-                              title="Unlock"
+                              className="px-2 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold disabled:opacity-50 transition-all border border-amber-200"
+                              title="Unlock record (अनलॉक करें)"
                             >
                               🔓
                             </button>
@@ -321,12 +338,13 @@ export default function TravelAllowanceModal({
           <div className="flex flex-wrap items-center justify-between gap-2 p-4 border-t border-slate-100 bg-slate-50 rounded-b-3xl">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => handleSubmitRoster?.()}
+                onClick={() => setShowConfirmSubmitModal(true)}
                 disabled={!isSubAdmin || isSubmitting || roster.length === 0}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-blue-600/20 active:scale-95"
+                title="Submit roster to Main Incharge for verification and approval"
               >
                 <span>📤</span>
-                <span>{isSubmitting ? 'Submitting…' : 'Submit All'}</span>
+                <span>{isSubmitting ? 'Submitting…' : 'Submit to Incharge'}</span>
               </button>
               <button
                 onClick={() => handleExportExcel?.()}
@@ -411,12 +429,97 @@ export default function TravelAllowanceModal({
             </div>
           </div>
         )}
+
+        {/* Submit to Incharge Confirmation Dialog */}
+        {showConfirmSubmitModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-60 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <div className="bg-white rounded-3xl p-6 w-full max-w-lg shadow-2xl border border-slate-100 flex flex-col gap-4">
+              
+              {/* Header */}
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 border border-blue-200 flex items-center justify-center text-2xl shrink-0">
+                  📋
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 leading-snug">
+                    अंतिम समीक्षा एवं इंचार्ज को सबमिट
+                  </h3>
+                  <p className="text-xs font-semibold text-blue-600">
+                    Final Review & Submit to Incharge
+                  </p>
+                </div>
+              </div>
+
+              {/* Warning Notice Box */}
+              <div className="bg-amber-50/80 border border-amber-200 rounded-2xl p-4 text-xs space-y-2.5 text-amber-950">
+                <div className="flex items-center gap-2 font-bold text-amber-900 text-sm">
+                  <span>⚠️</span>
+                  <span>क्या आपकी रिपोर्ट पूरी तरह फाइनल हो गई है?</span>
+                </div>
+                <p className="text-slate-700 leading-relaxed">
+                  यदि किसी अधिकारी की <strong>KM रीडिंग, रूट या कटौती (Deductions)</strong> में कोई सुधार शेष है, तो कृपया पहले <strong>'अंतिम समीक्षा करें'</strong> पर क्लिक करके जांच पूरी कर लें।
+                </p>
+                <div className="p-3 bg-white/80 rounded-xl border border-amber-200/60 text-slate-800 space-y-1.5 font-medium">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-900">
+                    <span>🔒</span>
+                    <span>महत्वपूर्ण सुरक्षा नियम (Locking Policy):</span>
+                  </div>
+                  <ul className="list-disc list-inside space-y-1 text-[11px] text-slate-600">
+                    <li>एक बार सबमिट होने के बाद यह रिपोर्ट <strong>स्वतः लॉक</strong> हो जाएगी और सब-एडमिन इसमें कोई बदलाव नहीं कर सकेंगे।</li>
+                    <li>रिपोर्ट को अनलॉक करने का अधिकार केवल <strong>मुख्य इंचार्ज (Main Incharge / Super Admin)</strong> के पास सुरक्षित है।</li>
+                    <li>यदि किसी फील्ड ऑफिसर द्वारा डिस्प्यूट (Dispute) दर्ज किया जाता है, तो इंचार्ज समीक्षा के बाद इसे अनलॉक कर सकेंगे।</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Summary Metrics Grid */}
+              <div className="grid grid-cols-3 gap-2 py-1 text-center text-xs">
+                <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-2">
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Officers</p>
+                  <p className="font-black text-slate-800 text-sm">{roster.length}</p>
+                </div>
+                <div className="bg-blue-50/50 border border-blue-200/60 rounded-xl p-2">
+                  <p className="text-[10px] text-blue-500 font-bold uppercase tracking-wider">Total KM</p>
+                  <p className="font-black text-blue-800 text-sm">{kpiBanners.totalKm.toFixed(1)}</p>
+                </div>
+                <div className="bg-emerald-50/50 border border-emerald-200/60 rounded-xl p-2">
+                  <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">Net Payable</p>
+                  <p className="font-black text-emerald-800 text-sm">₹{kpiBanners.net.toFixed(2)}</p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmSubmitModal(false)}
+                  disabled={isSubmitting}
+                  className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all disabled:opacity-50"
+                >
+                  अंतिम समीक्षा करें (Review Again)
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setShowConfirmSubmitModal(false);
+                    await handleSubmitRoster?.();
+                  }}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all disabled:opacity-50 shadow-md shadow-blue-600/30 active:scale-95"
+                >
+                  <span>{isSubmitting ? '⏳ सबमिट हो रहा है…' : 'हाँ, इंचार्ज को सबमिट करें'}</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   // ── DRILLDOWN VIEW ────────────────────────────────────────────────────────
-  const isLocked = selectedOfficer?.is_locked || false;
+  const isLocked = selectedOfficer?.is_locked || selectedOfficer?.status === 'SUBMITTED' || selectedOfficer?.status === 'APPROVED';
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col overflow-hidden">
@@ -437,7 +540,25 @@ export default function TravelAllowanceModal({
               <div className="flex items-center gap-2 mt-0.5">
                 <span className="text-xs text-slate-500">{selectedOfficer?.designation}</span>
                 <StatusBadge status={selectedOfficer?.status} />
-                {isLocked && <span className="text-xs text-slate-400">🔒 Locked</span>}
+                {isLocked && (
+                  <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold">
+                    🔒 Locked
+                  </span>
+                )}
+                {isIncharge && isLocked && (
+                  <button
+                    onClick={async () => {
+                      await handleUnlockStaff?.(selectedOfficer.staff_key || selectedOfficer.doc_id);
+                      setSelectedOfficer((prev) => ({ ...prev, is_locked: false, status: 'REVERTED' }));
+                    }}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 hover:bg-amber-200 text-amber-900 text-xs font-bold transition-all border border-amber-300 disabled:opacity-50"
+                    title="Unlock this officer's record to allow Sub-Admin editing"
+                  >
+                    <span>🔓</span>
+                    <span>Unlock</span>
+                  </button>
+                )}
                 <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
                   Rate: ₹{ratePerKm}/KM
                 </span>
@@ -580,8 +701,8 @@ export default function TravelAllowanceModal({
               <span>{isSubmitting ? 'Saving…' : 'Save Log'}</span>
             </button>
             {isLocked && (
-              <span className="text-xs text-slate-400 flex items-center gap-1">
-                🔒 Record is locked. Ask Incharge to unlock.
+              <span className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold">
+                🔒 Record is locked ({selectedOfficer?.status || 'LOCKED'}). Only Incharge can unlock.
               </span>
             )}
           </div>
