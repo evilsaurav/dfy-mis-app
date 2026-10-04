@@ -1105,7 +1105,7 @@ async def admin_feed_officer_data(
             "home_visit", "follow_up", "face_to_face", "presumptive", "documents",
             "fdc_provided", "kit_consumption", "tpt_treatment_start", "tpt_presumptive",
             "adhar_face_authentication", "consent_with_id", "culture_dst",
-            "date", "admin_fed", "fed_by", "pin"
+            "date", "admin_fed", "fed_by", "pin", "timestamp"
         ]
         for pk in phantom_keys:
             pg_payload.pop(pk, None)
