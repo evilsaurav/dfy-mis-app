@@ -530,7 +530,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             try:
                 alt_cat = cat_key[:-4] if cat_key.endswith("_ids") else f"{cat_key}_ids"
                 pg_entries = pg_execute_raw(
-                    "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category = %s OR category = %s) ORDER BY id ASC",
+                    "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category::text = %s OR category::text = %s) ORDER BY id ASC",
                     [int_report_id, cat_key, alt_cat],
                     fetch=True
                 ) or []
@@ -569,7 +569,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             if int_report_id:
                 alt_cat = cat_key[:-4] if cat_key.endswith("_ids") else f"{cat_key}_ids"
                 exists_row = pg_execute_raw(
-                    "SELECT 1 FROM report_kpi_entries WHERE report_id = %s AND (category = %s OR category = %s) AND patient_id = %s LIMIT 1",
+                    "SELECT 1 FROM report_kpi_entries WHERE report_id = %s AND (category::text = %s OR category::text = %s) AND patient_id = %s LIMIT 1",
                     [int_report_id, cat_key, alt_cat, clean_new_id],
                     fetch=True
                 )
@@ -642,7 +642,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 alt_cat = cat_key[:-4] if cat_key.endswith("_ids") else f"{cat_key}_ids"
                 if req.action == "replace":
                     pg_execute_raw(
-                        "UPDATE report_kpi_entries SET patient_id = %s WHERE report_id = %s AND (category = %s OR category = %s) AND patient_id = %s",
+                        "UPDATE report_kpi_entries SET patient_id = %s WHERE report_id = %s AND (category::text = %s OR category::text = %s) AND patient_id = %s",
                         [clean_new_id, int_report_id, cat_key, alt_cat, old_id_clean]
                     )
                     pg_execute_raw(
@@ -651,7 +651,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                     )
                 elif req.action == "delete":
                     pg_execute_raw(
-                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND (category = %s OR category = %s) AND patient_id = %s",
+                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND (category::text = %s OR category::text = %s) AND patient_id = %s",
                         [int_report_id, cat_key, alt_cat, old_id_clean]
                     )
                     if l_col:

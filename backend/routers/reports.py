@@ -751,7 +751,7 @@ async def submit_daily_report(report: DailyActivityReport):
             if report_id and isinstance(report_id, int):
                 try:
                     k_rows = pg_execute_raw(
-                        "SELECT category, patient_id FROM report_kpi_entries WHERE report_id = %s",
+                        "SELECT category::text, patient_id FROM report_kpi_entries WHERE report_id = %s",
                         [report_id],
                         fetch=True
                     )
@@ -894,8 +894,20 @@ async def submit_daily_report(report: DailyActivityReport):
             "culture_dst_ids": "legacy_count_culture_dst"
         }
         for k_cat, l_col in cat_to_legacy_metric.items():
-            pg_payload[l_col] = len(payload.get(k_cat) or [])
+            merged_count = len(payload.get(k_cat) or [])
+            if merged_count == 0 and existing_report and existing_report.get(l_col):
+                merged_count = int(existing_report[l_col])
+            pg_payload[l_col] = merged_count
         pg_payload["legacy_doc_id"] = doc_id
+
+        # Keep payload integer metric counts in sync with merged lists (never reduce existing counts to 0)
+        payload["notifications"] = pg_payload.get("legacy_count_notifications", len(payload.get("notification_ids") or []))
+        payload["sample_tested"] = pg_payload.get("legacy_count_sample_tested", len(payload.get("sample_tested_ids") or []))
+        payload["tests"] = payload["sample_tested"]
+        payload["hiv_dm"] = pg_payload.get("legacy_count_hiv_dm", len(payload.get("hiv_dm_ids") or []))
+        payload["dbt"] = pg_payload.get("legacy_count_dbt", len(payload.get("dbt_ids") or []))
+        payload["contact_tracing"] = pg_payload.get("legacy_count_contact_tracing", len(payload.get("contact_tracing_ids") or []))
+        payload["differentiated_tb"] = pg_payload.get("legacy_count_differentiated_tb", len(payload.get("differentiated_tb_ids") or []))
 
         if "pin" in pg_payload:
             pg_payload["pin_used"] = pg_payload.pop("pin")
@@ -999,7 +1011,7 @@ async def submit_daily_report(report: DailyActivityReport):
 
                     alt_cat = category[:-4] if category.endswith("_ids") else f"{category}_ids"
                     existing_rows = pg_execute_raw(
-                        "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category = %s OR category = %s)",
+                        "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category::text = %s OR category::text = %s)",
                         [int_report_id, category, alt_cat],
                         fetch=True
                     ) or []
