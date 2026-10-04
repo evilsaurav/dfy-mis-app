@@ -912,26 +912,106 @@ async def admin_feed_officer_data(
         if total_ids_added == 0 and not req.remark.strip():
             raise HTTPException(status_code=400, detail="Please enter at least one valid patient ID or remark.")
 
-        # 4. Target Report Document with alias candidate search
+        # 4. Target Report Document with PostgreSQL lookup and alias candidate search
+        clean_date_iso = normalize_date_to_iso(clean_date) or clean_date
         candidate_doc_ids = [
             f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{req.district}_{clean_fo}_{clean_date}".replace(" ", "_").lower()
+            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
+            f"{req.district.strip()}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
         ]
+        candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
 
         doc_ref = None
         doc_snap = None
         doc_id = candidate_doc_ids[0]
+        existing_pg_report_id = None
 
-        for cid in candidate_doc_ids:
-            cand_ref = db.collection("daily_field_reports").document(cid)
-            snap = await asyncio.to_thread(cand_ref.get)
-            if snap.exists:
-                doc_ref = cand_ref
-                doc_snap = snap
-                doc_id = cid
-                break
+        # 4a. Query PostgreSQL daily_field_reports first
+        try:
+            pg_rows = pg_execute_raw(
+                """
+                SELECT * FROM daily_field_reports 
+                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
+                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                  AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
+                ORDER BY id DESC LIMIT 1
+                """,
+                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%", clean_fo, clean_fo],
+                fetch=True
+            ) or []
+            if not pg_rows:
+                pg_rows = pg_execute_raw(
+                    """
+                    SELECT * FROM daily_field_reports 
+                    WHERE legacy_doc_id = ANY(%s)
+                      AND (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
+                      AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    [candidate_doc_ids, clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%"],
+                    fetch=True
+                ) or []
+            if pg_rows:
+                pg_match = dict(pg_rows[0])
+                doc_snap = pg_match
+                existing_pg_report_id = pg_match.get("id") if isinstance(pg_match.get("id"), int) else None
+                doc_id = pg_match.get("legacy_doc_id") or candidate_doc_ids[0]
+                doc_ref = db.collection("daily_field_reports").document(doc_id)
 
-        if not doc_ref:
+                # Hydrate child table entries (patient IDs, FDC, visited names) from Postgres
+                if existing_pg_report_id:
+                    try:
+                        k_rows = pg_execute_raw(
+                            "SELECT category, patient_id FROM report_kpi_entries WHERE report_id = %s ORDER BY id ASC",
+                            [existing_pg_report_id],
+                            fetch=True
+                        ) or []
+                        for kr in k_rows:
+                            cat = kr.get("category")
+                            pid = kr.get("patient_id")
+                            if cat and pid:
+                                cat_k = cat if cat.endswith("_ids") else f"{cat}_ids"
+                                doc_snap.setdefault(cat_k, []).append(str(pid).strip())
+                                if cat_k.endswith("_ids"):
+                                    doc_snap.setdefault(cat_k[:-4], []).append(str(pid).strip())
+                        # Deduplicate hydrated lists
+                        for ck in list(doc_snap.keys()):
+                            if isinstance(doc_snap[ck], list) and (ck.endswith("_ids") or ck in categories):
+                                doc_snap[ck] = list(dict.fromkeys(doc_snap[ck]))
+
+                        f_rows = pg_execute_raw(
+                            "SELECT * FROM report_fdc_details WHERE report_id = %s ORDER BY position ASC, id ASC",
+                            [existing_pg_report_id],
+                            fetch=True
+                        ) or []
+                        if f_rows:
+                            doc_snap["fdc_details"] = [dict(fr) for fr in f_rows]
+
+                        v_rows = pg_execute_raw(
+                            "SELECT name FROM report_visited_names WHERE report_id = %s ORDER BY position ASC, id ASC",
+                            [existing_pg_report_id],
+                            fetch=True
+                        ) or []
+                        if v_rows:
+                            doc_snap["visited_names"] = [str(vr["name"]).strip() for vr in v_rows if vr.get("name")]
+                    except Exception as child_hydr_err:
+                        print(f"[Admin Feed PG Child Hydration Notice] {child_hydr_err}")
+        except Exception as pg_look_err:
+            logger.warning(f"[Admin Feed PG Lookup Notice] {pg_look_err}")
+
+        # 4b. Mock / Firestore fallback (preserved for test harness)
+        if not doc_snap:
+            for cid in candidate_doc_ids:
+                cand_ref = db.collection("daily_field_reports").document(cid)
+                snap = await asyncio.to_thread(cand_ref.get)
+                if snap.exists:
+                    doc_ref = cand_ref
+                    doc_snap = snap
+                    doc_id = cid
+                    break
+
+        if not doc_ref and not doc_snap:
             # Fallback search by fo_name and date_of_reporting in case of spacing/casing variations
             # STRICT: Only match documents in the SAME district. Never cross-merge across districts.
             try:
@@ -954,18 +1034,23 @@ async def admin_feed_officer_data(
             except Exception as qe:
                 print(f"[Admin Feed Fallback Notice] {qe}")
 
-        if not doc_ref:
+        if not doc_ref and not doc_snap:
             doc_id = candidate_doc_ids[0]
             doc_ref = db.collection("daily_field_reports").document(doc_id)
             new_report_created = True
         else:
+            if not doc_ref and doc_id:
+                doc_ref = db.collection("daily_field_reports").document(doc_id)
             new_report_created = False
 
-        # 4b. Duplicate Notification Protection (Scoped with resolved doc exclusion)
+        # 4c. Duplicate Notification Protection (Scoped with resolved doc exclusion)
         if cleaned_payload.get("notification_ids"):
             existing_day_notifs = set()
-            if not new_report_created and doc_snap and hasattr(doc_snap, "to_dict"):
-                existing_day_notifs = set(doc_snap.to_dict().get("notification_ids", []) or [])
+            if not new_report_created and doc_snap:
+                if isinstance(doc_snap, dict):
+                    existing_day_notifs = set(doc_snap.get("notification_ids", []) or [])
+                elif hasattr(doc_snap, "to_dict") and callable(doc_snap.to_dict):
+                    existing_day_notifs = set(doc_snap.to_dict().get("notification_ids", []) or [])
 
             new_notifs_to_check = [pid for pid in cleaned_payload["notification_ids"] if pid not in existing_day_notifs]
 
@@ -1024,7 +1109,7 @@ async def admin_feed_officer_data(
             await asyncio.to_thread(lambda: doc_ref.set(doc_data))
         else:
             # Merge with existing daily report (monotonic union)
-            existing_data = doc_snap.to_dict()
+            existing_data = doc_snap if isinstance(doc_snap, dict) else (doc_snap.to_dict() if hasattr(doc_snap, "to_dict") and callable(doc_snap.to_dict) else {})
             for cat in categories:
                 existing_set = set(existing_data.get(cat, []))
                 delta_counts[cat] = len(set(cleaned_payload[cat]) - existing_set)
@@ -1127,7 +1212,7 @@ async def admin_feed_officer_data(
         pg_payload["staff_id"] = resolved_staff_id
         pg_payload["district_id"] = resolved_district_id
 
-        pg_rep_id = None
+        pg_rep_id = existing_pg_report_id
         try:
             cols = list(pg_payload.keys())
             vals = [pg_payload[c] for c in cols]
@@ -1145,7 +1230,7 @@ async def admin_feed_officer_data(
                 fetch=True
             )
             if ret_rows and len(ret_rows) > 0:
-                pg_rep_id = ret_rows[0].get("id")
+                pg_rep_id = ret_rows[0].get("id") or existing_pg_report_id
         except Exception as pg_err:
             print(f"[Admin Feed PG Write on staff_date Notice] {pg_err}")
             try:
@@ -1161,7 +1246,7 @@ async def admin_feed_officer_data(
                     fetch=True
                 )
                 if ret_rows2 and len(ret_rows2) > 0:
-                    pg_rep_id = ret_rows2[0].get("id")
+                    pg_rep_id = ret_rows2[0].get("id") or existing_pg_report_id
             except Exception as pg_err2:
                 print(f"[Admin Feed PG Write on legacy_doc_id Notice] {pg_err2}")
                 pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
@@ -1320,8 +1405,9 @@ async def admin_feed_officer_data(
                 d_cnt = delta_counts.get(cat_k, 0)
                 rollup_update[rollup_k] = old_v + max(0, d_cnt)
 
-            if is_mock_env and active_db and hasattr(active_db, "collection"):
-                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection") and type(active_db).__name__ != "_DatabaseProxy":
+                rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
                 mock_rollup_update = dict(rollup_update)
                 mock_rollup_update["submitted_fos"] = submitted_fos
                 await asyncio.to_thread(lambda: rollup_ref.set(mock_rollup_update, merge=True))
@@ -2082,14 +2168,16 @@ async def admin_edit_day_report(
 
         # 6. Invalidate caches and record tombstones (Scoped)
         old_wp = canonicalize_district(old_data.get("working_place", ""))
+        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
         for d in matching_docs:
+            d_safe_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
             updated_report = dict(old_data)
             updated_report.update(doc_update)
-            updated_report["id"] = d.id
-            updated_report["doc_id"] = d.id
+            updated_report["id"] = d_safe_id
+            updated_report["doc_id"] = d_safe_id
             updated_report["last_edited_at"] = now_str
-            record_report_mutation("edit", d.id, district=clean_wp, date=clean_date, old_district=old_wp, report_data=updated_report)
-            cache.delete(f"status_{d.id}")
+            record_report_mutation("edit", d_safe_id, district=clean_wp, date=clean_date, old_district=old_wp, report_data=updated_report)
+            cache.delete(f"status_{d_safe_id}")
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())

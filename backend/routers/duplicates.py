@@ -340,13 +340,38 @@ async def repair_duplicate_notifications(
                     detail=f"Permission Denied: You do not have access to repair data for district '{req.district}'."
                 )
 
-        # 1. Retrieve document instance_doc_id from daily_field_reports
-        doc_ref = db.collection("daily_field_reports").document(clean_doc_id)
-        doc_snap = await asyncio.to_thread(doc_ref.get)
-        if not doc_snap.exists:
-            raise HTTPException(status_code=404, detail=f"Report document '{clean_doc_id}' not found.")
+        # 1. Retrieve document instance_doc_id from daily_field_reports (PostgreSQL first, then mock/Firestore)
+        pg_rep = None
+        try:
+            if str(clean_doc_id).isdigit():
+                pg_rep = pg_fetch_one("daily_field_reports", filters={"id": int(clean_doc_id)})
+            if not pg_rep:
+                pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": clean_doc_id})
+        except Exception as pg_err:
+            logger.warning(f"[repair_duplicate_notifications PG Lookup Notice] {pg_err}")
 
-        report_data = doc_snap.to_dict() or {}
+        report_data = None
+        int_report_id = None
+        if pg_rep:
+            report_data = dict(pg_rep)
+            int_report_id = pg_rep.get("id") if isinstance(pg_rep.get("id"), int) else None
+            if int_report_id:
+                try:
+                    k_rows = pg_execute_raw(
+                        "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND category = 'notification_ids'",
+                        [int_report_id],
+                        fetch=True
+                    ) or []
+                    report_data["notification_ids"] = [str(r["patient_id"]).strip() for r in k_rows if str(r.get("patient_id", "")).strip()]
+                except Exception as k_err:
+                    print(f"[repair-duplicate PG kpi fetch notice]: {k_err}")
+
+        doc_ref = db.collection("daily_field_reports").document(clean_doc_id)
+        if not report_data:
+            doc_snap = await asyncio.to_thread(doc_ref.get)
+            if not getattr(doc_snap, "exists", False):
+                raise HTTPException(status_code=404, detail=f"Report document '{clean_doc_id}' not found.")
+            report_data = doc_snap if isinstance(doc_snap, dict) else (doc_snap.to_dict() if hasattr(doc_snap, "to_dict") and callable(doc_snap.to_dict) else {})
 
         # 2. Verify canonical district matches
         doc_district = canonicalize_district(report_data.get("working_place", "") or report_data.get("district", ""))
@@ -403,11 +428,15 @@ async def repair_duplicate_notifications(
                 except Exception as upd_err:
                     print(f"[repair-duplicate PG parent update notice]: {upd_err}")
 
-            await asyncio.to_thread(lambda: doc_ref.update({
-                "notification_ids": filtered,
-                "last_repaired_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
-                "last_repaired_by": admin.get("username") or admin.get("user_id") or "admin"
-            }))
+            try:
+                if doc_ref and hasattr(doc_ref, "update"):
+                    await asyncio.to_thread(lambda: doc_ref.update({
+                        "notification_ids": filtered,
+                        "last_repaired_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "last_repaired_by": admin.get("username") or admin.get("user_id") or "admin"
+                    }))
+            except Exception:
+                pass
 
             # 6. Decrement daily_district_rollups in PostgreSQL & mock store
             report_date = str(report_data.get("date_of_reporting") or report_data.get("date", "")).strip()
