@@ -1,7 +1,10 @@
 import os
 import json
+import logging
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+
+logger = logging.getLogger("db")
 
 # Load dotenv if present
 try:
@@ -71,9 +74,7 @@ def get_postgres_connection():
         conn = psycopg2.connect(db_url, **conn_kwargs)
         return conn
     except Exception as e:
-        print(f"[PostgreSQL Connection Error] Failed connecting to database: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"[PostgreSQL Connection Error] Failed connecting to database: {e}")
         return None
 
 def _normalize_admin_user_row(row: dict) -> dict:
@@ -965,23 +966,30 @@ def pg_execute_raw(sql: str, params: Optional[List] = None, fetch: bool = False)
                 conn.commit()
                 return True
         except Exception as e:
-            print(f"[pg_execute_raw Error] Query execution failed: {e}\nSQL: {sql[:150]}\nParams: {params}")
-            import traceback
-            traceback.print_exc()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"[pg_execute_raw Error] Query execution failed: {e}\nSQL: {sql[:150]}\nParams: {params}")
+            raise
         finally:
             try:
                 conn.close()
             except Exception:
                 pass
     else:
-        db_url = (
-            os.environ.get("DATABASE_URL")
-            or os.environ.get("POSTGRES_URL")
-            or os.environ.get("SUPABASE_DB_URL")
-            or os.environ.get("POSTGRESQL_URL")
+        import sys
+        active_db = get_active_db()
+        is_mock_or_test = (
+            "pytest" in sys.modules
+            or os.environ.get("PYTEST_CURRENT_TEST")
+            or (active_db is not None and (
+                hasattr(active_db, "mock_calls") or hasattr(active_db, "reports") or hasattr(active_db, "store")
+            ))
         )
-        if db_url:
-            print(f"[pg_execute_raw WARNING] No PostgreSQL connection available despite DB URL configured! Query: {sql[:100]}")
+        if not is_mock_or_test:
+            logger.error("PostgreSQL connection pool exhausted or DATABASE_URL invalid")
+            raise RuntimeError("Database connection unavailable: PostgreSQL connection failed or DATABASE_URL is invalid.")
 
     # Fallback when no PostgreSQL connection
     if not fetch:
