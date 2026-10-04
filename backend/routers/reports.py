@@ -32,7 +32,9 @@ from backend.core.helpers import (
     get_active_operational_month,
     DEFAULT_BIHAR_DISTRICTS,
     log_admin_activity,
-    get_month_date_range
+    get_month_date_range,
+    resolve_staff_and_district_ids,
+    check_patient_id_90day_notification_duplicate
 )
 from backend.core.master_ledger import (
     get_raw_monthly_reports,
@@ -588,15 +590,32 @@ async def submit_daily_report(report: DailyActivityReport):
         valid_new_notifs = list(dict.fromkeys(report.notification_ids or []))
         if report.notification_ids:
             try:
+                for pid in list(dict.fromkeys(report.notification_ids)):
+                    clean_p = str(pid).strip()
+                    if not clean_p:
+                        continue
+                    dupe_info = check_patient_id_90day_notification_duplicate(
+                        patient_id=clean_p,
+                        district=report.working_place,
+                        reporting_date=report.date_of_reporting,
+                        exclude_doc_ids=[doc_id]
+                    )
+                    if dupe_info:
+                        pruned_duplicates.append(clean_p)
+                
                 existing_notified_set = await get_district_90day_notified_ids(
                     clean_dist=report.working_place,
                     exclude_doc_id=doc_id,
                     months=3
                 )
-                pruned_duplicates = [pid for pid in (report.notification_ids or []) if str(pid).strip() in existing_notified_set]
-                valid_new_notifs = list(dict.fromkeys([pid for pid in (report.notification_ids or []) if str(pid).strip() not in existing_notified_set]))
+                for pid in (report.notification_ids or []):
+                    sp = str(pid).strip()
+                    if sp in existing_notified_set and sp not in pruned_duplicates:
+                        pruned_duplicates.append(sp)
+
+                valid_new_notifs = [pid for pid in (report.notification_ids or []) if str(pid).strip() not in pruned_duplicates]
                 if pruned_duplicates:
-                    print(f"[Duplicate Pruned] {len(pruned_duplicates)} duplicate notification IDs stripped from {doc_id}")
+                    print(f"[Duplicate Pruned] {len(pruned_duplicates)} duplicate notification IDs stripped from {doc_id}: {pruned_duplicates}")
             except Exception as dupe_err:
                 print(f"[Ingestion Defense Notice] Duplicate check notice: {dupe_err}")
                 pruned_duplicates = []
@@ -828,6 +847,15 @@ async def submit_daily_report(report: DailyActivityReport):
         ]:
             pg_payload.pop(p_cat, None)
 
+        # Resolve staff_id and district_id foreign keys for daily_field_reports
+        resolved_staff_id, resolved_district_id = resolve_staff_and_district_ids(
+            fo_name=report.fo_name,
+            district=report.working_place,
+            pin=getattr(report, "pin", None)
+        )
+        pg_payload["staff_id"] = resolved_staff_id
+        pg_payload["district_id"] = resolved_district_id
+
         # Upsert parent row in daily_field_reports and retrieve integer PK 'id'
         int_report_id = None
         if report_id and isinstance(report_id, int):
@@ -841,12 +869,12 @@ async def submit_daily_report(report: DailyActivityReport):
                 vals = [pg_payload[c] for c in cols]
                 col_names = ", ".join(cols)
                 placeholders = ", ".join(["%s"] * len(cols))
-                update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+                update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c not in ["legacy_doc_id", "staff_id", "date_of_reporting"])
                 ret_rows = pg_execute_raw(
                     f"""
                     INSERT INTO daily_field_reports ({col_names})
                     VALUES ({placeholders})
-                    ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set}
+                    ON CONFLICT (staff_id, date_of_reporting) DO UPDATE SET {update_set}
                     RETURNING id
                     """,
                     vals,
@@ -855,12 +883,30 @@ async def submit_daily_report(report: DailyActivityReport):
                 if ret_rows and len(ret_rows) > 0:
                     int_report_id = ret_rows[0].get("id")
             except Exception as ins_err:
-                print(f"[daily_field_reports insert RETURNING id notice]: {ins_err}")
-                pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
+                print(f"[daily_field_reports insert on staff_date conflict notice]: {ins_err}")
+                try:
+                    update_set_legacy = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+                    ret_rows2 = pg_execute_raw(
+                        f"""
+                        INSERT INTO daily_field_reports ({col_names})
+                        VALUES ({placeholders})
+                        ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set_legacy}
+                        RETURNING id
+                        """,
+                        vals,
+                        fetch=True
+                    )
+                    if ret_rows2 and len(ret_rows2) > 0:
+                        int_report_id = ret_rows2[0].get("id")
+                except Exception as ins_err2:
+                    print(f"[daily_field_reports insert on legacy_doc_id notice]: {ins_err2}")
+                    pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
 
         if not int_report_id:
             try:
                 look_row = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
+                if not look_row and resolved_staff_id:
+                    look_row = pg_fetch_one("daily_field_reports", filters={"staff_id": resolved_staff_id, "date_of_reporting": str(report.date_of_reporting)})
                 if look_row:
                     int_report_id = look_row.get("id")
             except Exception:

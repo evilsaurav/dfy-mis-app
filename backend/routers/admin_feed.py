@@ -23,7 +23,9 @@ from backend.core.helpers import (
     evict_officer_profile_cache,
     log_admin_activity,
     format_to_ist_time,
-    normalize_date_to_iso
+    normalize_date_to_iso,
+    resolve_staff_and_district_ids,
+    check_patient_id_90day_notification_duplicate
 )
 from backend.core.master_ledger import (
     get_cached_staff_directory_raw,
@@ -487,38 +489,62 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             current_list = list(data.get(cat_key, [])) if data else []
 
         old_id_clean = str(req.old_id).strip()
+        clean_new_id = str(req.new_id).strip() if req.new_id else ""
         
+        # 🛡️ 90-Day Rule for Notifications Only
         if cat_key == "notification_ids" and req.action in ["replace", "add"]:
-            clean_new_id = str(req.new_id).strip()
-            main_mod = sys.modules.get("main")
-            get_90day = getattr(main_mod, "get_district_90day_notified_ids", get_district_90day_notified_ids) if main_mod else get_district_90day_notified_ids
-            existing_notified_set = await get_90day(
-                clean_dist=c_wp,
-                exclude_doc_id=doc_id,
-                exclude_doc_ids=candidate_doc_ids,
-                months=3
+            dupe_info = check_patient_id_90day_notification_duplicate(
+                patient_id=clean_new_id,
+                district=c_wp,
+                reporting_date=clean_date,
+                exclude_report_id=int_report_id,
+                exclude_doc_ids=candidate_doc_ids
             )
-            if clean_new_id in existing_notified_set:
+            if dupe_info:
+                d_date = dupe_info.get("date_of_reporting")
+                d_fo = dupe_info.get("fo_name")
+                d_dist = dupe_info.get("working_place")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Patient ID {clean_new_id} is already notified in a different report."
                 )
 
+        # 🛡️ Same-Day Category Duplicate Prevention (HTTP 409)
+        if req.action == "add":
+            if int_report_id:
+                exists_row = pg_execute_raw(
+                    "SELECT 1 FROM report_kpi_entries WHERE report_id = %s AND category = %s AND patient_id = %s LIMIT 1",
+                    [int_report_id, cat_key, clean_new_id],
+                    fetch=True
+                )
+                if exists_row:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Patient ID '{clean_new_id}' is already present in this report for category '{cat_key}'."
+                    )
+            elif clean_new_id in current_list:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Patient ID '{clean_new_id}' is already present in this report for category '{cat_key}'."
+                )
+
         if req.action == "replace":
-            if old_id_clean not in current_list:
+            if old_id_clean not in current_list and not (int_report_id and any(r == old_id_clean for r in current_list)):
                 raise HTTPException(status_code=404, detail=f"Old ID '{old_id_clean}' not found in category '{cat_key}'.")
-            idx = current_list.index(old_id_clean)
-            current_list[idx] = req.new_id
+            if old_id_clean in current_list:
+                idx = current_list.index(old_id_clean)
+                current_list[idx] = clean_new_id
+            else:
+                current_list.append(clean_new_id)
             
         elif req.action == "delete":
-            if old_id_clean not in current_list:
+            if old_id_clean not in current_list and not (int_report_id and any(r == old_id_clean for r in current_list)):
                 raise HTTPException(status_code=404, detail=f"ID '{old_id_clean}' not found in category '{cat_key}'.")
-            current_list.remove(old_id_clean)
+            if old_id_clean in current_list:
+                current_list.remove(old_id_clean)
             
         elif req.action == "add":
-            if req.new_id in current_list:
-                raise HTTPException(status_code=400, detail=f"ID '{req.new_id}' is already present in this category.")
-            current_list.append(req.new_id)
+            current_list.append(clean_new_id)
 
         count_key = cat_key.replace("_ids", "")
         doc_update = {
@@ -530,57 +556,64 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         if cat_key == "notification_ids":
             doc_update["notifications"] = len(current_list)
 
+        cat_to_legacy = {
+            "notification_ids": "legacy_count_notifications",
+            "sample_tested_ids": "legacy_count_sample_tested",
+            "hiv_dm_ids": "legacy_count_hiv_dm",
+            "dbt_ids": "legacy_count_dbt",
+            "contact_tracing_ids": "legacy_count_contact_tracing",
+            "differentiated_tb_ids": "legacy_count_differentiated_tb",
+            "sample_collection_ids": "legacy_count_sample_collection",
+            "outcome_assigned_ids": "legacy_count_outcome_assigned",
+            "home_visit_ids": "legacy_count_home_visit",
+            "follow_up_ids": "legacy_count_follow_up",
+            "face_to_face_ids": "legacy_count_face_to_face",
+            "presumptive_ids": "legacy_count_presumptive",
+            "documents_ids": "legacy_count_documents",
+            "fdc_provided_ids": "legacy_count_fdc_provided",
+            "kit_consumption_ids": "legacy_count_kit_consumption",
+            "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
+            "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
+            "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
+            "consent_with_id_ids": "legacy_count_consent_with_id",
+            "culture_dst_ids": "legacy_count_culture_dst"
+        }
+        l_col = cat_to_legacy.get(cat_key)
+
+        # 🛡️ Safe Mutation: Update child table row and parent legacy_count_* atomically
         if int_report_id:
             try:
                 if req.action == "replace":
                     pg_execute_raw(
                         "UPDATE report_kpi_entries SET patient_id = %s WHERE report_id = %s AND category = %s AND patient_id = %s",
-                        [req.new_id, int_report_id, cat_key, old_id_clean]
+                        [clean_new_id, int_report_id, cat_key, old_id_clean]
+                    )
+                    pg_execute_raw(
+                        "UPDATE daily_field_reports SET last_edited_at = NOW(), last_edited_by = %s WHERE id = %s",
+                        [req.edited_by, int_report_id]
                     )
                 elif req.action == "delete":
                     pg_execute_raw(
                         "DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s AND patient_id = %s",
                         [int_report_id, cat_key, old_id_clean]
                     )
+                    if l_col:
+                        pg_execute_raw(
+                            f"UPDATE daily_field_reports SET {l_col} = GREATEST(0, COALESCE({l_col}, 0) - 1), last_edited_at = NOW(), last_edited_by = %s WHERE id = %s",
+                            [req.edited_by, int_report_id]
+                        )
                 elif req.action == "add":
                     pg_execute_raw(
                         "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                        [int_report_id, cat_key, req.new_id]
+                        [int_report_id, cat_key, clean_new_id]
                     )
+                    if l_col:
+                        pg_execute_raw(
+                            f"UPDATE daily_field_reports SET {l_col} = COALESCE({l_col}, 0) + 1, last_edited_at = NOW(), last_edited_by = %s WHERE id = %s",
+                            [req.edited_by, int_report_id]
+                        )
             except Exception as kpi_err:
-                print(f"[/edit-patient-id PG report_kpi_entries notice]: {kpi_err}")
-
-            try:
-                cat_to_legacy = {
-                    "notification_ids": "legacy_count_notifications",
-                    "sample_tested_ids": "legacy_count_sample_tested",
-                    "hiv_dm_ids": "legacy_count_hiv_dm",
-                    "dbt_ids": "legacy_count_dbt",
-                    "contact_tracing_ids": "legacy_count_contact_tracing",
-                    "differentiated_tb_ids": "legacy_count_differentiated_tb",
-                    "sample_collection_ids": "legacy_count_sample_collection",
-                    "outcome_assigned_ids": "legacy_count_outcome_assigned",
-                    "home_visit_ids": "legacy_count_home_visit",
-                    "follow_up_ids": "legacy_count_follow_up",
-                    "face_to_face_ids": "legacy_count_face_to_face",
-                    "presumptive_ids": "legacy_count_presumptive",
-                    "documents_ids": "legacy_count_documents",
-                    "fdc_provided_ids": "legacy_count_fdc_provided",
-                    "kit_consumption_ids": "legacy_count_kit_consumption",
-                    "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
-                    "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
-                    "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
-                    "consent_with_id_ids": "legacy_count_consent_with_id",
-                    "culture_dst_ids": "legacy_count_culture_dst"
-                }
-                l_col = cat_to_legacy.get(cat_key)
-                if l_col:
-                    pg_execute_raw(
-                        f"UPDATE daily_field_reports SET {l_col} = %s, last_edited_at = NOW(), last_edited_by = %s WHERE id = %s",
-                        [len(current_list), req.edited_by, int_report_id]
-                    )
-            except Exception as pg_up_err:
-                print(f"[/edit-patient-id PG daily_field_reports notice]: {pg_up_err}")
+                print(f"[/edit-patient-id PG report_kpi_entries mutation notice]: {kpi_err}")
 
         # 2. Mirror to mock store / active_db if in test environment
         if is_mock_env:
@@ -872,22 +905,27 @@ async def admin_feed_officer_data(
             if not new_report_created and doc_snap and hasattr(doc_snap, "to_dict"):
                 existing_day_notifs = set(doc_snap.to_dict().get("notification_ids", []) or [])
 
-            # Only check IDs that are genuinely NEW to this report
             new_notifs_to_check = [pid for pid in cleaned_payload["notification_ids"] if pid not in existing_day_notifs]
 
             if new_notifs_to_check:
                 resolved_exclude_docs = list(set(candidate_doc_ids + ([doc_id] if doc_id else [])))
-                existing_notified_set = await get_district_90day_notified_ids(
-                    clean_dist=clean_wp,
-                    exclude_doc_ids=resolved_exclude_docs,
-                    months=3
-                )
-                dupe_notifs = [pid for pid in new_notifs_to_check if pid in existing_notified_set]
+                dupe_notifs = []
+                for pid in new_notifs_to_check:
+                    clean_p = str(pid).strip()
+                    d_info = check_patient_id_90day_notification_duplicate(
+                        patient_id=clean_p,
+                        district=clean_wp,
+                        reporting_date=clean_date,
+                        exclude_doc_ids=resolved_exclude_docs
+                    )
+                    if d_info:
+                        dupe_notifs.append(f"{clean_p} (notified on {d_info.get('date_of_reporting')} by {d_info.get('fo_name')})")
+
                 if dupe_notifs:
-                    sample_dupes = ", ".join(dupe_notifs[:5])
+                    sample_dupes = ", ".join(dupe_notifs[:3])
                     raise HTTPException(
                         status_code=400,
-                        detail=f"Duplicate notification IDs detected in {clean_wp}: {sample_dupes}. Notification IDs cannot be re-used across reports."
+                        detail=f"Duplicate notification IDs detected in {clean_wp}: {sample_dupes}. Notification IDs cannot be re-used within 90 days."
                     )
 
         now_iso = datetime.utcnow().isoformat()
@@ -1018,18 +1056,27 @@ async def admin_feed_officer_data(
         if "pin" in full_report_data:
             pg_payload["pin_used"] = full_report_data["pin"]
 
+        # Resolve staff_id and district_id foreign keys
+        resolved_staff_id, resolved_district_id = resolve_staff_and_district_ids(
+            fo_name=clean_fo,
+            district=clean_wp,
+            pin="1234"
+        )
+        pg_payload["staff_id"] = resolved_staff_id
+        pg_payload["district_id"] = resolved_district_id
+
         pg_rep_id = None
         try:
             cols = list(pg_payload.keys())
             vals = [pg_payload[c] for c in cols]
             col_names = ", ".join(cols)
             placeholders = ", ".join(["%s"] * len(cols))
-            update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+            update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c not in ["legacy_doc_id", "staff_id", "date_of_reporting"])
             ret_rows = pg_execute_raw(
                 f"""
                 INSERT INTO daily_field_reports ({col_names})
                 VALUES ({placeholders})
-                ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set}
+                ON CONFLICT (staff_id, date_of_reporting) DO UPDATE SET {update_set}
                 RETURNING id
                 """,
                 vals,
@@ -1038,12 +1085,30 @@ async def admin_feed_officer_data(
             if ret_rows and len(ret_rows) > 0:
                 pg_rep_id = ret_rows[0].get("id")
         except Exception as pg_err:
-            print(f"[Admin Feed PG Write Notice] {pg_err}")
-            pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
+            print(f"[Admin Feed PG Write on staff_date Notice] {pg_err}")
+            try:
+                update_set_legacy = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+                ret_rows2 = pg_execute_raw(
+                    f"""
+                    INSERT INTO daily_field_reports ({col_names})
+                    VALUES ({placeholders})
+                    ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set_legacy}
+                    RETURNING id
+                    """,
+                    vals,
+                    fetch=True
+                )
+                if ret_rows2 and len(ret_rows2) > 0:
+                    pg_rep_id = ret_rows2[0].get("id")
+            except Exception as pg_err2:
+                print(f"[Admin Feed PG Write on legacy_doc_id Notice] {pg_err2}")
+                pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
 
         if not pg_rep_id:
             try:
                 look_row = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
+                if not look_row and resolved_staff_id:
+                    look_row = pg_fetch_one("daily_field_reports", filters={"staff_id": resolved_staff_id, "date_of_reporting": clean_date})
                 if look_row:
                     pg_rep_id = look_row.get("id")
             except Exception:
@@ -1231,6 +1296,10 @@ async def admin_feed_officer_data(
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
+        cache.delete_prefix("master_reports_")
+        cache.delete_prefix("district_reports_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("kpi_")
         evict_officer_profile_cache(clean_wp, clean_fo, clean_date)
 
         return {
@@ -1702,6 +1771,18 @@ async def admin_edit_day_report(
                             clean_new_ids.append(cid)
                     
                     old_ids = list(old_data.get(cat_key, []))
+                    for d in matching_docs:
+                        d_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
+                        if d_id and str(d_id).isdigit():
+                            k_rows = pg_execute_raw(
+                                "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND category = %s",
+                                [int(d_id), cat_key],
+                                fetch=True
+                            )
+                            if k_rows:
+                                old_ids = [str(r["patient_id"]).strip() for r in k_rows]
+                            break
+
                     doc_update[cat_key] = clean_new_ids
                     count_key = cat_key.replace("_ids", "")
                     doc_update[count_key] = len(clean_new_ids)
@@ -1710,6 +1791,20 @@ async def admin_edit_day_report(
 
                     added = [x for x in clean_new_ids if x not in old_ids]
                     deleted = [x for x in old_ids if x not in clean_new_ids]
+
+                    if cat_key == "notification_ids" and added:
+                        for aid in added:
+                            d_info = check_patient_id_90day_notification_duplicate(
+                                patient_id=aid,
+                                district=clean_wp,
+                                reporting_date=clean_date,
+                                exclude_doc_ids=[str(getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else "")) for d in matching_docs]
+                            )
+                            if d_info:
+                                raise HTTPException(
+                                    status_code=400,
+                                    detail=f"Patient ID {aid} is already notified on {d_info.get('date_of_reporting')} by {d_info.get('fo_name')} ({d_info.get('working_place')}) within the last 90 days."
+                                )
 
                     all_added_ids.extend([{"cat": cat_key, "id": x} for x in added])
                     all_deleted_ids.extend([{"cat": cat_key, "id": x} for x in deleted])
