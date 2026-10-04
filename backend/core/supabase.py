@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import threading
+from contextlib import contextmanager
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 
@@ -44,7 +46,105 @@ def get_supabase_client():
             return _supabase_client
         except Exception as e:
             print(f"[Supabase Init Notice] {e}")
-    return None
+_postgres_pool = None
+_pool_lock = threading.Lock()
+
+def get_postgres_pool(minconn: int = 2, maxconn: int = 8):
+    """
+    Lazily initializes ThreadedConnectionPool (minconn=2, maxconn=8)
+    for high-performance PostgreSQL connection multiplexing.
+    """
+    global _postgres_pool
+    if _postgres_pool is not None and not getattr(_postgres_pool, "closed", True):
+        return _postgres_pool
+
+    import sys
+    if ("pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")) and not os.environ.get("TEST_LIVE_DB"):
+        return None
+
+    db_url = (
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("POSTGRES_URL")
+        or os.environ.get("SUPABASE_DB_URL")
+        or os.environ.get("POSTGRESQL_URL")
+    )
+    if not db_url:
+        return None
+
+    with _pool_lock:
+        if _postgres_pool is not None and not getattr(_postgres_pool, "closed", True):
+            return _postgres_pool
+        try:
+            from psycopg2 import pool
+            if db_url.startswith("postgres://"):
+                db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+            conn_kwargs = {"connect_timeout": 10}
+            if "sslmode" not in db_url and not any(h in db_url for h in ("localhost", "127.0.0.1")):
+                conn_kwargs["sslmode"] = "require"
+
+            _postgres_pool = pool.ThreadedConnectionPool(
+                minconn=minconn,
+                maxconn=maxconn,
+                dsn=db_url,
+                **conn_kwargs
+            )
+            logger.info(f"PostgreSQL ThreadedConnectionPool initialized (minconn={minconn}, maxconn={maxconn})")
+            return _postgres_pool
+        except Exception as e:
+            logger.error(f"[PostgreSQL Pool Init Error] Failed to initialize connection pool: {e}")
+            return None
+
+def close_postgres_pool():
+    """Closes all connections in the pool cleanly on server shutdown."""
+    global _postgres_pool
+    with _pool_lock:
+        if _postgres_pool is not None and not getattr(_postgres_pool, "closed", True):
+            try:
+                _postgres_pool.closeall()
+                logger.info("PostgreSQL ThreadedConnectionPool closed cleanly.")
+            except Exception as e:
+                logger.error(f"[PostgreSQL Pool Close Error] {e}")
+            _postgres_pool = None
+
+@contextmanager
+def get_db_connection():
+    """
+    Acquires a connection from ThreadedConnectionPool if available,
+    falling back to a direct connection. Safely returns connection to pool on completion.
+    """
+    p = get_postgres_pool()
+    conn = None
+    from_pool = False
+
+    if p:
+        try:
+            conn = p.getconn()
+            from_pool = True
+        except Exception as pe:
+            logger.error(f"[PostgreSQL Pool Exhausted] Could not acquire connection from pool: {pe}")
+            conn = None
+
+    if conn is None and not from_pool:
+        conn = get_postgres_connection()
+
+    try:
+        yield conn
+    finally:
+        if conn:
+            if from_pool and p and not getattr(p, "closed", True):
+                try:
+                    p.putconn(conn)
+                except Exception:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
 def get_postgres_connection():
     """Establishes connection to PostgreSQL using standard connection URLs with SSL and timeout enforcement."""
@@ -953,43 +1053,38 @@ def pg_execute_raw(sql: str, params: Optional[List] = None, fetch: bool = False)
     Execute raw SQL via psycopg2. Returns rows if fetch=True, else True/False.
     Falls back to active_db query/update simulation when psycopg2 is not connected.
     """
-    conn = get_postgres_connection()
-    if conn:
-        try:
-            import psycopg2.extras
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(sql, params or [])
-                if fetch:
-                    rows = cur.fetchall()
+    with get_db_connection() as conn:
+        if conn:
+            try:
+                import psycopg2.extras
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(sql, params or [])
+                    if fetch:
+                        rows = cur.fetchall()
+                        conn.commit()
+                        return [dict(r) for r in rows] if rows else []
                     conn.commit()
-                    return [dict(r) for r in rows] if rows else []
-                conn.commit()
-                return True
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.error(f"[pg_execute_raw Error] Query execution failed: {e}\nSQL: {sql[:150]}\nParams: {params}")
-            raise
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    else:
-        import sys
-        active_db = get_active_db()
-        is_mock_or_test = (
-            "pytest" in sys.modules
-            or os.environ.get("PYTEST_CURRENT_TEST")
-            or (active_db is not None and (
-                hasattr(active_db, "mock_calls") or hasattr(active_db, "reports") or hasattr(active_db, "store")
-            ))
-        )
-        if not is_mock_or_test:
-            logger.error("PostgreSQL connection pool exhausted or DATABASE_URL invalid")
-            raise RuntimeError("Database connection unavailable: PostgreSQL connection failed or DATABASE_URL is invalid.")
+                    return True
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error(f"[pg_execute_raw Error] Query execution failed: {e}\nSQL: {sql[:150]}\nParams: {params}")
+                raise
+        else:
+            import sys
+            active_db = get_active_db()
+            is_mock_or_test = (
+                "pytest" in sys.modules
+                or os.environ.get("PYTEST_CURRENT_TEST")
+                or (active_db is not None and (
+                    hasattr(active_db, "mock_calls") or hasattr(active_db, "reports") or hasattr(active_db, "store")
+                ))
+            )
+            if not is_mock_or_test:
+                logger.error("PostgreSQL connection pool exhausted or DATABASE_URL invalid")
+                raise RuntimeError("Database connection unavailable: PostgreSQL connection failed or DATABASE_URL is invalid.")
 
     # Fallback when no PostgreSQL connection
     if not fetch:
