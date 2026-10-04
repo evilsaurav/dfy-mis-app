@@ -789,28 +789,87 @@ async def submit_daily_report(report: DailyActivityReport):
         for cat in array_columns_to_strip:
             pg_payload.pop(cat, None)
 
-        # Set integer counts on pg_payload
-        pg_payload["notifications"] = len(payload.get("notification_ids") or [])
-        pg_payload["tests"] = len(payload.get("sample_tested_ids") or [])
-        pg_payload["hiv_dm"] = len(payload.get("hiv_dm_ids") or [])
-        pg_payload["dbt"] = len(payload.get("dbt_ids") or [])
-        pg_payload["contact_tracing"] = len(payload.get("contact_tracing_ids") or [])
-        pg_payload["differentiated_tb"] = len(payload.get("differentiated_tb_ids") or [])
-        pg_payload["legacy_count_notifications"] = pg_payload["notifications"]
+        # Map counts to valid PostgreSQL legacy_count_* columns (NO phantom columns like 'notifications')
+        cat_to_legacy_metric = {
+            "notification_ids": "legacy_count_notifications",
+            "sample_tested_ids": "legacy_count_sample_tested",
+            "hiv_dm_ids": "legacy_count_hiv_dm",
+            "dbt_ids": "legacy_count_dbt",
+            "sample_collection_ids": "legacy_count_sample_collection",
+            "contact_tracing_ids": "legacy_count_contact_tracing",
+            "differentiated_tb_ids": "legacy_count_differentiated_tb",
+            "home_visit_ids": "legacy_count_home_visit",
+            "outcome_assigned_ids": "legacy_count_outcome_assigned",
+            "follow_up_ids": "legacy_count_follow_up",
+            "face_to_face_ids": "legacy_count_face_to_face",
+            "presumptive_ids": "legacy_count_presumptive",
+            "documents_ids": "legacy_count_documents",
+            "fdc_provided_ids": "legacy_count_fdc_provided",
+            "kit_consumption_ids": "legacy_count_kit_consumption",
+            "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
+            "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
+            "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
+            "consent_with_id_ids": "legacy_count_consent_with_id",
+            "culture_dst_ids": "legacy_count_culture_dst"
+        }
+        for k_cat, l_col in cat_to_legacy_metric.items():
+            pg_payload[l_col] = len(payload.get(k_cat) or [])
         pg_payload["legacy_doc_id"] = doc_id
 
-        # Upsert parent row in daily_field_reports
+        if "pin" in pg_payload:
+            pg_payload["pin_used"] = pg_payload.pop("pin")
+
+        for p_cat in [
+            "notification", "notifications", "tests", "sample_tested", "hiv_dm", "dbt",
+            "contact_tracing", "differentiated_tb", "sample_collection", "outcome_assigned",
+            "home_visit", "follow_up", "face_to_face", "presumptive", "documents",
+            "fdc_provided", "kit_consumption", "tpt_treatment_start", "tpt_presumptive",
+            "adhar_face_authentication", "consent_with_id", "culture_dst"
+        ]:
+            pg_payload.pop(p_cat, None)
+
+        # Upsert parent row in daily_field_reports and retrieve integer PK 'id'
+        int_report_id = None
         if report_id and isinstance(report_id, int):
-            pg_payload["id"] = report_id
+            int_report_id = report_id
+            pg_payload["id"] = int_report_id
             pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["id"])
         else:
             pg_payload.pop("id", None)
-            upsert_res = pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
-            if upsert_res and isinstance(upsert_res, dict) and upsert_res.get("id"):
-                report_id = upsert_res.get("id")
+            try:
+                cols = list(pg_payload.keys())
+                vals = [pg_payload[c] for c in cols]
+                col_names = ", ".join(cols)
+                placeholders = ", ".join(["%s"] * len(cols))
+                update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+                ret_rows = pg_execute_raw(
+                    f"""
+                    INSERT INTO daily_field_reports ({col_names})
+                    VALUES ({placeholders})
+                    ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set}
+                    RETURNING id
+                    """,
+                    vals,
+                    fetch=True
+                )
+                if ret_rows and len(ret_rows) > 0:
+                    int_report_id = ret_rows[0].get("id")
+            except Exception as ins_err:
+                print(f"[daily_field_reports insert RETURNING id notice]: {ins_err}")
+                pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
 
-        if not report_id:
-            report_id = (existing_report.get("id") if existing_report else None) or doc_id
+        if not int_report_id:
+            try:
+                look_row = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
+                if look_row:
+                    int_report_id = look_row.get("id")
+            except Exception:
+                pass
+
+        if not int_report_id and existing_report and isinstance(existing_report.get("id"), int):
+            int_report_id = existing_report.get("id")
+
+        report_id = int_report_id or doc_id
 
         # Maintain mirror write to active_db for unit tests
         active_db = get_active_db()
@@ -820,61 +879,112 @@ async def submit_daily_report(report: DailyActivityReport):
             except Exception:
                 pass
 
-        # Write to child tables
-        if report_id:
+        # Write to child tables ONLY if we have an integer report_id
+        if int_report_id and isinstance(int_report_id, int):
             # 1. report_kpi_entries
             try:
-                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [report_id])
+                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [int_report_id])
+                kpi_entries_batch = []
                 for category in [c for c in payload.keys() if c.endswith("_ids") and isinstance(payload.get(c), list)]:
                     for pid in payload[category]:
                         clean_pid = str(pid).strip()
                         if clean_pid:
-                            pg_execute_raw(
-                                "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                                [report_id, category, clean_pid]
-                            )
+                            kpi_entries_batch.append((int_report_id, category, clean_pid))
+                if kpi_entries_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s",
+                                    kpi_entries_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as kpi_err:
                 print(f"[report_kpi_entries Write Notice] {kpi_err}")
 
             # 2. report_fdc_details
             try:
-                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [report_id])
+                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [int_report_id])
+                fdc_batch = []
                 for idx, item in enumerate(payload.get("fdc_details") or []):
                     if isinstance(item, dict):
-                        pg_execute_raw(
-                            """INSERT INTO report_fdc_details 
-                               (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, patient_name, patient_type, weight_kg, weight_band, daily_tablets, strips, recommended_strips, supply_issued, position) 
-                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                            [
-                                report_id,
-                                str(item.get("patient_id") or item.get("id") or ""),
-                                str(item.get("fdc_type") or ""),
-                                str(item.get("regimen_name") or ""),
-                                str(item.get("phase") or ""),
-                                str(item.get("daily_dose_text") or ""),
-                                str(item.get("patient_name") or ""),
-                                str(item.get("patient_type") or ""),
-                                str(item.get("weight_kg") or ""),
-                                str(item.get("weight_band") or ""),
-                                str(item.get("daily_tablets") or ""),
-                                str(item.get("strips") or ""),
-                                str(item.get("recommended_strips") or ""),
-                                str(item.get("supply_issued") or ""),
-                                idx
-                            ]
-                        )
+                        w_kg = float(item["weight_kg"]) if (item.get("weight_kg") is not None and str(item.get("weight_kg")).strip()) else None
+                        d_tab = int(item["daily_tablets"]) if (item.get("daily_tablets") is not None and str(item.get("daily_tablets")).strip()) else None
+                        strp = int(item["strips"]) if (item.get("strips") is not None and str(item.get("strips")).strip()) else None
+                        rec_strp = int(item["recommended_strips"]) if (item.get("recommended_strips") is not None and str(item.get("recommended_strips")).strip()) else None
+                        fdc_batch.append((
+                            int_report_id,
+                            str(item.get("patient_id") or item.get("id") or ""),
+                            str(item.get("fdc_type") or ""),
+                            str(item.get("regimen_name") or ""),
+                            str(item.get("phase") or ""),
+                            str(item.get("daily_dose_text") or ""),
+                            str(item.get("patient_name") or ""),
+                            str(item.get("patient_type") or ""),
+                            w_kg,
+                            str(item.get("weight_band") or ""),
+                            d_tab,
+                            strp,
+                            rec_strp,
+                            str(item.get("supply_issued") or ""),
+                            idx
+                        ))
+                if fdc_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    """INSERT INTO report_fdc_details 
+                                       (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, 
+                                        patient_name, patient_type, weight_kg, weight_band, daily_tablets, 
+                                        strips, recommended_strips, supply_issued, position) 
+                                       VALUES %s""",
+                                    fdc_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as fdc_err:
                 print(f"[report_fdc_details Write Notice] {fdc_err}")
 
             # 3. report_visited_names
             try:
-                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [report_id])
+                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [int_report_id])
+                visited_batch = []
                 for idx, name in enumerate(payload.get("visited_names") or []):
                     if name and str(name).strip():
-                        pg_execute_raw(
-                            "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
-                            [report_id, str(name).strip(), idx]
-                        )
+                        visited_batch.append((int_report_id, str(name).strip(), idx))
+                if visited_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO report_visited_names (report_id, name, position) VALUES %s",
+                                    visited_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as names_err:
                 print(f"[report_visited_names Write Notice] {names_err}")
 

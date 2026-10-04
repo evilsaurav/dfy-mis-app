@@ -20,7 +20,10 @@ from backend.core.master_ledger import (
     get_directory,
     invalidate_staff_directory_cache
 )
-from backend.core.supabase import pg_fetch_one, pg_upsert_row, pg_query_table, pg_execute_raw
+from backend.core.supabase import (
+    pg_fetch_one, pg_upsert_row, pg_query_table, pg_execute_raw,
+    get_active_db, get_postgres_connection
+)
 
 router = APIRouter(tags=["targets"])
 
@@ -342,46 +345,69 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
             except Exception as st_err:
                 print(f"[staff_targets PG Write Notice] {st_err}")
 
-        # 3. Mirror to mock store for test harness
-        pg_upsert_row("staff_targets", {
-            "id": month_doc_id,
-            "month": month,
-            "district": clean_dist,
-            "fo_name": clean_name,
-            "target": int(data.target),
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }, conflict_columns=["id"])
-        
-        fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
-        pg_upsert_row("staff_targets", {
-            "id": fallback_doc_id,
-            "district": clean_dist,
-            "fo_name": clean_name,
-            "target": int(data.target),
-            "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }, conflict_columns=["id"])
+        # 3. Mirror directly to active_db for test harness & mock resilience
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                active_db.collection("staff_targets").document(month_doc_id).set({
+                    "id": month_doc_id,
+                    "month": month,
+                    "district": clean_dist,
+                    "fo_name": clean_name,
+                    "target": int(data.target),
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }, merge=True)
+                fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
+                active_db.collection("staff_targets").document(fallback_doc_id).set({
+                    "id": fallback_doc_id,
+                    "district": clean_dist,
+                    "fo_name": clean_name,
+                    "target": int(data.target),
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }, merge=True)
+            except Exception:
+                pass
         
         # Synchronize alias records if applicable
         if clean_dist.lower() == "muzaffarpur" and clean_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
             for alias in ("Vinay Prakash", "Vinay Kumar"):
                 if alias.lower() != clean_name.lower():
-                    a_mid = f"{month}_{clean_dist}_{alias}".replace(" ", "").lower()
-                    a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
-                    pg_upsert_row("staff_targets", {
-                        "id": a_mid,
-                        "month": month,
-                        "district": clean_dist,
-                        "fo_name": alias,
-                        "target": int(data.target),
-                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, conflict_columns=["id"])
-                    pg_upsert_row("staff_targets", {
-                        "id": a_fid,
-                        "district": clean_dist,
-                        "fo_name": alias,
-                        "target": int(data.target),
-                        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    }, conflict_columns=["id"])
+                    try:
+                        alias_rows = pg_execute_raw(
+                            "SELECT id FROM staff_directory WHERE LOWER(district) = 'muzaffarpur' AND LOWER(TRIM(name)) = LOWER(%s) LIMIT 1",
+                            [alias],
+                            fetch=True
+                        )
+                        if alias_rows:
+                            pg_execute_raw("""
+                                INSERT INTO staff_targets (staff_id, month, target, updated_at, legacy_doc_id)
+                                VALUES (%s, %s, %s, NOW(), %s)
+                                ON CONFLICT (staff_id, month)
+                                DO UPDATE SET target = EXCLUDED.target, updated_at = NOW(), legacy_doc_id = EXCLUDED.legacy_doc_id
+                            """, [alias_rows[0]["id"], month_sql_val, int(data.target), f"{month}_{clean_dist}_{alias}".replace(" ", "").lower()])
+                    except Exception:
+                        pass
+                    if active_db and hasattr(active_db, "collection"):
+                        try:
+                            a_mid = f"{month}_{clean_dist}_{alias}".replace(" ", "").lower()
+                            a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
+                            active_db.collection("staff_targets").document(a_mid).set({
+                                "id": a_mid,
+                                "month": month,
+                                "district": clean_dist,
+                                "fo_name": alias,
+                                "target": int(data.target),
+                                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }, merge=True)
+                            active_db.collection("staff_targets").document(a_fid).set({
+                                "id": a_fid,
+                                "district": clean_dist,
+                                "fo_name": alias,
+                                "target": int(data.target),
+                                "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            }, merge=True)
+                        except Exception:
+                            pass
 
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
@@ -440,16 +466,6 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         except Exception as dt_pg_err:
             print(f"[district_targets PG Upsert Notice] {dt_pg_err}")
 
-        pg_upsert_row("district_targets", {
-            "id": month_doc_id,
-            "month": month,
-            "district": clean_dist,
-            "official_target": target_val,
-            "updated_at": now_str,
-            "updated_by": actor_name,
-            "updated_by_role": actor_role
-        }, conflict_columns=["id"])
-
         # 2. General fallback record: {clean_dist}
         fallback_doc_id = clean_dist.replace(" ", "").lower()
         try:
@@ -462,14 +478,29 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         except Exception:
             pass
 
-        pg_upsert_row("district_targets", {
-            "id": fallback_doc_id,
-            "district": clean_dist,
-            "official_target": target_val,
-            "updated_at": now_str,
-            "updated_by": actor_name,
-            "updated_by_role": actor_role
-        }, conflict_columns=["id"])
+        # 3. Mirror directly to active_db for test harness & mock resilience
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                active_db.collection("district_targets").document(month_doc_id).set({
+                    "id": month_doc_id,
+                    "month": month,
+                    "district": clean_dist,
+                    "official_target": target_val,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, merge=True)
+                active_db.collection("district_targets").document(fallback_doc_id).set({
+                    "id": fallback_doc_id,
+                    "district": clean_dist,
+                    "official_target": target_val,
+                    "updated_at": now_str,
+                    "updated_by": actor_name,
+                    "updated_by_role": actor_role
+                }, merge=True)
+            except Exception:
+                pass
 
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
@@ -521,46 +552,66 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
                 raise HTTPException(status_code=400, detail=f"Official target for '{clean_dist}' cannot be negative.")
             valid_items.append((clean_dist, target_val))
 
-        def _batch_district_write():
-            for cd, tv in valid_items:
-                m_id = f"{month}_{cd}".replace(" ", "").lower()
-                f_id = cd.replace(" ", "").lower()
-                try:
-                    pg_execute_raw("""
+        if not valid_items:
+            return {
+                "success": True, 
+                "month": month, 
+                "count": 0, 
+                "updated_districts": [], 
+                "message": "No valid district targets to update."
+            }
+
+        # 1. Prepare batch records for atomic SQL execution
+        batch_dist_params = []
+        mock_dist_docs = []
+        for cd, tv in valid_items:
+            m_id = f"{month}_{cd}".replace(" ", "").lower()
+            f_id = cd.replace(" ", "").lower()
+            batch_dist_params.append((m_id, cd, month, tv, actor_name))
+            batch_dist_params.append((f_id, cd, None, tv, actor_name))
+            mock_dist_docs.append((m_id, {
+                "id": m_id, "month": month, "district": cd, "official_target": tv,
+                "updated_at": now_str, "updated_by": actor_name, "updated_by_role": actor_role
+            }))
+            mock_dist_docs.append((f_id, {
+                "id": f_id, "district": cd, "official_target": tv,
+                "updated_at": now_str, "updated_by": actor_name, "updated_by_role": actor_role
+            }))
+
+        # 2. Single batch SQL execution in PostgreSQL (< 30ms)
+        conn = get_postgres_connection()
+        if conn:
+            try:
+                import psycopg2.extras
+                with conn.cursor() as cur:
+                    psycopg2.extras.execute_values(
+                        cur,
+                        """
                         INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
-                        VALUES (%s, %s, %s, %s, NOW(), %s)
+                        VALUES %s
                         ON CONFLICT (id)
                         DO UPDATE SET district = EXCLUDED.district, month = EXCLUDED.month, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
-                    """, [m_id, cd, month, tv, actor_name])
-                    pg_execute_raw("""
-                        INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
-                        VALUES (%s, %s, %s, %s, NOW(), %s)
-                        ON CONFLICT (id)
-                        DO UPDATE SET district = EXCLUDED.district, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
-                    """, [f_id, cd, None, tv, actor_name])
-                except Exception as b_err:
-                    print(f"[district_targets Bulk PG Notice] {b_err}")
+                        """,
+                        batch_dist_params,
+                        template="(%s, %s, %s, %s, NOW(), %s)"
+                    )
+                conn.commit()
+            except Exception as dt_batch_err:
+                print(f"[district_targets Bulk execute_values Notice] {dt_batch_err}")
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-                pg_upsert_row("district_targets", {
-                    "id": m_id,
-                    "month": month,
-                    "district": cd,
-                    "official_target": tv,
-                    "updated_at": now_str,
-                    "updated_by": actor_name,
-                    "updated_by_role": actor_role
-                }, conflict_columns=["id"])
-                pg_upsert_row("district_targets", {
-                    "id": f_id,
-                    "district": cd,
-                    "official_target": tv,
-                    "updated_at": now_str,
-                    "updated_by": actor_name,
-                    "updated_by_role": actor_role
-                }, conflict_columns=["id"])
-
-        if valid_items:
-            await asyncio.to_thread(_batch_district_write)
+        # 3. Mirror directly to active_db for test harness
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                for doc_id, doc_data in mock_dist_docs:
+                    active_db.collection("district_targets").document(doc_id).set(doc_data, merge=True)
+            except Exception:
+                pass
 
         updated_districts = [cd for cd, _ in valid_items]
 
@@ -594,6 +645,7 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
 async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends(get_current_admin)):
     try:
         month = data.month or datetime.now().strftime("%Y-%m")
+        month_sql_val = f"{month[:7]}-01"
         actor_name = admin.get("name") or admin.get("username", "Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         actor_role = admin.get("role", "SUB_ADMIN")
@@ -615,48 +667,113 @@ async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends
                 raise HTTPException(status_code=400, detail=f"Target for {t.fo_name} cannot be negative.")
             valid_items.append((clean_dist, t.fo_name.strip(), t_val))
 
-        def _batch_staff_write():
-            for c_dist, c_name, val in valid_items:
-                m_id = f"{month}_{c_dist}_{c_name}".replace(" ", "").lower()
-                f_id = f"{c_dist}_{c_name}".replace(" ", "").lower()
-                pg_upsert_row("staff_targets", {
-                    "id": m_id,
-                    "month": month,
-                    "district": c_dist,
-                    "fo_name": c_name,
-                    "target": val,
-                    "updated_at": now_str
-                }, conflict_columns=["id"])
-                pg_upsert_row("staff_targets", {
-                    "id": f_id,
-                    "district": c_dist,
-                    "fo_name": c_name,
-                    "target": val,
-                    "updated_at": now_str
-                }, conflict_columns=["id"])
-                if c_dist.lower() == "muzaffarpur" and c_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
-                    for alias in ("Vinay Prakash", "Vinay Kumar"):
-                        if alias.lower() != c_name.lower():
-                            a_mid = f"{month}_{c_dist}_{alias}".replace(" ", "").lower()
-                            a_fid = f"{c_dist}_{alias}".replace(" ", "").lower()
-                            pg_upsert_row("staff_targets", {
-                                "id": a_mid,
-                                "month": month,
-                                "district": c_dist,
-                                "fo_name": alias,
-                                "target": val,
-                                "updated_at": now_str
-                            }, conflict_columns=["id"])
-                            pg_upsert_row("staff_targets", {
-                                "id": a_fid,
-                                "district": c_dist,
-                                "fo_name": alias,
-                                "target": val,
-                                "updated_at": now_str
-                            }, conflict_columns=["id"])
+        if not valid_items:
+            return {
+                "success": True, 
+                "month": month, 
+                "count": 0, 
+                "message": "No valid staff targets to update."
+            }
 
-        if valid_items:
-            await asyncio.to_thread(_batch_staff_write)
+        # 1. Fetch staff directory in 1 single query for instantaneous in-memory lookup
+        staff_rows = []
+        try:
+            staff_rows = pg_execute_raw(
+                "SELECT id, name, district, slug FROM staff_directory WHERE deleted_at IS NULL",
+                fetch=True
+            ) or []
+        except Exception as st_err:
+            print(f"[Bulk Staff Directory Notice] {st_err}")
+
+        if not staff_rows:
+            raw_staff = await get_cached_staff_directory_raw()
+            staff_rows = raw_staff or []
+
+        staff_map = {}
+        for s in staff_rows:
+            s_id = s.get("id")
+            if not s_id:
+                continue
+            s_dist = canonicalize_district(s.get("district") or "").lower()
+            s_name = str(s.get("name") or "").strip().lower()
+            s_slug = str(s.get("slug") or "").strip().lower()
+            staff_map[(s_dist, s_name)] = s_id
+            if s_slug:
+                staff_map[(s_dist, s_slug)] = s_id
+
+        # 2. Prepare batch params for single atomic SQL upsert
+        batch_params = []
+        mock_docs = []
+        for c_dist, c_name, val in valid_items:
+            s_id = staff_map.get((c_dist.lower(), c_name.lower()))
+            if not s_id:
+                for (sd, sn), candidate_id in staff_map.items():
+                    if sd == c_dist.lower() and is_officer_name_match(sn, c_name, c_dist):
+                        s_id = candidate_id
+                        break
+
+            m_id = f"{month}_{c_dist}_{c_name}".replace(" ", "").lower()
+            f_id = f"{c_dist}_{c_name}".replace(" ", "").lower()
+            if s_id:
+                batch_params.append((s_id, month_sql_val, val, m_id))
+
+            mock_docs.append((m_id, {
+                "id": m_id, "month": month, "district": c_dist, "fo_name": c_name, "target": val, "updated_at": now_str
+            }))
+            mock_docs.append((f_id, {
+                "id": f_id, "district": c_dist, "fo_name": c_name, "target": val, "updated_at": now_str
+            }))
+
+            if c_dist.lower() == "muzaffarpur" and c_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
+                for alias in ("Vinay Prakash", "Vinay Kumar"):
+                    if alias.lower() != c_name.lower():
+                        alias_sid = staff_map.get((c_dist.lower(), alias.lower()))
+                        a_mid = f"{month}_{c_dist}_{alias}".replace(" ", "").lower()
+                        a_fid = f"{c_dist}_{alias}".replace(" ", "").lower()
+                        if alias_sid:
+                            batch_params.append((alias_sid, month_sql_val, val, a_mid))
+                        mock_docs.append((a_mid, {
+                            "id": a_mid, "month": month, "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
+                        }))
+                        mock_docs.append((a_fid, {
+                            "id": a_fid, "district": c_dist, "fo_name": alias, "target": val, "updated_at": now_str
+                        }))
+
+        # 3. Single atomic SQL upsert in PostgreSQL using execute_values (< 50ms)
+        if batch_params:
+            conn = get_postgres_connection()
+            if conn:
+                try:
+                    import psycopg2.extras
+                    with conn.cursor() as cur:
+                        psycopg2.extras.execute_values(
+                            cur,
+                            """
+                            INSERT INTO staff_targets (staff_id, month, target, updated_at, legacy_doc_id)
+                            VALUES %s
+                            ON CONFLICT (staff_id, month)
+                            DO UPDATE SET target = EXCLUDED.target, updated_at = NOW(), legacy_doc_id = EXCLUDED.legacy_doc_id
+                            """,
+                            batch_params,
+                            template="(%s, %s, %s, NOW(), %s)"
+                        )
+                    conn.commit()
+                except Exception as b_pg_err:
+                    print(f"[staff_targets Bulk execute_values Notice] {b_pg_err}")
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        # 4. Mirror directly to active_db for test harness
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                for doc_id, doc_data in mock_docs:
+                    active_db.collection("staff_targets").document(doc_id).set(doc_data, merge=True)
+            except Exception:
+                pass
 
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
@@ -677,7 +794,7 @@ async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends
         return {
             "success": True, 
             "month": month, 
-            "count": len(valid_items),
+            "count": len(valid_items), 
             "message": f"Successfully updated targets for {len(valid_items)} staff members!"
         }
     except HTTPException:

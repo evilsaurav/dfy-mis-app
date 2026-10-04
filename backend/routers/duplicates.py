@@ -376,24 +376,29 @@ async def repair_duplicate_notifications(
             # PostgreSQL persistence
             pg_rep = None
             try:
-                pg_rep = pg_fetch_one("daily_field_reports", filters={"id": clean_doc_id}) or pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": clean_doc_id})
+                if str(clean_doc_id).isdigit():
+                    pg_rep = pg_fetch_one("daily_field_reports", filters={"id": int(clean_doc_id)})
+                if not pg_rep:
+                    pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": clean_doc_id})
             except Exception:
                 pass
-            report_id = (pg_rep.get("id") if pg_rep else None) or clean_doc_id
+            int_report_id = pg_rep.get("id") if (pg_rep and isinstance(pg_rep.get("id"), int)) else None
+            if not int_report_id and str(clean_doc_id).isdigit():
+                int_report_id = int(clean_doc_id)
 
-            if report_id and dupe_set:
+            if int_report_id and dupe_set:
                 try:
                     pg_execute_raw(
-                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND category IN ('notification_ids', 'notifications') AND patient_id = ANY(%s)",
-                        [report_id, list(dupe_set)]
+                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND category = 'notification_ids' AND patient_id = ANY(%s)",
+                        [int_report_id, list(dupe_set)]
                     )
                 except Exception as del_err:
                     print(f"[repair-duplicate PG child delete notice]: {del_err}")
 
                 try:
                     pg_execute_raw(
-                        "UPDATE daily_field_reports SET notifications = %s, last_repaired_at = %s, last_repaired_by = %s WHERE id = %s",
-                        [len(filtered), get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), admin.get("username") or admin.get("user_id") or "admin", report_id]
+                        "UPDATE daily_field_reports SET legacy_count_notifications = %s, last_repaired_at = %s, last_repaired_by = %s WHERE id = %s",
+                        [len(filtered), get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), admin.get("username") or admin.get("user_id") or "admin", int_report_id]
                     )
                 except Exception as upd_err:
                     print(f"[repair-duplicate PG parent update notice]: {upd_err}")

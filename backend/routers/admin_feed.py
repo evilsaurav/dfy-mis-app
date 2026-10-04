@@ -128,51 +128,77 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             f"{c_wp}_{req.fo_name}_{req.date}".replace(" ", "_").lower(),
             f"{req.working_place}_{req.fo_name}_{req.date}".replace(" ", "_").lower()
         ]
+        # Locate report row in PostgreSQL first
+        pg_rep = None
+        for cid in candidate_doc_ids:
+            try:
+                pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid}) or pg_fetch_one("daily_field_reports", filters={"id": cid})
+                if pg_rep:
+                    break
+            except Exception:
+                pass
+        if not pg_rep:
+            try:
+                rows = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s) AND LOWER(working_place) = LOWER(%s) AND LOWER(fo_name) = LOWER(%s) LIMIT 1",
+                    [req.date, f"{req.date}%", c_wp, clean_fo],
+                    fetch=True
+                )
+                if rows:
+                    pg_rep = dict(rows[0])
+            except Exception:
+                pass
+
         doc_ref = None
         data = None
+        doc_id = candidate_doc_ids[0]
         for cid in candidate_doc_ids:
-            cand_ref = db.collection("daily_field_reports").document(cid)
-            doc_snap = await asyncio.to_thread(cand_ref.get)
-            if doc_snap.exists:
-                doc_ref = cand_ref
-                data = doc_snap.to_dict()
-                doc_id = cid
-                break
+            try:
+                cand_ref = db.collection("daily_field_reports").document(cid)
+                doc_snap = await asyncio.to_thread(cand_ref.get)
+                if doc_snap.exists:
+                    doc_ref = cand_ref
+                    data = doc_snap.to_dict()
+                    doc_id = cid
+                    break
+            except Exception:
+                pass
         
-        if not doc_ref:
+        if not doc_ref and not pg_rep:
             docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
                 .where("fo_name", "==", req.fo_name)
                 .where("date_of_reporting", "==", req.date)
                 .stream()))
-            # STRICT: Only match documents in the SAME district. Never edit a different district's record.
             matching_docs = [d for d in docs if canonicalize_district(d.to_dict().get("working_place", "")) == c_wp]
-            if not matching_docs:
-                raise HTTPException(status_code=404, detail="No report found for this date and officer.")
-            # Deterministic selection: sort by doc ID so canonical format (district_fo_date) is always picked first
-            if len(matching_docs) > 1:
-                matching_docs.sort(key=lambda d: d.id)
-            doc_ref = matching_docs[0].reference
-            data = matching_docs[0].to_dict()
-            doc_id = matching_docs[0].id
+            if matching_docs:
+                if len(matching_docs) > 1:
+                    matching_docs.sort(key=lambda d: d.id)
+                doc_ref = matching_docs[0].reference
+                data = matching_docs[0].to_dict()
+                doc_id = matching_docs[0].id
+
+        if not doc_ref and not pg_rep:
+            raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+
+        if data is None and pg_rep:
+            data = dict(pg_rep)
+            doc_id = pg_rep.get("legacy_doc_id") or str(pg_rep.get("id"))
 
         # 🛡️ Strict 24-Hour Editing Window Rule for Field Officers
         if not is_admin or req.edited_by == "FO":
             is_expired = False
             evaluated = False
 
-            # 1. Check timestamp_completed (primary), timestamp, or submitted_at
             sub_ts = data.get("timestamp_completed") or data.get("timestamp") or data.get("submitted_at")
             if sub_ts:
                 try:
                     now_utc = datetime.now(timezone.utc)
-                    # Case A: Firestore DatetimeWithNanoseconds or python datetime
                     if isinstance(sub_ts, datetime):
                         sub_utc = sub_ts if sub_ts.tzinfo is not None else sub_ts.replace(tzinfo=timezone.utc)
                         hours_diff = (now_utc - sub_utc).total_seconds() / 3600.0
                         if hours_diff > 24.0:
                             is_expired = True
                         evaluated = True
-                    # Case B: String representation of timestamp
                     elif isinstance(sub_ts, str) and sub_ts.strip():
                         clean_ts = sub_ts.strip().replace("Z", "+00:00")
                         if " " in clean_ts and "T" not in clean_ts:
@@ -186,14 +212,12 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 except Exception as e:
                     logger.warning(f"Error parsing edit window timestamp '{sub_ts}': {e}")
 
-            # 2. Fallback check against date_of_reporting in Indian Standard Time (IST = UTC + 5:30)
             if not evaluated and not is_expired:
                 try:
                     now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
                     today_ist = now_ist.date()
                     yesterday_ist = today_ist - timedelta(days=1)
                     rep_date = datetime.strptime(req.date, "%Y-%m-%d").date()
-                    # Only lock if report is older than yesterday in IST (2 or more calendar days ago)
                     if rep_date < yesterday_ist:
                         is_expired = True
                 except Exception:
@@ -204,8 +228,26 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                     status_code=403, 
                     detail="Field Officer edit window expired (24 hours limit). 24 ghante beet chuke hain. Kripya badlav ke liye District Admin ya State MIS se sampark karein."
                 )
-            
-        current_list = list(data.get(cat_key, []))
+
+        int_report_id = pg_rep.get("id") if (pg_rep and isinstance(pg_rep.get("id"), int)) else None
+
+        # Fetch live list of patient IDs from PostgreSQL child table report_kpi_entries if available
+        if int_report_id:
+            try:
+                pg_entries = pg_execute_raw(
+                    "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND category = %s ORDER BY id ASC",
+                    [int_report_id, cat_key],
+                    fetch=True
+                ) or []
+                if pg_entries:
+                    current_list = [str(r["patient_id"]) for r in pg_entries]
+                else:
+                    current_list = list(data.get(cat_key, [])) if data else []
+            except Exception:
+                current_list = list(data.get(cat_key, [])) if data else []
+        else:
+            current_list = list(data.get(cat_key, [])) if data else []
+
         old_id_clean = str(req.old_id).strip()
         
         if cat_key == "notification_ids" and req.action in ["replace", "add"]:
@@ -250,65 +292,67 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         if cat_key == "notification_ids":
             doc_update["notifications"] = len(current_list)
 
-        # Locate report row in PostgreSQL
-        pg_rep = None
-        for cid in candidate_doc_ids:
-            try:
-                pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid}) or pg_fetch_one("daily_field_reports", filters={"id": cid})
-                if pg_rep:
-                    break
-            except Exception:
-                pass
-        if not pg_rep:
-            try:
-                rows = pg_execute_raw(
-                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(working_place) = LOWER(%s) AND LOWER(fo_name) = LOWER(%s) LIMIT 1",
-                    [req.date, c_wp, clean_fo],
-                    fetch=True
-                )
-                if rows:
-                    pg_rep = dict(rows[0])
-            except Exception:
-                pass
-
-        report_id = (pg_rep.get("id") if pg_rep else None) or doc_id
-
-        if report_id:
+        if int_report_id:
             try:
                 if req.action == "replace":
                     pg_execute_raw(
                         "UPDATE report_kpi_entries SET patient_id = %s WHERE report_id = %s AND category = %s AND patient_id = %s",
-                        [req.new_id, report_id, cat_key, old_id_clean]
+                        [req.new_id, int_report_id, cat_key, old_id_clean]
                     )
                 elif req.action == "delete":
                     pg_execute_raw(
                         "DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s AND patient_id = %s",
-                        [report_id, cat_key, old_id_clean]
+                        [int_report_id, cat_key, old_id_clean]
                     )
                 elif req.action == "add":
                     pg_execute_raw(
                         "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                        [report_id, cat_key, req.new_id]
+                        [int_report_id, cat_key, req.new_id]
                     )
             except Exception as kpi_err:
                 print(f"[/edit-patient-id PG report_kpi_entries notice]: {kpi_err}")
 
             try:
-                pg_up = {
-                    "last_edited_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "last_edited_by": req.edited_by
+                cat_to_legacy = {
+                    "notification_ids": "legacy_count_notifications",
+                    "sample_tested_ids": "legacy_count_sample_tested",
+                    "hiv_dm_ids": "legacy_count_hiv_dm",
+                    "dbt_ids": "legacy_count_dbt",
+                    "contact_tracing_ids": "legacy_count_contact_tracing",
+                    "differentiated_tb_ids": "legacy_count_differentiated_tb",
+                    "sample_collection_ids": "legacy_count_sample_collection",
+                    "outcome_assigned_ids": "legacy_count_outcome_assigned",
+                    "home_visit_ids": "legacy_count_home_visit",
+                    "follow_up_ids": "legacy_count_follow_up",
+                    "face_to_face_ids": "legacy_count_face_to_face",
+                    "presumptive_ids": "legacy_count_presumptive",
+                    "documents_ids": "legacy_count_documents",
+                    "fdc_provided_ids": "legacy_count_fdc_provided",
+                    "kit_consumption_ids": "legacy_count_kit_consumption",
+                    "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
+                    "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
+                    "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
+                    "consent_with_id_ids": "legacy_count_consent_with_id",
+                    "culture_dst_ids": "legacy_count_culture_dst"
                 }
-                metric_col = cat_key.replace("_ids", "")
-                if metric_col in ["notifications", "tests", "hiv_dm", "dbt", "contact_tracing", "differentiated_tb"]:
-                    pg_up[metric_col] = len(current_list)
-                if cat_key == "notification_ids":
-                    pg_up["notifications"] = len(current_list)
-                    pg_up["legacy_count_notifications"] = len(current_list)
-                pg_update_row("daily_field_reports", pg_up, filters={"id": report_id} if isinstance(report_id, int) else {"legacy_doc_id": report_id})
+                l_col = cat_to_legacy.get(cat_key)
+                if l_col:
+                    pg_execute_raw(
+                        f"UPDATE daily_field_reports SET {l_col} = %s, last_edited_at = NOW(), last_edited_by = %s WHERE id = %s",
+                        [len(current_list), req.edited_by, int_report_id]
+                    )
             except Exception as pg_up_err:
                 print(f"[/edit-patient-id PG daily_field_reports notice]: {pg_up_err}")
 
-        await asyncio.to_thread(lambda: doc_ref.update(doc_update))
+        if doc_ref:
+            await asyncio.to_thread(lambda: doc_ref.update(doc_update))
+        else:
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    active_db.collection("daily_field_reports").document(doc_id).set(doc_update, merge=True)
+                except Exception:
+                    pass
 
         # Atomic adjustment to daily_district_rollups in PostgreSQL & mock store
         if req.action in ["delete", "add"]:
@@ -651,77 +695,183 @@ async def admin_feed_officer_data(
         for cat_col in array_columns_to_strip:
             pg_payload.pop(cat_col, None)
 
-        pg_payload["notifications"] = len(full_report_data.get("notification_ids") or [])
-        pg_payload["tests"] = len(full_report_data.get("sample_tested_ids") or [])
-        pg_payload["hiv_dm"] = len(full_report_data.get("hiv_dm_ids") or [])
-        pg_payload["dbt"] = len(full_report_data.get("dbt_ids") or [])
-        pg_payload["contact_tracing"] = len(full_report_data.get("contact_tracing_ids") or [])
-        pg_payload["differentiated_tb"] = len(full_report_data.get("differentiated_tb_ids") or [])
-        pg_payload["legacy_count_notifications"] = pg_payload["notifications"]
+        cat_to_legacy = {
+            "notification_ids": "legacy_count_notifications",
+            "sample_tested_ids": "legacy_count_sample_tested",
+            "hiv_dm_ids": "legacy_count_hiv_dm",
+            "dbt_ids": "legacy_count_dbt",
+            "sample_collection_ids": "legacy_count_sample_collection",
+            "contact_tracing_ids": "legacy_count_contact_tracing",
+            "differentiated_tb_ids": "legacy_count_differentiated_tb",
+            "home_visit_ids": "legacy_count_home_visit",
+            "outcome_assigned_ids": "legacy_count_outcome_assigned",
+            "follow_up_ids": "legacy_count_follow_up",
+            "face_to_face_ids": "legacy_count_face_to_face",
+            "presumptive_ids": "legacy_count_presumptive",
+            "documents_ids": "legacy_count_documents",
+            "fdc_provided_ids": "legacy_count_fdc_provided",
+            "kit_consumption_ids": "legacy_count_kit_consumption",
+            "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
+            "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
+            "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
+            "consent_with_id_ids": "legacy_count_consent_with_id",
+            "culture_dst_ids": "legacy_count_culture_dst"
+        }
+        for k_cat, l_col in cat_to_legacy.items():
+            pg_payload[l_col] = len(full_report_data.get(k_cat) or [])
         pg_payload["legacy_doc_id"] = doc_id
+
+        phantom_keys = [
+            "notification", "notifications", "tests", "sample_tested", "hiv_dm", "dbt",
+            "contact_tracing", "differentiated_tb", "sample_collection", "outcome_assigned",
+            "home_visit", "follow_up", "face_to_face", "presumptive", "documents",
+            "fdc_provided", "kit_consumption", "tpt_treatment_start", "tpt_presumptive",
+            "adhar_face_authentication", "consent_with_id", "culture_dst",
+            "date", "admin_fed", "fed_by", "pin"
+        ]
+        for pk in phantom_keys:
+            pg_payload.pop(pk, None)
+
+        if "admin_fed" in full_report_data:
+            pg_payload["is_admin_fed"] = True
+        if "fed_by" in full_report_data:
+            pg_payload["fed_by_username"] = full_report_data["fed_by"]
+        if "pin" in full_report_data:
+            pg_payload["pin_used"] = full_report_data["pin"]
 
         pg_rep_id = None
         try:
-            upsert_res = pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
-            if upsert_res and isinstance(upsert_res, dict) and upsert_res.get("id"):
-                pg_rep_id = upsert_res.get("id")
+            cols = list(pg_payload.keys())
+            vals = [pg_payload[c] for c in cols]
+            col_names = ", ".join(cols)
+            placeholders = ", ".join(["%s"] * len(cols))
+            update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "legacy_doc_id")
+            ret_rows = pg_execute_raw(
+                f"""
+                INSERT INTO daily_field_reports ({col_names})
+                VALUES ({placeholders})
+                ON CONFLICT (legacy_doc_id) DO UPDATE SET {update_set}
+                RETURNING id
+                """,
+                vals,
+                fetch=True
+            )
+            if ret_rows and len(ret_rows) > 0:
+                pg_rep_id = ret_rows[0].get("id")
         except Exception as pg_err:
             print(f"[Admin Feed PG Write Notice] {pg_err}")
+            pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
 
         if not pg_rep_id:
-            pg_rep_id = doc_id
+            try:
+                look_row = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
+                if look_row:
+                    pg_rep_id = look_row.get("id")
+            except Exception:
+                pass
 
-        if pg_rep_id:
+        if pg_rep_id and isinstance(pg_rep_id, int):
             try:
                 pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [pg_rep_id])
+                kpi_entries_batch = []
                 for cat_k in [c for c in full_report_data.keys() if c.endswith("_ids") and isinstance(full_report_data[c], list)]:
                     for pid in full_report_data[cat_k]:
                         clean_pid = str(pid).strip()
                         if clean_pid:
-                            pg_execute_raw(
-                                "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                                [pg_rep_id, cat_k, clean_pid]
-                            )
+                            kpi_entries_batch.append((pg_rep_id, cat_k, clean_pid))
+                if kpi_entries_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s",
+                                    kpi_entries_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as kpi_err:
                 print(f"[Admin Feed report_kpi_entries Write Notice] {kpi_err}")
 
             try:
                 pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [pg_rep_id])
+                fdc_batch = []
                 for idx, item in enumerate(full_report_data.get("fdc_details") or []):
                     if isinstance(item, dict):
-                        pg_execute_raw(
-                            """INSERT INTO report_fdc_details 
-                               (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, patient_name, patient_type, weight_kg, weight_band, daily_tablets, strips, recommended_strips, supply_issued, position) 
-                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                            [
-                                pg_rep_id,
-                                str(item.get("patient_id") or item.get("id") or ""),
-                                str(item.get("fdc_type") or ""),
-                                str(item.get("regimen_name") or ""),
-                                str(item.get("phase") or ""),
-                                str(item.get("daily_dose_text") or ""),
-                                str(item.get("patient_name") or ""),
-                                str(item.get("patient_type") or ""),
-                                str(item.get("weight_kg") or ""),
-                                str(item.get("weight_band") or ""),
-                                str(item.get("daily_tablets") or ""),
-                                str(item.get("strips") or ""),
-                                str(item.get("recommended_strips") or ""),
-                                str(item.get("supply_issued") or ""),
-                                idx
-                            ]
-                        )
+                        w_kg = float(item["weight_kg"]) if (item.get("weight_kg") is not None and str(item.get("weight_kg")).strip()) else None
+                        d_tab = int(item["daily_tablets"]) if (item.get("daily_tablets") is not None and str(item.get("daily_tablets")).strip()) else None
+                        strp = int(item["strips"]) if (item.get("strips") is not None and str(item.get("strips")).strip()) else None
+                        rec_strp = int(item["recommended_strips"]) if (item.get("recommended_strips") is not None and str(item.get("recommended_strips")).strip()) else None
+                        fdc_batch.append((
+                            pg_rep_id,
+                            str(item.get("patient_id") or item.get("id") or ""),
+                            str(item.get("fdc_type") or ""),
+                            str(item.get("regimen_name") or ""),
+                            str(item.get("phase") or ""),
+                            str(item.get("daily_dose_text") or ""),
+                            str(item.get("patient_name") or ""),
+                            str(item.get("patient_type") or ""),
+                            w_kg,
+                            str(item.get("weight_band") or ""),
+                            d_tab,
+                            strp,
+                            rec_strp,
+                            str(item.get("supply_issued") or ""),
+                            idx
+                        ))
+                if fdc_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    """INSERT INTO report_fdc_details 
+                                       (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, 
+                                        patient_name, patient_type, weight_kg, weight_band, daily_tablets, 
+                                        strips, recommended_strips, supply_issued, position) 
+                                       VALUES %s""",
+                                    fdc_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as fdc_err:
                 print(f"[Admin Feed report_fdc_details Write Notice] {fdc_err}")
 
             try:
                 pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [pg_rep_id])
+                visited_batch = []
                 for idx, name in enumerate(full_report_data.get("visited_names") or []):
                     if name and str(name).strip():
-                        pg_execute_raw(
-                            "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
-                            [pg_rep_id, str(name).strip(), idx]
-                        )
+                        visited_batch.append((pg_rep_id, str(name).strip(), idx))
+                if visited_batch:
+                    conn = get_postgres_connection()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    "INSERT INTO report_visited_names (report_id, name, position) VALUES %s",
+                                    visited_batch
+                                )
+                            conn.commit()
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
             except Exception as names_err:
                 print(f"[Admin Feed report_visited_names Write Notice] {names_err}")
 
@@ -823,6 +973,7 @@ class DeleteDayReportReq(BaseModel):
     district: str
     fo_name: str
     date: str # YYYY-MM-DD
+    report_id: Optional[Any] = None
 
 @router.post("/admin/reports/delete-day")
 async def admin_delete_day_report(
@@ -838,7 +989,7 @@ async def admin_delete_day_report(
         clean_wp = canonicalize_district(req.district.strip())
         import re
         clean_fo = re.sub(r'\s+', ' ', req.fo_name).strip()
-        clean_date = req.date.strip()
+        clean_date = req.date.strip()[:10]
 
         if not clean_wp or not clean_fo or not clean_date:
             raise HTTPException(status_code=400, detail="District, Field Officer name, and Date are required.")
@@ -857,6 +1008,8 @@ async def admin_delete_day_report(
             f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
         ]
+        if req.report_id:
+            candidate_doc_ids.append(str(req.report_id).strip().lower())
 
         # 2. Locate all candidate documents in PostgreSQL daily_field_reports & mock/Firestore
         matching_docs = []
@@ -864,14 +1017,18 @@ async def admin_delete_day_report(
 
         # 2a. Query PostgreSQL daily_field_reports
         try:
-            pg_sql = """
-                SELECT * FROM daily_field_reports 
-                WHERE (date_of_reporting = %s OR date_of_reporting::text = %s)
-            """
-            pg_candidates = pg_execute_raw(pg_sql, [clean_date, clean_date], fetch=True) or []
+            if req.report_id and str(req.report_id).isdigit():
+                pg_sql = "SELECT * FROM daily_field_reports WHERE id = %s"
+                pg_candidates = pg_execute_raw(pg_sql, [int(req.report_id)], fetch=True) or []
+            else:
+                pg_sql = """
+                    SELECT * FROM daily_field_reports 
+                    WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
+                """
+                pg_candidates = pg_execute_raw(pg_sql, [clean_date, f"{clean_date}%"], fetch=True) or []
             for r in pg_candidates:
                 r_dict = dict(r)
-                r_fo = str(r_dict.get("fo_name", "")).strip().lower()
+                r_fo = re.sub(r'\s+', ' ', str(r_dict.get("fo_name", ""))).strip().lower()
                 r_wp = canonicalize_district(r_dict.get("working_place", "") or r_dict.get("district", "")).lower()
                 r_id = r_dict.get("id")
                 r_legacy = str(r_dict.get("legacy_doc_id", "")).lower()
@@ -880,7 +1037,7 @@ async def admin_delete_day_report(
                 dist_matches = (r_wp == clean_wp.lower())
                 id_matches = (str(r_id).lower() in candidate_doc_ids or (r_legacy and r_legacy in candidate_doc_ids))
 
-                if (fo_matches and dist_matches) or id_matches:
+                if (fo_matches and dist_matches) or id_matches or (req.report_id and str(r_id) == str(req.report_id)):
                     if r_id is not None and str(r_id) not in seen_report_ids:
                         matching_docs.append(r_dict)
                         seen_report_ids.add(str(r_id))
@@ -909,7 +1066,7 @@ async def admin_delete_day_report(
                     .stream()))
                 for d in query_docs:
                     d_dict = d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else dict(d)
-                    d_fo = str(d_dict.get("fo_name", "")).strip().lower()
+                    d_fo = re.sub(r'\s+', ' ', str(d_dict.get("fo_name", ""))).strip().lower()
                     d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
                     d_id = getattr(d, "id", None) or d_dict.get("id")
                     if (d_fo == clean_fo.lower() or is_officer_name_match(d_dict.get("fo_name"), clean_fo, clean_wp)) and d_wp == clean_wp.lower():
@@ -931,26 +1088,64 @@ async def admin_delete_day_report(
             "contact_tracing": 0, "diff_tb": 0
         }
 
-        for doc_item in matching_docs:
-            d_dict = doc_item.to_dict() if hasattr(doc_item, "to_dict") and callable(doc_item.to_dict) else dict(doc_item)
-            total_deleted_ids += sum(len(v) for k, v in d_dict.items() if isinstance(v, list) and k.endswith("_ids"))
-            deleted_metrics["notifications"] += len(d_dict.get("notification_ids", []))
-            deleted_metrics["tests"] += len(d_dict.get("sample_tested_ids", []))
-            deleted_metrics["hiv_dm"] += len(d_dict.get("hiv_dm_ids", []))
-            deleted_metrics["dbt"] += len(d_dict.get("dbt_ids", []))
-            deleted_metrics["contact_tracing"] += len(d_dict.get("contact_tracing_ids", []))
-            deleted_metrics["diff_tb"] += len(d_dict.get("differentiated_tb_ids", []))
+        int_report_ids = [int(r["id"]) for r in matching_docs if str(r.get("id", "")).isdigit()]
+        if int_report_ids:
+            try:
+                kpi_counts = pg_execute_raw(
+                    "SELECT category, count(*) as cnt FROM report_kpi_entries WHERE report_id = ANY(%s) GROUP BY category",
+                    [int_report_ids],
+                    fetch=True
+                ) or []
+                cat_to_metric = {
+                    "notification_ids": "notifications",
+                    "sample_tested_ids": "tests",
+                    "hiv_dm_ids": "hiv_dm",
+                    "dbt_ids": "dbt",
+                    "contact_tracing_ids": "contact_tracing",
+                    "differentiated_tb_ids": "diff_tb"
+                }
+                for kc in kpi_counts:
+                    c_name = kc.get("category")
+                    if c_name in cat_to_metric:
+                        deleted_metrics[cat_to_metric[c_name]] += int(kc.get("cnt", 0))
+                    total_deleted_ids += int(kc.get("cnt", 0))
+            except Exception as kpi_cnt_err:
+                print(f"[Delete Day KPI count notice]: {kpi_cnt_err}")
+
+        # Also fallback to legacy_count_* or mock dicts if child table query yielded 0 or was bypassed
+        if total_deleted_ids == 0:
+            for doc_item in matching_docs:
+                d_dict = doc_item.to_dict() if hasattr(doc_item, "to_dict") and callable(doc_item.to_dict) else dict(doc_item)
+                for k, v in d_dict.items():
+                    if isinstance(v, list) and k.endswith("_ids"):
+                        total_deleted_ids += len(v)
+                deleted_metrics["notifications"] += len(d_dict.get("notification_ids", [])) or int(d_dict.get("legacy_count_notifications", 0) or 0)
+                deleted_metrics["tests"] += len(d_dict.get("sample_tested_ids", [])) or int(d_dict.get("legacy_count_sample_tested", 0) or 0)
+                deleted_metrics["hiv_dm"] += len(d_dict.get("hiv_dm_ids", [])) or int(d_dict.get("legacy_count_hiv_dm", 0) or 0)
+                deleted_metrics["dbt"] += len(d_dict.get("dbt_ids", [])) or int(d_dict.get("legacy_count_dbt", 0) or 0)
+                deleted_metrics["contact_tracing"] += len(d_dict.get("contact_tracing_ids", [])) or int(d_dict.get("legacy_count_contact_tracing", 0) or 0)
+                deleted_metrics["diff_tb"] += len(d_dict.get("differentiated_tb_ids", [])) or int(d_dict.get("legacy_count_differentiated_tb", 0) or 0)
+                if total_deleted_ids == 0:
+                    total_deleted_ids = sum(deleted_metrics.values())
 
         # 4. Cascade delete child rows and parent reports in PostgreSQL
-        report_ids = [r["id"] for r in matching_docs if r.get("id") is not None]
-        if report_ids:
+        int_ids = [int(r["id"]) for r in matching_docs if str(r.get("id", "")).isdigit()]
+        legacy_ids = [str(r.get("legacy_doc_id") or r.get("id")) for r in matching_docs if r.get("legacy_doc_id") or r.get("id")]
+
+        if int_ids:
             try:
-                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = ANY(%s)", [report_ids])
-                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = ANY(%s)", [report_ids])
-                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = ANY(%s)", [report_ids])
-                pg_execute_raw("DELETE FROM daily_field_reports WHERE id = ANY(%s)", [report_ids])
+                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = ANY(%s)", [int_ids])
+                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = ANY(%s)", [int_ids])
+                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = ANY(%s)", [int_ids])
+                pg_execute_raw("DELETE FROM daily_field_reports WHERE id = ANY(%s)", [int_ids])
             except Exception as pg_cascade_err:
                 print(f"[Delete Day PG Cascade Notice] {pg_cascade_err}")
+
+        if legacy_ids:
+            try:
+                pg_execute_raw("DELETE FROM daily_field_reports WHERE legacy_doc_id = ANY(%s)", [legacy_ids])
+            except Exception:
+                pass
 
         # Also delete in mock / Firestore mode to keep mock store synced
         for doc_item in matching_docs:
@@ -976,7 +1171,6 @@ async def admin_delete_day_report(
             except Exception:
                 pass
 
-        # 5. Atomic Rollback in daily_district_rollups
         # 5. Rollback in daily_district_rollups
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
@@ -1248,7 +1442,10 @@ async def admin_edit_day_report(
             d_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
             if d_id:
                 try:
-                    pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": d_id}) or pg_fetch_one("daily_field_reports", filters={"id": d_id})
+                    if str(d_id).isdigit():
+                        pg_rep = pg_fetch_one("daily_field_reports", filters={"id": int(d_id)})
+                    if not pg_rep:
+                        pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": str(d_id)})
                     if pg_rep:
                         break
                 except Exception:
@@ -1256,7 +1453,7 @@ async def admin_edit_day_report(
         if not pg_rep:
             try:
                 rows = pg_execute_raw(
-                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(working_place) = LOWER(%s) AND LOWER(fo_name) = LOWER(%s) LIMIT 1",
+                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) AND LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) LIMIT 1",
                     [clean_date, clean_wp, clean_fo],
                     fetch=True
                 )
@@ -1265,30 +1462,72 @@ async def admin_edit_day_report(
             except Exception:
                 pass
 
-        target_first = matching_docs[0]
-        report_id = (pg_rep.get("id") if pg_rep else None) or (getattr(target_first, "id", None) or (target_first.get("id") if isinstance(target_first, dict) else None))
+        int_report_id = pg_rep.get("id") if (pg_rep and isinstance(pg_rep.get("id"), int)) else None
+        if not int_report_id:
+            for d in matching_docs:
+                d_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
+                if d_id and str(d_id).isdigit():
+                    int_report_id = int(d_id)
+                    break
 
-        if report_id:
-            # Update parent daily_field_reports
-            pg_doc_update = dict(doc_update)
-            for k in [c for c in pg_doc_update.keys() if c.endswith("_ids") or c in ["visited_names", "fdc_details"]]:
-                pg_doc_update.pop(k, None)
+        cat_to_legacy_map = {
+            "notification_ids": "legacy_count_notifications",
+            "sample_tested_ids": "legacy_count_sample_tested",
+            "hiv_dm_ids": "legacy_count_hiv_dm",
+            "dbt_ids": "legacy_count_dbt",
+            "contact_tracing_ids": "legacy_count_contact_tracing",
+            "differentiated_tb_ids": "legacy_count_differentiated_tb",
+            "sample_collection_ids": "legacy_count_sample_collection",
+            "outcome_assigned_ids": "legacy_count_outcome_assigned",
+            "home_visit_ids": "legacy_count_home_visit",
+            "follow_up_ids": "legacy_count_follow_up",
+            "face_to_face_ids": "legacy_count_face_to_face",
+            "presumptive_ids": "legacy_count_presumptive",
+            "documents_ids": "legacy_count_documents",
+            "fdc_provided_ids": "legacy_count_fdc_provided",
+            "kit_consumption_ids": "legacy_count_kit_consumption",
+            "tpt_treatment_start_ids": "legacy_count_tpt_treatment_start",
+            "tpt_presumptive_ids": "legacy_count_tpt_presumptive",
+            "adhar_face_authentication_ids": "legacy_count_adhar_face_authentication",
+            "consent_with_id_ids": "legacy_count_consent_with_id",
+            "culture_dst_ids": "legacy_count_culture_dst"
+        }
+
+        valid_parent_cols = {
+            "morning_km", "evening_km", "travel_expenses", "total_km",
+            "doctor_store_visits_count", "remark", "last_edited_by",
+            "last_edited_at", "last_edited_role"
+        }
+        pg_doc_update = {k: v for k, v in doc_update.items() if k in valid_parent_cols}
+        if req.category_ids is not None:
+            for c_key in VALID_CATEGORIES:
+                if c_key in req.category_ids:
+                    l_col = cat_to_legacy_map.get(c_key)
+                    if l_col:
+                        pg_doc_update[l_col] = len(doc_update.get(c_key, []))
+
+        if int_report_id or pg_rep:
             try:
-                pg_update_row("daily_field_reports", pg_doc_update, filters={"id": report_id} if isinstance(report_id, int) else {"legacy_doc_id": report_id})
+                if int_report_id:
+                    pg_update_row("daily_field_reports", pg_doc_update, filters={"id": int_report_id})
+                elif pg_rep and pg_rep.get("legacy_doc_id"):
+                    pg_update_row("daily_field_reports", pg_doc_update, filters={"legacy_doc_id": pg_rep["legacy_doc_id"]})
             except Exception as upd_err:
                 print(f"[edit-day PG parent update notice]: {upd_err}")
 
+        # Reconcile child relational tables if int_report_id is known
+        if int_report_id:
             # Reconcile report_kpi_entries
             if req.category_ids is not None:
                 for cat_key in VALID_CATEGORIES:
                     if cat_key in req.category_ids:
                         try:
-                            pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s", [report_id, cat_key])
+                            pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s", [int_report_id, cat_key])
                             clean_ids = doc_update.get(cat_key, [])
                             for cid in clean_ids:
                                 pg_execute_raw(
                                     "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                                    [report_id, cat_key, cid]
+                                    [int_report_id, cat_key, cid]
                                 )
                         except Exception as kpi_rec_err:
                             print(f"[edit-day PG report_kpi_entries reconcile notice]: {kpi_rec_err}")
@@ -1296,12 +1535,12 @@ async def admin_edit_day_report(
             # Reconcile report_visited_names
             if req.visited_names is not None:
                 try:
-                    pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [report_id])
+                    pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [int_report_id])
                     for idx, name in enumerate(doc_update.get("visited_names", [])):
                         if name:
                             pg_execute_raw(
                                 "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
-                                [report_id, name, idx]
+                                [int_report_id, name, idx]
                             )
                 except Exception as vis_err:
                     print(f"[edit-day PG report_visited_names reconcile notice]: {vis_err}")
