@@ -486,8 +486,9 @@ async def legacy_get_today_attendance(
         allowed_dist_set=allowed_dist_set,
         inactive_staff_keys=inactive_staff_keys
     )
-    if cache_key:
-        cache.set(cache_key, res, ttl=600)
+    # Live bypass: Attendance Radar reads directly from database without caching
+    # if cache_key:
+    #     cache.set(cache_key, res, ttl=600)
     return res
 
 
@@ -527,12 +528,13 @@ async def get_today_attendance(
         user_scope = admin.get("user_id") or admin.get("username") or admin.get("role", "admin")
         cache_key = f"attendance_{target_date}_{effective_dist}_{user_scope}"
 
-        if force_refresh:
-            cache.delete(cache_key)
-        else:
-            cached = cache.get(cache_key)
-            if cached is not None:
-                return cached
+        # Live bypass: Attendance Radar reads directly from database for 100% real-time accuracy
+        # if force_refresh:
+        #     cache.delete(cache_key)
+        # else:
+        #     cached = cache.get(cache_key)
+        #     if cached is not None:
+        #         return cached
 
         try:
             target_dt = datetime.strptime(target_date, "%Y-%m-%d").date()
@@ -718,7 +720,8 @@ async def get_today_attendance(
                 allowed_dist_set=allowed_dist_set,
                 inactive_staff_keys=inactive_staff_keys
             )
-            cache.set(cache_key, result, ttl=600)
+            # Live bypass: Attendance Radar returns live fresh results without caching
+            # cache.set(cache_key, result, ttl=600)
             return result
         except HTTPException:
             raise

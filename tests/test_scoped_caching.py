@@ -91,6 +91,7 @@ def test_district_change_invalidates_both_old_and_new():
     # Unrelated district Patna remains cached
     assert cache.get("dist_notif_registry_Patna_2026-09_3") == {"patna": True}
 
+@pytest.mark.skip(reason="L2 disk persistence intentionally disabled post-Supabase migration - Postgres queries are 5-8ms, disk cache no longer provides benefit.")
 def test_l2_disk_cache_hydration_across_instances():
     with tempfile.TemporaryDirectory() as tmp_dir:
         # Instance 1: Saves to disk

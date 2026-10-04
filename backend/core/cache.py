@@ -12,7 +12,7 @@ class SimpleTTLCache:
         self._disk_path = os.path.join(self._disk_dir, "l2_persistent_cache.json")
         self._lock = threading.Lock()
         self._disk_lock = threading.Lock()
-        self._hydrate_from_disk()
+        # self._hydrate_from_disk()  # Disabled: ephemeral Render instances make disk hydration redundant
 
     def _hydrate_from_disk(self):
         try:
@@ -88,11 +88,12 @@ class SimpleTTLCache:
         t = ttl if ttl is not None else self.default_ttl
         with self._lock:
             self._cache[key] = (time.time() + t, val)
-        if persist or any(key.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_"]):
-            try:
-                threading.Thread(target=self._flush_to_disk_sync, daemon=True).start()
-            except Exception:
-                pass
+        # Disk flush disabled to eliminate disk I/O on ephemeral instances
+        # if persist or any(key.startswith(p) for p in ["staff_directory", "staff_targets", "dist_notif_registry_"]):
+        #     try:
+        #         threading.Thread(target=self._flush_to_disk_sync, daemon=True).start()
+        #     except Exception:
+        #         pass
 
     def delete(self, key: str):
         with self._lock:

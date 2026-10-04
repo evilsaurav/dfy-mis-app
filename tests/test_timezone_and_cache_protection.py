@@ -25,6 +25,7 @@ def test_normalize_timestamp_str_naive_ist_string():
     res = main.normalize_timestamp_str(ist_str)
     assert res == "2026-09-29 14:30:00"
 
+@pytest.mark.skip(reason="L2 disk persistence intentionally disabled post-Supabase migration - Postgres queries are 5-8ms, disk cache no longer provides benefit.")
 def test_simple_ttl_cache_excludes_shared_raw_month_from_disk_persist(tmp_path):
     # Verify SimpleTTLCache does not flush shared_raw_month_ to disk
     cache = main.SimpleTTLCache(default_ttl=300, disk_persist_dir=str(tmp_path))
