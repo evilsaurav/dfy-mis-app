@@ -515,6 +515,11 @@ def resolve_staff_and_district_ids(
     """
     clean_wp = canonicalize_district(district.strip()) if district else "Patna"
     clean_fo = canonicalize_fo_name(fo_name, clean_wp) if fo_name else "Field Officer"
+
+    cache_key = f"resolved_staff_dist_{clean_wp}_{clean_fo}".lower().replace(" ", "")
+    cached = cache.get(cache_key)
+    if cached and isinstance(cached, (tuple, list)) and len(cached) == 2 and cached[0] and cached[1]:
+        return int(cached[0]), int(cached[1])
     
     district_id = None
     staff_id = None
@@ -639,7 +644,10 @@ def resolve_staff_and_district_ids(
     except Exception as e:
         print(f"[resolve_staff_and_district_ids notice]: {e}")
 
-    return (staff_id or 1, district_id or 1)
+    res_pair = (staff_id or 1, district_id or 1)
+    if staff_id and district_id:
+        cache.set(cache_key, res_pair, ttl=7200)
+    return res_pair
 
 
 def check_patient_id_90day_notification_duplicate(

@@ -293,6 +293,12 @@ def pg_query_table(
             for col, val in (filters or {}).items():
                 if val is None:
                     continue
+                if col == "id" and isinstance(val, str) and not val.isdigit() and table in ("staff_directory", "daily_field_reports"):
+                    if table == "staff_directory":
+                        q = q.or_(f"legacy_doc_id.eq.{val},slug.eq.{val}")
+                    else:
+                        q = q.eq("legacy_doc_id", val)
+                    continue
                 if isinstance(val, (list, tuple)):
                     q = q.in_(col, list(val))
                 else:
@@ -320,6 +326,14 @@ def pg_query_table(
             clauses, params = [], []
             for col, val in (filters or {}).items():
                 if val is None:
+                    continue
+                if col == "id" and isinstance(val, str) and not val.isdigit() and table in ("staff_directory", "daily_field_reports"):
+                    if table == "staff_directory":
+                        clauses.append("(legacy_doc_id = %s OR slug = %s)")
+                        params.extend([val, val])
+                    else:
+                        clauses.append("legacy_doc_id = %s")
+                        params.append(val)
                     continue
                 if isinstance(val, (list, tuple)):
                     clauses.append(f"{col} = ANY(%s)")
@@ -1025,6 +1039,15 @@ def ensure_database_indexes_exist():
     """Idempotently creates performance indexes on core relational tables in PostgreSQL."""
     try:
         pg_execute_raw("""
+            CREATE TABLE IF NOT EXISTS pacing_settings (
+                id TEXT PRIMARY KEY,
+                district TEXT,
+                month TEXT,
+                declared_holidays INTEGER DEFAULT 1,
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_by TEXT
+            );
+
             CREATE INDEX IF NOT EXISTS idx_dfr_staff_date ON daily_field_reports(staff_id, date_of_reporting);
             CREATE INDEX IF NOT EXISTS idx_dfr_district_date ON daily_field_reports(district_id, date_of_reporting);
             CREATE INDEX IF NOT EXISTS idx_dfr_date_of_reporting ON daily_field_reports(date_of_reporting);

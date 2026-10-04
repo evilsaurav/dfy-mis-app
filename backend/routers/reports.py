@@ -334,11 +334,30 @@ async def check_today_status(req: CheckStatusRequest):
 
         res = {"status": "not_started"}
         try:
-            for cid in candidate_ids:
-                doc = pg_fetch_one("daily_field_reports", filters={"id": cid})
-                if doc:
-                    res = {"status": "completed", "submission_count": 1, "data": doc}
-                    break
+            clean_fo_alpha = re.sub(r'[^a-z0-9]', '', req.fo_name.lower())
+            rows = pg_execute_raw(
+                """
+                SELECT * FROM daily_field_reports
+                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
+                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)))
+                  AND (
+                      LOWER(TRIM(fo_name)) = LOWER(TRIM(%s))
+                      OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = %s
+                      OR legacy_doc_id = ANY(%s)
+                  )
+                ORDER BY id DESC LIMIT 1
+                """,
+                [req.date, f"{req.date}%", c_wp, req.working_place, req.fo_name, clean_fo_alpha, candidate_ids],
+                fetch=True
+            )
+            if rows:
+                res = {"status": "completed", "submission_count": 1, "data": dict(rows[0])}
+            else:
+                for cid in candidate_ids:
+                    doc = pg_fetch_one("daily_field_reports", filters={"id": cid})
+                    if doc:
+                        res = {"status": "completed", "submission_count": 1, "data": doc}
+                        break
         except Exception as fe:
             print(f"Check status read notice (PG): {fe}")
 
@@ -1146,26 +1165,32 @@ async def compute_profile_response(
         date_str = str(data.get("date_of_reporting") or data.get("date") or "").strip()
         if date_str and date_str.startswith(req_month):
             day_total = 0
-            for k in stats.keys():
-                arr = data.get(k + "_ids", [])
-                if isinstance(arr, list):
-                    stats[k] += len(arr)
-                    day_total += len(arr)
             day_categories = {}
             for k in stats.keys():
                 arr = data.get(k + "_ids", [])
                 if isinstance(arr, list) and len(arr) > 0:
+                    stats[k] += len(arr)
+                    day_total += len(arr)
                     day_categories[k] = arr
-                    
+                else:
+                    # Relational fallback: read from parent legacy_count column if present
+                    l_val = data.get(f"legacy_count_{k}s")
+                    if l_val is None:
+                        l_val = data.get(f"legacy_count_{k}")
+                    l_count = int(l_val or 0) if str(l_val or "").isdigit() or isinstance(l_val, (int, float)) else 0
+                    if l_count > 0:
+                        stats[k] += l_count
+                        day_total += l_count
+
             daily_history[date_str] = {
                 "submitted": True,
-                "count": data.get("submission_count", 1),
+                "count": int(data.get("submission_count") or 1),
                 "total_ids": day_total,
                 "categories": day_categories,
-                "visited_names": data.get("visited_names", []),
-                "total_km": data.get("total_km", 0),
-                "remark": data.get("remark", ""),
-                "fdc_details": data.get("fdc_details", []),
+                "visited_names": data.get("visited_names") or [],
+                "total_km": int(data.get("total_km") or 0),
+                "remark": data.get("remark") or "",
+                "fdc_details": data.get("fdc_details") or [],
                 "admin_remark": data.get("admin_remark") or "",
                 "admin_remark_by": data.get("admin_remark_by") or ""
             }
@@ -1251,7 +1276,7 @@ async def compute_profile_response(
     
     # Calculate Reporting Streak (Preserves streaks across Sundays, approved leaves & declared holidays)
     streak_days = calculate_reporting_streak(daily_history, today=get_ist_now().date())
-    total_km_month = sum(d.get("total_km", 0) for d in daily_history.values())
+    total_km_month = sum(int(d.get("total_km") or 0) for d in daily_history.values())
     
     badges = []
     if stats.get("notification", 0) >= 100:
@@ -1272,17 +1297,16 @@ async def compute_profile_response(
             declared_holidays = int(cached_pacing.get("declared_holidays", 1))
         else:
             dist_doc_id = f"{req_month}_{c_wp}"
-            doc_snap = pg_fetch_one("pacing_settings", filters={"id": dist_doc_id})
-            if doc_snap:
-                declared_holidays = int(doc_snap.get("declared_holidays", 1))
-                cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
+            p_rows = pg_execute_raw(
+                "SELECT declared_holidays FROM pacing_settings WHERE id IN (%s, %s) ORDER BY (id = %s) DESC LIMIT 1",
+                [dist_doc_id, req_month, dist_doc_id],
+                fetch=True
+            )
+            if p_rows and p_rows[0].get("declared_holidays") is not None:
+                declared_holidays = int(p_rows[0]["declared_holidays"])
             else:
-                state_doc_snap = pg_fetch_one("pacing_settings", filters={"id": req_month})
-                if state_doc_snap:
-                    declared_holidays = int(state_doc_snap.get("declared_holidays", 1))
-                else:
-                    declared_holidays = 1
-                cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": "all", "month": req_month}, ttl=1800)
+                declared_holidays = 1
+            cache.set(p_cache_key, {"declared_holidays": declared_holidays, "district": c_wp, "month": req_month}, ttl=1800)
 
     except Exception as p_err:
         print(f"Notice: Failed to fetch pacing settings for {req_month} {c_wp}: {p_err}")
@@ -1505,27 +1529,17 @@ async def my_profile_stats(req: ProfileStatsRequest):
             return res
 
         try:
-            # 1. In-Memory PIN Verification from Cached Directory
-            raw_staff = await get_cached_staff_directory_raw()
+            # 1. Fast Staff Resolution & PIN Validation (< 10ms target)
             pin_valid = False
-            found_officer = False
-            for s in (raw_staff or []):
-                s_wp = canonicalize_district(s.get("district", ""))
-                s_name = re.sub(r'[^a-zA-Z0-9]', '', str(s.get("name") or s.get("fo_name") or "")).lower()
-                if s_wp == clean_wp and s_name == clean_fo:
-                    found_officer = True
-                    real_pin = s.get("pin", "")
-                    if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
-                        pin_valid = True
-                        break
-            
-            # Fast Staff Resolution & PIN Validation
             resolved_staff_id, resolved_district_id = resolve_staff_and_district_ids(
                 fo_name=req.fo_name,
                 district=clean_wp,
                 pin=req.pin
             )
-            if not found_officer and resolved_staff_id:
+            cached_pin = cache.get(f"pin_{resolved_staff_id}") or cache.get(f"pin_{clean_wp}_{clean_fo}")
+            if cached_pin and (verify_password(str(req.pin), str(cached_pin)) or str(req.pin) == str(cached_pin)):
+                pin_valid = True
+            elif resolved_staff_id:
                 try:
                     staff_row = pg_execute_raw(
                         "SELECT pin, is_active FROM staff_directory WHERE id = %s LIMIT 1",
@@ -1534,32 +1548,60 @@ async def my_profile_stats(req: ProfileStatsRequest):
                     )
                     if staff_row:
                         s_pin = staff_row[0].get("pin", "")
+                        cache.set(f"pin_{resolved_staff_id}", str(s_pin), ttl=3600)
                         if verify_password(str(req.pin), str(s_pin)) or str(req.pin) == str(s_pin):
                             pin_valid = True
                 except Exception:
                     pass
 
             if not pin_valid:
+                # Fast fallback: cached directory or mock store for test harness
+                raw_staff = await get_cached_staff_directory_raw()
+                for s in (raw_staff or []):
+                    s_wp = canonicalize_district(s.get("district", ""))
+                    s_name = re.sub(r'[^a-zA-Z0-9]', '', str(s.get("name") or s.get("fo_name") or "")).lower()
+                    if s_wp == clean_wp and s_name == clean_fo:
+                        real_pin = s.get("pin", "")
+                        if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
+                            pin_valid = True
+                            break
+
+            if not pin_valid:
                 if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
                     raise HTTPException(status_code=401, detail="Invalid PIN")
 
-            # 2. In-Memory Target Lookup via Unified Target Engine
+            # 2. In-Memory Target Lookup via Unified Target Engine (Direct indexed query first)
             target_val = 50
             target_found = False
-            try:
-                targets_res = await get_targets(district=clean_wp, month=req_month)
-                if targets_res and isinstance(targets_res, dict) and "targets" in targets_res:
-                    for t in targets_res["targets"]:
-                        t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
-                        if t_fo == clean_fo or is_officer_name_match(t.get("fo_name") or t.get("name"), req.fo_name, clean_wp):
-                            try:
-                                target_val = int(t.get("target", 50))
-                                target_found = True
-                            except Exception:
-                                target_val = 50
-                            break
-            except Exception as e_tgt:
-                print(f"[Profile Stats] Target lookup fallback notice: {e_tgt}")
+            if resolved_staff_id:
+                try:
+                    month_first = f"{req_month[:7]}-01"
+                    tgt_rows = pg_execute_raw(
+                        "SELECT target FROM staff_targets WHERE staff_id = %s AND (month = %s::date OR month::text LIKE %s) LIMIT 1",
+                        [resolved_staff_id, month_first, f"{req_month[:7]}%"],
+                        fetch=True
+                    )
+                    if tgt_rows and tgt_rows[0].get("target"):
+                        target_val = int(tgt_rows[0]["target"])
+                        target_found = True
+                except Exception as tgt_err:
+                    print(f"[Profile Stats] Targeted staff_targets lookup notice: {tgt_err}")
+
+            if not target_found:
+                try:
+                    targets_res = await get_targets(district=clean_wp, month=req_month)
+                    if targets_res and isinstance(targets_res, dict) and "targets" in targets_res:
+                        for t in targets_res["targets"]:
+                            t_fo = re.sub(r'[^a-zA-Z0-9]', '', str(t.get("fo_name") or t.get("name") or "")).lower()
+                            if t_fo == clean_fo or is_officer_name_match(t.get("fo_name") or t.get("name"), req.fo_name, clean_wp):
+                                try:
+                                    target_val = int(t.get("target", 50))
+                                    target_found = True
+                                except Exception:
+                                    target_val = 50
+                                break
+                except Exception as e_tgt:
+                    print(f"[Profile Stats] Target lookup fallback notice: {e_tgt}")
 
             if not target_found:
                 cached_targets = await get_cached_staff_targets_for_month(req_month)
