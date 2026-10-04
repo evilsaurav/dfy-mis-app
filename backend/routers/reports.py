@@ -3,6 +3,7 @@ import io
 import re
 import gc
 import json
+import json as _json
 import math
 import time
 import asyncio
@@ -12,7 +13,6 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from google.cloud import firestore
 
 from backend.core.database import db, project_id, ENABLE_IN_MEMORY_DERIVATION
 from backend.core.cache import cache
@@ -60,12 +60,14 @@ from backend.core.styles import (
 from backend.routers.backup import ensure_daily_backup_scheduled
 from backend.routers.targets import get_targets
 from backend.core.supabase import (
+    get_postgres_connection,
     pg_query_table,
     pg_fetch_one,
     pg_upsert_row,
     pg_update_row,
     pg_delete_rows,
     pg_execute_raw,
+    get_active_db,
 )
 
 router = APIRouter(tags=["reports"])
@@ -411,14 +413,43 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
         clean_dist.upper()
     ]))[:10]
 
-    # Fast targeted district query from PostgreSQL
-    docs = pg_execute_raw(
-        "SELECT * FROM daily_field_reports WHERE (working_place = ANY(%s) OR district = ANY(%s)) AND date_of_reporting >= %s",
-        [target_places, target_places, start_date],
-        fetch=True
-    ) or []
+    registry = {}
+    import json as _json
 
-    if not docs:
+    relational_rows = []
+    try:
+        sql = """
+            SELECT k.patient_id AS notification_id, r.id AS report_id, COALESCE(r.legacy_doc_id, r.id::text) AS doc_id,
+                   r.date_of_reporting, r.fo_name, r.working_place
+            FROM report_kpi_entries k
+            JOIN daily_field_reports r ON k.report_id = r.id
+            WHERE (r.working_place = ANY(%s) OR r.district_id::text = ANY(%s))
+              AND r.date_of_reporting >= %s
+              AND k.category IN ('notification_ids', 'notifications')
+            ORDER BY r.date_of_reporting ASC, r.created_at ASC
+        """
+        relational_rows = pg_execute_raw(sql, [target_places, target_places, start_date], fetch=True) or []
+    except Exception as rel_err:
+        print(f"[Registry Relational Notice] {rel_err}")
+        relational_rows = []
+
+    if relational_rows:
+        for row in relational_rows:
+            r = dict(row)
+            clean_nid = str(r.get("notification_id", "")).strip()
+            dt = str(r.get("date_of_reporting", "")).strip()
+            fo = str(r.get("fo_name", "")).strip()
+            did = str(r.get("doc_id", "")).strip()
+            if clean_nid and len(clean_nid) >= 5:
+                if clean_nid not in registry or dt < registry[clean_nid]["date"]:
+                    registry[clean_nid] = {
+                        "date": dt,
+                        "fo_name": fo,
+                        "doc_id": did
+                    }
+    else:
+        # Fallback to active_db / mock store
+        docs = []
         try:
             docs = await asyncio.to_thread(lambda: list(
                 db.collection("daily_field_reports")
@@ -434,36 +465,33 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
                     .stream()
                 ))
         except Exception as fe:
-            print(f"Registry Firestore fallback notice: {fe}")
+            print(f"Registry mock fallback notice: {fe}")
 
-    registry = {}
-    import json as _json
-
-    for doc in docs:
-        d = doc.to_dict() if hasattr(doc, "to_dict") else doc
-        doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
-        if doc_dist.lower() != clean_dist.lower():
-            continue
-        dt = str(d.get("date_of_reporting", "")).strip()
-        fo = str(d.get("fo_name", "")).strip()
-        did = getattr(doc, "id", "") or str(d.get("id", "") or d.get("doc_id", "")).strip()
-        if not did:
-            did = f"{doc_dist}_{fo}_{dt}".replace(" ", "_").lower()
-        notifs = d.get("notification_ids", []) or []
-        if isinstance(notifs, str):
-            try:
-                notifs = _json.loads(notifs)
-            except Exception:
-                notifs = []
-        for nid in notifs:
-            clean_nid = str(nid).strip()
-            if clean_nid and len(clean_nid) >= 5:
-                if clean_nid not in registry or dt < registry[clean_nid]["date"]:
-                    registry[clean_nid] = {
-                        "date": dt,
-                        "fo_name": fo,
-                        "doc_id": did
-                    }
+        for doc in docs:
+            d = doc.to_dict() if hasattr(doc, "to_dict") else doc
+            doc_dist = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+            if doc_dist.lower() != clean_dist.lower():
+                continue
+            dt = str(d.get("date_of_reporting", "")).strip()
+            fo = str(d.get("fo_name", "")).strip()
+            did = getattr(doc, "id", "") or str(d.get("id", "") or d.get("doc_id", "")).strip()
+            if not did:
+                did = f"{doc_dist}_{fo}_{dt}".replace(" ", "_").lower()
+            notifs = d.get("notification_ids", []) or []
+            if isinstance(notifs, str):
+                try:
+                    notifs = _json.loads(notifs)
+                except Exception:
+                    notifs = []
+            for nid in notifs:
+                clean_nid = str(nid).strip()
+                if clean_nid and len(clean_nid) >= 5:
+                    if clean_nid not in registry or dt < registry[clean_nid]["date"]:
+                        registry[clean_nid] = {
+                            "date": dt,
+                            "fo_name": fo,
+                            "doc_id": did
+                        }
 
     result = {
         "status": "success",
@@ -574,13 +602,13 @@ async def submit_daily_report(report: DailyActivityReport):
                 pruned_duplicates = []
                 valid_new_notifs = list(dict.fromkeys(report.notification_ids or []))
 
-        payload = report.dict(exclude_unset=True)
+        payload = report.model_dump(exclude_unset=True) if hasattr(report, "model_dump") else report.dict(exclude_unset=True)
         payload["notification_ids"] = valid_new_notifs
         payload["status"] = "completed"
-        payload["timestamp_completed"] = firestore.SERVER_TIMESTAMP
+        payload["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
         payload["submission_count"] = 1
         
-        # Storage Guard: Prevent massive base64 strings from inflating Firestore document size
+        # Storage Guard: Prevent massive base64 strings from inflating document size
         if report.morning_km_photo_url and len(report.morning_km_photo_url) > 1000:
             payload["morning_km_photo_url"] = ""
         if report.evening_km_photo_url and len(report.evening_km_photo_url) > 1000:
@@ -606,103 +634,250 @@ async def submit_daily_report(report: DailyActivityReport):
             "diff_tb": len(report.differentiated_tb_ids or []),
         }
 
+        existing_report = None
+        report_id = None
         try:
             doc = pg_fetch_one("daily_field_reports", filters={"id": doc_id})
             if doc:
-                is_new_submission = False
-                d = dict(doc)
-                import json as _json
-                for col in ["notification_ids", "sample_tested_ids", "hiv_dm_ids", "dbt_ids", "contact_tracing_ids", "differentiated_tb_ids", "visited_names", "fdc_details"]:
-                    if isinstance(d.get(col), str):
-                        try:
-                            d[col] = _json.loads(d[col])
-                        except Exception:
-                            d[col] = []
-                
-                # Compute delta for each category to ensure accurate rollup increments
-                old_notifs = set(d.get("notification_ids", []))
-                delta_counts["notifications"] = len(set(valid_new_notifs) - old_notifs)
-
-                old_tests = set(d.get("sample_tested_ids", []))
-                delta_counts["tests"] = len(set(report.sample_tested_ids or []) - old_tests)
-
-                old_hiv = set(d.get("hiv_dm_ids", []))
-                delta_counts["hiv_dm"] = len(set(report.hiv_dm_ids or []) - old_hiv)
-
-                old_dbt = set(d.get("dbt_ids", []))
-                delta_counts["dbt"] = len(set(report.dbt_ids or []) - old_dbt)
-
-                old_contact = set(d.get("contact_tracing_ids", []))
-                delta_counts["contact_tracing"] = len(set(report.contact_tracing_ids or []) - old_contact)
-
-                old_diff = set(d.get("differentiated_tb_ids", []))
-                delta_counts["diff_tb"] = len(set(report.differentiated_tb_ids or []) - old_diff)
-
-                # Increment submission_count for subsequent submissions
-                payload["submission_count"] = (d.get("submission_count") or 1) + 1
-
-                for k, v in payload.items():
-                    if isinstance(v, list) and k.endswith("_ids"):
-                        combined = (d.get(k) or []) + v
-                        payload[k] = list(dict.fromkeys(combined))
-                    elif k == "visited_names" and isinstance(v, list):
-                        combined = (d.get(k) or []) + v
-                        payload[k] = list(dict.fromkeys(combined))
-                    elif k == "fdc_details" and isinstance(v, list):
-                        old_fdc = d.get("fdc_details", [])
-                        f_map = {item.get("id"): item for item in old_fdc if isinstance(item, dict) and item.get("id")}
-                        for item in v:
-                            if isinstance(item, dict) and item.get("id"):
-                                f_map[item.get("id")] = item
-                        payload[k] = list(f_map.values())
-                    elif k == "remark" and v:
-                        old_remark = d.get("remark", "")
-                        if v not in old_remark:
-                            payload[k] = f"{old_remark} | {v}".strip(" |")
-                        else:
-                            payload[k] = old_remark
-
-                # Preserve preexisting KM readings if subsequent submission didn't provide new ones
-                if d.get("morning_km") and not payload.get("morning_km"):
-                    payload["morning_km"] = d["morning_km"]
-                if d.get("morning_km_photo_url") and not payload.get("morning_km_photo_url"):
-                    payload["morning_km_photo_url"] = d["morning_km_photo_url"]
-                if d.get("evening_km") and not payload.get("evening_km"):
-                    payload["evening_km"] = d["evening_km"]
-                if d.get("evening_km_photo_url") and not payload.get("evening_km_photo_url"):
-                    payload["evening_km_photo_url"] = d["evening_km_photo_url"]
-                if d.get("total_km") and not payload.get("total_km"):
-                    payload["total_km"] = d["total_km"]
-
-                # Preserve preexisting next-day metadata if present in existing document and not set in payload
-                if d.get("is_next_day_submission") and not payload.get("is_next_day_submission"):
-                    payload["is_next_day_submission"] = d["is_next_day_submission"]
-                    payload["submitted_morning_time"] = d.get("submitted_morning_time", "")
-                    payload["morning_submission_label"] = d.get("morning_submission_label", "")
-        except Exception as read_err:
-            print(f"[Submit Notice] Read existing report skipped: {read_err}")
-                        
-        payload["id"] = doc_id
-        import json as _json
-        pg_payload = dict(payload)
-        for col in [
-            "visited_names", "notification_ids", "hiv_dm_ids", "dbt_ids",
-            "sample_tested_ids", "sample_collection_ids", "contact_tracing_ids",
-            "differentiated_tb_ids", "outcome_assigned_ids", "home_visit_ids",
-            "follow_up_ids", "face_to_face_ids", "presumptive_ids",
-            "documents_ids", "fdc_provided_ids", "kit_consumption_ids",
-            "tpt_treatment_start_ids", "tpt_presumptive_ids",
-            "adhar_face_authentication_ids", "consent_with_id_ids", "culture_dst_ids"
-        ]:
-            if col in pg_payload and isinstance(pg_payload[col], list):
-                pg_payload[col] = _json.dumps(pg_payload[col])
-        pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["id"])
-        try:
-            doc_ref = db.collection("daily_field_reports").document(doc_id)
-            await asyncio.to_thread(lambda: doc_ref.set(payload, merge=True))
+                existing_report = dict(doc)
+                report_id = existing_report.get("id") or doc_id
         except Exception:
             pass
-        
+
+        if not existing_report:
+            try:
+                doc = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
+                if doc:
+                    existing_report = dict(doc)
+                    report_id = existing_report.get("id") or doc_id
+            except Exception:
+                pass
+
+        if not existing_report:
+            try:
+                pg_res = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(fo_name) = LOWER(%s) AND LOWER(working_place) = LOWER(%s) LIMIT 1",
+                    [str(report.date_of_reporting), str(report.fo_name).strip(), str(report.working_place).strip()],
+                    fetch=True
+                )
+                if pg_res:
+                    existing_report = dict(pg_res[0])
+                    report_id = existing_report.get("id") or doc_id
+            except Exception:
+                pass
+
+        if not existing_report:
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    doc_snap = active_db.collection("daily_field_reports").document(doc_id).get()
+                    if doc_snap and getattr(doc_snap, "exists", False):
+                        existing_report = doc_snap.to_dict() if callable(getattr(doc_snap, "to_dict", None)) else doc_snap
+                        report_id = existing_report.get("id") or doc_id
+                except Exception:
+                    pass
+
+        if existing_report:
+            is_new_submission = False
+
+            # If existing_report from Postgres doesn't have child array columns, fetch them from report_kpi_entries
+            if report_id and not any(isinstance(existing_report.get(k), list) and existing_report.get(k) for k in ["notification_ids", "sample_tested_ids"]):
+                try:
+                    k_rows = pg_execute_raw(
+                        "SELECT category, patient_id FROM report_kpi_entries WHERE report_id = %s",
+                        [report_id],
+                        fetch=True
+                    )
+                    if k_rows:
+                        for kr in k_rows:
+                            cat = kr.get("category")
+                            pid = kr.get("patient_id")
+                            if cat and pid:
+                                existing_report.setdefault(cat, []).append(str(pid).strip())
+                except Exception:
+                    pass
+
+            for k in list(existing_report.keys()):
+                val = existing_report.get(k)
+                if isinstance(val, str) and (val.startswith("[") or val.startswith("{")):
+                    try:
+                        existing_report[k] = _json.loads(val)
+                    except Exception:
+                        pass
+
+            # Calculate deltas preserving insertion order
+            delta_map = {
+                "notifications": ("notification_ids", valid_new_notifs),
+                "tests": ("sample_tested_ids", report.sample_tested_ids or []),
+                "hiv_dm": ("hiv_dm_ids", report.hiv_dm_ids or []),
+                "dbt": ("dbt_ids", report.dbt_ids or []),
+                "contact_tracing": ("contact_tracing_ids", report.contact_tracing_ids or []),
+                "diff_tb": ("differentiated_tb_ids", report.differentiated_tb_ids or []),
+            }
+            for metric_name, (cat_key, new_vals) in delta_map.items():
+                old_list = list(existing_report.get(cat_key) or [])
+                delta_counts[metric_name] = len(set(new_vals) - set(old_list))
+
+            # Increment submission_count for subsequent submissions
+            payload["submission_count"] = (existing_report.get("submission_count") or 1) + 1
+
+            for k, v in payload.items():
+                if isinstance(v, list) and k.endswith("_ids"):
+                    old_list = list(existing_report.get(k) or [])
+                    combined = old_list + v
+                    payload[k] = list(dict.fromkeys(combined))
+                elif k == "visited_names" and isinstance(v, list):
+                    raw_names = existing_report.get("visited_names") or []
+                    if isinstance(raw_names, str):
+                        try:
+                            raw_names = _json.loads(raw_names)
+                        except Exception:
+                            raw_names = []
+                    combined = (raw_names if isinstance(raw_names, list) else []) + v
+                    payload[k] = list(dict.fromkeys(combined))
+                elif k == "fdc_details" and isinstance(v, list):
+                    old_fdc = existing_report.get("fdc_details", [])
+                    if isinstance(old_fdc, str):
+                        try:
+                            old_fdc = _json.loads(old_fdc)
+                        except Exception:
+                            old_fdc = []
+                    f_map = {item.get("id") or item.get("patient_id"): item for item in (old_fdc if isinstance(old_fdc, list) else []) if isinstance(item, dict) and (item.get("id") or item.get("patient_id"))}
+                    for item in v:
+                        if isinstance(item, dict) and (item.get("id") or item.get("patient_id")):
+                            f_map[item.get("id") or item.get("patient_id")] = item
+                    payload[k] = list(f_map.values())
+                elif k == "remark" and v:
+                    old_remark = existing_report.get("remark", "")
+                    if v not in old_remark:
+                        payload[k] = f"{old_remark} | {v}".strip(" |")
+                    else:
+                        payload[k] = old_remark
+
+            # Preserve preexisting KM readings if subsequent submission didn't provide new ones
+            if existing_report.get("morning_km") and not payload.get("morning_km"):
+                payload["morning_km"] = existing_report["morning_km"]
+            if existing_report.get("morning_km_photo_url") and not payload.get("morning_km_photo_url"):
+                payload["morning_km_photo_url"] = existing_report["morning_km_photo_url"]
+            if existing_report.get("evening_km") and not payload.get("evening_km"):
+                payload["evening_km"] = existing_report["evening_km"]
+            if existing_report.get("evening_km_photo_url") and not payload.get("evening_km_photo_url"):
+                payload["evening_km_photo_url"] = existing_report["evening_km_photo_url"]
+            if existing_report.get("total_km") and not payload.get("total_km"):
+                payload["total_km"] = existing_report["total_km"]
+
+            # Preserve preexisting next-day metadata if present in existing document and not set in payload
+            if existing_report.get("is_next_day_submission") and not payload.get("is_next_day_submission"):
+                payload["is_next_day_submission"] = existing_report["is_next_day_submission"]
+                payload["submitted_morning_time"] = existing_report.get("submitted_morning_time", "")
+                payload["morning_submission_label"] = existing_report.get("morning_submission_label", "")
+
+        payload["id"] = doc_id
+
+        # Parent table daily_field_reports in PostgreSQL does NOT have array columns
+        array_columns_to_strip = [
+            "notification_ids", "sample_collection_ids", "sample_tested_ids", "hiv_dm_ids",
+            "dbt_ids", "contact_tracing_ids", "home_visit_ids", "outcome_assigned_ids",
+            "follow_up_ids", "face_to_face_ids", "presumptive_ids", "documents_ids",
+            "fdc_provided_ids", "kit_consumption_ids", "differentiated_tb_ids",
+            "tpt_treatment_start_ids", "tpt_presumptive_ids", "adhar_face_authentication_ids",
+            "consent_with_id_ids", "culture_dst_ids", "fdc_details", "visited_names"
+        ]
+
+        # Strip these array keys from pg_payload before pg_upsert_row
+        pg_payload = dict(payload)
+        for cat in array_columns_to_strip:
+            pg_payload.pop(cat, None)
+
+        # Set integer counts on pg_payload
+        pg_payload["notifications"] = len(payload.get("notification_ids") or [])
+        pg_payload["tests"] = len(payload.get("sample_tested_ids") or [])
+        pg_payload["hiv_dm"] = len(payload.get("hiv_dm_ids") or [])
+        pg_payload["dbt"] = len(payload.get("dbt_ids") or [])
+        pg_payload["contact_tracing"] = len(payload.get("contact_tracing_ids") or [])
+        pg_payload["differentiated_tb"] = len(payload.get("differentiated_tb_ids") or [])
+        pg_payload["legacy_count_notifications"] = pg_payload["notifications"]
+        pg_payload["legacy_doc_id"] = doc_id
+
+        # Upsert parent row in daily_field_reports
+        if report_id and isinstance(report_id, int):
+            pg_payload["id"] = report_id
+            pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["id"])
+        else:
+            pg_payload.pop("id", None)
+            upsert_res = pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
+            if upsert_res and isinstance(upsert_res, dict) and upsert_res.get("id"):
+                report_id = upsert_res.get("id")
+
+        if not report_id:
+            report_id = (existing_report.get("id") if existing_report else None) or doc_id
+
+        # Maintain mirror write to active_db for unit tests
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                active_db.collection("daily_field_reports").document(doc_id).set(payload, merge=True)
+            except Exception:
+                pass
+
+        # Write to child tables
+        if report_id:
+            # 1. report_kpi_entries
+            try:
+                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [report_id])
+                for category in [c for c in payload.keys() if c.endswith("_ids") and isinstance(payload.get(c), list)]:
+                    for pid in payload[category]:
+                        clean_pid = str(pid).strip()
+                        if clean_pid:
+                            pg_execute_raw(
+                                "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
+                                [report_id, category, clean_pid]
+                            )
+            except Exception as kpi_err:
+                print(f"[report_kpi_entries Write Notice] {kpi_err}")
+
+            # 2. report_fdc_details
+            try:
+                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [report_id])
+                for idx, item in enumerate(payload.get("fdc_details") or []):
+                    if isinstance(item, dict):
+                        pg_execute_raw(
+                            """INSERT INTO report_fdc_details 
+                               (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, patient_name, patient_type, weight_kg, weight_band, daily_tablets, strips, recommended_strips, supply_issued, position) 
+                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                            [
+                                report_id,
+                                str(item.get("patient_id") or item.get("id") or ""),
+                                str(item.get("fdc_type") or ""),
+                                str(item.get("regimen_name") or ""),
+                                str(item.get("phase") or ""),
+                                str(item.get("daily_dose_text") or ""),
+                                str(item.get("patient_name") or ""),
+                                str(item.get("patient_type") or ""),
+                                str(item.get("weight_kg") or ""),
+                                str(item.get("weight_band") or ""),
+                                str(item.get("daily_tablets") or ""),
+                                str(item.get("strips") or ""),
+                                str(item.get("recommended_strips") or ""),
+                                str(item.get("supply_issued") or ""),
+                                idx
+                            ]
+                        )
+            except Exception as fdc_err:
+                print(f"[report_fdc_details Write Notice] {fdc_err}")
+
+            # 3. report_visited_names
+            try:
+                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [report_id])
+                for idx, name in enumerate(payload.get("visited_names") or []):
+                    if name and str(name).strip():
+                        pg_execute_raw(
+                            "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
+                            [report_id, str(name).strip(), idx]
+                        )
+            except Exception as names_err:
+                print(f"[report_visited_names Write Notice] {names_err}")
+
         # Update daily_district_rollups in PostgreSQL
         try:
             clean_wp = report.working_place.strip()
@@ -737,11 +912,12 @@ async def submit_daily_report(report: DailyActivityReport):
                 rollup_update[metric_k] = old_val + max(0, delta_v)
 
             pg_upsert_row("daily_district_rollups", rollup_update, conflict_columns=["id"])
-            try:
-                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-                await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
-            except Exception:
-                pass
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
+                    rollup_ref.set(rollup_update, merge=True)
+                except Exception:
+                    pass
         except Exception as rollup_err:
             print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
@@ -1400,93 +1576,184 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
     if districts and districts.strip() and districts.strip() != "All":
         allowed_dist_set = set([canonicalize_district(d.strip()).lower() for d in districts.split(",") if d.strip()])
         
-    if fo_name:
-        raw_fo = fo_name.strip()
-        docs = pg_execute_raw(
-            "SELECT * FROM daily_field_reports WHERE (fo_name = %s OR fo_name = %s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
-            [raw_fo, fo_name, start_date, end_date],
-            fetch=True
-        ) or []
-    elif clean_district != "All":
-        alias_dists = [clean_district]
-        if "aurangabad" in clean_district.lower():
-            alias_dists.extend(["AURANGABAD-BI", "Aurangabad"])
-        elif "champaran" in clean_district.lower():
-            alias_dists.extend(["Purba Champaran", "East Champaran"])
-        elif "bhojpur" in clean_district.lower():
-            alias_dists.extend(["BHOJPUR", "Bhojpur"])
-        alias_dists = list(dict.fromkeys(alias_dists))
-
-        docs = pg_execute_raw(
-            "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
-            [alias_dists, start_date, end_date],
-            fetch=True
-        ) or []
-    else:
-        docs = pg_execute_raw(
-            "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
-            [start_date, end_date],
-            fetch=True
-        ) or []
-        
     patient_map = {}
     import json as _json
-    
-    for doc in docs:
-        d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
-        doc_dist = canonicalize_district(d.get("working_place", ""))
-        doc_fo = d.get("fo_name", "").strip()
 
-        doc_date = d.get("date_of_reporting", "")
-        
-        if allowed_dist_set and doc_dist.lower() not in allowed_dist_set:
-            continue
-        if clean_district != "All" and doc_dist.lower() != clean_district.lower():
-            continue
-        if clean_fo and doc_fo.lower() != clean_fo:
-            continue
+    cat_flag_map = {
+        "notification_ids": "notification", "notifications": "notification",
+        "hiv_dm_ids": "hiv_dm", "hiv_dm": "hiv_dm",
+        "dbt_ids": "dbt", "dbt": "dbt",
+        "contact_tracing_ids": "contact_tracing", "contact_tracing": "contact_tracing",
+        "sample_tested_ids": "sample_tested", "tests": "sample_tested",
+        "presumptive_ids": "presumptive", "presumptive": "presumptive",
+        "outcome_assigned_ids": "outcome", "outcome": "outcome",
+        "differentiated_tb_ids": "differentiated_tb", "diff_tb": "differentiated_tb"
+    }
+
+    relational_kpis = []
+    try:
+        if fo_name:
+            raw_fo = fo_name.strip()
+            kpi_sql = """
+                SELECT k.patient_id, k.category, r.working_place, r.fo_name, r.date_of_reporting
+                FROM report_kpi_entries k
+                JOIN daily_field_reports r ON k.report_id = r.id
+                WHERE (LOWER(r.fo_name) = LOWER(%s)) AND r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+            """
+            relational_kpis = pg_execute_raw(kpi_sql, [raw_fo, start_date, end_date], fetch=True) or []
+        elif clean_district != "All":
+            alias_dists = [clean_district]
+            if "aurangabad" in clean_district.lower():
+                alias_dists.extend(["AURANGABAD-BI", "Aurangabad"])
+            elif "champaran" in clean_district.lower():
+                alias_dists.extend(["Purba Champaran", "East Champaran"])
+            elif "bhojpur" in clean_district.lower():
+                alias_dists.extend(["BHOJPUR", "Bhojpur"])
+            alias_dists = list(dict.fromkeys(alias_dists))
+            kpi_sql = """
+                SELECT k.patient_id, k.category, r.working_place, r.fo_name, r.date_of_reporting
+                FROM report_kpi_entries k
+                JOIN daily_field_reports r ON k.report_id = r.id
+                WHERE (r.working_place = ANY(%s) OR r.district_id::text = ANY(%s))
+                  AND r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+            """
+            relational_kpis = pg_execute_raw(kpi_sql, [alias_dists, alias_dists, start_date, end_date], fetch=True) or []
+        else:
+            kpi_sql = """
+                SELECT k.patient_id, k.category, r.working_place, r.fo_name, r.date_of_reporting
+                FROM report_kpi_entries k
+                JOIN daily_field_reports r ON k.report_id = r.id
+                WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+            """
+            relational_kpis = pg_execute_raw(kpi_sql, [start_date, end_date], fetch=True) or []
+    except Exception as kpi_err:
+        print(f"[Cascade Alerts Relational Notice] {kpi_err}")
+        relational_kpis = []
+
+    if relational_kpis:
+        for r_entry in relational_kpis:
+            pid_clean = str(r_entry.get("patient_id", "")).strip()
+            cat = r_entry.get("category", "")
+            flag = cat_flag_map.get(cat)
+            if not flag or len(pid_clean) < 5:
+                continue
+            doc_dist = canonicalize_district(r_entry.get("working_place", ""))
+            doc_fo = str(r_entry.get("fo_name", "")).strip()
+            doc_date = str(r_entry.get("date_of_reporting", ""))
+
+            if allowed_dist_set and doc_dist.lower() not in allowed_dist_set:
+                continue
+            if clean_district != "All" and doc_dist.lower() != clean_district.lower():
+                continue
+            if clean_fo and doc_fo.lower() != clean_fo:
+                continue
+
+            if pid_clean not in patient_map:
+                patient_map[pid_clean] = {
+                    "id": pid_clean,
+                    "district": doc_dist,
+                    "fo_name": doc_fo,
+                    "first_date": doc_date,
+                    "notification": False,
+                    "hiv_dm": False,
+                    "dbt": False,
+                    "contact_tracing": False,
+                    "sample_tested": False,
+                    "presumptive": False,
+                    "outcome": False,
+                    "differentiated_tb": False
+                }
+            patient_map[pid_clean][flag] = True
+            if flag in ["notification", "presumptive"] and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
+                patient_map[pid_clean]["first_date"] = doc_date
+                patient_map[pid_clean]["district"] = doc_dist
+                patient_map[pid_clean]["fo_name"] = doc_fo
+    else:
+        # Fallback to active_db / mock store
+        docs = []
+        if fo_name:
+            raw_fo = fo_name.strip()
+            docs = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE (fo_name = %s OR fo_name = %s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+                [raw_fo, fo_name, start_date, end_date],
+                fetch=True
+            ) or []
+        elif clean_district != "All":
+            alias_dists = [clean_district]
+            if "aurangabad" in clean_district.lower():
+                alias_dists.extend(["AURANGABAD-BI", "Aurangabad"])
+            elif "champaran" in clean_district.lower():
+                alias_dists.extend(["Purba Champaran", "East Champaran"])
+            elif "bhojpur" in clean_district.lower():
+                alias_dists.extend(["BHOJPUR", "Bhojpur"])
+            alias_dists = list(dict.fromkeys(alias_dists))
+
+            docs = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
+                [alias_dists, start_date, end_date],
+                fetch=True
+            ) or []
+        else:
+            docs = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
+                [start_date, end_date],
+                fetch=True
+            ) or []
+
+        for doc in docs:
+            d = doc if isinstance(doc, dict) else (doc.to_dict() if hasattr(doc, "to_dict") else {})
+            doc_dist = canonicalize_district(d.get("working_place", ""))
+            doc_fo = d.get("fo_name", "").strip()
+
+            doc_date = d.get("date_of_reporting", "")
             
-        for cat_key, flag in [
-            ("notification_ids", "notification"),
-            ("hiv_dm_ids", "hiv_dm"),
-            ("dbt_ids", "dbt"),
-            ("contact_tracing_ids", "contact_tracing"),
-            ("sample_tested_ids", "sample_tested"),
-            ("presumptive_ids", "presumptive"),
-            ("outcome_assigned_ids", "outcome"),
-            ("differentiated_tb_ids", "differentiated_tb")
-        ]:
-            ids = d.get(cat_key, [])
-            if isinstance(ids, str):
-                try:
-                    ids = _json.loads(ids)
-                except Exception:
-                    ids = []
-            if isinstance(ids, list):
-
-                for pid in ids:
-                    pid_clean = str(pid).strip()
-                    if len(pid_clean) >= 5:
-                        if pid_clean not in patient_map:
-                            patient_map[pid_clean] = {
-                                "id": pid_clean,
-                                "district": doc_dist,
-                                "fo_name": doc_fo,
-                                "first_date": doc_date,
-                                "notification": False,
-                                "hiv_dm": False,
-                                "dbt": False,
-                                "contact_tracing": False,
-                                "sample_tested": False,
-                                "presumptive": False,
-                                "outcome": False,
-                                "differentiated_tb": False
-                            }
-                        patient_map[pid_clean][flag] = True
-                        if flag in ["notification", "presumptive"] and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
-                            patient_map[pid_clean]["first_date"] = doc_date
-                            patient_map[pid_clean]["district"] = doc_dist
-                            patient_map[pid_clean]["fo_name"] = doc_fo
+            if allowed_dist_set and doc_dist.lower() not in allowed_dist_set:
+                continue
+            if clean_district != "All" and doc_dist.lower() != clean_district.lower():
+                continue
+            if clean_fo and doc_fo.lower() != clean_fo:
+                continue
+                
+            for cat_key, flag in [
+                ("notification_ids", "notification"),
+                ("hiv_dm_ids", "hiv_dm"),
+                ("dbt_ids", "dbt"),
+                ("contact_tracing_ids", "contact_tracing"),
+                ("sample_tested_ids", "sample_tested"),
+                ("presumptive_ids", "presumptive"),
+                ("outcome_assigned_ids", "outcome"),
+                ("differentiated_tb_ids", "differentiated_tb")
+            ]:
+                ids = d.get(cat_key, [])
+                if isinstance(ids, str):
+                    try:
+                        ids = _json.loads(ids)
+                    except Exception:
+                        ids = []
+                if isinstance(ids, list):
+                    for pid in ids:
+                        pid_clean = str(pid).strip()
+                        if len(pid_clean) >= 5:
+                            if pid_clean not in patient_map:
+                                patient_map[pid_clean] = {
+                                    "id": pid_clean,
+                                    "district": doc_dist,
+                                    "fo_name": doc_fo,
+                                    "first_date": doc_date,
+                                    "notification": False,
+                                    "hiv_dm": False,
+                                    "dbt": False,
+                                    "contact_tracing": False,
+                                    "sample_tested": False,
+                                    "presumptive": False,
+                                    "outcome": False,
+                                    "differentiated_tb": False
+                                }
+                            patient_map[pid_clean][flag] = True
+                            if flag in ["notification", "presumptive"] and (not patient_map[pid_clean]["first_date"] or doc_date < patient_map[pid_clean]["first_date"]):
+                                patient_map[pid_clean]["first_date"] = doc_date
+                                patient_map[pid_clean]["district"] = doc_dist
+                                patient_map[pid_clean]["fo_name"] = doc_fo
 
     alert_list = []
     today_dt = datetime.now().date()

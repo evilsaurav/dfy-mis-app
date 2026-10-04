@@ -1,5 +1,5 @@
 // changelogData.js - Application Release Notes & Update History
-// High-performance client-side release log (Zero backend / Firestore load)
+// High-performance client-side release log (Zero backend / Database load)
 
 export const APP_VERSION = "2.8.6";
 export const LAST_UPDATED_DATE = "30 Sep 2026";
@@ -16,7 +16,7 @@ export const CHANGELOG_ENTRIES = [
       "👥 Staff & PINs Target Management: Added a dedicated Monthly Target input field inside the 'Edit Staff Details' modal, allowing supervisors to adjust designations, PINs, and monthly targets in a single unified form with automatic real-time dashboard refresh.",
       "🔗 Resilient Master Table & Pacing Matching: Replaced rigid canonical matching with an alias-resilient matching engine, seamlessly linking field names and designations (e.g. Vinay Prakash ↔ Vinay Kumar / LT in Muzaffarpur) without dropping to default 50.",
       "⏱️ Smart Month-End Reporting Cutoff: Enhanced the daily stealth cutoff to 11:00 AM IST on regular days, and extended the cutoff to 12:00 PM (Noon) on the 1st of every month for comprehensive month-end field reconciliation.",
-      "🛡️ Zero-Leakage Privacy & Cost Protection: Preserved strict 7:00 PM evening deadline messaging in the frontline mobile app with zero leak of internal grace cutoffs, while keeping Firestore reads and writes at zero additional cost."
+      "🛡️ Zero-Leakage Privacy & Cost Protection: Preserved strict 7:00 PM evening deadline messaging in the frontline mobile app with zero leak of internal grace cutoffs, while keeping Database reads and writes at zero additional cost."
     ],
     details: [
       {
@@ -200,7 +200,7 @@ export const CHANGELOG_ENTRIES = [
     badge: "Previous Stable",
     badgeColor: "slate",
     highlights: [
-      "🔄 Bulletproof Sub-Admin Monthly Sync: Eliminated exact working_place Firestore index constraints in favor of date-range queries and in-memory canonical district resolution, guaranteeing zero dropped records across district spelling variations.",
+      "🔄 Bulletproof Sub-Admin Monthly Sync: Eliminated exact working_place index constraints in favor of date-range queries and in-memory canonical district resolution, guaranteeing zero dropped records across district spelling variations.",
       "🛡️ Guarded Statewide Disk Snapshots: Prevented Sub-Admin single-district queries from overwriting statewide disk backup caches, isolating district scopes completely.",
       "⚡ Zero-Stale PWA Cache Invalidation: Configured strict no-cache/no-store Cache-Control headers on Vercel for sw.js and index.html, with automatic registration update polling on load and visibilitychange.",
       "📱 Attendance Radar Mobile Ergonomics: Overhauled mobile radar modal with flex-col constraints, dynamic max-h-[85vh] viewport scaling, and touch-optimized tab scrolling, eliminating viewport clipping on Android/iOS.",
@@ -648,19 +648,19 @@ export const CHANGELOG_ENTRIES = [
   {
     version: "v2.1.0",
     date: "11 Sep 2026",
-    title: "High-Speed Delta Sync & 90% Firestore Read Cut",
+    title: "High-Speed Delta Sync & 90% Database Read Cut",
     badge: "Performance",
     badgeColor: "teal",
     highlights: [
       "⚡ Delta Sync Engine: Client checks server mutation timestamp before fetching, cutting read latency to under 100ms.",
       "🪦 Tombstone Deletion Tracking: Deleted reports propagate instantly to cached dashboard clients.",
-      "💾 Multi-Tiered Memory Caching: In-memory monthly snapshots eliminate redundant Firestore queries."
+      "💾 Multi-Tiered Memory Caching: In-memory monthly snapshots eliminate redundant Database queries."
     ],
     details: [
       {
         tag: "Performance",
         color: "teal",
-        text: "Delta sync headers and memory cache cut Firestore daily bill and read load by over 90%."
+        text: "Delta sync headers and memory cache cut database daily bill and read load by over 90%."
       }
     ]
   },

@@ -6,7 +6,6 @@ import pytest
 import os
 import sys
 from pathlib import Path
-from google.cloud import firestore
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
@@ -287,12 +286,11 @@ async def test_repair_duplicate_notifications_success():
             assert saved_report["notification_ids"] == ["999888777"]
             assert "last_repaired_at" in saved_report
 
-            # Verify atomic decrement in daily_district_rollups
+            # Verify decrement in daily_district_rollups
             rollup_id = "2026-09-06_aurangabad"
             assert rollup_id in mock_fs.saved_rollups
             rollup_saved = mock_fs.saved_rollups[rollup_id]
-            assert isinstance(rollup_saved["notifications"], firestore.Increment)
-            assert rollup_saved["notifications"]._value == -1
+            assert rollup_saved["notifications"] == -1
 
 @pytest.mark.asyncio
 async def test_repair_duplicate_notifications_subadmin_rbac_forbidden():

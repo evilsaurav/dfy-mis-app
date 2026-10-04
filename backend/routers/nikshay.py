@@ -11,7 +11,6 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache

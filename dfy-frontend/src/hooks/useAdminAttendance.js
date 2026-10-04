@@ -27,7 +27,7 @@ export function useAdminAttendance({
   setCopiedAttendance,
   fetchData
 }) {
-  // Zero-Firestore In-Memory Derivation: Instantly computes attendance from loaded rawRecords (0 reads, 0 Render load)
+  // Zero-DB In-Memory Derivation: Instantly computes attendance from loaded rawRecords (0 reads, 0 Render load)
   const deriveAttendanceFromRecords = (targetDate) => {
     if (!staffDirectory || Object.keys(staffDirectory).length === 0 || !rawRecords) return null;
 

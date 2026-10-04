@@ -7,7 +7,6 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import pandas as pd
-from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache

@@ -217,7 +217,7 @@ export default function AppGuideModal({
                             <span className="text-sm">🔒</span>
                           </div>
                           <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Monotonic Ledger Sync</strong>
-                          <p className="text-[10px] text-slate-600">Verified DBT &amp; tests permanently locked in Firestore.</p>
+                          <p className="text-[10px] text-slate-600">Verified DBT &amp; tests permanently locked in database.</p>
                         </div>
 
                         <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
@@ -533,7 +533,7 @@ export default function AppGuideModal({
                           <div>
                             <strong className="text-xs font-black text-slate-900 block">Monotonic Ledger Sync</strong>
                             <p className="text-[10px] text-slate-600 mt-1 leading-normal">
-                              Permanent Cumulative Ledger: Verified records permanently Firestore me lock ho jate hain aur future dumps me degrade nahi hote.
+                              Permanent Cumulative Ledger: Verified records permanently database me lock ho jate hain aur future dumps me degrade nahi hote.
                             </p>
                           </div>
                           <div className="pt-1.5 border-t border-slate-100 text-[10px] font-bold text-emerald-700">

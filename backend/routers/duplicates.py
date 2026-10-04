@@ -5,11 +5,16 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, Header, Query
 from pydantic import BaseModel
 import jwt
-from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache
 from backend.core.security import get_current_admin, JWT_SECRET, JWT_SECRET_KEY, JWT_ALGORITHM
+from backend.core.supabase import (
+    pg_execute_raw,
+    pg_fetch_one,
+    pg_update_row,
+    get_active_db,
+)
 from backend.core.helpers import (
     get_ist_now,
     canonicalize_district,
@@ -368,14 +373,38 @@ async def repair_duplicate_notifications(
 
         # 5. Update document with filtered notification IDs (if any removed)
         if removed_count > 0:
+            # PostgreSQL persistence
+            pg_rep = None
+            try:
+                pg_rep = pg_fetch_one("daily_field_reports", filters={"id": clean_doc_id}) or pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": clean_doc_id})
+            except Exception:
+                pass
+            report_id = (pg_rep.get("id") if pg_rep else None) or clean_doc_id
+
+            if report_id and dupe_set:
+                try:
+                    pg_execute_raw(
+                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND category IN ('notification_ids', 'notifications') AND patient_id = ANY(%s)",
+                        [report_id, list(dupe_set)]
+                    )
+                except Exception as del_err:
+                    print(f"[repair-duplicate PG child delete notice]: {del_err}")
+
+                try:
+                    pg_execute_raw(
+                        "UPDATE daily_field_reports SET notifications = %s, last_repaired_at = %s, last_repaired_by = %s WHERE id = %s",
+                        [len(filtered), get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), admin.get("username") or admin.get("user_id") or "admin", report_id]
+                    )
+                except Exception as upd_err:
+                    print(f"[repair-duplicate PG parent update notice]: {upd_err}")
+
             await asyncio.to_thread(lambda: doc_ref.update({
                 "notification_ids": filtered,
                 "last_repaired_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                 "last_repaired_by": admin.get("username") or admin.get("user_id") or "admin"
             }))
 
-            # 6. Atomically decrement daily_district_rollups:
-            # rollup_ref.set({"notifications": firestore.Increment(-removed_count)}, merge=True)
+            # 6. Decrement daily_district_rollups in PostgreSQL & mock store
             report_date = str(report_data.get("date_of_reporting") or report_data.get("date", "")).strip()
             if not report_date:
                 parts = clean_doc_id.split("_")
@@ -384,11 +413,22 @@ async def repair_duplicate_notifications(
 
             if report_date and doc_district:
                 rollup_id = f"{report_date}_{doc_district}".replace(" ", "_").lower()
-                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-                await asyncio.to_thread(lambda: rollup_ref.set({
-                    "notifications": firestore.Increment(-removed_count),
-                    "last_updated": firestore.SERVER_TIMESTAMP
-                }, merge=True))
+                try:
+                    pg_execute_raw(
+                        "UPDATE daily_district_rollups SET notifications = GREATEST(0, COALESCE(notifications, 0) - %s), last_updated = %s WHERE id = %s",
+                        [removed_count, get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), rollup_id]
+                    )
+                except Exception as roll_err:
+                    print(f"[repair-duplicate PG rollup notice]: {roll_err}")
+
+                try:
+                    rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                    await asyncio.to_thread(lambda: rollup_ref.set({
+                        "notifications": -removed_count,
+                        "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+                    }, merge=True))
+                except Exception:
+                    pass
 
             # 7. Log audit in admin_audit_logs
             actor_name = admin.get("name") or admin.get("username") or "Admin"

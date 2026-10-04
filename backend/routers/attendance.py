@@ -273,10 +273,22 @@ def format_attendance_response(
             else:
                 time_classification = "On Time"
 
+        doc_total_ids = sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+        if doc_total_ids == 0:
+            if isinstance(d.get("total_ids"), int) and d["total_ids"] > 0:
+                doc_total_ids = d["total_ids"]
+            else:
+                doc_total_ids = sum(
+                    int(d[k]) for k in [
+                        "notifications", "legacy_count_notifications", "sample_tested",
+                        "hiv_dm", "dbt", "contact_tracing", "differentiated_tb", "doctor_store_visits_count"
+                    ] if isinstance(d.get(k), int) and d[k] > 0
+                )
+
         if key in reports_map:
             existing = reports_map[key]
             existing["submission_count"] = max(existing.get("submission_count", 1), d.get("submission_count", 1))
-            existing["total_ids"] += sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids"))
+            existing["total_ids"] += doc_total_ids
             existing["total_km"] = max(existing.get("total_km", 0), total_km)
             if is_next_day:
                 existing["is_next_day"] = True
@@ -288,7 +300,7 @@ def format_attendance_response(
                 "district": dist,
                 "fo_name": fo_raw_name,
                 "submission_count": d.get("submission_count", 1),
-                "total_ids": sum(len(v) for k, v in d.items() if isinstance(v, list) and k.endswith("_ids")),
+                "total_ids": doc_total_ids,
                 "submitted_time": submitted_time or "Submitted",
                 "timestamp_raw": iso_ts,
                 "total_km": total_km,

@@ -225,7 +225,7 @@ export default function BackupModal({
                 <button onClick={() => setRestoreTargetFile(null)} className="text-rose-400 hover:text-rose-700 font-bold">&times;</button>
               </div>
               <p className="text-[11px] text-rose-800 font-medium">
-                Restoring from this snapshot will safely merge all backed up reports, targets, and staff records back into the live Firestore database.
+                Restoring from this snapshot will safely merge all backed up reports, targets, and staff records back into the live PostgreSQL database.
                 To confirm authorization, type <span className="font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-rose-300 text-rose-900">RESTORE-CONFIRM</span> below:
               </p>
               <div className="flex gap-2">

@@ -251,7 +251,7 @@ app.include_router(reports_router)
 def health_status():
     return {
         "status": "healthy",
-        "active_firebase_project": project_id,
+        "database_engine": "Supabase PostgreSQL",
         "timestamp": datetime.utcnow().isoformat()
     }
 

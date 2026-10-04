@@ -2501,7 +2501,7 @@ const FoHelpGuide = () => {
       desc: "Agar remote village me internet nahi hai, toh app bina kisi rukawat ke kaam karta hai. Data phone ki internal memory (IndexedDB) me encrypted save hota hai.",
       points: [
         "Network na hone par data phone me 100% surakshit rehta hai.",
-        "Internet aate hi top bar ke 'Sync' button se ya automatic Firestore cloud par upload ho jata hai.",
+        "Internet aate hi top bar ke 'Sync' button se ya automatic cloud database par upload ho jata hai.",
         "Phone restart hone par bhi draft ya offline report delete nahi hoti."
       ]
     },
@@ -5345,7 +5345,7 @@ function App() {
     if (!targetDist) return;
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
-    // Freshness guard: If cached within the last 2 hours (7,200,000 ms), skip network fetch to save Firestore reads
+    // Freshness guard: If cached within the last 2 hours (7,200,000 ms), skip network fetch to save database reads
     if (!force) {
       try {
         const cached = await getDistrictRegistry(targetDist);

@@ -3,7 +3,6 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -171,7 +170,7 @@ async def get_all_broadcasts(districts: Optional[str] = None, role: Optional[str
             if active_db and hasattr(active_db, "collection"):
                 try:
                     docs = await asyncio.to_thread(lambda: list(active_db.collection("broadcast_alerts")
-                        .order_by("created_at", direction=firestore.Query.DESCENDING)
+                        .order_by("created_at", direction="DESCENDING")
                         .limit(100)
                         .stream()))
                     docs_data = [d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else dict(d) for d in docs]

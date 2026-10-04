@@ -10,7 +10,7 @@ project_id: str = os.environ.get("PROJECT_ID", os.environ.get("GCP_PROJECT_ID", 
 _real_db = None
 
 
-class _DummyFirestoreDoc:
+class _MemoryDoc:
     def __init__(self, doc_id="dummy", data=None):
         self.id = doc_id
         self._data = data or {}
@@ -33,12 +33,12 @@ class _DummyFirestoreDoc:
         return None
 
 
-class _DummyFirestoreCollection:
+class _MemoryCollection:
     def __init__(self, name="dummy"):
         self.name = name
 
     def document(self, doc_id="dummy"):
-        return _DummyFirestoreDoc(doc_id=doc_id)
+        return _MemoryDoc(doc_id=doc_id)
 
     def where(self, *args, **kwargs):
         return self
@@ -59,7 +59,12 @@ class _DummyFirestoreCollection:
         return []
 
     def add(self, *args, **kwargs):
-        return (None, _DummyFirestoreDoc())
+        return (None, _MemoryDoc())
+
+
+# Backward-compatibility aliases
+_DummyFirestoreDoc = _MemoryDoc
+_DummyFirestoreCollection = _MemoryCollection
 
 
 class _DatabaseProxy:
@@ -72,7 +77,7 @@ class _DatabaseProxy:
                 return active.collection(name)
         if _real_db is not None and hasattr(_real_db, "collection"):
             return _real_db.collection(name)
-        return _DummyFirestoreCollection(name)
+        return _MemoryCollection(name)
 
     def batch(self):
         return self

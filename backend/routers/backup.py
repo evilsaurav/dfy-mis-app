@@ -8,10 +8,8 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-try:
-    from firebase_admin import storage
-except Exception:
-    storage = None
+# Firebase Admin SDK decommissioned in favor of Supabase/PostgreSQL backups
+storage = None
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -40,6 +38,8 @@ _backup_in_progress = False
 
 def get_backup_storage_bucket():
     """Returns the Google Cloud Storage bucket object for backups."""
+    if storage is None:
+        return None
     try:
         return storage.bucket(BACKUP_BUCKET_NAME)
     except Exception as e:

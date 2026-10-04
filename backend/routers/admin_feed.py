@@ -9,7 +9,6 @@ from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 import sys
-from google.cloud import firestore
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -32,7 +31,13 @@ from backend.core.master_ledger import (
     get_raw_monthly_reports,
     invalidate_staff_directory_cache
 )
-from backend.core.supabase import pg_execute_raw
+from backend.core.supabase import (
+    pg_execute_raw,
+    pg_fetch_one,
+    pg_upsert_row,
+    pg_update_row,
+    get_active_db,
+)
 from backend.routers.reports import get_district_90day_notified_ids
 
 router = APIRouter(tags=["admin_feed"])
@@ -245,9 +250,67 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         if cat_key == "notification_ids":
             doc_update["notifications"] = len(current_list)
 
+        # Locate report row in PostgreSQL
+        pg_rep = None
+        for cid in candidate_doc_ids:
+            try:
+                pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid}) or pg_fetch_one("daily_field_reports", filters={"id": cid})
+                if pg_rep:
+                    break
+            except Exception:
+                pass
+        if not pg_rep:
+            try:
+                rows = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(working_place) = LOWER(%s) AND LOWER(fo_name) = LOWER(%s) LIMIT 1",
+                    [req.date, c_wp, clean_fo],
+                    fetch=True
+                )
+                if rows:
+                    pg_rep = dict(rows[0])
+            except Exception:
+                pass
+
+        report_id = (pg_rep.get("id") if pg_rep else None) or doc_id
+
+        if report_id:
+            try:
+                if req.action == "replace":
+                    pg_execute_raw(
+                        "UPDATE report_kpi_entries SET patient_id = %s WHERE report_id = %s AND category = %s AND patient_id = %s",
+                        [req.new_id, report_id, cat_key, old_id_clean]
+                    )
+                elif req.action == "delete":
+                    pg_execute_raw(
+                        "DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s AND patient_id = %s",
+                        [report_id, cat_key, old_id_clean]
+                    )
+                elif req.action == "add":
+                    pg_execute_raw(
+                        "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
+                        [report_id, cat_key, req.new_id]
+                    )
+            except Exception as kpi_err:
+                print(f"[/edit-patient-id PG report_kpi_entries notice]: {kpi_err}")
+
+            try:
+                pg_up = {
+                    "last_edited_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "last_edited_by": req.edited_by
+                }
+                metric_col = cat_key.replace("_ids", "")
+                if metric_col in ["notifications", "tests", "hiv_dm", "dbt", "contact_tracing", "differentiated_tb"]:
+                    pg_up[metric_col] = len(current_list)
+                if cat_key == "notification_ids":
+                    pg_up["notifications"] = len(current_list)
+                    pg_up["legacy_count_notifications"] = len(current_list)
+                pg_update_row("daily_field_reports", pg_up, filters={"id": report_id} if isinstance(report_id, int) else {"legacy_doc_id": report_id})
+            except Exception as pg_up_err:
+                print(f"[/edit-patient-id PG daily_field_reports notice]: {pg_up_err}")
+
         await asyncio.to_thread(lambda: doc_ref.update(doc_update))
 
-        # Atomic adjustment to daily_district_rollups if applicable
+        # Atomic adjustment to daily_district_rollups in PostgreSQL & mock store
         if req.action in ["delete", "add"]:
             try:
                 metric_map = {
@@ -261,10 +324,14 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 if cat_key in metric_map:
                     delta = -1 if req.action == "delete" else 1
                     rollup_id = f"{req.date}_{c_wp}".replace(" ", "_").lower()
+                    pg_execute_raw(
+                        f"UPDATE daily_district_rollups SET {metric_map[cat_key]} = GREATEST(0, COALESCE({metric_map[cat_key]}, 0) + %s), last_updated = %s WHERE id = %s",
+                        [delta, get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), rollup_id]
+                    )
                     rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
                     await asyncio.to_thread(lambda: rollup_ref.update({
-                        metric_map[cat_key]: firestore.Increment(delta),
-                        "last_updated": firestore.SERVER_TIMESTAMP
+                        metric_map[cat_key]: delta,
+                        "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
                     }))
             except Exception:
                 pass
@@ -518,7 +585,7 @@ async def admin_feed_officer_data(
                 "pin": "ADMIN_FEED",
                 "status": "completed",
                 "timestamp": now_iso,
-                "timestamp_completed": firestore.SERVER_TIMESTAMP,
+                "timestamp_completed": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
                 "submission_count": 1,
                 "admin_fed": True,
                 "fed_by": admin_user,
@@ -566,18 +633,114 @@ async def admin_feed_officer_data(
             
             await asyncio.to_thread(lambda: doc_ref.set(update_data, merge=True))
 
-        # 5. Atomic Update to Daily District Rollups
+        # Persist to PostgreSQL: parent daily_field_reports and child tables
+        full_report_data = dict(doc_data) if new_report_created else dict(existing_data)
+        if not new_report_created:
+            full_report_data.update(update_data)
+
+        array_columns_to_strip = [
+            "notification_ids", "sample_collection_ids", "sample_tested_ids", "hiv_dm_ids",
+            "dbt_ids", "contact_tracing_ids", "home_visit_ids", "outcome_assigned_ids",
+            "follow_up_ids", "face_to_face_ids", "presumptive_ids", "documents_ids",
+            "fdc_provided_ids", "kit_consumption_ids", "differentiated_tb_ids",
+            "tpt_treatment_start_ids", "tpt_presumptive_ids", "adhar_face_authentication_ids",
+            "consent_with_id_ids", "culture_dst_ids", "fdc_details", "visited_names"
+        ]
+
+        pg_payload = dict(full_report_data)
+        for cat_col in array_columns_to_strip:
+            pg_payload.pop(cat_col, None)
+
+        pg_payload["notifications"] = len(full_report_data.get("notification_ids") or [])
+        pg_payload["tests"] = len(full_report_data.get("sample_tested_ids") or [])
+        pg_payload["hiv_dm"] = len(full_report_data.get("hiv_dm_ids") or [])
+        pg_payload["dbt"] = len(full_report_data.get("dbt_ids") or [])
+        pg_payload["contact_tracing"] = len(full_report_data.get("contact_tracing_ids") or [])
+        pg_payload["differentiated_tb"] = len(full_report_data.get("differentiated_tb_ids") or [])
+        pg_payload["legacy_count_notifications"] = pg_payload["notifications"]
+        pg_payload["legacy_doc_id"] = doc_id
+
+        pg_rep_id = None
+        try:
+            upsert_res = pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["legacy_doc_id"])
+            if upsert_res and isinstance(upsert_res, dict) and upsert_res.get("id"):
+                pg_rep_id = upsert_res.get("id")
+        except Exception as pg_err:
+            print(f"[Admin Feed PG Write Notice] {pg_err}")
+
+        if not pg_rep_id:
+            pg_rep_id = doc_id
+
+        if pg_rep_id:
+            try:
+                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [pg_rep_id])
+                for cat_k in [c for c in full_report_data.keys() if c.endswith("_ids") and isinstance(full_report_data[c], list)]:
+                    for pid in full_report_data[cat_k]:
+                        clean_pid = str(pid).strip()
+                        if clean_pid:
+                            pg_execute_raw(
+                                "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
+                                [pg_rep_id, cat_k, clean_pid]
+                            )
+            except Exception as kpi_err:
+                print(f"[Admin Feed report_kpi_entries Write Notice] {kpi_err}")
+
+            try:
+                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [pg_rep_id])
+                for idx, item in enumerate(full_report_data.get("fdc_details") or []):
+                    if isinstance(item, dict):
+                        pg_execute_raw(
+                            """INSERT INTO report_fdc_details 
+                               (report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text, patient_name, patient_type, weight_kg, weight_band, daily_tablets, strips, recommended_strips, supply_issued, position) 
+                               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                            [
+                                pg_rep_id,
+                                str(item.get("patient_id") or item.get("id") or ""),
+                                str(item.get("fdc_type") or ""),
+                                str(item.get("regimen_name") or ""),
+                                str(item.get("phase") or ""),
+                                str(item.get("daily_dose_text") or ""),
+                                str(item.get("patient_name") or ""),
+                                str(item.get("patient_type") or ""),
+                                str(item.get("weight_kg") or ""),
+                                str(item.get("weight_band") or ""),
+                                str(item.get("daily_tablets") or ""),
+                                str(item.get("strips") or ""),
+                                str(item.get("recommended_strips") or ""),
+                                str(item.get("supply_issued") or ""),
+                                idx
+                            ]
+                        )
+            except Exception as fdc_err:
+                print(f"[Admin Feed report_fdc_details Write Notice] {fdc_err}")
+
+            try:
+                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [pg_rep_id])
+                for idx, name in enumerate(full_report_data.get("visited_names") or []):
+                    if name and str(name).strip():
+                        pg_execute_raw(
+                            "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
+                            [pg_rep_id, str(name).strip(), idx]
+                        )
+            except Exception as names_err:
+                print(f"[Admin Feed report_visited_names Write Notice] {names_err}")
+
+        # 5. Update Daily District Rollups in PostgreSQL & mock store
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-            rollup_update = {
-                "date": clean_date,
-                "district": clean_wp,
-                "submitted_fos": firestore.ArrayUnion([clean_fo]),
-                "last_updated": firestore.SERVER_TIMESTAMP
-            }
-            if new_report_created:
-                rollup_update["submission_count"] = firestore.Increment(1)
+            existing_rollup = pg_fetch_one("daily_district_rollups", filters={"id": rollup_id})
+            submitted_fos = []
+            if existing_rollup:
+                raw_fos = existing_rollup.get("submitted_fos")
+                if isinstance(raw_fos, list):
+                    submitted_fos = raw_fos
+                elif isinstance(raw_fos, str):
+                    try:
+                        submitted_fos = json.loads(raw_fos)
+                    except Exception:
+                        pass
+            if clean_fo not in submitted_fos:
+                submitted_fos.append(clean_fo)
 
             metric_map = {
                 "notification_ids": "notifications",
@@ -587,12 +750,26 @@ async def admin_feed_officer_data(
                 "contact_tracing_ids": "contact_tracing",
                 "differentiated_tb_ids": "diff_tb"
             }
+            sub_count = (existing_rollup.get("submission_count") or 0) + (1 if new_report_created else 0) if existing_rollup else (1 if new_report_created else 0)
+            rollup_update = {
+                "id": rollup_id,
+                "date": clean_date,
+                "district": clean_wp,
+                "submitted_fos": json.dumps(submitted_fos),
+                "submission_count": sub_count,
+                "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+            }
             for cat_k, rollup_k in metric_map.items():
+                old_v = (existing_rollup.get(rollup_k) or 0) if existing_rollup else 0
                 d_cnt = delta_counts.get(cat_k, 0)
-                if d_cnt > 0:
-                    rollup_update[rollup_k] = firestore.Increment(d_cnt)
+                rollup_update[rollup_k] = old_v + max(0, d_cnt)
 
-            await asyncio.to_thread(lambda: rollup_ref.set(rollup_update, merge=True))
+            pg_upsert_row("daily_district_rollups", rollup_update, conflict_columns=["id"])
+
+            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+            mock_rollup_update = dict(rollup_update)
+            mock_rollup_update["submitted_fos"] = submitted_fos
+            await asyncio.to_thread(lambda: rollup_ref.set(mock_rollup_update, merge=True))
         except Exception as rollup_err:
             print(f"[Admin Feed Rollup Notice] Non-fatal error: {rollup_err}")
 
@@ -800,22 +977,32 @@ async def admin_delete_day_report(
                 pass
 
         # 5. Atomic Rollback in daily_district_rollups
+        # 5. Rollback in daily_district_rollups
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
+            set_clauses = ["submission_count = GREATEST(0, COALESCE(submission_count, 0) - %s)", "last_updated = %s"]
+            vals = [len(matching_docs), get_ist_now().strftime("%Y-%m-%d %H:%M:%S")]
+            for m_key, m_val in deleted_metrics.items():
+                if m_val > 0:
+                    set_clauses.append(f"{m_key} = GREATEST(0, COALESCE({m_key}, 0) - %s)")
+                    vals.append(m_val)
+            vals.append(rollup_id)
+            pg_execute_raw(f"UPDATE daily_district_rollups SET {', '.join(set_clauses)} WHERE id = %s", vals)
+
             rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
             r_snap = await asyncio.to_thread(rollup_ref.get)
             if r_snap.exists:
-                rollup_update = {
-                    "submission_count": firestore.Increment(-len(matching_docs)),
-                    "last_updated": firestore.SERVER_TIMESTAMP
-                }
-                for m_key, m_val in deleted_metrics.items():
-                    if m_val > 0:
-                        rollup_update[m_key] = firestore.Increment(-m_val)
                 r_dict = r_snap.to_dict()
                 old_fos = r_dict.get("submitted_fos", [])
                 new_fos = [f for f in old_fos if f.strip().lower() != clean_fo.lower()]
-                rollup_update["submitted_fos"] = new_fos
+                rollup_update = {
+                    "submission_count": max(0, (r_dict.get("submission_count") or 0) - len(matching_docs)),
+                    "submitted_fos": new_fos,
+                    "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                for m_key, m_val in deleted_metrics.items():
+                    if m_val > 0:
+                        rollup_update[m_key] = max(0, (r_dict.get(m_key) or 0) - m_val)
                 await asyncio.to_thread(lambda: rollup_ref.update(rollup_update))
         except Exception as r_err:
             print(f"[Delete Day Rollup Notice] {r_err}")
@@ -1055,19 +1242,91 @@ async def admin_edit_day_report(
                         if diff != 0:
                             metric_deltas[metric_map[cat_key]] = diff
 
-        # 4. Commit document updates
+        # 4. Commit document updates to PostgreSQL and mock store
+        pg_rep = None
+        for d in matching_docs:
+            d_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
+            if d_id:
+                try:
+                    pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": d_id}) or pg_fetch_one("daily_field_reports", filters={"id": d_id})
+                    if pg_rep:
+                        break
+                except Exception:
+                    pass
+        if not pg_rep:
+            try:
+                rows = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(working_place) = LOWER(%s) AND LOWER(fo_name) = LOWER(%s) LIMIT 1",
+                    [clean_date, clean_wp, clean_fo],
+                    fetch=True
+                )
+                if rows:
+                    pg_rep = dict(rows[0])
+            except Exception:
+                pass
+
+        target_first = matching_docs[0]
+        report_id = (pg_rep.get("id") if pg_rep else None) or (getattr(target_first, "id", None) or (target_first.get("id") if isinstance(target_first, dict) else None))
+
+        if report_id:
+            # Update parent daily_field_reports
+            pg_doc_update = dict(doc_update)
+            for k in [c for c in pg_doc_update.keys() if c.endswith("_ids") or c in ["visited_names", "fdc_details"]]:
+                pg_doc_update.pop(k, None)
+            try:
+                pg_update_row("daily_field_reports", pg_doc_update, filters={"id": report_id} if isinstance(report_id, int) else {"legacy_doc_id": report_id})
+            except Exception as upd_err:
+                print(f"[edit-day PG parent update notice]: {upd_err}")
+
+            # Reconcile report_kpi_entries
+            if req.category_ids is not None:
+                for cat_key in VALID_CATEGORIES:
+                    if cat_key in req.category_ids:
+                        try:
+                            pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s", [report_id, cat_key])
+                            clean_ids = doc_update.get(cat_key, [])
+                            for cid in clean_ids:
+                                pg_execute_raw(
+                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
+                                    [report_id, cat_key, cid]
+                                )
+                        except Exception as kpi_rec_err:
+                            print(f"[edit-day PG report_kpi_entries reconcile notice]: {kpi_rec_err}")
+
+            # Reconcile report_visited_names
+            if req.visited_names is not None:
+                try:
+                    pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [report_id])
+                    for idx, name in enumerate(doc_update.get("visited_names", [])):
+                        if name:
+                            pg_execute_raw(
+                                "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
+                                [report_id, name, idx]
+                            )
+                except Exception as vis_err:
+                    print(f"[edit-day PG report_visited_names reconcile notice]: {vis_err}")
+
         await asyncio.to_thread(lambda: doc_ref.update(doc_update))
 
-        # 5. Atomic adjustments in daily_district_rollups
+        # 5. Adjustments in daily_district_rollups
         if metric_deltas:
             try:
                 rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
+                set_clauses = ["last_updated = %s"]
+                vals = [get_ist_now().strftime("%Y-%m-%d %H:%M:%S")]
+                for mk, dv in metric_deltas.items():
+                    set_clauses.append(f"{mk} = GREATEST(0, COALESCE({mk}, 0) + %s)")
+                    vals.append(dv)
+                vals.append(rollup_id)
+                pg_execute_raw(f"UPDATE daily_district_rollups SET {', '.join(set_clauses)} WHERE id = %s", vals)
+
                 rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
                 r_snap = await asyncio.to_thread(rollup_ref.get)
                 if r_snap.exists:
-                    r_update = {"last_updated": firestore.SERVER_TIMESTAMP}
+                    r_dict = r_snap.to_dict()
+                    r_update = {"last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")}
                     for mk, dv in metric_deltas.items():
-                        r_update[mk] = firestore.Increment(dv)
+                        r_update[mk] = max(0, (r_dict.get(mk) or 0) + dv)
                     await asyncio.to_thread(lambda: rollup_ref.update(r_update))
             except Exception as r_err:
                 print(f"[Edit Day Rollup Notice] {r_err}")
@@ -1146,7 +1405,7 @@ async def get_recent_id_edits(
         cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
         docs = await asyncio.to_thread(lambda: list(db.collection("id_edit_logs")
-            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .order_by("timestamp", direction="DESCENDING")
             .limit(limit or 300)
             .stream()))
 
