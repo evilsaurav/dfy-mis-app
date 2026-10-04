@@ -377,3 +377,72 @@ def test_attendance_user_scoped_cache_key():
         assert resp2.status_code == 200
         data2 = resp2.json()
         assert data2["submitted_fos"][0]["district"] == "Gaya"
+
+def test_today_attendance_direct_pg_query_bypasses_monthly_stream():
+    """Verify get_today_attendance queries PG directly and bypasses get_raw_monthly_reports entirely when PG returns rows."""
+    mock_staff = [
+        {"district": "Patna", "name": "Alok Kumar", "is_active": True, "designation": "Field Officer"},
+        {"district": "Patna", "name": "Bikash Singh", "is_active": True, "designation": "Field Officer"}
+    ]
+    mock_pg_rows = [
+        {
+            "id": "patna_alok_2026-10-15",
+            "working_place": "Patna",
+            "fo_name": "Alok Kumar",
+            "date_of_reporting": "2026-10-15",
+            "timestamp": "2026-10-15T18:30:00+05:30",
+            "submission_count": 1,
+            "total_km": 25,
+            "_kpi_json": {"notification_ids": ["P1", "P2"]},
+            "_visited_names_json": []
+        }
+    ]
+
+    with patch("main.get_cached_staff_directory_raw", AsyncMock(return_value=mock_staff)), \
+         patch("backend.routers.attendance.pg_execute_raw", return_value=mock_pg_rows) as mock_pg_exec, \
+         patch("main.get_raw_monthly_reports", AsyncMock()) as mock_raw_monthly:
+
+        token = make_admin_token()
+        resp = client.get("/admin/today-attendance?date=2026-10-15", headers={"Authorization": f"Bearer {token}"})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["date"] == "2026-10-15"
+        assert data["submitted_count"] == 1
+        assert data["submitted_fos"][0]["fo_name"] == "Alok Kumar"
+        # Bypassed streaming entire month!
+        mock_raw_monthly.assert_not_called()
+        assert mock_pg_exec.called
+        # Verify parameterized SQL was executed with target_date
+        all_sqls = [call[0][0] for call in mock_pg_exec.call_args_list]
+        assert any("WHERE (r.date_of_reporting = %s OR r.date_of_reporting = %s)" in sql for sql in all_sqls)
+        first_call_params = mock_pg_exec.call_args_list[0][0][1]
+        assert first_call_params[0] == "2026-10-15"
+
+@pytest.mark.asyncio
+async def test_master_ledger_pushes_district_filter_to_sql():
+    """Verify get_raw_monthly_reports pushes district_filter into SQL query WHERE clause."""
+    from backend.core.master_ledger import get_raw_monthly_reports as real_get_raw
+
+    mock_pg_rows = [
+        {
+            "id": "patna_fo1_2026-10-10",
+            "working_place": "Patna",
+            "fo_name": "FO One",
+            "date_of_reporting": "2026-10-10",
+            "_kpi_json": {},
+            "_fdc_json": [],
+            "_visited_names_json": []
+        }
+    ]
+
+    with patch("backend.core.master_ledger.pg_execute_raw", return_value=mock_pg_rows) as mock_pg_exec:
+        res = await real_get_raw("2026-10", force=True, district_filter={"Patna"})
+        assert len(res) == 1
+        assert res[0]["working_place"] == "Patna"
+        assert mock_pg_exec.called
+        executed_sql = mock_pg_exec.call_args[0][0]
+        executed_params = mock_pg_exec.call_args[0][1]
+        assert "LOWER(TRIM(r.working_place)) = ANY(%s)" in executed_sql
+        assert "r.district_id::text = ANY(%s)" in executed_sql
+        assert any("patna" in p for p in executed_params[2:])
+

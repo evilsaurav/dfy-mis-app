@@ -1542,14 +1542,131 @@ async def my_profile_stats(req: ProfileStatsRequest):
                             target_val = 50
                         break
 
-            # 3. In-Memory Monthly Reports Lookup from Master Ledger
-            raw_docs = await get_raw_monthly_reports(req_month, district_filter={clean_wp})
+            # 3. Targeted Monthly Reports Lookup (Pushdown to PostgreSQL)
             reports = []
-            for d in (raw_docs or []):
-                d_wp = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
-                d_fo = re.sub(r'[^a-zA-Z0-9]', '', str(d.get("fo_name", ""))).lower()
-                if d_wp == clean_wp and d_fo == clean_fo:
-                    reports.append(d)
+            try:
+                start_date, end_date = get_month_date_range(req_month)
+                officer_sql = """
+                    SELECT r.*,
+                           COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
+                           COALESCE(f.fdc_data, '[]'::json) as _fdc_json,
+                           COALESCE(v.names_data, '[]'::json) as _visited_names_json
+                    FROM daily_field_reports r
+                    LEFT JOIN (
+                        SELECT report_id, json_object_agg(category, ids) as kpi_data
+                        FROM (
+                            SELECT report_id, category, json_agg(patient_id) as ids
+                            FROM report_kpi_entries
+                            GROUP BY report_id, category
+                        ) cat_grouped GROUP BY report_id
+                    ) k ON r.id = k.report_id
+                    LEFT JOIN (
+                        SELECT report_id, json_agg(json_build_object(
+                            'patient_id', patient_id,
+                            'fdc_type', fdc_type,
+                            'regimen_name', regimen_name,
+                            'phase', phase,
+                            'daily_dose_text', daily_dose_text,
+                            'patient_name', patient_name,
+                            'patient_type', patient_type,
+                            'weight_kg', weight_kg,
+                            'weight_band', weight_band,
+                            'daily_tablets', daily_tablets,
+                            'strips', strips,
+                            'recommended_strips', recommended_strips,
+                            'supply_issued', supply_issued
+                        ) ORDER BY position) as fdc_data
+                        FROM report_fdc_details GROUP BY report_id
+                    ) f ON r.id = f.report_id
+                    LEFT JOIN (
+                        SELECT report_id, json_agg(name ORDER BY position) as names_data
+                        FROM report_visited_names GROUP BY report_id
+                    ) v ON r.id = v.report_id
+                    WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+                      AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))
+                      AND (LOWER(TRIM(r.fo_name)) = ANY(%s) OR REGEXP_REPLACE(LOWER(COALESCE(r.fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s))
+                """
+                dist_param = list({str(clean_wp).lower(), str(clean_wp)})
+                fo_variants = {str(req.fo_name).strip().lower(), clean_fo}
+                if "ashwani" in clean_fo:
+                    fo_variants.update(["ashwani kumar", "ashwanikumar", "ashwani kr keshri", "ashwanikrkeshri"])
+                if "vinay" in clean_fo:
+                    fo_variants.update(["vinay prakash", "vinay kumar", "vinay kumar lt", "vinayprakash", "vinaykumar", "vinaykumarlt"])
+                fo_param = list(fo_variants)
+                sql_params = [start_date, end_date, dist_param, dist_param, fo_param, fo_param]
+
+                pg_rows = pg_execute_raw(officer_sql, sql_params, fetch=True)
+                if not pg_rows:
+                    flat_officer_sql = """
+                        SELECT * FROM daily_field_reports
+                        WHERE date_of_reporting >= %s AND date_of_reporting <= %s
+                          AND (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))
+                          AND (LOWER(TRIM(fo_name)) = ANY(%s) OR REGEXP_REPLACE(LOWER(COALESCE(fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s))
+                    """
+                    pg_rows = pg_execute_raw(flat_officer_sql, sql_params, fetch=True)
+
+                if pg_rows:
+                    for row in pg_rows:
+                        item = dict(row)
+                        kpi_map = item.pop("_kpi_json", {}) or {}
+                        fdc_list = item.pop("_fdc_json", []) or []
+                        names_list = item.pop("_visited_names_json", []) or []
+
+                        if hasattr(item.get("date_of_reporting"), "strftime"):
+                            item["date_of_reporting"] = item["date_of_reporting"].strftime("%Y-%m-%d")
+
+                        did = item.get("id") or item.get("doc_id")
+                        if not did or isinstance(did, int):
+                            c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+                            fo = str(item.get("fo_name", "")).strip()
+                            dt = str(item.get("date_of_reporting", "")).strip()
+                            did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+                        item["id"] = did
+                        item.setdefault("doc_id", did)
+
+                        for list_field in (
+                            "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
+                            "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
+                            "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
+                            "presumptive_ids", "fdc_provided_ids", "differentiated_tb_ids",
+                            "tpt_treatment_start_ids", "tpt_presumptive_ids",
+                            "adhar_face_authentication_ids", "consent_with_id_ids",
+                            "culture_dst_ids", "kit_consumption_ids", "documents_ids"
+                        ):
+                            if list_field in kpi_map:
+                                item[list_field] = kpi_map[list_field]
+                            else:
+                                val = item.get(list_field)
+                                if isinstance(val, str):
+                                    try:
+                                        item[list_field] = _json.loads(val)
+                                    except Exception:
+                                        item[list_field] = []
+                                elif not isinstance(val, list):
+                                    item[list_field] = []
+
+                        item["fdc_details"] = fdc_list if fdc_list else (item.get("fdc_details") or [])
+                        item["visited_names"] = names_list if names_list else (item.get("visited_names") or [])
+                        reports.append(item)
+
+                    # Ensure exact canonical matching
+                    reports = [
+                        r for r in reports
+                        if canonicalize_district(r.get("working_place", "") or r.get("district", "")) == clean_wp
+                        and (re.sub(r'[^a-zA-Z0-9]', '', str(r.get("fo_name", ""))).lower() == clean_fo or is_officer_name_match(r.get("fo_name", ""), req.fo_name, clean_wp))
+                    ]
+            except Exception as pg_e:
+                print(f"[Profile Stats] PG officer query notice: {pg_e}")
+                reports = []
+
+            # Fallback to get_raw_monthly_reports if PG returned nothing (e.g. mock test mode or offline)
+            if not reports:
+                raw_docs = await get_raw_monthly_reports(req_month, district_filter={clean_wp})
+                for d in (raw_docs or []):
+                    d_wp = canonicalize_district(d.get("working_place", "") or d.get("district", ""))
+                    d_fo = re.sub(r'[^a-zA-Z0-9]', '', str(d.get("fo_name", ""))).lower()
+                    if d_wp == clean_wp and (d_fo == clean_fo or is_officer_name_match(d.get("fo_name", ""), req.fo_name, clean_wp)):
+                        reports.append(d)
 
             # Compute profile stats using calculation helper
             result = await compute_profile_response(reports, target_val, req_month, clean_wp, clean_fo)

@@ -16,7 +16,13 @@ export const formatIstTime = (rawTs) => {
     const ampm = match12[3].toUpperCase();
     return `${hh}:${mm} ${ampm}`;
   }
-  const d = new Date(rawTs);
+  let dateInput = str;
+  if (!str.endsWith('Z') && !str.endsWith('z') && !/[+-]\d{2}:?\d{2}$/.test(str)) {
+    dateInput = (str.includes('T') ? str : str.replace(' ', 'T')) + '+05:30';
+  } else if (!str.includes('T') && str.includes(' ')) {
+    dateInput = str.replace(' ', 'T');
+  }
+  const d = new Date(dateInput);
   if (isNaN(d.getTime())) return str;
   return d.toLocaleTimeString('en-IN', {
     timeZone: 'Asia/Kolkata',

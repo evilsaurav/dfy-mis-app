@@ -12,6 +12,7 @@ from backend.core.database import db
 from backend.core.helpers import (
     get_ist_now,
     format_to_ist_time,
+    parse_to_ist_datetime,
     canonicalize_district,
     canonicalize_fo_name,
     get_previous_month,
@@ -495,17 +496,28 @@ async def get_raw_monthly_reports(
             ) v ON r.id = v.report_id
             WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
         """
+        pg_params = [start_date, end_date]
+        if clean_dists:
+            hydrated_sql += " AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))"
+            dists_param = list({str(d).lower() for d in clean_dists} | {str(d) for d in clean_dists})
+            pg_params.extend([dists_param, dists_param])
+
         pg_rows = []
         try:
-            pg_rows = pg_execute_raw(hydrated_sql, [start_date, end_date], fetch=True)
+            pg_rows = pg_execute_raw(hydrated_sql, pg_params, fetch=True)
         except Exception:
             pass
 
         if not pg_rows:
             # Flat query fallback for mock store or simplified schema
+            flat_sql = "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s"
+            flat_params = [start_date, end_date]
+            if clean_dists:
+                flat_sql += " AND (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))"
+                flat_params.extend([dists_param, dists_param])
             pg_rows = pg_execute_raw(
-                "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
-                [start_date, end_date],
+                flat_sql,
+                flat_params,
                 fetch=True
             )
 
@@ -583,6 +595,12 @@ async def get_raw_monthly_reports(
             print(f"[get_raw_monthly_reports] Firestore fallback notice: {fe}")
 
 
+    if clean_dists:
+        filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
+        if dist_cache_key != full_cache_key:
+            cache.set(dist_cache_key, filtered_list, ttl=3600)
+        return filtered_list
+
     # Save statewide monthly cache
     cache.set(full_cache_key, raw_list, ttl=3600) # 1-hour shared cache
 
@@ -595,12 +613,6 @@ async def get_raw_monthly_reports(
         cache.delete(evicted_key)
         cache.delete_prefix(f"{evicted_key}_")
         gc.collect()
-
-    if clean_dists:
-        filtered_list = [d for d in raw_list if canonicalize_district(d.get("working_place") or d.get("district", "")) in clean_dists]
-        if dist_cache_key != full_cache_key:
-            cache.set(dist_cache_key, filtered_list, ttl=3600)
-        return filtered_list
 
     return raw_list
 
@@ -619,10 +631,17 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
         did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
 
     raw_ts = data.get("timestamp_completed") or data.get("timestamp") or data.get("submitted_at")
-    iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
     submitted_time = format_to_ist_time(raw_ts)
+    dt_ist = parse_to_ist_datetime(raw_ts)
+    if dt_ist:
+        iso_ts = dt_ist.isoformat()
+    elif hasattr(raw_ts, 'isoformat'):
+        iso_ts = raw_ts.isoformat()
+    else:
+        iso_ts = str(raw_ts) if raw_ts else ""
     is_next_day = bool(data.get("is_next_day_submission"))
-    morning_time = data.get("submitted_morning_time") or ""
+    raw_m = data.get("submitted_morning_time")
+    morning_time = format_to_ist_time(raw_m) if raw_m else ""
     morning_label = data.get("morning_submission_label") or (f"Next day morning {morning_time or submitted_time}" if is_next_day else "")
     total_ids = sum(len(v) for k, v in data.items() if isinstance(v, list) and k.endswith("_ids"))
 

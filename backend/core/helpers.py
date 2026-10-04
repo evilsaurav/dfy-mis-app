@@ -22,67 +22,86 @@ def get_ist_now() -> datetime:
             return custom()
     return datetime.now(IST_TIMEZONE)
 
+def parse_to_ist_datetime(raw_ts) -> Optional[datetime]:
+    """Converts Firestore timestamp, datetime, or ISO string to an IST datetime object.
+    
+    If raw_ts is naive (tzinfo is None or string has no explicit offset/Z), it is treated as IST
+    because application timestamps are generated in IST.
+    If raw_ts has an explicit timezone offset or UTC indicator ('Z'), it is converted to IST.
+    """
+    if not raw_ts:
+        return None
+    try:
+        if hasattr(raw_ts, "to_datetime") and callable(raw_ts.to_datetime):
+            raw_ts = raw_ts.to_datetime()
+
+        if isinstance(raw_ts, datetime):
+            if raw_ts.tzinfo is None:
+                return raw_ts.replace(tzinfo=IST_TIMEZONE)
+            return raw_ts.astimezone(IST_TIMEZONE)
+
+        str_ts = str(raw_ts).strip()
+        if not str_ts:
+            return None
+
+        clean_str = str_ts.replace("Z", "+00:00").replace("z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(clean_str)
+        except ValueError:
+            for fmt in (
+                "%Y-%m-%d %H:%M:%S",
+                "%Y-%m-%d %H:%M",
+                "%Y/%m/%d %H:%M:%S",
+                "%d-%m-%Y %H:%M:%S",
+                "%d/%m/%Y %H:%M:%S",
+                "%Y-%m-%d",
+            ):
+                try:
+                    dt = datetime.strptime(str_ts, fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return None
+
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=IST_TIMEZONE)
+        return dt.astimezone(IST_TIMEZONE)
+    except Exception:
+        return None
+
 def format_to_ist_time(raw_ts) -> str:
-    """Converts Firestore timestamp or ISO string to Indian Standard Time (IST - UTC+5:30) 12-hour format."""
+    """Converts Firestore timestamp, datetime, or ISO string to Indian Standard Time (IST - UTC+5:30) 12-hour format."""
     if not raw_ts:
         return ""
     try:
-        ist_offset = timezone(timedelta(hours=5, minutes=30))
-        if isinstance(raw_ts, datetime):
-            if raw_ts.tzinfo is None:
-                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
-            else:
-                dt_utc = raw_ts
-            dt_ist = dt_utc.astimezone(ist_offset)
+        if isinstance(raw_ts, str):
+            str_ts = raw_ts.strip()
+            # If already in 12-hour format like "12:45 PM" or "01:30 AM"
+            m12 = re.match(r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$', str_ts, re.IGNORECASE)
+            if m12:
+                h = int(m12.group(1))
+                mn = int(m12.group(2))
+                mer = m12.group(3).upper()
+                return f"{h:02d}:{mn:02d} {mer}"
+
+            # If 24-hour time-only string like "14:30" or "09:15:00"
+            m24 = re.match(r'^(\d{1,2}):(\d{2})(?::\d{2})?$', str_ts)
+            if m24:
+                h = int(m24.group(1))
+                mn = int(m24.group(2))
+                mer = "AM" if h < 12 else "PM"
+                h12 = h % 12
+                if h12 == 0:
+                    h12 = 12
+                return f"{h12:02d}:{mn:02d} {mer}"
+
+        dt_ist = parse_to_ist_datetime(raw_ts)
+        if dt_ist:
             return dt_ist.strftime("%I:%M %p")
-            
-        str_ts = str(raw_ts).strip()
-        clean_str = str_ts.replace("Z", "+00:00")
-        if "T" in clean_str or "+" in clean_str or "-" in clean_str:
-            dt = datetime.fromisoformat(clean_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            dt_ist = dt.astimezone(ist_offset)
-            return dt_ist.strftime("%I:%M %p")
-        else:
-            dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
-            dt = dt.replace(tzinfo=timezone.utc)
-            dt_ist = dt.astimezone(ist_offset)
-            return dt_ist.strftime("%I:%M %p")
+        return str(raw_ts)[:16]
     except Exception:
         return str(raw_ts)[:16]
-
-def parse_to_ist_datetime(raw_ts) -> Optional[datetime]:
-    """Converts Firestore timestamp, datetime, or ISO string to an IST datetime object."""
-    if not raw_ts:
-        return None
-    try:
-        ist_offset = timezone(timedelta(hours=5, minutes=30))
-        if isinstance(raw_ts, datetime):
-            if raw_ts.tzinfo is None:
-                dt_utc = raw_ts.replace(tzinfo=timezone.utc)
-            else:
-                dt_utc = raw_ts
-            return dt_utc.astimezone(ist_offset)
-        str_ts = str(raw_ts).strip()
-        clean_str = str_ts.replace("Z", "+00:00")
-        if "T" in clean_str or "+" in clean_str or (clean_str.count("-") >= 3):
-            dt = datetime.fromisoformat(clean_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(ist_offset)
-        else:
-            try:
-                dt = datetime.strptime(str_ts, "%Y-%m-%d %H:%M:%S")
-                dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(ist_offset)
-            except ValueError:
-                dt = datetime.fromisoformat(clean_str)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                return dt.astimezone(ist_offset)
-    except Exception:
-        return None
 
 def get_month_date_range(month_str: Optional[str]) -> Tuple[str, str]:
     """

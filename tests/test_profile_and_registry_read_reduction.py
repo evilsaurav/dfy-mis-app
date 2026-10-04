@@ -243,3 +243,50 @@ def test_update_pacing_settings_multi_word_district_profile_eviction():
         assert cache.get(key_east_champ) is None, "East Champaran profile cache should have been evicted!"
         # Key for Patna officer must NOT be evicted (scoped district isolation)
         assert cache.get(key_patna) == {"data": "patna_officer"}, "Patna profile cache should be preserved!"
+
+def test_my_profile_stats_pg_pushdown():
+    """Verify my_profile_stats pushes FO name and district down into PG SQL query directly."""
+    mock_staff = [
+        {"district": "Patna", "name": "Alok Kumar", "pin": "1234", "is_active": True}
+    ]
+    mock_targets = [
+        {"district": "Patna", "fo_name": "Alok Kumar", "target": 65}
+    ]
+    mock_pg_rows = [
+        {
+            "id": "patna_alok_2026-10-02",
+            "working_place": "Patna",
+            "fo_name": "Alok Kumar",
+            "date_of_reporting": "2026-10-02",
+            "total_km": 15,
+            "_kpi_json": {"notification_ids": ["N1", "N2", "N3"]},
+            "_visited_names_json": []
+        }
+    ]
+
+    with patch("main.get_cached_staff_directory_raw", AsyncMock(return_value=mock_staff)), \
+         patch("main.get_cached_staff_targets_for_month", AsyncMock(return_value=mock_targets)), \
+         patch("backend.routers.reports.pg_execute_raw", return_value=mock_pg_rows) as mock_pg_exec, \
+         patch("main.get_raw_monthly_reports", AsyncMock()) as mock_raw_monthly:
+
+        payload = {
+            "working_place": "Patna",
+            "fo_name": "Alok Kumar",
+            "pin": "1234",
+            "month": "2026-10"
+        }
+        resp = client.post("/my-profile-stats", json=payload)
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["success"] is True
+        assert data["target"] == 65
+        assert data["breakdown"]["notification"] == 3
+        assert data["total_km"] == 15
+
+        # Bypassed get_raw_monthly_reports because PG returned the rows directly!
+        mock_raw_monthly.assert_not_called()
+        assert mock_pg_exec.called
+        all_sqls = [call[0][0] for call in mock_pg_exec.call_args_list]
+        assert any("LOWER(TRIM(r.fo_name)) = ANY(%s)" in sql for sql in all_sqls)
+        assert any("LOWER(TRIM(r.working_place)) = ANY(%s)" in sql for sql in all_sqls)
+

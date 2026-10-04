@@ -815,6 +815,12 @@ def _fallback_raw_query(sql: str, params: Optional[List] = None) -> List[Dict[st
                 d["id"] = str(doc_id)
                 d["doc_id"] = str(doc_id)
                 records.append(d)
+        elif hasattr(active_db, "staff_members") and table == "staff_directory":
+            for doc_id, item in getattr(active_db, "staff_members", {}).items():
+                d = dict(item) if isinstance(item, dict) else {}
+                d["id"] = str(doc_id)
+                d["doc_id"] = str(doc_id)
+                records.append(d)
         else:
             try:
                 col = active_db.collection(table)
@@ -840,15 +846,14 @@ def _fallback_raw_query(sql: str, params: Optional[List] = None) -> List[Dict[st
         match = True
 
         # 1. Date of reporting equality
-        if "DATE_OF_REPORTING = %S OR DATE = %S" in sql_upper:
-            target_date = params[0]
-            rep_date = str(r.get("date_of_reporting") or r.get("date") or "")
-            if rep_date != str(target_date):
-                match = False
-        elif "DATE_OF_REPORTING = %S" in sql_upper:
-            target_date = params[0]
-            if str(r.get("date_of_reporting", "")) != str(target_date):
-                match = False
+        if ("DATE_OF_REPORTING = %S::DATE" in sql_upper or "DATE_OF_REPORTING::TEXT LIKE %S" in sql_upper
+            or "DATE_OF_REPORTING = %S OR DATE = %S" in sql_upper or "DATE_OF_REPORTING = %S" in sql_upper):
+            dates = [p for p in params if isinstance(p, str) and re.match(r'^\d{4}-\d{2}-\d{2}', p)]
+            if dates:
+                target_date = dates[0]
+                rep_date = str(r.get("date_of_reporting") or r.get("date") or "")
+                if not rep_date.startswith(target_date):
+                    match = False
 
         # 2. Date of reporting range
         elif "DATE_OF_REPORTING >=" in sql_upper and "DATE_OF_REPORTING <=" in sql_upper:
@@ -891,29 +896,36 @@ def _fallback_raw_query(sql: str, params: Optional[List] = None) -> List[Dict[st
                 c_wp = canonicalize_district(wp).lower()
                 if wp not in target_places and c_wp not in target_places:
                     match = False
-        elif ("WORKING_PLACE = %S OR DISTRICT = %S" in sql_upper) or ("DISTRICT = %S" in sql_upper and "WORKING_PLACE" in sql_upper):
-            dist_params = [p for p in params if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p)]
+        elif "LOWER(TRIM(WORKING_PLACE)) = LOWER(TRIM(%S))" in sql_upper or "LOWER(TRIM(DISTRICT)) = LOWER(TRIM(%S))" in sql_upper or "WORKING_PLACE = %S" in sql_upper or "DISTRICT = %S" in sql_upper:
+            dist_params = [p for p in params if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p) and not p.startswith("%")]
             if dist_params:
-                target_dist = dist_params[0].lower()
+                target_dist = canonicalize_district(dist_params[0]).lower()
                 wp = str(r.get("working_place", "") or r.get("district", "")).lower()
                 c_wp = canonicalize_district(wp).lower()
                 if wp != target_dist and c_wp != target_dist:
                     match = False
-        elif "DISTRICT = %S" in sql_upper and "WORKING_PLACE" not in sql_upper:
-            dist_params = [p for p in params if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p)]
-            if dist_params:
-                target_dist = dist_params[0].lower()
-                d_val = str(r.get("district", "")).lower()
-                if d_val != target_dist and canonicalize_district(d_val).lower() != target_dist:
-                    match = False
 
         # 6. FO name matching
-        if "FO_NAME = %S" in sql_upper:
-            for p in params:
-                if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p):
-                    r_fo = str(r.get("fo_name", "")).strip().lower()
-                    if r_fo and (p.strip().lower() == r_fo or re.sub(r'[^a-z0-9]', '', p.lower()) == re.sub(r'[^a-z0-9]', '', r_fo)):
-                        pass
+        if "LOWER(TRIM(FO_NAME)) = LOWER(TRIM(%S))" in sql_upper or "FO_NAME = %S" in sql_upper:
+            fo_params = [p for p in params if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p) and not p.startswith("%")]
+            if fo_params:
+                target_fo = fo_params[-1].strip().lower()
+                r_fo = str(r.get("fo_name", "")).strip().lower()
+                clean_target = re.sub(r'[^a-z0-9]', '', target_fo)
+                clean_r = re.sub(r'[^a-z0-9]', '', r_fo)
+                if r_fo != target_fo and clean_target != clean_r and clean_target not in clean_r and clean_r not in clean_target:
+                    match = False
+
+        # 7. Staff name matching
+        if "LOWER(TRIM(NAME)) = LOWER(TRIM(%S))" in sql_upper or "NAME = %S" in sql_upper:
+            name_params = [p for p in params if isinstance(p, str) and not re.match(r'^\d{4}-\d{2}', p) and not p.startswith("%")]
+            if name_params:
+                target_name = name_params[-1].strip().lower()
+                r_name = str(r.get("name", "")).strip().lower()
+                clean_target = re.sub(r'[^a-z0-9]', '', target_name)
+                clean_r = re.sub(r'[^a-z0-9]', '', r_name)
+                if r_name != target_name and clean_target != clean_r and clean_target not in clean_r and clean_r not in clean_target:
+                    match = False
 
         if match:
             filtered.append(r)

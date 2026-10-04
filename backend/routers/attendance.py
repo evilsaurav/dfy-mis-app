@@ -224,7 +224,12 @@ def format_attendance_response(
         raw_ts = d.get("timestamp_completed") or d.get("timestamp") or d.get("submitted_at")
         submitted_time = format_to_ist_time(raw_ts)
         dt_ist = parse_to_ist_datetime(raw_ts)
-        iso_ts = raw_ts.isoformat() if hasattr(raw_ts, 'isoformat') else str(raw_ts) if raw_ts else ""
+        if dt_ist:
+            iso_ts = dt_ist.isoformat()
+        elif hasattr(raw_ts, 'isoformat'):
+            iso_ts = raw_ts.isoformat()
+        else:
+            iso_ts = str(raw_ts) if raw_ts else ""
         
         rep_date = d.get("date_of_reporting") or d.get("date") or ""
         is_next_day_flag = bool(d.get("is_next_day_submission"))
@@ -256,7 +261,8 @@ def format_attendance_response(
             try: total_km = max(0, int(d.get("evening_km")) - int(d.get("morning_km")))
             except: pass
 
-        morning_time = d.get("submitted_morning_time") or submitted_time
+        raw_morning_time = d.get("submitted_morning_time")
+        morning_time = format_to_ist_time(raw_morning_time) if raw_morning_time else submitted_time
         if is_next_day:
             submitted_time = morning_time or submitted_time
             submitted_label = d.get("morning_submission_label") or f"Next day morning {submitted_time}"
@@ -293,6 +299,11 @@ def format_attendance_response(
             if is_next_day:
                 existing["is_next_day"] = True
                 existing["submitted_time"] = submitted_time
+                existing["submitted_label"] = submitted_label
+                existing["time_classification"] = time_classification
+            elif iso_ts and (not existing.get("timestamp_raw") or iso_ts > existing.get("timestamp_raw", "")):
+                existing["timestamp_raw"] = iso_ts
+                existing["submitted_time"] = submitted_time or existing.get("submitted_time")
                 existing["submitted_label"] = submitted_label
                 existing["time_classification"] = time_classification
         else:
@@ -552,32 +563,122 @@ async def get_today_attendance(
         try:
             staff_list, inactive_staff_keys = await get_attendance_staff_roster(target_date, allowed_dist_set)
 
-            target_month = target_date[:7]
-            raw_docs = await _resolve_get_raw_monthly_reports(target_month)
-
-            extended_raw_docs = list(raw_docs or [])
-            if target_dt.day <= 2:
-                prev_month = (target_dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-                prev_docs = await _resolve_get_raw_monthly_reports(prev_month)
-                if prev_docs:
-                    extended_raw_docs.extend(prev_docs)
-            elif target_dt.day >= 28:
-                next_month = (target_dt.replace(day=28) + timedelta(days=5)).strftime("%Y-%m")
-                next_docs = await _resolve_get_raw_monthly_reports(next_month)
-                if next_docs:
-                    extended_raw_docs.extend(next_docs)
-
             all_candidate_docs = []
-            seen_doc_ids = set()
-            for d in extended_raw_docs:
-                r_date = str(d.get("date_of_reporting") or d.get("date") or "").strip()
-                if r_date == target_date or (next_date and r_date == next_date):
-                    did = d.get("id") or d.get("doc_id")
-                    if did:
+            pg_rows = []
+            try:
+                date_sql = """
+                    SELECT r.*,
+                           COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
+                           COALESCE(v.names_data, '[]'::json) as _visited_names_json
+                    FROM daily_field_reports r
+                    LEFT JOIN (
+                        SELECT report_id, json_object_agg(category, ids) as kpi_data
+                        FROM (
+                            SELECT report_id, category, json_agg(patient_id) as ids
+                            FROM report_kpi_entries
+                            GROUP BY report_id, category
+                        ) cg GROUP BY report_id
+                    ) k ON r.id = k.report_id
+                    LEFT JOIN (
+                        SELECT report_id, json_agg(name ORDER BY position) as names_data
+                        FROM report_visited_names GROUP BY report_id
+                    ) v ON r.id = v.report_id
+                    WHERE (r.date_of_reporting = %s OR r.date_of_reporting = %s)
+                """
+                sql_params = [target_date, next_date or target_date]
+                if allowed_dist_set is not None and len(allowed_dist_set) > 0:
+                    date_sql += " AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))"
+                    dist_param = list({str(d).lower() for d in allowed_dist_set} | {str(d) for d in allowed_dist_set})
+                    sql_params.extend([dist_param, dist_param])
+
+                pg_rows = pg_execute_raw(date_sql, sql_params, fetch=True)
+                if not pg_rows:
+                    flat_date_sql = "SELECT * FROM daily_field_reports WHERE (date_of_reporting = %s OR date_of_reporting = %s)"
+                    flat_params = [target_date, next_date or target_date]
+                    if allowed_dist_set is not None and len(allowed_dist_set) > 0:
+                        flat_date_sql += " AND (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))"
+                        dist_param = list({str(d).lower() for d in allowed_dist_set} | {str(d) for d in allowed_dist_set})
+                        flat_params.extend([dist_param, dist_param])
+                    pg_rows = pg_execute_raw(flat_date_sql, flat_params, fetch=True)
+
+                if pg_rows:
+                    seen_doc_ids = set()
+                    for row in pg_rows:
+                        item = dict(row)
+                        kpi_map = item.pop("_kpi_json", {}) or {}
+                        names_list = item.pop("_visited_names_json", []) or []
+
+                        if hasattr(item.get("date_of_reporting"), "strftime"):
+                            item["date_of_reporting"] = item["date_of_reporting"].strftime("%Y-%m-%d")
+
+                        did = item.get("id") or item.get("doc_id")
+                        if not did or isinstance(did, int):
+                            c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+                            fo = str(item.get("fo_name", "")).strip()
+                            dt = str(item.get("date_of_reporting", "")).strip()
+                            did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+                        item["id"] = did
+                        item.setdefault("doc_id", did)
+
                         if did in seen_doc_ids:
                             continue
                         seen_doc_ids.add(did)
-                    all_candidate_docs.append(d)
+
+                        for list_field in (
+                            "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
+                            "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
+                            "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
+                            "presumptive_ids", "fdc_provided_ids", "differentiated_tb_ids",
+                            "tpt_treatment_start_ids", "tpt_presumptive_ids",
+                            "adhar_face_authentication_ids", "consent_with_id_ids",
+                            "culture_dst_ids", "kit_consumption_ids", "documents_ids"
+                        ):
+                            if list_field in kpi_map:
+                                item[list_field] = kpi_map[list_field]
+                            else:
+                                val = item.get(list_field)
+                                if isinstance(val, str):
+                                    try:
+                                        import json as _json
+                                        item[list_field] = _json.loads(val)
+                                    except Exception:
+                                        item[list_field] = []
+                                elif not isinstance(val, list):
+                                    item[list_field] = []
+
+                        item["visited_names"] = names_list if names_list else (item.get("visited_names") or [])
+                        all_candidate_docs.append(item)
+            except Exception as pg_e:
+                logger.debug(f"[get_today_attendance] Direct PG date query notice: {pg_e}")
+                all_candidate_docs = []
+
+            # Fallback to get_raw_monthly_reports / active_db if PG returned nothing (e.g. mock test mode)
+            if not all_candidate_docs:
+                target_month = target_date[:7]
+                raw_docs = await _resolve_get_raw_monthly_reports(target_month)
+
+                extended_raw_docs = list(raw_docs or [])
+                if target_dt.day <= 2:
+                    prev_month = (target_dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+                    prev_docs = await _resolve_get_raw_monthly_reports(prev_month)
+                    if prev_docs:
+                        extended_raw_docs.extend(prev_docs)
+                elif target_dt.day >= 28:
+                    next_month = (target_dt.replace(day=28) + timedelta(days=5)).strftime("%Y-%m")
+                    next_docs = await _resolve_get_raw_monthly_reports(next_month)
+                    if next_docs:
+                        extended_raw_docs.extend(next_docs)
+
+                seen_doc_ids = set()
+                for d in extended_raw_docs:
+                    r_date = str(d.get("date_of_reporting") or d.get("date") or "").strip()
+                    if r_date == target_date or (next_date and r_date == next_date):
+                        did = d.get("id") or d.get("doc_id")
+                        if did:
+                            if did in seen_doc_ids:
+                                continue
+                            seen_doc_ids.add(did)
+                        all_candidate_docs.append(d)
 
             leave_cache_key = f"daily_leaves_date_{target_date}"
             cached_leaves = cache.get(leave_cache_key)
@@ -821,7 +922,8 @@ async def export_staff_attendance(
                     v_names = []
                 raw_rem = (d.get("admin_remark") or d.get("remark") or "").strip()
                 is_next_day = bool(d.get("is_next_day_submission"))
-                m_time = d.get("submitted_morning_time") or format_to_ist_time(d.get("timestamp_completed") or d.get("timestamp")) or ""
+                raw_m = d.get("submitted_morning_time")
+                m_time = format_to_ist_time(raw_m) if raw_m else (format_to_ist_time(d.get("timestamp_completed") or d.get("timestamp")) or "")
 
                 if key not in reports_by_key:
                     reports_by_key[key] = {

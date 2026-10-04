@@ -112,20 +112,62 @@ export function useAdminAttendance({
       const key = `${dist}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
 
       const rawTs = r.timestamp_completed || r.timestamp || r.submitted_at || r.timestamp_raw || '';
-      let submittedTime = r.submitted_time || "Submitted";
-      if ((!submittedTime || submittedTime === "Submitted") && rawTs) {
-        try {
-          const cleanTs = String(rawTs).includes('T') ? rawTs : String(rawTs).replace(' ', 'T');
-          const d = new Date(cleanTs);
-          if (!isNaN(d.getTime())) {
-            submittedTime = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
-          }
-        } catch (e) {}
+      let submittedTime = (r.submitted_time || '').trim();
+      const is12Hour = /^\d{1,2}:\d{2}\s*(?:AM|PM)$/i.test(submittedTime);
+      if (is12Hour) {
+        submittedTime = submittedTime.replace(/[\u202f\u00a0]/g, ' ').toUpperCase();
+      } else {
+        if (rawTs) {
+          try {
+            let cleanTs = String(rawTs).trim();
+            if (!cleanTs.endsWith('Z') && !cleanTs.endsWith('z') && !/[+-]\d{2}:?\d{2}$/.test(cleanTs)) {
+              cleanTs = (cleanTs.includes('T') ? cleanTs : cleanTs.replace(' ', 'T')) + '+05:30';
+            } else if (!cleanTs.includes('T') && cleanTs.includes(' ')) {
+              cleanTs = cleanTs.replace(' ', 'T');
+            }
+            const d = new Date(cleanTs);
+            if (!isNaN(d.getTime())) {
+              submittedTime = d.toLocaleTimeString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+              }).replace(/[\u202f\u00a0]/g, ' ').toUpperCase();
+            }
+          } catch (e) {}
+        }
+        if (!submittedTime) {
+          submittedTime = "Submitted";
+        }
       }
 
       // Stealth 10 AM Cutoff Segregation for in-memory derivation:
       const isNextDay = Boolean(r.is_next_day_submission || r.is_next_day);
-      const morningTime = r.submitted_morning_time || (isNextDay ? submittedTime : '');
+      let morningTime = (r.submitted_morning_time || '').trim();
+      if (morningTime) {
+        const isMorning12Hour = /^\d{1,2}:\d{2}\s*(?:AM|PM)$/i.test(morningTime);
+        if (isMorning12Hour) {
+          morningTime = morningTime.replace(/[\u202f\u00a0]/g, ' ').toUpperCase();
+        } else {
+          try {
+            let cleanM = morningTime;
+            if (!cleanM.endsWith('Z') && !cleanM.endsWith('z') && !/[+-]\d{2}:?\d{2}$/.test(cleanM)) {
+              cleanM = (cleanM.includes('T') ? cleanM : cleanM.replace(' ', 'T')) + '+05:30';
+            }
+            const dm = new Date(cleanM);
+            if (!isNaN(dm.getTime())) {
+              morningTime = dm.toLocaleTimeString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+              }).replace(/[\u202f\u00a0]/g, ' ').toUpperCase();
+            }
+          } catch (e) {}
+        }
+      } else if (isNextDay) {
+        morningTime = submittedTime;
+      }
       const submittedLabel = r.morning_submission_label || r.submitted_label || (isNextDay ? `Next day morning ${morningTime}` : (submittedTime || 'Submitted'));
 
       // Total IDs: use r.total_ids if present (computed across all _ids lists), else sum available numeric categories
