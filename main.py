@@ -225,6 +225,8 @@ app = FastAPI(title="DFY TB MIS API", version="2.8.3")
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:5173",
     "https://dfy-frontend.vercel.app",
 ]
 

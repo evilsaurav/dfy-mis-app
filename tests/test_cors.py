@@ -28,6 +28,36 @@ def test_cors_allowed_localhost():
     assert res.status_code == 200
     assert res.headers.get("access-control-allow-origin") == "http://localhost:5173"
 
+def test_cors_allowed_localhost_preview():
+    """Verify http://localhost:4173 (Vite preview) receives Access-Control-Allow-Origin header."""
+    headers = {
+        "Origin": "http://localhost:4173",
+        "Access-Control-Request-Method": "GET"
+    }
+    res = client.options("/health", headers=headers)
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "http://localhost:4173"
+    assert res.headers.get("access-control-allow-credentials") == "true"
+
+    res = client.get("/health", headers={"Origin": "http://localhost:4173"})
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "http://localhost:4173"
+
+def test_cors_allowed_ip_address():
+    """Verify http://127.0.0.1:5173 receives Access-Control-Allow-Origin header."""
+    headers = {
+        "Origin": "http://127.0.0.1:5173",
+        "Access-Control-Request-Method": "GET"
+    }
+    res = client.options("/health", headers=headers)
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+    assert res.headers.get("access-control-allow-credentials") == "true"
+
+    res = client.get("/health", headers={"Origin": "http://127.0.0.1:5173"})
+    assert res.status_code == 200
+    assert res.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+
 def test_cors_allowed_production_domain():
     """Verify https://dfy-frontend.vercel.app receives Access-Control-Allow-Origin header."""
     headers = {
