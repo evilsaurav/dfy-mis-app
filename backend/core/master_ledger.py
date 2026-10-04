@@ -235,7 +235,14 @@ def _upsert_into_cached_list(cache_key: str, target_id: str, report_data: dict, 
         if idx != -1:
             cached_list.pop(idx)
     elif idx != -1:
-        cached_list[idx] = report_data
+        # Shallow merge: naye report_data ke jo bhi keys hain wo override 
+        # karengi, jo keys report_data mein MAUJOOD NAHI hain unki purani 
+        # value cache mein SAFE rahegi. Isse partial/incomplete report_data 
+        # (jaisa edit_patient_id se aata hai - sirf 1 category ke saath) 
+        # poori cached report ko corrupt nahi karega.
+        merged = dict(cached_list[idx])
+        merged.update(report_data)
+        cached_list[idx] = merged
     else:
         cached_list.append(report_data)
     cache.set(cache_key, cached_list, ttl=3600)
