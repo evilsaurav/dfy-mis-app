@@ -635,6 +635,8 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             "culture_dst_ids": "legacy_count_culture_dst"
         }
         l_col = cat_to_legacy.get(cat_key)
+        if l_col:
+            doc_update[l_col] = len(current_list)
 
         # 🛡️ Safe Mutation: Update child table row and parent legacy_count_* atomically
         if int_report_id:
@@ -781,6 +783,9 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         if doc_id:
             cache.delete(f"status_{doc_id}")
         cache.delete_prefix("recent_id_edits_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("master_reports_")
+        cache.delete_prefix("district_reports_")
         evict_officer_profile_cache(c_wp, req.fo_name, clean_date)
 
         try:
