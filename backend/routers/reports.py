@@ -64,6 +64,7 @@ from backend.routers.backup import ensure_daily_backup_scheduled
 from backend.routers.targets import get_targets
 from backend.core.supabase import (
     get_postgres_connection,
+    get_db_connection,
     pg_query_table,
     pg_fetch_one,
     pg_upsert_row,
@@ -675,14 +676,53 @@ async def submit_daily_report(report: DailyActivityReport):
 
         existing_report = None
         report_id = None
-        try:
-            doc = pg_fetch_one("daily_field_reports", filters={"id": doc_id})
-            if doc:
-                existing_report = dict(doc)
-                report_id = existing_report.get("id") or doc_id
-        except Exception:
-            pass
 
+        clean_date = str(report.date_of_reporting).strip()[:10]
+        c_wp = canonicalize_district(report.working_place).strip() if report.working_place else ""
+        fo_trimmed = str(report.fo_name or "").strip()
+
+        # Reliable PostgreSQL lookup using canonical district, date, and officer name
+        try:
+            existing_rows = pg_execute_raw(
+                """
+                SELECT * FROM daily_field_reports 
+                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
+                  AND LOWER(TRIM(working_place)) = LOWER(TRIM(%s))
+                  AND LOWER(TRIM(fo_name)) = LOWER(TRIM(%s))
+                ORDER BY id DESC LIMIT 1
+                """,
+                [clean_date, f"{clean_date}%", c_wp, fo_trimmed],
+                fetch=True
+            )
+            if existing_rows:
+                existing_report = dict(existing_rows[0])
+                report_id = existing_report.get("id")
+        except Exception as ex_err:
+            print(f"[submit_daily_report lookup primary notice]: {ex_err}")
+
+        # Fallback 1: match with raw working_place or fuzzy officer name if canonical district differed
+        if not existing_report:
+            try:
+                alt_rows = pg_execute_raw(
+                    """
+                    SELECT * FROM daily_field_reports 
+                    WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
+                      AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)))
+                      AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
+                           OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
+                           OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    [clean_date, f"{clean_date}%", c_wp, str(report.working_place).strip(), fo_trimmed, f"%{fo_trimmed}%", fo_trimmed],
+                    fetch=True
+                )
+                if alt_rows:
+                    existing_report = dict(alt_rows[0])
+                    report_id = existing_report.get("id")
+            except Exception:
+                pass
+
+        # Fallback 2: legacy_doc_id
         if not existing_report:
             try:
                 doc = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": doc_id})
@@ -692,19 +732,7 @@ async def submit_daily_report(report: DailyActivityReport):
             except Exception:
                 pass
 
-        if not existing_report:
-            try:
-                pg_res = pg_execute_raw(
-                    "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s AND LOWER(fo_name) = LOWER(%s) AND LOWER(working_place) = LOWER(%s) LIMIT 1",
-                    [str(report.date_of_reporting), str(report.fo_name).strip(), str(report.working_place).strip()],
-                    fetch=True
-                )
-                if pg_res:
-                    existing_report = dict(pg_res[0])
-                    report_id = existing_report.get("id") or doc_id
-            except Exception:
-                pass
-
+        # Fallback 3: active_db / test mock store
         if not existing_report:
             active_db = get_active_db()
             if active_db and hasattr(active_db, "collection"):
@@ -719,8 +747,8 @@ async def submit_daily_report(report: DailyActivityReport):
         if existing_report:
             is_new_submission = False
 
-            # If existing_report from Postgres doesn't have child array columns, fetch them from report_kpi_entries
-            if report_id and not any(isinstance(existing_report.get(k), list) and existing_report.get(k) for k in ["notification_ids", "sample_tested_ids"]):
+            # If existing_report from Postgres has an integer report_id, hydrate patient IDs from report_kpi_entries
+            if report_id and isinstance(report_id, int):
                 try:
                     k_rows = pg_execute_raw(
                         "SELECT category, patient_id FROM report_kpi_entries WHERE report_id = %s",
@@ -732,9 +760,17 @@ async def submit_daily_report(report: DailyActivityReport):
                             cat = kr.get("category")
                             pid = kr.get("patient_id")
                             if cat and pid:
-                                existing_report.setdefault(cat, []).append(str(pid).strip())
-                except Exception:
-                    pass
+                                clean_p = str(pid).strip()
+                                existing_report.setdefault(cat, []).append(clean_p)
+                                if not cat.endswith("_ids"):
+                                    existing_report.setdefault(f"{cat}_ids", []).append(clean_p)
+                                else:
+                                    existing_report.setdefault(cat[:-4], []).append(clean_p)
+                        for k in list(existing_report.keys()):
+                            if isinstance(existing_report[k], list) and (k.endswith("_ids") or k in ["notifications", "sample_tested", "hiv_dm", "dbt", "contact_tracing", "differentiated_tb"]):
+                                existing_report[k] = list(dict.fromkeys(existing_report[k]))
+                except Exception as k_fetch_err:
+                    print(f"[existing_report kpi hydration notice]: {k_fetch_err}")
 
             for k in list(existing_report.keys()):
                 val = existing_report.get(k)
@@ -792,6 +828,12 @@ async def submit_daily_report(report: DailyActivityReport):
                         payload[k] = f"{old_remark} | {v}".strip(" |")
                     else:
                         payload[k] = old_remark
+
+            # Preserve all preexisting _ids categories from existing_report even if omitted in incoming payload
+            for k, v in existing_report.items():
+                if isinstance(v, list) and k.endswith("_ids"):
+                    if k not in payload or not payload.get(k):
+                        payload[k] = list(dict.fromkeys(v))
 
             # Preserve preexisting KM readings if subsequent submission didn't provide new ones
             if existing_report.get("morning_km") and not payload.get("morning_km"):
@@ -947,19 +989,29 @@ async def submit_daily_report(report: DailyActivityReport):
 
         # Write to child tables ONLY if we have an integer report_id
         if int_report_id and isinstance(int_report_id, int):
-            # 1. report_kpi_entries
+            # 1. report_kpi_entries (FIX 2: Incremental Non-Destructive Insertion - NEVER DELETE ALL)
             try:
-                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s", [int_report_id])
                 kpi_entries_batch = []
                 for category in [c for c in payload.keys() if c.endswith("_ids") and isinstance(payload.get(c), list)]:
-                    for pid in payload[category]:
-                        clean_pid = str(pid).strip()
-                        if clean_pid:
-                            kpi_entries_batch.append((int_report_id, category, clean_pid))
+                    incoming_ids = [str(pid).strip() for pid in payload[category] if str(pid).strip()]
+                    if not incoming_ids:
+                        continue
+
+                    alt_cat = category[:-4] if category.endswith("_ids") else f"{category}_ids"
+                    existing_rows = pg_execute_raw(
+                        "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category = %s OR category = %s)",
+                        [int_report_id, category, alt_cat],
+                        fetch=True
+                    ) or []
+                    existing_pids_set = {str(r.get("patient_id") or "").strip() for r in existing_rows if r.get("patient_id")}
+
+                    new_pids = [pid for pid in dict.fromkeys(incoming_ids) if pid not in existing_pids_set]
+                    for pid in new_pids:
+                        kpi_entries_batch.append((int_report_id, category, pid))
+
                 if kpi_entries_batch:
-                    conn = get_postgres_connection()
-                    if conn:
-                        try:
+                    with get_db_connection() as conn:
+                        if conn:
                             import psycopg2.extras
                             with conn.cursor() as cur:
                                 psycopg2.extras.execute_values(
@@ -968,11 +1020,6 @@ async def submit_daily_report(report: DailyActivityReport):
                                     kpi_entries_batch
                                 )
                             conn.commit()
-                        finally:
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
             except Exception as kpi_err:
                 print(f"[report_kpi_entries Write Notice] {kpi_err}")
 
@@ -1004,9 +1051,8 @@ async def submit_daily_report(report: DailyActivityReport):
                             idx
                         ))
                 if fdc_batch:
-                    conn = get_postgres_connection()
-                    if conn:
-                        try:
+                    with get_db_connection() as conn:
+                        if conn:
                             import psycopg2.extras
                             with conn.cursor() as cur:
                                 psycopg2.extras.execute_values(
@@ -1019,11 +1065,6 @@ async def submit_daily_report(report: DailyActivityReport):
                                     fdc_batch
                                 )
                             conn.commit()
-                        finally:
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
             except Exception as fdc_err:
                 print(f"[report_fdc_details Write Notice] {fdc_err}")
 
@@ -1035,9 +1076,8 @@ async def submit_daily_report(report: DailyActivityReport):
                     if name and str(name).strip():
                         visited_batch.append((int_report_id, str(name).strip(), idx))
                 if visited_batch:
-                    conn = get_postgres_connection()
-                    if conn:
-                        try:
+                    with get_db_connection() as conn:
+                        if conn:
                             import psycopg2.extras
                             with conn.cursor() as cur:
                                 psycopg2.extras.execute_values(
@@ -1046,11 +1086,6 @@ async def submit_daily_report(report: DailyActivityReport):
                                     visited_batch
                                 )
                             conn.commit()
-                        finally:
-                            try:
-                                conn.close()
-                            except Exception:
-                                pass
             except Exception as names_err:
                 print(f"[report_visited_names Write Notice] {names_err}")
 
