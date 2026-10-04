@@ -223,9 +223,17 @@ from backend.routers.reports import (
 
 app = FastAPI(title="DFY TB MIS API", version="2.8.3")
 
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "https://dfy-frontend.vercel.app",
+]
+
+CORS_ORIGIN_REGEX = r"https://dfy-frontend.*\.vercel\.app"
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
