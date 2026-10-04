@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { downloadOrShareCanvas } from '../canvasShare';
 import { feedCategoriesConfig, formatAuditTimestamp, TOP_PERFORMER_MESSAGES, canonicalizeDistrict, isOfficerNameMatch } from '../utils/districtHelpers';
 import { getPreviousMonth } from '../utils/operationalMonth';
+import { setCachedDashboardData } from '../adminCache';
 
 export function useAdminModals({
   month,
@@ -1625,20 +1626,45 @@ export function useAdminModals({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ district, fo_name, date })
       });
-      if (res.ok) {
+      if (res.ok || res.status === 404) {
         if (typeof setRawRecords === 'function') {
-          setRawRecords(prev => prev.filter(r => {
-            const matchFo = (r.fo_name || '').trim().toLowerCase() === fo_name.trim().toLowerCase();
-            const matchDist = canonicalizeDistrict(r.working_place || '') === canonicalizeDistrict(district);
-            const matchDate = (r.date_of_reporting || r.date) === date;
-            return !(matchFo && matchDist && matchDate);
-          }));
+          setRawRecords(prev => {
+            const nextList = (prev || []).filter(r => {
+              const matchFo = isOfficerNameMatch(r.fo_name || '', fo_name);
+              const matchDist = canonicalizeDistrict(r.working_place || r.district || '') === canonicalizeDistrict(district);
+              const matchDate = (r.date_of_reporting || r.date) === date;
+              return !(matchFo && matchDist && matchDate);
+            });
+            try {
+              const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'guest'}`;
+              const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+              localStorage.setItem(cacheKey, JSON.stringify({
+                synced_at: fallbackStamp,
+                records: nextList
+              }));
+              if (typeof setCachedDashboardData === 'function') {
+                setCachedDashboardData(cacheKey, {
+                  synced_at: fallbackStamp,
+                  records: nextList
+                }).catch(() => {});
+              }
+            } catch (storageErr) {
+              console.warn("Storage sync failed after report deletion:", storageErr);
+            }
+            return nextList;
+          });
         }
         setDeleteDayModal(null);
-        if (showToast) showToast(`✓ Report for ${fo_name} on ${date} deleted.`, "success");
+        if (showToast) {
+          showToast(res.status === 404 
+            ? `✓ Stale record for ${fo_name} on ${date} removed from dashboard.` 
+            : `✓ Report for ${fo_name} on ${date} deleted.`, 
+            "success"
+          );
+        }
         if (typeof fetchAttendance === 'function') fetchAttendance();
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         setDeleteDayModal(prev => ({ ...prev, error: data.detail || "Failed to delete report.", loading: false }));
       }
     } catch (err) {

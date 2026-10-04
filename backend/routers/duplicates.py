@@ -419,14 +419,6 @@ async def repair_duplicate_notifications(
             if report_date and doc_district:
                 rollup_id = f"{report_date}_{doc_district}".replace(" ", "_").lower()
                 try:
-                    pg_execute_raw(
-                        "UPDATE daily_district_rollups SET notifications = GREATEST(0, COALESCE(notifications, 0) - %s), last_updated = %s WHERE id = %s",
-                        [removed_count, get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), rollup_id]
-                    )
-                except Exception as roll_err:
-                    print(f"[repair-duplicate PG rollup notice]: {roll_err}")
-
-                try:
                     rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
                     await asyncio.to_thread(lambda: rollup_ref.set({
                         "notifications": -removed_count,

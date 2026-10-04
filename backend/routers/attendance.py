@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta, date as dt_date
 from typing import Optional, List, Dict, Any, Tuple, Set
 from fastapi import APIRouter, HTTPException, Depends
+from collections import defaultdict
 from pydantic import BaseModel
 
 from backend.core.database import db, ENABLE_IN_MEMORY_DERIVATION
@@ -40,6 +41,7 @@ from backend.core.supabase import (
     pg_update_row,
     pg_delete_rows,
     pg_execute_raw,
+    get_active_db,
 )
 
 from backend.core.styles import (
@@ -440,8 +442,8 @@ async def legacy_get_today_attendance(
             next_date = ""
 
     report_rows = pg_execute_raw(
-        "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s OR date = %s",
-        [target_date, target_date],
+        "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s",
+        [target_date],
         fetch=True
     ) or []
     all_candidate_docs = [dict(r) for r in report_rows]
@@ -450,8 +452,8 @@ async def legacy_get_today_attendance(
     if next_date:
         try:
             next_day_rows = pg_execute_raw(
-                "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s OR date = %s",
-                [next_date, next_date],
+                "SELECT * FROM daily_field_reports WHERE date_of_reporting = %s",
+                [next_date],
                 fetch=True
             ) or []
             for ndoc in next_day_rows:
@@ -566,47 +568,45 @@ async def get_today_attendance(
             all_candidate_docs = []
             pg_rows = []
             try:
-                date_sql = """
-                    SELECT r.*,
-                           COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
-                           COALESCE(v.names_data, '[]'::json) as _visited_names_json
-                    FROM daily_field_reports r
-                    LEFT JOIN (
-                        SELECT report_id, json_object_agg(category, ids) as kpi_data
-                        FROM (
-                            SELECT report_id, category, json_agg(patient_id) as ids
-                            FROM report_kpi_entries
-                            GROUP BY report_id, category
-                        ) cg GROUP BY report_id
-                    ) k ON r.id = k.report_id
-                    LEFT JOIN (
-                        SELECT report_id, json_agg(name ORDER BY position) as names_data
-                        FROM report_visited_names GROUP BY report_id
-                    ) v ON r.id = v.report_id
-                    WHERE (r.date_of_reporting = %s OR r.date_of_reporting = %s)
-                """
+                date_sql = "SELECT * FROM daily_field_reports r WHERE (r.date_of_reporting = %s OR r.date_of_reporting = %s)"
                 sql_params = [target_date, next_date or target_date]
                 if allowed_dist_set is not None and len(allowed_dist_set) > 0:
                     date_sql += " AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))"
                     dist_param = list({str(d).lower() for d in allowed_dist_set} | {str(d) for d in allowed_dist_set})
                     sql_params.extend([dist_param, dist_param])
 
-                pg_rows = pg_execute_raw(date_sql, sql_params, fetch=True)
-                if not pg_rows:
-                    flat_date_sql = "SELECT * FROM daily_field_reports WHERE (date_of_reporting = %s OR date_of_reporting = %s)"
-                    flat_params = [target_date, next_date or target_date]
-                    if allowed_dist_set is not None and len(allowed_dist_set) > 0:
-                        flat_date_sql += " AND (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))"
-                        dist_param = list({str(d).lower() for d in allowed_dist_set} | {str(d) for d in allowed_dist_set})
-                        flat_params.extend([dist_param, dist_param])
-                    pg_rows = pg_execute_raw(flat_date_sql, flat_params, fetch=True)
+                pg_rows = pg_execute_raw(date_sql, sql_params, fetch=True) or []
 
                 if pg_rows:
+                    report_ids = [r["id"] for r in pg_rows if r.get("id")]
+                    kpi_by_rep = defaultdict(lambda: defaultdict(list))
+                    visited_by_rep = defaultdict(list)
+                    if report_ids:
+                        try:
+                            k_rows = pg_execute_raw(
+                                "SELECT report_id, category, patient_id FROM report_kpi_entries WHERE report_id = ANY(%s)",
+                                [report_ids], fetch=True
+                            ) or []
+                            for kr in k_rows:
+                                kpi_by_rep[kr["report_id"]][kr["category"]].append(kr["patient_id"])
+                        except Exception as k_err:
+                            logger.debug(f"[get_today_attendance] child kpi fetch notice: {k_err}")
+                        try:
+                            v_rows = pg_execute_raw(
+                                "SELECT report_id, name FROM report_visited_names WHERE report_id = ANY(%s) ORDER BY position ASC",
+                                [report_ids], fetch=True
+                            ) or []
+                            for vr in v_rows:
+                                visited_by_rep[vr["report_id"]].append(vr["name"])
+                        except Exception as v_err:
+                            logger.debug(f"[get_today_attendance] child visited fetch notice: {v_err}")
+
                     seen_doc_ids = set()
                     for row in pg_rows:
                         item = dict(row)
-                        kpi_map = item.pop("_kpi_json", {}) or {}
-                        names_list = item.pop("_visited_names_json", []) or []
+                        r_id = item.get("id")
+                        kpi_map = kpi_by_rep.get(r_id, {})
+                        names_list = visited_by_rep.get(r_id, [])
 
                         if hasattr(item.get("date_of_reporting"), "strftime"):
                             item["date_of_reporting"] = item["date_of_reporting"].strftime("%Y-%m-%d")
@@ -652,8 +652,19 @@ async def get_today_attendance(
                 logger.debug(f"[get_today_attendance] Direct PG date query notice: {pg_e}")
                 all_candidate_docs = []
 
-            # Fallback to get_raw_monthly_reports / active_db if PG returned nothing (e.g. mock test mode)
-            if not all_candidate_docs:
+            # Fallback to get_raw_monthly_reports / active_db ONLY if in mock/test environment
+            active_db = get_active_db()
+            is_mock_env = (
+                active_db is not None and (
+                    hasattr(active_db, "mock_calls") 
+                    or hasattr(active_db, "store")
+                    or hasattr(active_db, "saved_reports")
+                    or hasattr(active_db, "existing_docs")
+                    or type(active_db).__name__ in ["Mock", "MagicMock", "MockFirestore"]
+                    or isinstance(getattr(active_db, "reports", None), list)
+                )
+            )
+            if not all_candidate_docs and is_mock_env:
                 target_month = target_date[:7]
                 raw_docs = await _resolve_get_raw_monthly_reports(target_month)
 

@@ -560,7 +560,16 @@ export default function AdminDashboard() {
         setSyncStatus('UP_TO_DATE');
         if (data.synced_at) setLastSyncedTime(data.synced_at);
         if (cachedData?.records && cachedData.records.length > 0 && hasValidIds) {
-          setRawRecords(cachedData.records);
+          let recordsToUse = cachedData.records;
+          if (Array.isArray(data.deleted_ids) && data.deleted_ids.length > 0) {
+            const delSet = new Set(data.deleted_ids);
+            recordsToUse = recordsToUse.filter(r => !delSet.has(r.id) && !delSet.has(r.doc_id));
+            try {
+              setCachedDashboardData(cacheKey, { synced_at: data.synced_at || cachedData.synced_at, records: recordsToUse });
+              localStorage.setItem(cacheKey, JSON.stringify({ synced_at: data.synced_at || cachedData.synced_at, records: recordsToUse }));
+            } catch (e) {}
+          }
+          setRawRecords(recordsToUse);
         }
       } else if (data.mode === 'DELTA') {
         setRawRecords(prev => {
@@ -739,7 +748,13 @@ export default function AdminDashboard() {
       fetchActiveBroadcasts();
       fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
     }
-  }, [month, isAuthenticated, topPerformersPeriod, fetchTopPerformers, adminTargetViewMode]);
+  }, [month, isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
+    }
+  }, [isAuthenticated, topPerformersPeriod, adminTargetViewMode, fetchTopPerformers]);
 
   useEffect(() => {
     if (isAuthenticated && selectedDistrict) {

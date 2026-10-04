@@ -1087,7 +1087,6 @@ async def submit_daily_report(report: DailyActivityReport):
                 old_val = (existing_rollup.get(metric_k) or 0) if existing_rollup else 0
                 rollup_update[metric_k] = old_val + max(0, delta_v)
 
-            pg_upsert_row("daily_district_rollups", rollup_update, conflict_columns=["id"])
             if active_db and hasattr(active_db, "collection"):
                 try:
                     rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)

@@ -448,25 +448,31 @@ async def get_raw_monthly_reports(
     # 3. Try PostgreSQL primary source first
     raw_list = []
     try:
-        hydrated_sql = """
-            SELECT 
-                r.*,
-                COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
-                COALESCE(f.fdc_data, '[]'::json) as _fdc_json,
-                COALESCE(v.names_data, '[]'::json) as _visited_names_json
-            FROM daily_field_reports r
-            LEFT JOIN (
+        where_clause = "WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s"
+        pg_params = [start_date, end_date]
+        if clean_dists:
+            where_clause += " AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))"
+            dists_param = list({str(d).lower() for d in clean_dists} | {str(d) for d in clean_dists})
+            pg_params.extend([dists_param, dists_param])
+
+        hydrated_sql = f"""
+            WITH target_reports AS (
+                SELECT r.* FROM daily_field_reports r
+                {where_clause}
+            ),
+            kpi_agg AS (
                 SELECT 
                     report_id, 
                     json_object_agg(category, ids) as kpi_data
                 FROM (
                     SELECT report_id, category, json_agg(patient_id) as ids
                     FROM report_kpi_entries
+                    WHERE report_id IN (SELECT id FROM target_reports)
                     GROUP BY report_id, category
                 ) cat_grouped
                 GROUP BY report_id
-            ) k ON r.id = k.report_id
-            LEFT JOIN (
+            ),
+            fdc_agg AS (
                 SELECT 
                     report_id,
                     json_agg(json_build_object(
@@ -485,22 +491,27 @@ async def get_raw_monthly_reports(
                         'supply_issued', supply_issued
                     ) ORDER BY position) as fdc_data
                 FROM report_fdc_details
+                WHERE report_id IN (SELECT id FROM target_reports)
                 GROUP BY report_id
-            ) f ON r.id = f.report_id
-            LEFT JOIN (
+            ),
+            names_agg AS (
                 SELECT 
                     report_id,
                     json_agg(name ORDER BY position) as names_data
                 FROM report_visited_names
+                WHERE report_id IN (SELECT id FROM target_reports)
                 GROUP BY report_id
-            ) v ON r.id = v.report_id
-            WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+            )
+            SELECT 
+                r.*,
+                COALESCE(k.kpi_data, '{{}}'::json) as _kpi_json,
+                COALESCE(f.fdc_data, '[]'::json) as _fdc_json,
+                COALESCE(v.names_data, '[]'::json) as _visited_names_json
+            FROM target_reports r
+            LEFT JOIN kpi_agg k ON r.id = k.report_id
+            LEFT JOIN fdc_agg f ON r.id = f.report_id
+            LEFT JOIN names_agg v ON r.id = v.report_id
         """
-        pg_params = [start_date, end_date]
-        if clean_dists:
-            hydrated_sql += " AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))"
-            dists_param = list({str(d).lower() for d in clean_dists} | {str(d) for d in clean_dists})
-            pg_params.extend([dists_param, dists_param])
 
         pg_rows = []
         try:

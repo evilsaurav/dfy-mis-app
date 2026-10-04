@@ -67,6 +67,8 @@ class EditIdRequest(BaseModel):
 async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(get_optional_admin)):
     try:
         c_wp = canonicalize_district(req.working_place)
+        if not isinstance(admin, dict):
+            admin = None
         is_admin = admin is not None
         matched_staff_id = None
         matched_staff_name = ""
@@ -416,7 +418,59 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
 
         # Fast Fail: Zero remote Firestore .stream() queries!
         if not pg_rep and not data:
-            raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+            if req.action == "add" and not is_mock_env:
+                # 🛡️ Resilient Auto-Provisioning: If an FO or Admin adds a missing ID for a date
+                # where no report has been submitted yet, auto-provision baseline parent row
+                res_s_id, res_d_id = resolve_staff_and_district_ids(
+                    fo_name=req.fo_name,
+                    district=c_wp,
+                    pin=req.pin
+                )
+                staff_pk = matched_staff_id or res_s_id
+                dist_pk = res_d_id
+                clean_doc_id = candidate_doc_ids[0]
+                
+                try:
+                    if staff_pk:
+                        insert_sql = """
+                            INSERT INTO daily_field_reports 
+                                (staff_id, district_id, fo_name, working_place, pin_used, date_of_reporting, status, submission_count, is_next_day_submission, created_at, legacy_doc_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, 'completed', 1, false, NOW(), %s)
+                            ON CONFLICT (staff_id, date_of_reporting) DO UPDATE SET last_edited_at = NOW()
+                            RETURNING id, staff_id, district_id, fo_name, working_place, date_of_reporting, legacy_doc_id
+                        """
+                        inserted_rows = pg_execute_raw(
+                            insert_sql,
+                            [staff_pk, dist_pk, req.fo_name.strip(), c_wp, str(req.pin or "1234").strip(), clean_date, clean_doc_id],
+                            fetch=True
+                        )
+                    else:
+                        insert_sql = """
+                            INSERT INTO daily_field_reports 
+                                (district_id, fo_name, working_place, pin_used, date_of_reporting, status, submission_count, is_next_day_submission, created_at, legacy_doc_id)
+                            VALUES (%s, %s, %s, %s, %s, 'completed', 1, false, NOW(), %s)
+                            ON CONFLICT (legacy_doc_id) DO UPDATE SET last_edited_at = NOW()
+                            RETURNING id, staff_id, district_id, fo_name, working_place, date_of_reporting, legacy_doc_id
+                        """
+                        inserted_rows = pg_execute_raw(
+                            insert_sql,
+                            [dist_pk, req.fo_name.strip(), c_wp, str(req.pin or "1234").strip(), clean_date, clean_doc_id],
+                            fetch=True
+                        )
+                    if inserted_rows:
+                        pg_rep = dict(inserted_rows[0])
+                        data = dict(pg_rep)
+                        doc_id = clean_doc_id
+                        int_report_id = pg_rep.get("id")
+                    else:
+                        raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+                except HTTPException:
+                    raise
+                except Exception as auto_ins_err:
+                    logger.warning(f"Auto-provisioning daily_field_reports notice: {auto_ins_err}")
+                    raise HTTPException(status_code=404, detail="No report found for this date and officer.")
+            else:
+                raise HTTPException(status_code=404, detail="No report found for this date and officer.")
 
         if data is None and pg_rep:
             data = dict(pg_rep)
@@ -639,10 +693,6 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 if cat_key in metric_map:
                     delta = -1 if req.action == "delete" else 1
                     rollup_id = f"{clean_date}_{c_wp}".replace(" ", "_").lower()
-                    pg_execute_raw(
-                        f"UPDATE daily_district_rollups SET {metric_map[cat_key]} = GREATEST(0, COALESCE({metric_map[cat_key]}, 0) + %s), last_updated = %s WHERE id = %s",
-                        [delta, get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), rollup_id]
-                    )
                     if is_mock_env and active_db and hasattr(active_db, "collection"):
                         try:
                             rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
@@ -653,7 +703,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                         except Exception:
                             pass
             except Exception as r_err:
-                logger.warning(f"Error updating daily_district_rollups: {r_err}")
+                logger.warning(f"Error updating daily_district_rollups in mock: {r_err}")
         
         # 4. Audit Log entry
         log_entry = {
@@ -1258,12 +1308,11 @@ async def admin_feed_officer_data(
                 d_cnt = delta_counts.get(cat_k, 0)
                 rollup_update[rollup_k] = old_v + max(0, d_cnt)
 
-            pg_upsert_row("daily_district_rollups", rollup_update, conflict_columns=["id"])
-
-            rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-            mock_rollup_update = dict(rollup_update)
-            mock_rollup_update["submitted_fos"] = submitted_fos
-            await asyncio.to_thread(lambda: rollup_ref.set(mock_rollup_update, merge=True))
+            if is_mock_env and active_db and hasattr(active_db, "collection"):
+                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
+                mock_rollup_update = dict(rollup_update)
+                mock_rollup_update["submitted_fos"] = submitted_fos
+                await asyncio.to_thread(lambda: rollup_ref.set(mock_rollup_update, merge=True))
         except Exception as rollup_err:
             print(f"[Admin Feed Rollup Notice] Non-fatal error: {rollup_err}")
 
@@ -1429,7 +1478,52 @@ async def admin_delete_day_report(
                 pass
 
         if not matching_docs:
-            raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
+            # 🛡️ Safe Idempotency: The report is already absent or was deleted.
+            # Clean up any potential orphan records/tombstones and notify delta sync so all clients purge it.
+            try:
+                pg_execute_raw("DELETE FROM daily_field_reports WHERE legacy_doc_id = ANY(%s)", [candidate_doc_ids])
+            except Exception:
+                pass
+            for cid in candidate_doc_ids:
+                try:
+                    if active_db and hasattr(active_db, "collection"):
+                        active_db.collection("daily_field_reports").document(cid).delete()
+                except Exception:
+                    pass
+
+            tombstone_entry = {
+                "doc_id": candidate_doc_ids[0],
+                "deleted_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "district": clean_wp,
+                "fo_name": clean_fo,
+                "date": clean_date
+            }
+            DELETED_REPORTS_TOMBSTONES.append(tombstone_entry)
+            record_report_mutation(f"delete_absent_{clean_wp}_{clean_fo}_{clean_date}")
+            cache.delete_prefix("dash_")
+            cache.delete_prefix("attendance_")
+            cache.delete_prefix("shared_raw_month_")
+            cache.delete_prefix("dist_notif_registry_")
+
+            await log_admin_activity(
+                action_type="DELETE_DAY_REPORT",
+                details=f"Admin {admin.get('username')} confirmed deletion/removal of report for {clean_fo} ({clean_wp}) on {clean_date}.",
+                user_name=admin.get("name") or admin.get("username", "Admin"),
+                user_id=admin.get("user_id") or admin.get("username", "admin"),
+                role=admin.get("role", "ADMIN"),
+                district=clean_wp,
+                target_officer=clean_fo,
+                diff={"deleted_report_count": 0, "status": "already_removed_or_not_found", "date": clean_date}
+            )
+
+            return {
+                "status": "success",
+                "message": f"Report for {clean_fo} ({clean_wp}) on {clean_date} has been cleared from view.",
+                "deleted_count": 0,
+                "deleted_metrics": {},
+                "total_deleted_ids": 0,
+                "purged": True
+            }
 
         # 3. Calculate metrics to rollback from rollups
         total_deleted_ids = 0
@@ -1521,18 +1615,9 @@ async def admin_delete_day_report(
             except Exception:
                 pass
 
-        # 5. Rollback in daily_district_rollups
+        # 5. Rollback in daily_district_rollups (Mock Store only - PostgreSQL uses auto-derived materialized view)
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-            set_clauses = ["submission_count = GREATEST(0, COALESCE(submission_count, 0) - %s)", "last_updated = %s"]
-            vals = [len(matching_docs), get_ist_now().strftime("%Y-%m-%d %H:%M:%S")]
-            for m_key, m_val in deleted_metrics.items():
-                if m_val > 0:
-                    set_clauses.append(f"{m_key} = GREATEST(0, COALESCE({m_key}, 0) - %s)")
-                    vals.append(m_val)
-            vals.append(rollup_id)
-            pg_execute_raw(f"UPDATE daily_district_rollups SET {', '.join(set_clauses)} WHERE id = %s", vals)
-
             rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
             r_snap = await asyncio.to_thread(rollup_ref.get)
             if r_snap.exists:

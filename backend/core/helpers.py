@@ -688,7 +688,7 @@ def check_patient_id_90day_notification_duplicate(
         SELECT r.id, r.fo_name, r.working_place, r.date_of_reporting, k.patient_id, r.legacy_doc_id
         FROM report_kpi_entries k
         JOIN daily_field_reports r ON k.report_id = r.id
-        WHERE k.category IN ('notification_ids', 'notifications')
+        WHERE k.category::text IN ('notification_ids', 'notifications')
           AND k.patient_id = %s
           AND (LOWER(TRIM(r.working_place)) = ANY(%s))
           AND r.date_of_reporting >= (%s::date - INTERVAL '90 days')
@@ -721,15 +721,16 @@ def check_patient_id_90day_notification_duplicate(
         is_mock_env = (
             active_db is not None and (
                 hasattr(active_db, "mock_calls") 
-                or hasattr(active_db, "reports")
                 or hasattr(active_db, "store")
                 or hasattr(active_db, "saved_reports")
                 or hasattr(active_db, "existing_docs")
                 or type(active_db).__name__ in ["Mock", "MagicMock", "MockFirestore"]
+                or isinstance(getattr(active_db, "reports", None), list)
             )
         )
         if is_mock_env:
-            mock_reports = list(getattr(active_db, "reports", []) or [])
+            raw_rep = getattr(active_db, "reports", [])
+            mock_reports = list(raw_rep) if isinstance(raw_rep, (list, tuple)) else []
             if hasattr(active_db, "existing_docs") and isinstance(active_db.existing_docs, dict):
                 for ed_id, ed_data in active_db.existing_docs.items():
                     if not any(getattr(r, "id", None) == ed_id for r in mock_reports):

@@ -103,6 +103,8 @@ class _DatabaseProxy:
                 return getattr(active, name)
         if _real_db is not None and hasattr(_real_db, name):
             return getattr(_real_db, name)
+        if name in ("reports", "store", "saved_reports", "existing_docs", "mock_calls", "staff_members"):
+            raise AttributeError(f"'_DatabaseProxy' object has no attribute '{name}'")
         return lambda *args, **kwargs: None
 
 
