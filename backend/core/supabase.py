@@ -1020,3 +1020,27 @@ def pg_execute_raw(sql: str, params: Optional[List] = None, fetch: bool = False)
 
     return _fallback_raw_query(sql, params)
 
+
+def ensure_database_indexes_exist():
+    """Idempotently creates performance indexes on core relational tables in PostgreSQL."""
+    try:
+        pg_execute_raw("""
+            CREATE INDEX IF NOT EXISTS idx_dfr_staff_date ON daily_field_reports(staff_id, date_of_reporting);
+            CREATE INDEX IF NOT EXISTS idx_dfr_district_date ON daily_field_reports(district_id, date_of_reporting);
+            CREATE INDEX IF NOT EXISTS idx_dfr_date_of_reporting ON daily_field_reports(date_of_reporting);
+            CREATE INDEX IF NOT EXISTS idx_dfr_fo_name ON daily_field_reports(fo_name);
+            CREATE INDEX IF NOT EXISTS idx_dfr_working_place ON daily_field_reports(working_place);
+            CREATE INDEX IF NOT EXISTS idx_dfr_legacy_doc_id ON daily_field_reports(legacy_doc_id);
+
+            CREATE INDEX IF NOT EXISTS idx_rkp_report_id ON report_kpi_entries(report_id);
+            CREATE INDEX IF NOT EXISTS idx_rkp_category_patient ON report_kpi_entries(category, patient_id);
+            CREATE INDEX IF NOT EXISTS idx_rfd_report_id ON report_fdc_details(report_id);
+            CREATE INDEX IF NOT EXISTS idx_rvn_report_id ON report_visited_names(report_id);
+
+            CREATE INDEX IF NOT EXISTS idx_staff_dist_name ON staff_directory(district, name);
+            CREATE INDEX IF NOT EXISTS idx_staff_district_id ON staff_directory(district_id);
+        """)
+    except Exception as e:
+        print(f"[Database indexes init notice] {e}")
+
+

@@ -10,6 +10,7 @@ import asyncio
 import calendar
 from datetime import datetime, timedelta, date as dt_date, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
+from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -1518,41 +1519,25 @@ async def my_profile_stats(req: ProfileStatsRequest):
                         pin_valid = True
                         break
             
-            # New Staff Zero-Latency Fallback: If not in memory, check Firestore document directly
-            if not found_officer:
-                candidate_ids = [
-                    f"{clean_wp}_{req.fo_name}".replace(" ", "").lower(),
-                    f"{req.working_place}_{req.fo_name}".replace(" ", "").lower(),
-                    f"{clean_wp.replace(' ', '')}_{clean_fo}".lower()
-                ]
-                if "aurangabad" in clean_wp.lower():
-                    candidate_ids.extend([f"aurangabad_{clean_fo}", f"aurangabad_{req.fo_name}".replace(" ", "").lower()])
-                if "champaran" in clean_wp.lower():
-                    candidate_ids.extend([f"eastchamparan_{clean_fo}", f"east_champaran_{clean_fo}"])
-                if "bhojpur" in clean_wp.lower():
-                    candidate_ids.extend([f"bhojpur_{clean_fo}"])
-                candidate_ids = list(dict.fromkeys(candidate_ids))
-
-                for doc_id in candidate_ids:
-                    try:
-                        pin_row = pg_fetch_one("staff_directory", filters={"id": doc_id})
-                        if pin_row:
-                            real_pin = pin_row.get("pin", "")
-                            if verify_password(str(req.pin), str(real_pin)) or str(req.pin) == str(real_pin):
-                                pin_valid = True
-                                # Warm up staff directory cache with new officer
-                                if raw_staff is not None and isinstance(raw_staff, list):
-                                    raw_staff.append({
-                                        "id": doc_id,
-                                        "district": clean_wp,
-                                        "name": req.fo_name,
-                                        "pin": real_pin,
-                                        "is_active": True
-                                    })
-                                break
-                    except Exception:
-                        pass
-
+            # Fast Staff Resolution & PIN Validation
+            resolved_staff_id, resolved_district_id = resolve_staff_and_district_ids(
+                fo_name=req.fo_name,
+                district=clean_wp,
+                pin=req.pin
+            )
+            if not found_officer and resolved_staff_id:
+                try:
+                    staff_row = pg_execute_raw(
+                        "SELECT pin, is_active FROM staff_directory WHERE id = %s LIMIT 1",
+                        [resolved_staff_id],
+                        fetch=True
+                    )
+                    if staff_row:
+                        s_pin = staff_row[0].get("pin", "")
+                        if verify_password(str(req.pin), str(s_pin)) or str(req.pin) == str(s_pin):
+                            pin_valid = True
+                except Exception:
+                    pass
 
             if not pin_valid:
                 if not (str(req.pin).isdigit() and len(str(req.pin)) == 4):
@@ -1588,50 +1573,10 @@ async def my_profile_stats(req: ProfileStatsRequest):
                             target_val = 50
                         break
 
-            # 3. Targeted Monthly Reports Lookup (Pushdown to PostgreSQL)
+            # 3. Targeted Monthly Reports Lookup (Pushdown to PostgreSQL with Indexes, < 15ms target)
             reports = []
             try:
                 start_date, end_date = get_month_date_range(req_month)
-                officer_sql = """
-                    SELECT r.*,
-                           COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
-                           COALESCE(f.fdc_data, '[]'::json) as _fdc_json,
-                           COALESCE(v.names_data, '[]'::json) as _visited_names_json
-                    FROM daily_field_reports r
-                    LEFT JOIN (
-                        SELECT report_id, json_object_agg(category, ids) as kpi_data
-                        FROM (
-                            SELECT report_id, category, json_agg(patient_id) as ids
-                            FROM report_kpi_entries
-                            GROUP BY report_id, category
-                        ) cat_grouped GROUP BY report_id
-                    ) k ON r.id = k.report_id
-                    LEFT JOIN (
-                        SELECT report_id, json_agg(json_build_object(
-                            'patient_id', patient_id,
-                            'fdc_type', fdc_type,
-                            'regimen_name', regimen_name,
-                            'phase', phase,
-                            'daily_dose_text', daily_dose_text,
-                            'patient_name', patient_name,
-                            'patient_type', patient_type,
-                            'weight_kg', weight_kg,
-                            'weight_band', weight_band,
-                            'daily_tablets', daily_tablets,
-                            'strips', strips,
-                            'recommended_strips', recommended_strips,
-                            'supply_issued', supply_issued
-                        ) ORDER BY position) as fdc_data
-                        FROM report_fdc_details GROUP BY report_id
-                    ) f ON r.id = f.report_id
-                    LEFT JOIN (
-                        SELECT report_id, json_agg(name ORDER BY position) as names_data
-                        FROM report_visited_names GROUP BY report_id
-                    ) v ON r.id = v.report_id
-                    WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
-                      AND (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))
-                      AND (LOWER(TRIM(r.fo_name)) = ANY(%s) OR REGEXP_REPLACE(LOWER(COALESCE(r.fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s))
-                """
                 dist_param = list({str(clean_wp).lower(), str(clean_wp)})
                 fo_variants = {str(req.fo_name).strip().lower(), clean_fo}
                 if "ashwani" in clean_fo:
@@ -1639,34 +1584,107 @@ async def my_profile_stats(req: ProfileStatsRequest):
                 if "vinay" in clean_fo:
                     fo_variants.update(["vinay prakash", "vinay kumar", "vinay kumar lt", "vinayprakash", "vinaykumar", "vinaykumarlt"])
                 fo_param = list(fo_variants)
-                sql_params = [start_date, end_date, dist_param, dist_param, fo_param, fo_param]
 
-                pg_rows = pg_execute_raw(officer_sql, sql_params, fetch=True)
-                if not pg_rows:
-                    flat_officer_sql = """
+                officer_sql = """
+                    SELECT r.* FROM daily_field_reports r
+                    WHERE (
+                        (r.staff_id = %s AND %s IS NOT NULL)
+                        OR (
+                            (LOWER(TRIM(r.working_place)) = ANY(%s) OR r.district_id::text = ANY(%s))
+                            AND (
+                                LOWER(TRIM(r.fo_name)) = ANY(%s)
+                                OR REGEXP_REPLACE(LOWER(COALESCE(r.fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s)
+                            )
+                        )
+                    )
+                    AND r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+                    ORDER BY r.date_of_reporting ASC
+                """
+                sql_params = [
+                    resolved_staff_id, resolved_staff_id,
+                    dist_param, dist_param,
+                    fo_param, fo_param,
+                    start_date, end_date
+                ]
+
+                pg_rows = pg_execute_raw(officer_sql, sql_params, fetch=True) or []
+                if not pg_rows and resolved_district_id:
+                    fallback_sql = """
                         SELECT * FROM daily_field_reports
                         WHERE date_of_reporting >= %s AND date_of_reporting <= %s
-                          AND (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))
+                          AND (district_id = %s OR LOWER(TRIM(working_place)) = ANY(%s))
                           AND (LOWER(TRIM(fo_name)) = ANY(%s) OR REGEXP_REPLACE(LOWER(COALESCE(fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s))
+                        ORDER BY date_of_reporting ASC
                     """
-                    pg_rows = pg_execute_raw(flat_officer_sql, sql_params, fetch=True)
+                    pg_rows = pg_execute_raw(fallback_sql, [start_date, end_date, resolved_district_id, dist_param, fo_param, fo_param], fetch=True) or []
 
                 if pg_rows:
+                    report_ids = [r["id"] for r in pg_rows if r.get("id") is not None]
+                    kpi_map = defaultdict(lambda: defaultdict(list))
+                    fdc_map = defaultdict(list)
+                    visited_map = defaultdict(list)
+
+                    if report_ids:
+                        try:
+                            k_entries = pg_execute_raw(
+                                "SELECT report_id, category, patient_id FROM report_kpi_entries WHERE report_id = ANY(%s)",
+                                [report_ids],
+                                fetch=True
+                            ) or []
+                            for ke in k_entries:
+                                if isinstance(ke, dict) and "report_id" in ke and "category" in ke:
+                                    kpi_map[ke["report_id"]][ke["category"]].append(ke.get("patient_id"))
+                        except Exception as k_err:
+                            print(f"[Profile Stats] Child kpi fetch notice: {k_err}")
+
+                        try:
+                            f_entries = pg_execute_raw(
+                                """
+                                SELECT report_id, patient_id, fdc_type, regimen_name, phase, daily_dose_text,
+                                       patient_name, patient_type, weight_kg, weight_band, daily_tablets,
+                                       strips, recommended_strips, supply_issued, position
+                                FROM report_fdc_details WHERE report_id = ANY(%s)
+                                ORDER BY position ASC
+                                """,
+                                [report_ids],
+                                fetch=True
+                            ) or []
+                            for fe in f_entries:
+                                if isinstance(fe, dict) and "report_id" in fe:
+                                    fdc_map[fe["report_id"]].append(dict(fe))
+                        except Exception as f_err:
+                            print(f"[Profile Stats] Child fdc fetch notice: {f_err}")
+
+                        try:
+                            v_entries = pg_execute_raw(
+                                "SELECT report_id, name, position FROM report_visited_names WHERE report_id = ANY(%s) ORDER BY position ASC",
+                                [report_ids],
+                                fetch=True
+                            ) or []
+                            for ve in v_entries:
+                                if isinstance(ve, dict) and "report_id" in ve:
+                                    visited_map[ve["report_id"]].append(ve.get("name"))
+                        except Exception as v_err:
+                            print(f"[Profile Stats] Child visited fetch notice: {v_err}")
+
                     for row in pg_rows:
                         item = dict(row)
-                        kpi_map = item.pop("_kpi_json", {}) or {}
-                        fdc_list = item.pop("_fdc_json", []) or []
-                        names_list = item.pop("_visited_names_json", []) or []
+                        r_id = item.get("id")
+                        inline_kpi = item.get("_kpi_json") or {}
+                        inline_visited = item.get("_visited_names_json") or []
+                        k_data = kpi_map.get(r_id, {})
+                        f_list = fdc_map.get(r_id, [])
+                        v_list = visited_map.get(r_id, []) or (inline_visited if isinstance(inline_visited, list) else [])
 
                         if hasattr(item.get("date_of_reporting"), "strftime"):
                             item["date_of_reporting"] = item["date_of_reporting"].strftime("%Y-%m-%d")
 
                         did = item.get("id") or item.get("doc_id")
                         if not did or isinstance(did, int):
-                            c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
-                            fo = str(item.get("fo_name", "")).strip()
-                            dt = str(item.get("date_of_reporting", "")).strip()
-                            did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
+                            c_wp_i = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
+                            fo_i = str(item.get("fo_name", "")).strip()
+                            dt_i = str(item.get("date_of_reporting", "")).strip()
+                            did = f"{c_wp_i}_{fo_i}_{dt_i}".replace(" ", "_").lower()
                         item["id"] = did
                         item.setdefault("doc_id", did)
 
@@ -1679,8 +1697,10 @@ async def my_profile_stats(req: ProfileStatsRequest):
                             "adhar_face_authentication_ids", "consent_with_id_ids",
                             "culture_dst_ids", "kit_consumption_ids", "documents_ids"
                         ):
-                            if list_field in kpi_map:
-                                item[list_field] = kpi_map[list_field]
+                            if list_field in k_data:
+                                item[list_field] = k_data[list_field]
+                            elif isinstance(inline_kpi, dict) and list_field in inline_kpi:
+                                item[list_field] = inline_kpi[list_field]
                             else:
                                 val = item.get(list_field)
                                 if isinstance(val, str):
@@ -1691,8 +1711,8 @@ async def my_profile_stats(req: ProfileStatsRequest):
                                 elif not isinstance(val, list):
                                     item[list_field] = []
 
-                        item["fdc_details"] = fdc_list if fdc_list else (item.get("fdc_details") or [])
-                        item["visited_names"] = names_list if names_list else (item.get("visited_names") or [])
+                        item["fdc_details"] = f_list if f_list else (item.get("fdc_details") or [])
+                        item["visited_names"] = v_list if v_list else (item.get("visited_names") or [])
                         reports.append(item)
 
                     # Ensure exact canonical matching

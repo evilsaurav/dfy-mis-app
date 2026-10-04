@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # --- Core Infrastructure Re-exports (Backwards Compatibility for Tests & Scripts) ---
 from backend.core.database import db, project_id, ENABLE_IN_MEMORY_DERIVATION
+from backend.core.supabase import ensure_database_indexes_exist
 from backend.core.cache import cache, SimpleTTLCache, ACTIVE_MONTHLY_CACHE_KEYS
 from backend.core.security import (
     JWT_SECRET_KEY,
@@ -258,6 +259,7 @@ def health_status():
 @app.on_event("startup")
 async def on_app_startup_tasks():
     ensure_district_targets_table_exists()
+    ensure_database_indexes_exist()
     await init_default_super_admin()
     asyncio.create_task(prune_expired_audit_logs(retention_days=30))
     ensure_daily_backup_scheduled()
