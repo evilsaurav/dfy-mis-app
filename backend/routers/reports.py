@@ -1539,8 +1539,83 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
                     if r_fo == clean_target_fo:
                         fallback_matches.append(r)
             if fallback_matches:
-
                 reports = fallback_matches
+
+        # Hydrate child table entries (kpi, fdc, visited names) from PostgreSQL for FO profile view
+        if reports:
+            int_rep_ids = [
+                int(r["id"]) for r in reports 
+                if isinstance(r, dict) and (isinstance(r.get("id"), int) or (isinstance(r.get("id"), str) and str(r.get("id")).isdigit()))
+            ]
+            if int_rep_ids:
+                try:
+                    kpi_rows = pg_execute_raw(
+                        "SELECT report_id, category, patient_id FROM report_kpi_entries WHERE report_id = ANY(%s) ORDER BY id ASC",
+                        [int_rep_ids],
+                        fetch=True
+                    ) or []
+                    kpi_by_report = {}
+                    for kr in kpi_rows:
+                        rid = kr.get("report_id")
+                        cat = str(kr.get("category") or "").strip()
+                        pid = str(kr.get("patient_id") or "").strip()
+                        if rid and cat and pid:
+                            cat_key = cat if cat.endswith("_ids") else f"{cat}_ids"
+                            kpi_by_report.setdefault(rid, {}).setdefault(cat_key, []).append(pid)
+                    for r in reports:
+                        if isinstance(r, dict):
+                            rid = r.get("id")
+                            if isinstance(rid, str) and rid.isdigit():
+                                rid = int(rid)
+                            if rid in kpi_by_report:
+                                for cat_k, pids in kpi_by_report[rid].items():
+                                    r[cat_k] = list(dict.fromkeys(pids))
+                                    if cat_k.endswith("_ids"):
+                                        r[cat_k[:-4]] = r[cat_k]
+                except Exception as kpi_err:
+                    print(f"[legacy_my_profile_stats kpi hydration notice]: {kpi_err}")
+
+                try:
+                    fdc_rows = pg_execute_raw(
+                        "SELECT * FROM report_fdc_details WHERE report_id = ANY(%s) ORDER BY position ASC, id ASC",
+                        [int_rep_ids],
+                        fetch=True
+                    ) or []
+                    if fdc_rows:
+                        fdc_by_report = {}
+                        for fr in fdc_rows:
+                            rid = fr.get("report_id")
+                            if rid:
+                                fdc_by_report.setdefault(rid, []).append(dict(fr))
+                        for r in reports:
+                            if isinstance(r, dict):
+                                rid = r.get("id")
+                                if isinstance(rid, str) and rid.isdigit():
+                                    rid = int(rid)
+                                if rid in fdc_by_report:
+                                    r["fdc_details"] = fdc_by_report[rid]
+
+                    names_rows = pg_execute_raw(
+                        "SELECT report_id, name FROM report_visited_names WHERE report_id = ANY(%s) ORDER BY position ASC, id ASC",
+                        [int_rep_ids],
+                        fetch=True
+                    ) or []
+                    if names_rows:
+                        names_by_report = {}
+                        for nr in names_rows:
+                            rid = nr.get("report_id")
+                            nm = str(nr.get("name") or "").strip()
+                            if rid and nm:
+                                names_by_report.setdefault(rid, []).append(nm)
+                        for r in reports:
+                            if isinstance(r, dict):
+                                rid = r.get("id")
+                                if isinstance(rid, str) and rid.isdigit():
+                                    rid = int(rid)
+                                if rid in names_by_report:
+                                    r["visited_names"] = names_by_report[rid]
+                except Exception as child_err:
+                    print(f"[legacy_my_profile_stats child hydration notice]: {child_err}")
 
         res = await compute_profile_response(reports, target_val, req_month, clean_wp, clean_fo)
         cache.set(cache_key, res, ttl=1800)

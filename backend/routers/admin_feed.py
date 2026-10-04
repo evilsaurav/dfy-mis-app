@@ -41,6 +41,7 @@ from backend.core.supabase import (
     pg_upsert_row,
     pg_update_row,
     get_active_db,
+    get_postgres_connection,
 )
 from backend.routers.reports import get_district_90day_notified_ids
 
