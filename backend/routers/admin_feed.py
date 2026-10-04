@@ -22,7 +22,8 @@ from backend.core.helpers import (
     is_officer_name_match,
     evict_officer_profile_cache,
     log_admin_activity,
-    format_to_ist_time
+    format_to_ist_time,
+    normalize_date_to_iso
 )
 from backend.core.master_ledger import (
     get_cached_staff_directory_raw,
@@ -58,10 +59,15 @@ class EditIdRequest(BaseModel):
     pin: Optional[str] = ""
 
 @router.post("/api/reports/edit-id")
+@router.post("/api/reports/add-missing-id")
+@router.post("/api/edit-id")
+@router.post("/edit-patient-id")
 async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(get_optional_admin)):
     try:
         c_wp = canonicalize_district(req.working_place)
         is_admin = admin is not None
+        matched_staff_id = None
+        matched_staff_name = ""
 
         # Dual-Authentication & Authorization Enforcement
         if req.edited_by == "Admin":
@@ -101,7 +107,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             try:
                 staff_row = pg_execute_raw(
                     """
-                    SELECT pin FROM staff_directory 
+                    SELECT id, name, district, pin FROM staff_directory 
                     WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
                       AND (LOWER(TRIM(name)) = LOWER(TRIM(%s)) 
                            OR LOWER(TRIM(name)) ILIKE LOWER(TRIM(%s))
@@ -115,6 +121,8 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 if staff_row and isinstance(staff_row, list) and len(staff_row) > 0:
                     staff_found = True
                     real_p = str(staff_row[0].get("pin", ""))
+                    matched_staff_id = staff_row[0].get("id")
+                    matched_staff_name = str(staff_row[0].get("name", "")).strip()
                     if _verify_pin_candidate(req.pin, real_p):
                         pin_match = True
             except Exception as e:
@@ -142,6 +150,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                         if pid in active_db.staff_members:
                             staff_found = True
                             real_p = str(active_db.staff_members[pid].get("pin", ""))
+                            matched_staff_name = str(active_db.staff_members[pid].get("name", "")).strip()
                             if _verify_pin_candidate(req.pin, real_p):
                                 pin_match = True
                                 break
@@ -151,6 +160,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                         if pid in s_store:
                             staff_found = True
                             real_p = str(s_store[pid].get("pin", ""))
+                            matched_staff_name = str(s_store[pid].get("name", "")).strip()
                             if _verify_pin_candidate(req.pin, real_p):
                                 pin_match = True
                                 break
@@ -167,6 +177,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                                     staff_found = True
                                     s_data = staff_doc.to_dict() if callable(getattr(staff_doc, "to_dict", None)) else {}
                                     real_p = str(s_data.get("pin", ""))
+                                    matched_staff_name = str(s_data.get("name", "")).strip()
                                     if _verify_pin_candidate(req.pin, real_p):
                                         pin_match = True
                                         break
@@ -184,6 +195,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                             if m_wp == clean_req_wp and (m_name == clean_req_fo or clean_req_fo in m_name):
                                 staff_found = True
                                 real_p = str(member.get("pin", ""))
+                                matched_staff_name = str(member.get("name", "")).strip()
                                 if _verify_pin_candidate(req.pin, real_p):
                                     pin_match = True
                                 break
@@ -208,44 +220,148 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                 raise HTTPException(status_code=400, detail=f"Invalid Patient ID '{clean_new_id}'. Must be exactly {lens_desc} digits.")
             req.new_id = clean_new_id
 
-        clean_date = req.date.strip()[:10]
+        # Robust Date Normalization (handles DD-MM-YYYY, YYYY-MM-DD, ISO, etc.)
+        clean_date = normalize_date_to_iso(req.date) or req.date.strip()[:10]
+        raw_date = req.date.strip()
+        raw_date_clean = raw_date[:10]
         clean_wp = c_wp.strip()
         fo_trimmed = req.fo_name.strip()
+        clean_fo_alpha = re.sub(r'[^a-z0-9]', '', fo_trimmed.lower())
+
+        district_variants = list(dict.fromkeys([
+            clean_wp.lower(),
+            req.working_place.strip().lower(),
+            canonicalize_district(req.working_place).lower(),
+        ]))
+        if "champaran" in clean_wp.lower():
+            district_variants.extend(["east champaran", "motihari", "purbi champaran", "purba champaran"])
+        if "aurangabad" in clean_wp.lower():
+            district_variants.extend(["aurangabad", "aurangabad-bi", "aurangabad bi"])
+        if "bhojpur" in clean_wp.lower():
+            district_variants.extend(["bhojpur", "arrah", "ara"])
+        district_variants = [d for d in district_variants if d]
 
         candidate_doc_ids = [
             f"{clean_wp}_{fo_trimmed}_{clean_date}".replace(" ", "_").lower(),
             f"{req.working_place.strip()}_{fo_trimmed}_{clean_date}".replace(" ", "_").lower(),
-            f"{clean_wp}_{re.sub(r'[^a-zA-Z0-9]', '', fo_trimmed)}_{clean_date}".lower()
+            f"{clean_wp}_{clean_fo_alpha}_{clean_date}".lower(),
+            f"{req.working_place.strip()}_{clean_fo_alpha}_{clean_date}".lower(),
+            f"{clean_wp}_{fo_trimmed}_{raw_date_clean}".replace(" ", "_").lower(),
+            f"{req.working_place.strip()}_{fo_trimmed}_{raw_date_clean}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo_alpha}_{raw_date_clean}".lower(),
+            f"{req.working_place.strip()}_{clean_fo_alpha}_{raw_date_clean}".lower(),
         ]
+        if matched_staff_name:
+            m_clean = matched_staff_name.strip()
+            candidate_doc_ids.extend([
+                f"{clean_wp}_{m_clean}_{clean_date}".replace(" ", "_").lower(),
+                f"{req.working_place.strip()}_{m_clean}_{clean_date}".replace(" ", "_").lower(),
+                f"{clean_wp}_{m_clean}_{raw_date_clean}".replace(" ", "_").lower(),
+                f"{req.working_place.strip()}_{m_clean}_{raw_date_clean}".replace(" ", "_").lower(),
+            ])
         candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
 
-        # 1. Parameterized PostgreSQL Lookup
+        # --- Resilient 3-Tier Parameterized PostgreSQL Lookup ---
         pg_rep = None
+
+        # Tier 1: Match by (date OR date_text) AND district variants AND fo_name
         try:
+            tier1_params = [
+                clean_date, f"{clean_date}%", f"{raw_date_clean}%", clean_date, raw_date_clean,
+                district_variants,
+                clean_wp, f"%{clean_wp}%", req.working_place.strip(), f"%{req.working_place.strip()}%",
+                fo_trimmed, f"%{fo_trimmed}%", clean_fo_alpha, fo_trimmed
+            ]
             rows = pg_execute_raw(
                 """
                 SELECT * FROM daily_field_reports 
-                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
-                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
-                  AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
-                       OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
-                       OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
+                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s OR date_of_reporting::text = %s)
+                  AND (
+                      LOWER(TRIM(working_place)) = ANY(%s)
+                      OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) 
+                      OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s))
+                      OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) 
+                      OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s))
+                  )
+                  AND (
+                      LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
+                      OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
+                      OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = %s
+                      OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
+                  )
                 ORDER BY id DESC
                 LIMIT 1
                 """,
-                [clean_date, f"{clean_date}%", clean_wp, f"%{clean_wp}%", fo_trimmed, f"%{fo_trimmed}%", fo_trimmed],
+                tier1_params,
                 fetch=True
             )
             if rows and isinstance(rows, list) and len(rows) > 0:
                 pg_rep = dict(rows[0])
         except Exception as pg_err:
-            logger.warning(f"Error querying daily_field_reports in Postgres: {pg_err}")
+            logger.warning(f"Error querying daily_field_reports in Postgres Tier 1: {pg_err}")
 
-        # 2. Check candidate legacy_doc_id in PostgreSQL if not found yet
+        # Tier 2: Match by candidate legacy_doc_id or staff_id + date
+        if not pg_rep:
+            try:
+                rows = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE legacy_doc_id = ANY(%s) ORDER BY id DESC LIMIT 1",
+                    [candidate_doc_ids],
+                    fetch=True
+                )
+                if rows and isinstance(rows, list) and len(rows) > 0:
+                    pg_rep = dict(rows[0])
+            except Exception as pg_err:
+                logger.warning(f"Error querying daily_field_reports in Postgres Tier 2 doc_id: {pg_err}")
+
+        if not pg_rep and matched_staff_id:
+            try:
+                rows = pg_execute_raw(
+                    """
+                    SELECT * FROM daily_field_reports 
+                    WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
+                      AND staff_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    [clean_date, f"{clean_date}%", clean_date, matched_staff_id],
+                    fetch=True
+                )
+                if rows and isinstance(rows, list) and len(rows) > 0:
+                    pg_rep = dict(rows[0])
+            except Exception as pg_err:
+                logger.warning(f"Error querying daily_field_reports in Postgres Tier 2 staff_id: {pg_err}")
+
+        # Tier 3: District-agnostic FO Name + Date match (FO only submits 1 report per date in Bihar)
+        if not pg_rep:
+            try:
+                rows = pg_execute_raw(
+                    """
+                    SELECT * FROM daily_field_reports 
+                    WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
+                      AND (
+                          LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
+                          OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
+                          OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = %s
+                          OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
+                      )
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """,
+                    [clean_date, f"{clean_date}%", f"{raw_date_clean}%", clean_date, fo_trimmed, f"%{fo_trimmed}%", clean_fo_alpha, fo_trimmed],
+                    fetch=True
+                )
+                if rows and isinstance(rows, list) and len(rows) > 0:
+                    pg_rep = dict(rows[0])
+            except Exception as pg_err:
+                logger.warning(f"Error querying daily_field_reports in Postgres Tier 3: {pg_err}")
+
+        # Check legacy_doc_id in single record fetch if needed
         if not pg_rep:
             for cid in candidate_doc_ids:
                 try:
-                    pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid}) or pg_fetch_one("daily_field_reports", filters={"id": cid})
+                    pg_rep = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid})
+                    if not pg_rep and str(cid).isdigit():
+                        pg_rep = pg_fetch_one("daily_field_reports", filters={"id": int(cid)})
                     if pg_rep:
                         break
                 except Exception:
@@ -287,9 +403,10 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                     r_data = r.to_dict() if callable(getattr(r, "to_dict", None)) else (r if isinstance(r, dict) else {})
                     r_wp = canonicalize_district(r_data.get("working_place", "")).lower()
                     r_fo = re.sub(r'[^a-z0-9]', '', str(r_data.get("fo_name", "")).lower())
-                    req_fo_clean = re.sub(r'[^a-z0-9]', '', fo_trimmed.lower())
+                    req_fo_clean = clean_fo_alpha
                     r_date = str(r_data.get("date_of_reporting") or r_data.get("date") or "")[:10]
-                    if (r_wp == clean_wp.lower() or r_wp == req.working_place.strip().lower()) and r_fo == req_fo_clean and r_date == clean_date:
+                    r_date_iso = normalize_date_to_iso(r_date)
+                    if (r_wp in district_variants or clean_wp.lower() in r_wp or r_wp == req.working_place.strip().lower()) and (r_fo == req_fo_clean or req_fo_clean in r_fo) and (r_date == clean_date or r_date_iso == clean_date or r_date == raw_date_clean):
                         doc_ref = getattr(r, "reference", r)
                         data = r_data
                         doc_id = getattr(r, "id", None) or doc_id
@@ -1207,23 +1324,25 @@ async def admin_delete_day_report(
             print(f"[Delete Day PG Lookup Notice] {pg_lookup_err}")
 
         # 2b. Fallback / Mock DB lookup for candidate doc IDs
-        for cid in candidate_doc_ids:
-            try:
-                cand_ref = db.collection("daily_field_reports").document(cid)
-                snap = await asyncio.to_thread(cand_ref.get)
-                if snap.exists and cid not in seen_report_ids:
-                    d_dict = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
-                    d_dict["id"] = snap.id
-                    d_dict["_snap"] = snap
-                    matching_docs.append(d_dict)
-                    seen_report_ids.add(cid)
-            except Exception:
-                pass
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            for cid in candidate_doc_ids:
+                try:
+                    cand_ref = active_db.collection("daily_field_reports").document(cid)
+                    snap = await asyncio.to_thread(cand_ref.get)
+                    if snap and getattr(snap, "exists", False) and cid not in seen_report_ids:
+                        d_dict = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+                        d_dict["id"] = snap.id
+                        d_dict["_snap"] = snap
+                        matching_docs.append(d_dict)
+                        seen_report_ids.add(cid)
+                except Exception:
+                    pass
 
         # 2c. Fallback / Mock DB query by date
-        if not matching_docs:
+        if not matching_docs and active_db and hasattr(active_db, "collection"):
             try:
-                query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                query_docs = await asyncio.to_thread(lambda: list(active_db.collection("daily_field_reports")
                     .where("date_of_reporting", "==", clean_date)
                     .stream()))
                 for d in query_docs:
@@ -1452,40 +1571,74 @@ async def admin_edit_day_report(
                     detail=f"Permission denied: You cannot edit reports for {req.district} district."
                 )
 
-        # 2. Locate all candidate documents in daily_field_reports
+        # 2. Locate all matching documents in PostgreSQL
+        clean_date_iso = normalize_date_to_iso(clean_date)
         candidate_doc_ids = [
+            f"{clean_wp}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
+            f"{req.district.strip()}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo}__{clean_date_iso}".replace(" ", "_").lower(),
             f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
         ]
+        candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
 
         matching_docs = []
         seen_doc_ids = set()
-        for cid in candidate_doc_ids:
-            cand_ref = db.collection("daily_field_reports").document(cid)
-            snap = await asyncio.to_thread(cand_ref.get)
-            if snap.exists and cid not in seen_doc_ids:
-                matching_docs.append(snap)
-                seen_doc_ids.add(cid)
+        try:
+            pg_rows = pg_execute_raw(
+                """
+                SELECT * FROM daily_field_reports 
+                WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
+                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                  AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
+                ORDER BY id DESC
+                """,
+                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%", clean_fo, clean_fo],
+                fetch=True
+            ) or []
+            for r in pg_rows:
+                matching_docs.append(dict(r))
+                seen_doc_ids.add(str(r.get("id")))
+        except Exception as pg_lookup_err:
+            logger.warning(f"[Edit Day PG Lookup Notice] {pg_lookup_err}")
 
         if not matching_docs:
-            query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
-                .where("date_of_reporting", "==", clean_date)
-                .stream()))
-            for d in query_docs:
-                d_dict = d.to_dict()
-                d_fo = str(d_dict.get("fo_name", "")).strip().lower()
-                d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
-                if d_fo == clean_fo.lower() and d_wp == clean_wp.lower():
-                    matching_docs.append(d)
-                    seen_doc_ids.add(d.id)
+            try:
+                cand_rows = pg_execute_raw(
+                    "SELECT * FROM daily_field_reports WHERE legacy_doc_id = ANY(%s) ORDER BY id DESC",
+                    [candidate_doc_ids],
+                    fetch=True
+                ) or []
+                for r in cand_rows:
+                    matching_docs.append(dict(r))
+                    seen_doc_ids.add(str(r.get("id")))
+            except Exception:
+                pass
+
+        # Mock DB fallback (for unit tests)
+        if not matching_docs:
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                for cid in candidate_doc_ids:
+                    try:
+                        cand_ref = active_db.collection("daily_field_reports").document(cid)
+                        snap = await asyncio.to_thread(cand_ref.get)
+                        if snap.exists and cid not in seen_doc_ids:
+                            d_dict = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+                            d_dict["id"] = snap.id
+                            d_dict["_snap"] = snap
+                            matching_docs.append(d_dict)
+                            seen_doc_ids.add(cid)
+                    except Exception:
+                        pass
 
         if not matching_docs:
             raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
 
         target_snap = matching_docs[0]
-        doc_ref = getattr(target_snap, "reference", None) or db.collection("daily_field_reports").document(target_snap.id)
-        old_data = target_snap.to_dict()
+        doc_ref = getattr(target_snap, "reference", None) if not isinstance(target_snap, dict) else target_snap.get("_snap")
+        old_data = target_snap if isinstance(target_snap, dict) else target_snap.to_dict()
 
         # 3. Calculate category deltas and prepare updates
         VALID_CATEGORIES = [
@@ -1707,7 +1860,8 @@ async def admin_edit_day_report(
                 except Exception as vis_err:
                     print(f"[edit-day PG report_visited_names reconcile notice]: {vis_err}")
 
-        await asyncio.to_thread(lambda: doc_ref.update(doc_update))
+        if doc_ref and hasattr(doc_ref, "update"):
+            await asyncio.to_thread(lambda: doc_ref.update(doc_update))
 
         # 5. Adjustments in daily_district_rollups
         if metric_deltas:
@@ -1721,14 +1875,16 @@ async def admin_edit_day_report(
                 vals.append(rollup_id)
                 pg_execute_raw(f"UPDATE daily_district_rollups SET {', '.join(set_clauses)} WHERE id = %s", vals)
 
-                rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
-                r_snap = await asyncio.to_thread(rollup_ref.get)
-                if r_snap.exists:
-                    r_dict = r_snap.to_dict()
-                    r_update = {"last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")}
-                    for mk, dv in metric_deltas.items():
-                        r_update[mk] = max(0, (r_dict.get(mk) or 0) + dv)
-                    await asyncio.to_thread(lambda: rollup_ref.update(r_update))
+                active_db = get_active_db()
+                if active_db and hasattr(active_db, "collection"):
+                    rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
+                    r_snap = await asyncio.to_thread(rollup_ref.get)
+                    if r_snap and getattr(r_snap, "exists", False):
+                        r_dict = r_snap.to_dict() if callable(getattr(r_snap, "to_dict", None)) else {}
+                        r_update = {"last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")}
+                        for mk, dv in metric_deltas.items():
+                            r_update[mk] = max(0, (r_dict.get(mk) or 0) + dv)
+                        await asyncio.to_thread(lambda: rollup_ref.update(r_update))
             except Exception as r_err:
                 print(f"[Edit Day Rollup Notice] {r_err}")
 

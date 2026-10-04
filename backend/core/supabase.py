@@ -888,7 +888,7 @@ def _fallback_raw_query(sql: str, params: Optional[List] = None) -> List[Dict[st
                     match = False
 
         # 5. District / working_place matching
-        if "WORKING_PLACE = ANY(%S)" in sql_upper or "DISTRICT = ANY(%S)" in sql_upper:
+        if "WORKING_PLACE = ANY(%S)" in sql_upper or "DISTRICT = ANY(%S)" in sql_upper or "LOWER(TRIM(WORKING_PLACE)) = ANY(%S)" in sql_upper:
             lists = [p for p in params if isinstance(p, (list, tuple, set))]
             if lists:
                 target_places = [str(x).lower() for x in lists[0]]

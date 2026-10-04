@@ -122,6 +122,42 @@ def get_month_date_range(month_str: Optional[str]) -> Tuple[str, str]:
         last_day = calendar.monthrange(year, month)[1]
         return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
 
+def normalize_date_to_iso(date_str: Any) -> str:
+    """
+    Normalizes any date input (YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, YYYY/MM/DD, date, datetime)
+    into canonical 'YYYY-MM-DD'.
+    """
+    if not date_str:
+        return ""
+    if isinstance(date_str, (datetime, date)):
+        return date_str.strftime("%Y-%m-%d")
+    s = str(date_str).strip()
+    if "T" in s:
+        s = s.split("T")[0].strip()
+    if " " in s:
+        s = s.split(" ")[0].strip()
+
+    # 1. YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+    m_ymd = re.match(r'^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$', s)
+    if m_ymd:
+        y, m, d = int(m_ymd.group(1)), int(m_ymd.group(2)), int(m_ymd.group(3))
+        return f"{y:04d}-{m:02d}-{d:02d}"
+
+    # 2. DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+    m_dmy = re.match(r'^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$', s)
+    if m_dmy:
+        d, m, y = int(m_dmy.group(1)), int(m_dmy.group(2)), int(m_dmy.group(3))
+        return f"{y:04d}-{m:02d}-{d:02d}"
+
+    # 3. Fallback try parsing known formats
+    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(s[:10], fmt).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    return s[:10]
+
 DEFAULT_BIHAR_DISTRICTS = [
     "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",
     "East Champaran", "Gaya", "Jamui", "Jehanabad", "Kaimur",

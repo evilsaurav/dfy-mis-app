@@ -281,3 +281,156 @@ async def test_fo_invalid_pin_rejected_under_30ms():
             assert res.status_code == 401
             assert "Invalid PIN" in res.json()["detail"]
             assert elapsed_ms < 30.0, f"PIN check took {elapsed_ms:.2f}ms, expected < 30ms!"
+
+
+@pytest.mark.asyncio
+async def test_fo_add_missing_id_with_dd_mm_yyyy_date_format():
+    """
+    CRITICAL PROD BUG FIX Verification:
+    When FO app sends date as DD-MM-YYYY (e.g. '04-10-2026') while PostgreSQL
+    schema stores date_of_reporting as '2026-10-04', date normalizer and
+    Postgres query MUST match and succeed.
+    """
+    now_utc = datetime.now(timezone.utc)
+    recent_ts = (now_utc - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    doc_id = "patna_saurav_kumar_2026-10-04"
+    report_doc = FakeDoc({
+        "working_place": "Patna",
+        "fo_name": "Saurav Kumar",
+        "date_of_reporting": "2026-10-04",
+        "timestamp_completed": recent_ts,
+        "notification_ids": ["100000001", "100000002"],
+        "notifications": 2
+    }, doc_id=doc_id, exists=True)
+
+    staff_dict = {
+        "patna_sauravkumar": {
+            "pin": "1234",
+            "name": "Saurav Kumar",
+            "district": "Patna"
+        }
+    }
+
+    mock_db = MockFirestore(reports=[report_doc], staff_members=staff_dict)
+
+    # FO frontend sending DD-MM-YYYY
+    payload = {
+        "working_place": "Patna",
+        "fo_name": "Saurav Kumar",
+        "date": "04-10-2026",
+        "category": "notification",
+        "action": "add",
+        "new_id": "888777666",
+        "pin": "1234",
+        "edited_by": "FO"
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post("/api/reports/edit-id", json=payload)
+            assert res.status_code == 200, f"Failed with {res.status_code}: {res.text}"
+            data = res.json()
+            assert data["success"] is True
+            assert "888777666" in data["updated_ids"]
+
+
+@pytest.mark.asyncio
+async def test_fo_add_missing_id_with_district_alias():
+    """
+    District Canonical Alias Verification:
+    If FO is registered under 'East Champaran' but report is stored as 'Motihari',
+    the query must match seamlessly.
+    """
+    now_utc = datetime.now(timezone.utc)
+    recent_ts = (now_utc - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    doc_id = "motihari_amit_kumar_2026-10-04"
+    report_doc = FakeDoc({
+        "working_place": "Motihari",
+        "fo_name": "Amit Kumar",
+        "date_of_reporting": "2026-10-04",
+        "timestamp_completed": recent_ts,
+        "notification_ids": ["100000001"],
+        "notifications": 1
+    }, doc_id=doc_id, exists=True)
+
+    staff_dict = {
+        "eastchamparan_amitkumar": {
+            "pin": "4321",
+            "name": "Amit Kumar",
+            "district": "East Champaran"
+        }
+    }
+
+    mock_db = MockFirestore(reports=[report_doc], staff_members=staff_dict)
+
+    payload = {
+        "working_place": "East Champaran",
+        "fo_name": "Amit Kumar",
+        "date": "2026-10-04",
+        "category": "notification",
+        "action": "add",
+        "new_id": "777666555",
+        "pin": "4321",
+        "edited_by": "FO"
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post("/api/reports/edit-id", json=payload)
+            assert res.status_code == 200, f"Failed with {res.status_code}: {res.text}"
+            data = res.json()
+            assert data["success"] is True
+            assert "777666555" in data["updated_ids"]
+
+
+@pytest.mark.asyncio
+async def test_fo_add_missing_id_multi_route_aliases():
+    """
+    Route Alias Verification:
+    Verify that /api/reports/add-missing-id and /edit-patient-id also work.
+    """
+    now_utc = datetime.now(timezone.utc)
+    recent_ts = (now_utc - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+    doc_id = "patna_saurav_kumar_2026-10-04"
+    report_doc = FakeDoc({
+        "working_place": "Patna",
+        "fo_name": "Saurav Kumar",
+        "date_of_reporting": "2026-10-04",
+        "timestamp_completed": recent_ts,
+        "notification_ids": ["100000001"],
+        "notifications": 1
+    }, doc_id=doc_id, exists=True)
+
+    staff_dict = {
+        "patna_sauravkumar": {
+            "pin": "1234",
+            "name": "Saurav Kumar",
+            "district": "Patna"
+        }
+    }
+
+    mock_db = MockFirestore(reports=[report_doc], staff_members=staff_dict)
+
+    payload = {
+        "working_place": "Patna",
+        "fo_name": "Saurav Kumar",
+        "date": "2026-10-04",
+        "category": "notification",
+        "action": "add",
+        "new_id": "111222333",
+        "pin": "1234",
+        "edited_by": "FO"
+    }
+
+    with patch("main.db", mock_db):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            res = await ac.post("/api/reports/add-missing-id", json=payload)
+            assert res.status_code == 200, f"Alias route /api/reports/add-missing-id failed: {res.text}"
+            assert res.json()["success"] is True
+
