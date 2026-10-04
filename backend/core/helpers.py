@@ -7,7 +7,7 @@ import calendar
 from typing import Optional, Dict, Any, List, Tuple
 from backend.core.cache import cache
 from backend.core.database import db
-from backend.core.supabase import pg_upsert_row
+from backend.core.supabase import pg_upsert_row, get_active_db
 
 
 IST_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
@@ -418,9 +418,30 @@ async def log_admin_activity(
 
         def _write_log():
             try:
-                pg_upsert_row("admin_audit_logs", entry, conflict_columns=["id"])
+                pg_entry = {
+                    "action_type": action_type,
+                    "details": details,
+                    "user_id": str(user_id) if user_id else None,
+                    "user_name": str(user_name) if user_name else None,
+                    "role": str(role) if role else None,
+                    "district_name_snapshot": str(district) if district else "All",
+                    "target_officer": str(target_officer) if target_officer else None,
+                    "diff": resolved_diff if isinstance(resolved_diff, dict) else {},
+                    "ip_address": ip_address if ip_address else None,
+                    "location": resolved_loc or None,
+                    "occurred_at": ist_now.isoformat(),
+                    "legacy_doc_id": log_id,
+                }
+                pg_upsert_row("admin_audit_logs", pg_entry, conflict_columns=["legacy_doc_id"])
             except Exception as w_err:
-                print(f"Audit log write notice: {w_err}")
+                print(f"Audit log PG write notice: {w_err}")
+
+            try:
+                active_db = get_active_db()
+                if active_db and hasattr(active_db, "collection"):
+                    active_db.collection("admin_audit_logs").document(log_id).set(entry)
+            except Exception:
+                pass
 
         await asyncio.to_thread(_write_log)
     except Exception as e:

@@ -547,30 +547,38 @@ def pg_upsert_row(
         except Exception as e:
             print(f"[pg_upsert_row:{table}] Supabase notice: {e}")
 
-    # 2. psycopg2
-    conn = get_postgres_connection()
-    if conn:
-        try:
-            cols = list(data.keys())
-            vals = [data[c] for c in cols]
-            col_str = ", ".join(cols)
-            placeholder_str = ", ".join(["%s"] * len(cols))
-            conflict_str = ""
-            if conflict_columns:
-                updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c not in conflict_columns)
-                conflict_str = f" ON CONFLICT ({', '.join(conflict_columns)}) DO UPDATE SET {updates}" if updates else f" ON CONFLICT ({', '.join(conflict_columns)}) DO NOTHING"
-            sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholder_str}){conflict_str}"
-            with conn.cursor() as cur:
-                cur.execute(sql, vals)
-            conn.commit()
-            success = True
-        except Exception as e:
-            print(f"[pg_upsert_row:{table}] psycopg2 notice: {e}")
-        finally:
+    # 2. psycopg2 (fallback if REST not used or failed)
+    if not success:
+        conn = get_postgres_connection()
+        if conn:
             try:
-                conn.close()
-            except Exception:
-                pass
+                import psycopg2.extras
+                cols = list(data.keys())
+                vals = []
+                for c in cols:
+                    v = data[c]
+                    if isinstance(v, (dict, list)):
+                        vals.append(psycopg2.extras.Json(v))
+                    else:
+                        vals.append(v)
+                col_str = ", ".join(cols)
+                placeholder_str = ", ".join(["%s"] * len(cols))
+                conflict_str = ""
+                if conflict_columns:
+                    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c not in conflict_columns)
+                    conflict_str = f" ON CONFLICT ({', '.join(conflict_columns)}) DO UPDATE SET {updates}" if updates else f" ON CONFLICT ({', '.join(conflict_columns)}) DO NOTHING"
+                sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholder_str}){conflict_str}"
+                with conn.cursor() as cur:
+                    cur.execute(sql, vals)
+                conn.commit()
+                success = True
+            except Exception as e:
+                print(f"[pg_upsert_row:{table}] psycopg2 notice: {e}")
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     # 3. Mirror to active_db for test harness & mock resilience
     try:
@@ -625,9 +633,18 @@ def pg_update_row(
     conn = get_postgres_connection()
     if conn:
         try:
+            import psycopg2.extras
             set_parts = [f"{c} = %s" for c in data]
             where_parts = [f"{c} = %s" for c in filters]
-            vals = list(data.values()) + list(filters.values())
+            vals = []
+            for c in data:
+                v = data[c]
+                if isinstance(v, (dict, list)):
+                    vals.append(psycopg2.extras.Json(v))
+                else:
+                    vals.append(v)
+            for c in filters:
+                vals.append(filters[c])
             sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
             with conn.cursor() as cur:
                 cur.execute(sql, vals)

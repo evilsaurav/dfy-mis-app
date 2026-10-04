@@ -1,7 +1,7 @@
 import io
 import time
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -20,6 +20,7 @@ from backend.core.supabase import (
     pg_update_row,
     pg_delete_rows,
     pg_execute_raw,
+    pg_query_table,
 )
 from backend.core.security import (
     hash_password,
@@ -286,12 +287,24 @@ async def prune_expired_audit_logs(retention_days: int = AUDIT_RETENTION_DAYS) -
     global _last_audit_prune_epoch
     _last_audit_prune_epoch = time.time()
     try:
-        cutoff_str = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
-        result = pg_execute_raw(
-            "DELETE FROM admin_audit_logs WHERE timestamp < %s",
-            [cutoff_str],
-            fetch=False
-        )
+        cutoff_dt = datetime.now() - timedelta(days=retention_days)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
+        result = None
+        try:
+            result = pg_execute_raw(
+                "DELETE FROM admin_audit_logs WHERE occurred_at < %s",
+                [cutoff_str],
+                fetch=False
+            )
+        except Exception:
+            try:
+                result = pg_execute_raw(
+                    "DELETE FROM admin_audit_logs WHERE timestamp < %s",
+                    [cutoff_str],
+                    fetch=False
+                )
+            except Exception as e2:
+                print(f"[Audit Retention Notice] Fallback pruning error: {e2}")
         print(f"[Audit Retention] Auto-pruned expired audit logs older than {cutoff_str}")
         return 1 if result else 0
     except Exception as e:
@@ -331,30 +344,51 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
             asyncio.create_task(prune_expired_audit_logs(AUDIT_RETENTION_DAYS))
 
         # Enforce 30-day retention cutoff so client never receives expired logs
-        cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_dt = datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        # Fetch audit logs from PostgreSQL ordered by timestamp DESC
-        pg_rows = pg_query_table(
-            "admin_audit_logs",
-            order_by="timestamp",
-            order_desc=True,
-            limit=query.limit or 300,
-        )
+        # Fetch audit logs from PostgreSQL ordered by occurred_at DESC (fallback to timestamp)
+        pg_rows = []
+        try:
+            pg_rows = pg_query_table(
+                "admin_audit_logs",
+                order_by="occurred_at",
+                order_desc=True,
+                limit=query.limit or 300,
+            )
+        except Exception:
+            pass
+        if not pg_rows:
+            try:
+                pg_rows = pg_query_table(
+                    "admin_audit_logs",
+                    order_by="timestamp",
+                    order_desc=True,
+                    limit=query.limit or 300,
+                )
+            except Exception:
+                pass
         docs = [dict(r) for r in pg_rows]
             
-        def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
-            if not ts_str:
+        def format_log_to_ist(ts_val, is_ist: bool = False) -> str:
+            if not ts_val:
                 return ""
+            if isinstance(ts_val, datetime):
+                if ts_val.tzinfo is not None:
+                    ist_dt = ts_val.astimezone(timezone(timedelta(hours=5, minutes=30)))
+                    return ist_dt.strftime("%d %b %Y, %I:%M:%S %p")
+                return (ts_val + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M:%S %p")
+            ts_str = str(ts_val)
             try:
-                if "AM" in str(ts_str) or "PM" in str(ts_str):
-                    return str(ts_str)
-                clean_ts = str(ts_str).strip().replace("T", " ")[:19]
+                if "AM" in ts_str or "PM" in ts_str:
+                    return ts_str
+                clean_ts = ts_str.strip().replace("T", " ")[:19]
                 dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
                 if not is_ist:
                     dt = dt + timedelta(hours=5, minutes=30)
                 return dt.strftime("%d %b %Y, %I:%M:%S %p")
             except Exception:
-                return str(ts_str)
+                return ts_str
 
         effective_action = query.action_type or query.action_filter or "All"
         effective_district = query.district or query.district_filter or "All"
@@ -362,9 +396,18 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
 
         logs = []
         for d in docs:
+            # Schema normalization
+            raw_ts = d.get("occurred_at") or d.get("timestamp") or ""
+            d_district = d.get("district_name_snapshot") or d.get("district") or "All"
+            d["district"] = d_district
+            if isinstance(raw_ts, datetime):
+                d["timestamp"] = raw_ts.isoformat()
+            else:
+                d["timestamp"] = str(raw_ts)
+
             # Retention check: Skip records older than 30 days
-            log_time = d.get("timestamp", "")
-            if log_time and str(log_time) < cutoff_str:
+            log_time_str = d["timestamp"].replace("T", " ")[:19]
+            if log_time_str and log_time_str < cutoff_str:
                 continue
 
             # Apply filters in memory
@@ -376,12 +419,12 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
                 continue
             if query.search:
                 s_lower = query.search.lower()
-                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')} {d.get('ip_address', '')} {d.get('location', '')} {(d.get('diff') or {}).get('location', '')}".lower()
+                text_to_search = f"{d.get('details', '')} {d.get('user_name', '')} {d.get('target_officer', '')} {d.get('district', '')} {d.get('ip_address', '')} {d.get('location', '')} {(d.get('diff') if isinstance(d.get('diff'), dict) else {}).get('location', '')}".lower()
                 if s_lower not in text_to_search:
                     continue
                     
-            d["timestamp_formatted"] = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
-            d["location"] = d.get("location") or (d.get("diff") or {}).get("location", "")
+            d["timestamp_formatted"] = d.get("timestamp_ist") or format_log_to_ist(raw_ts, d.get("is_ist", False))
+            d["location"] = d.get("location") or (d.get("diff") if isinstance(d.get("diff"), dict) else {}).get("location", "")
             logs.append(d)
             
         return {"success": True, "total": len(logs), "retention_policy": f"Last {AUDIT_RETENTION_DAYS} Days", "logs": logs}
@@ -393,34 +436,60 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
 @router.get("/admin/export-audit-logs")
 async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All", user_id: Optional[str] = "All", admin: dict = Depends(get_current_admin)):
     try:
-        cutoff_str = (datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
+        cutoff_dt = datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        pg_rows = pg_query_table(
-            "admin_audit_logs",
-            order_by="timestamp",
-            order_desc=True,
-            limit=1000,
-        )
+        pg_rows = []
+        try:
+            pg_rows = pg_query_table(
+                "admin_audit_logs",
+                order_by="occurred_at",
+                order_desc=True,
+                limit=1000,
+            )
+        except Exception:
+            pass
+        if not pg_rows:
+            try:
+                pg_rows = pg_query_table(
+                    "admin_audit_logs",
+                    order_by="timestamp",
+                    order_desc=True,
+                    limit=1000,
+                )
+            except Exception:
+                pass
         docs = [dict(r) for r in pg_rows]
 
-        def format_log_to_ist(ts_str: str, is_ist: bool = False) -> str:
-            if not ts_str:
+        def format_log_to_ist(ts_val, is_ist: bool = False) -> str:
+            if not ts_val:
                 return ""
+            if isinstance(ts_val, datetime):
+                if ts_val.tzinfo is not None:
+                    ist_dt = ts_val.astimezone(timezone(timedelta(hours=5, minutes=30)))
+                    return ist_dt.strftime("%d %b %Y, %I:%M:%S %p")
+                return (ts_val + timedelta(hours=5, minutes=30)).strftime("%d %b %Y, %I:%M:%S %p")
+            ts_str = str(ts_val)
             try:
-                if "AM" in str(ts_str) or "PM" in str(ts_str):
-                    return str(ts_str)
+                if "AM" in ts_str or "PM" in ts_str:
+                    return ts_str
 
-                clean_ts = str(ts_str).strip().replace("T", " ")[:19]
+                clean_ts = ts_str.strip().replace("T", " ")[:19]
                 dt = datetime.strptime(clean_ts, "%Y-%m-%d %H:%M:%S")
                 if not is_ist:
                     dt = dt + timedelta(hours=5, minutes=30)
                 return dt.strftime("%d %b %Y, %I:%M:%S %p")
             except Exception:
-                return str(ts_str)
+                return ts_str
             
         rows = []
         for idx, d in enumerate(docs):
-            if str(d.get("timestamp", "")) < cutoff_str:
+            raw_ts = d.get("occurred_at") or d.get("timestamp") or ""
+            d_dist = d.get("district_name_snapshot") or d.get("district") or "All"
+            d["district"] = d_dist
+            ts_str = raw_ts.isoformat() if isinstance(raw_ts, datetime) else str(raw_ts)
+            log_time_str = ts_str.replace("T", " ")[:19]
+            if log_time_str and log_time_str < cutoff_str:
                 continue
             if action_type and action_type != "All" and d.get("action_type") != action_type:
                 continue
@@ -429,9 +498,9 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
             if user_id and user_id != "All" and d.get("user_id") != user_id:
                 continue
                 
-            formatted_time = d.get("timestamp_ist") or format_log_to_ist(d.get("timestamp"), d.get("is_ist", False))
-            client_dev = (d.get("diff") or {}).get("device", "")
-            client_loc = d.get("location") or (d.get("diff") or {}).get("location", "")
+            formatted_time = d.get("timestamp_ist") or format_log_to_ist(raw_ts, d.get("is_ist", False))
+            client_dev = (d.get("diff") if isinstance(d.get("diff"), dict) else {}).get("device", "")
+            client_loc = d.get("location") or (d.get("diff") if isinstance(d.get("diff"), dict) else {}).get("location", "")
             rows.append({
                 "S.No": idx + 1,
                 "Timestamp (IST)": formatted_time,
