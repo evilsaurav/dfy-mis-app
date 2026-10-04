@@ -74,19 +74,22 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         matched_staff_name = ""
 
         # Dual-Authentication & Authorization Enforcement
-        if req.edited_by == "Admin":
-            if not is_admin:
-                raise HTTPException(
-                    status_code=401, 
-                    detail="Authentication token required. Please log in as an administrator."
-                )
+        if is_admin:
+            # Valid admin JWT token present - ye hamesha Admin path hai,
+            # edited_by string se koi farak nahi padta
             if admin.get("role") == "SUB_ADMIN":
                 allowed = admin.get("allowed_districts", [])
                 allowed_c = [canonicalize_district(a).lower() for a in allowed]
                 if "All" not in allowed and c_wp.lower() not in allowed_c and req.working_place.lower() not in allowed_c:
                     raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit IDs in district '{req.working_place}'.")
         else:
-            # Field Officer Authentication (PIN required)
+            # Koi admin token nahi hai - agar edited_by Admin claim kiya hai toh specific admin token error dein
+            if str(req.edited_by or "").strip().lower() == "admin":
+                raise HTTPException(
+                    status_code=401, 
+                    detail="Authentication token required. Please log in as an administrator."
+                )
+            # Field Officer path - PIN required
             if not req.pin or not str(req.pin).strip():
                 raise HTTPException(status_code=401, detail="PIN authorization is required for Field Officers.")
 
@@ -479,7 +482,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             pg_rep = dict(data)
 
         # 🛡️ Strict 24-Hour Editing Window Rule for Field Officers
-        if not is_admin or req.edited_by == "FO":
+        if not is_admin:
             is_expired = False
             evaluated = False
 
