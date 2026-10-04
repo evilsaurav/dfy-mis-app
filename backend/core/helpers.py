@@ -3,6 +3,7 @@ import re
 import json
 import asyncio
 from datetime import datetime, timedelta, timezone, date
+import calendar
 from typing import Optional, Dict, Any, List, Tuple
 from backend.core.cache import cache
 from backend.core.database import db
@@ -82,6 +83,25 @@ def parse_to_ist_datetime(raw_ts) -> Optional[datetime]:
                 return dt.astimezone(ist_offset)
     except Exception:
         return None
+
+def get_month_date_range(month_str: Optional[str]) -> Tuple[str, str]:
+    """
+    Returns (start_date, end_date) as 'YYYY-MM-DD' strings for the given month string.
+    Handles 'YYYY-MM' or 'YYYY-MM-DD'.
+    E.g.: '2026-09' -> ('2026-09-01', '2026-09-30')
+          '2026-10' -> ('2026-10-01', '2026-10-31')
+          '2026-02' -> ('2026-02-01', '2026-02-28' or '2026-02-29')
+    """
+    try:
+        parts = (month_str or "").strip()[:7].split("-")
+        year, month = int(parts[0]), int(parts[1])
+        last_day = calendar.monthrange(year, month)[1]
+        return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
+    except Exception:
+        today = date.today()
+        year, month = today.year, today.month
+        last_day = calendar.monthrange(year, month)[1]
+        return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
 
 DEFAULT_BIHAR_DISTRICTS = [
     "Aurangabad", "Begusarai", "Bhojpur", "Buxar", "Darbhanga",

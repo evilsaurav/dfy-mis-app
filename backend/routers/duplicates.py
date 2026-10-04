@@ -16,7 +16,8 @@ from backend.core.helpers import (
     normalize_staff_key,
     is_officer_name_match,
     evict_officer_profile_cache,
-    log_admin_activity
+    log_admin_activity,
+    get_month_date_range
 )
 from backend.core.master_ledger import (
     get_raw_monthly_reports,
@@ -39,8 +40,7 @@ async def duplicate_audit(month: Optional[str] = None, districts: Optional[str] 
         if cached is not None:
             return cached
 
-        start_date = f"{month}-01"
-        end_date = f"{month}-31"
+        start_date, end_date = get_month_date_range(month)
         
         allowed_dist_set = None
         if districts and districts.strip() and districts.strip() != "All":

@@ -29,8 +29,10 @@ from backend.core.master_ledger import (
     upsert_in_memory_report,
     record_report_mutation,
     DELETED_REPORTS_TOMBSTONES,
-    get_raw_monthly_reports
+    get_raw_monthly_reports,
+    invalidate_staff_directory_cache
 )
+from backend.core.supabase import pg_execute_raw
 from backend.routers.reports import get_district_90day_notified_ids
 
 router = APIRouter(tags=["admin_feed"])
@@ -673,33 +675,74 @@ async def admin_delete_day_report(
                     detail=f"Permission denied: You cannot delete reports for {req.district} district."
                 )
 
-        # 2. Locate all candidate documents in daily_field_reports
         candidate_doc_ids = [
             f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
             f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
         ]
 
+        # 2. Locate all candidate documents in PostgreSQL daily_field_reports & mock/Firestore
         matching_docs = []
-        seen_doc_ids = set()
-        for cid in candidate_doc_ids:
-            cand_ref = db.collection("daily_field_reports").document(cid)
-            snap = await asyncio.to_thread(cand_ref.get)
-            if snap.exists and cid not in seen_doc_ids:
-                matching_docs.append(snap)
-                seen_doc_ids.add(cid)
-        # Note: No break — collect ALL alias matches to prevent zombie documents
+        seen_report_ids = set()
 
+        # 2a. Query PostgreSQL daily_field_reports
+        try:
+            pg_sql = """
+                SELECT * FROM daily_field_reports 
+                WHERE (date_of_reporting = %s OR date_of_reporting::text = %s)
+            """
+            pg_candidates = pg_execute_raw(pg_sql, [clean_date, clean_date], fetch=True) or []
+            for r in pg_candidates:
+                r_dict = dict(r)
+                r_fo = str(r_dict.get("fo_name", "")).strip().lower()
+                r_wp = canonicalize_district(r_dict.get("working_place", "") or r_dict.get("district", "")).lower()
+                r_id = r_dict.get("id")
+                r_legacy = str(r_dict.get("legacy_doc_id", "")).lower()
+
+                fo_matches = (r_fo == clean_fo.lower() or is_officer_name_match(r_dict.get("fo_name"), clean_fo, clean_wp))
+                dist_matches = (r_wp == clean_wp.lower())
+                id_matches = (str(r_id).lower() in candidate_doc_ids or (r_legacy and r_legacy in candidate_doc_ids))
+
+                if (fo_matches and dist_matches) or id_matches:
+                    if r_id is not None and str(r_id) not in seen_report_ids:
+                        matching_docs.append(r_dict)
+                        seen_report_ids.add(str(r_id))
+        except Exception as pg_lookup_err:
+            print(f"[Delete Day PG Lookup Notice] {pg_lookup_err}")
+
+        # 2b. Fallback / Mock DB lookup for candidate doc IDs
+        for cid in candidate_doc_ids:
+            try:
+                cand_ref = db.collection("daily_field_reports").document(cid)
+                snap = await asyncio.to_thread(cand_ref.get)
+                if snap.exists and cid not in seen_report_ids:
+                    d_dict = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+                    d_dict["id"] = snap.id
+                    d_dict["_snap"] = snap
+                    matching_docs.append(d_dict)
+                    seen_report_ids.add(cid)
+            except Exception:
+                pass
+
+        # 2c. Fallback / Mock DB query by date
         if not matching_docs:
-            query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
-                .where("date_of_reporting", "==", clean_date)
-                .stream()))
-            for d in query_docs:
-                d_dict = d.to_dict()
-                d_fo = str(d_dict.get("fo_name", "")).strip().lower()
-                d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
-                if d_fo == clean_fo.lower() and d_wp == clean_wp.lower():
-                    matching_docs.append(d)
+            try:
+                query_docs = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports")
+                    .where("date_of_reporting", "==", clean_date)
+                    .stream()))
+                for d in query_docs:
+                    d_dict = d.to_dict() if hasattr(d, "to_dict") and callable(d.to_dict) else dict(d)
+                    d_fo = str(d_dict.get("fo_name", "")).strip().lower()
+                    d_wp = canonicalize_district(d_dict.get("working_place", "")).lower()
+                    d_id = getattr(d, "id", None) or d_dict.get("id")
+                    if (d_fo == clean_fo.lower() or is_officer_name_match(d_dict.get("fo_name"), clean_fo, clean_wp)) and d_wp == clean_wp.lower():
+                        d_dict["id"] = d_id
+                        d_dict["_snap"] = d
+                        if d_id and str(d_id) not in seen_report_ids:
+                            matching_docs.append(d_dict)
+                            seen_report_ids.add(str(d_id))
+            except Exception:
+                pass
 
         if not matching_docs:
             raise HTTPException(status_code=404, detail=f"No report found for {clean_fo} ({clean_wp}) on {clean_date}.")
@@ -711,8 +754,8 @@ async def admin_delete_day_report(
             "contact_tracing": 0, "diff_tb": 0
         }
 
-        for doc_snap in matching_docs:
-            d_dict = doc_snap.to_dict()
+        for doc_item in matching_docs:
+            d_dict = doc_item.to_dict() if hasattr(doc_item, "to_dict") and callable(doc_item.to_dict) else dict(doc_item)
             total_deleted_ids += sum(len(v) for k, v in d_dict.items() if isinstance(v, list) and k.endswith("_ids"))
             deleted_metrics["notifications"] += len(d_dict.get("notification_ids", []))
             deleted_metrics["tests"] += len(d_dict.get("sample_tested_ids", []))
@@ -720,11 +763,43 @@ async def admin_delete_day_report(
             deleted_metrics["dbt"] += len(d_dict.get("dbt_ids", []))
             deleted_metrics["contact_tracing"] += len(d_dict.get("contact_tracing_ids", []))
             deleted_metrics["diff_tb"] += len(d_dict.get("differentiated_tb_ids", []))
-            # Delete document
-            ref = getattr(doc_snap, "reference", None) or db.collection("daily_field_reports").document(doc_snap.id)
-            await asyncio.to_thread(ref.delete)
 
-        # 4. Atomic Rollback in daily_district_rollups
+        # 4. Cascade delete child rows and parent reports in PostgreSQL
+        report_ids = [r["id"] for r in matching_docs if r.get("id") is not None]
+        if report_ids:
+            try:
+                pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = ANY(%s)", [report_ids])
+                pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = ANY(%s)", [report_ids])
+                pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = ANY(%s)", [report_ids])
+                pg_execute_raw("DELETE FROM daily_field_reports WHERE id = ANY(%s)", [report_ids])
+            except Exception as pg_cascade_err:
+                print(f"[Delete Day PG Cascade Notice] {pg_cascade_err}")
+
+        # Also delete in mock / Firestore mode to keep mock store synced
+        for doc_item in matching_docs:
+            snap = doc_item.get("_snap")
+            if snap:
+                try:
+                    ref = getattr(snap, "reference", None) or db.collection("daily_field_reports").document(snap.id)
+                    await asyncio.to_thread(ref.delete)
+                except Exception:
+                    pass
+            else:
+                doc_id = str(doc_item.get("id", ""))
+                if doc_id:
+                    try:
+                        ref = db.collection("daily_field_reports").document(doc_id)
+                        await asyncio.to_thread(ref.delete)
+                    except Exception:
+                        pass
+        for cid in candidate_doc_ids:
+            try:
+                ref = db.collection("daily_field_reports").document(cid)
+                await asyncio.to_thread(ref.delete)
+            except Exception:
+                pass
+
+        # 5. Atomic Rollback in daily_district_rollups
         try:
             rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
             rollup_ref = db.collection("daily_district_rollups").document(rollup_id)
@@ -745,15 +820,21 @@ async def admin_delete_day_report(
         except Exception as r_err:
             print(f"[Delete Day Rollup Notice] {r_err}")
 
-        # 5. Invalidate caches and record tombstones (Scoped)
-        for doc_snap in matching_docs:
-            record_report_mutation("delete", doc_snap.id, district=clean_wp, date=clean_date)
-            cache.delete(f"status_{doc_snap.id}")
-        # Also invalidate all candidate alias IDs (covers fallback-found docs)
+        # 6. Evict all caches and record tombstones
+        cache.delete_prefix("master_reports_")
+        cache.delete_prefix("status_")
+        cache.delete_prefix("dash_")
+        cache.delete_prefix("shared_raw_month_")
+        cache.delete_prefix(f"dist_notif_registry_{clean_wp}")
+        for r_item in matching_docs:
+            rid = str(r_item.get("id", ""))
+            record_report_mutation("delete", rid, district=clean_wp, date=clean_date)
+            cache.delete(f"status_{rid}")
         for cid in candidate_doc_ids:
             cache.delete(f"status_{cid}")
         cache.delete(f"status_{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower())
         evict_officer_profile_cache(clean_wp, clean_fo, clean_date)
+        invalidate_staff_directory_cache()
 
         month_pfx = clean_date[:7]
         try:
@@ -763,7 +844,7 @@ async def admin_delete_day_report(
         except Exception:
             pass
 
-        # 6. Immutable Audit Trail
+        # 7. Immutable Audit Trail
         await log_admin_activity(
             action_type="DELETE_DAILY_REPORT",
             details=f"Admin {admin_user} deleted full day report for {clean_fo} ({clean_wp}) on {clean_date} ({total_deleted_ids} IDs deleted)",

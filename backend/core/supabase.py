@@ -964,6 +964,27 @@ def pg_execute_raw(sql: str, params: Optional[List] = None, fetch: bool = False)
                                     "admin_remark_by": actor,
                                     "admin_remark_at": at_str
                                 })
+            elif active_db and "DELETE FROM" in sql.upper():
+                import re
+                m_tbl = re.search(r'DELETE\s+FROM\s+([a-zA-Z0-9_]+)', sql, re.IGNORECASE)
+                if m_tbl and params:
+                    del_tbl = m_tbl.group(1).lower()
+                    raw_ids = params[0] if isinstance(params[0], (list, tuple, set)) else params
+                    str_ids = {str(x).lower() for x in raw_ids}
+                    if isinstance(getattr(active_db, "store", None), dict):
+                        t_store = active_db.store.get(del_tbl, {})
+                        if isinstance(t_store, dict):
+                            for k in list(t_store.keys()):
+                                if str(k).lower() in str_ids:
+                                    del t_store[k]
+                    try:
+                        col = active_db.collection(del_tbl)
+                        for item in list(col.stream()):
+                            did = getattr(item, "id", None)
+                            if did and str(did).lower() in str_ids:
+                                active_db.collection(del_tbl).document(str(did)).delete()
+                    except Exception:
+                        pass
         except Exception:
             pass
         return True

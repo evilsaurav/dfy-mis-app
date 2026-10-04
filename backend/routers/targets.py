@@ -16,12 +16,33 @@ from backend.core.helpers import (
 )
 from backend.core.master_ledger import (
     get_cached_staff_targets_for_month,
+    get_cached_staff_directory_raw,
     get_directory,
     invalidate_staff_directory_cache
 )
 from backend.core.supabase import pg_fetch_one, pg_upsert_row, pg_query_table, pg_execute_raw
 
 router = APIRouter(tags=["targets"])
+
+def ensure_district_targets_table_exists():
+    """Idempotently ensures district_targets table and index exist in PostgreSQL."""
+    try:
+        pg_execute_raw("""
+            CREATE TABLE IF NOT EXISTS district_targets (
+                id TEXT PRIMARY KEY, 
+                district TEXT NOT NULL, 
+                month TEXT, 
+                official_target INTEGER NOT NULL DEFAULT 0, 
+                updated_at TIMESTAMPTZ DEFAULT NOW(), 
+                updated_by TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_district_targets_dist_month ON district_targets(district, month);
+        """)
+    except Exception as e:
+        print(f"[district_targets table init notice] {e}")
+
+# Safe idempotent initialization at module import
+ensure_district_targets_table_exists()
 
 class TargetUpdate(BaseModel):
     district: str
@@ -278,8 +299,50 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
                 raise HTTPException(status_code=403, detail=f"Permission denied. You cannot update targets in district '{clean_dist}'.")
         clean_name = data.fo_name.strip()
         
-        # 1. Month-scoped record
         month_doc_id = f"{month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
+        month_sql_val = f"{month[:7]}-01"
+
+        # 1. Lookup staff_id from staff_directory where name ILIKE %s and canonical district matches
+        staff_id = None
+        try:
+            staff_rows = pg_execute_raw(
+                "SELECT id, name, district FROM staff_directory WHERE name ILIKE %s",
+                [clean_name],
+                fetch=True
+            ) or []
+            for sr in staff_rows:
+                s_dist = canonicalize_district(sr.get("district", ""))
+                if s_dist.lower() == clean_dist.lower():
+                    staff_id = sr.get("id")
+                    break
+        except Exception as s_err:
+            print(f"[Staff ID Lookup Notice] {s_err}")
+
+        if not staff_id:
+            try:
+                raw_staff = await get_cached_staff_directory_raw()
+                for s in raw_staff:
+                    s_dist = canonicalize_district(s.get("district", ""))
+                    s_name = str(s.get("name", "")).strip()
+                    if s_dist.lower() == clean_dist.lower() and is_officer_name_match(s_name, clean_name, clean_dist):
+                        staff_id = s.get("id")
+                        break
+            except Exception:
+                pass
+
+        # 2. Insert into PostgreSQL staff_targets with unique constraint conflict resolution
+        if staff_id:
+            try:
+                pg_execute_raw("""
+                    INSERT INTO staff_targets (staff_id, month, target, updated_at, legacy_doc_id)
+                    VALUES (%s, %s, %s, NOW(), %s)
+                    ON CONFLICT (staff_id, month)
+                    DO UPDATE SET target = EXCLUDED.target, updated_at = NOW(), legacy_doc_id = EXCLUDED.legacy_doc_id
+                """, [staff_id, month_sql_val, int(data.target), month_doc_id])
+            except Exception as st_err:
+                print(f"[staff_targets PG Write Notice] {st_err}")
+
+        # 3. Mirror to mock store for test harness
         pg_upsert_row("staff_targets", {
             "id": month_doc_id,
             "month": month,
@@ -289,7 +352,6 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }, conflict_columns=["id"])
         
-        # 2. General fallback record
         fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
         pg_upsert_row("staff_targets", {
             "id": fallback_doc_id,
@@ -299,7 +361,7 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }, conflict_columns=["id"])
         
-        # 3. Synchronize alias records if applicable
+        # Synchronize alias records if applicable
         if clean_dist.lower() == "muzaffarpur" and clean_name.lower() in ("vinay prakash", "vinay kumar", "vinay kumar lt"):
             for alias in ("Vinay Prakash", "Vinay Kumar"):
                 if alias.lower() != clean_name.lower():
@@ -321,10 +383,11 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
                         "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }, conflict_columns=["id"])
 
-        
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
         evict_officer_profile_cache(clean_dist, clean_name, month)
+        cache.delete_prefix("district_targets_")
+        cache.delete_prefix("pacing_")
         cache.delete_prefix("statewide_top_")
         invalidate_staff_directory_cache()
         actor_name = admin.get("name") or admin.get("username", "Admin")
@@ -367,6 +430,16 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
 
         # 1. Month-scoped record: {month}_{clean_dist}
         month_doc_id = f"{month}_{clean_dist}".replace(" ", "").lower()
+        try:
+            pg_execute_raw("""
+                INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (id)
+                DO UPDATE SET district = EXCLUDED.district, month = EXCLUDED.month, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+            """, [month_doc_id, clean_dist, month, target_val, actor_name])
+        except Exception as dt_pg_err:
+            print(f"[district_targets PG Upsert Notice] {dt_pg_err}")
+
         pg_upsert_row("district_targets", {
             "id": month_doc_id,
             "month": month,
@@ -379,6 +452,16 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
 
         # 2. General fallback record: {clean_dist}
         fallback_doc_id = clean_dist.replace(" ", "").lower()
+        try:
+            pg_execute_raw("""
+                INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
+                VALUES (%s, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (id)
+                DO UPDATE SET district = EXCLUDED.district, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+            """, [fallback_doc_id, clean_dist, None, target_val, actor_name])
+        except Exception:
+            pass
+
         pg_upsert_row("district_targets", {
             "id": fallback_doc_id,
             "district": clean_dist,
@@ -389,10 +472,10 @@ async def update_district_target(data: DistrictTargetUpdate, admin: dict = Depen
         }, conflict_columns=["id"])
 
         cache.delete_prefix("targets_")
-        cache.delete_prefix(f"district_targets_{month}_{clean_dist}".lower())
-        cache.delete_prefix(f"pacing_settings_{month}")
+        cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("district_targets_")
+        cache.delete_prefix("pacing_")
         cache.delete_prefix("statewide_top_")
-
 
         await log_admin_activity(
             action_type="DISTRICT_TARGET_UPDATED",
@@ -442,6 +525,22 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
             for cd, tv in valid_items:
                 m_id = f"{month}_{cd}".replace(" ", "").lower()
                 f_id = cd.replace(" ", "").lower()
+                try:
+                    pg_execute_raw("""
+                        INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
+                        VALUES (%s, %s, %s, %s, NOW(), %s)
+                        ON CONFLICT (id)
+                        DO UPDATE SET district = EXCLUDED.district, month = EXCLUDED.month, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+                    """, [m_id, cd, month, tv, actor_name])
+                    pg_execute_raw("""
+                        INSERT INTO district_targets (id, district, month, official_target, updated_at, updated_by)
+                        VALUES (%s, %s, %s, %s, NOW(), %s)
+                        ON CONFLICT (id)
+                        DO UPDATE SET district = EXCLUDED.district, official_target = EXCLUDED.official_target, updated_at = NOW(), updated_by = EXCLUDED.updated_by
+                    """, [f_id, cd, None, tv, actor_name])
+                except Exception as b_err:
+                    print(f"[district_targets Bulk PG Notice] {b_err}")
+
                 pg_upsert_row("district_targets", {
                     "id": m_id,
                     "month": month,
@@ -466,8 +565,9 @@ async def update_district_targets_bulk(data: BulkDistrictTargetUpdate, admin: di
         updated_districts = [cd for cd, _ in valid_items]
 
         cache.delete_prefix("targets_")
-        cache.delete_prefix(f"district_targets_{month}".lower())
-        cache.delete_prefix(f"pacing_settings_{month}")
+        cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("district_targets_")
+        cache.delete_prefix("pacing_")
         cache.delete_prefix("statewide_top_")
 
         await log_admin_activity(
@@ -560,6 +660,8 @@ async def update_targets_bulk(data: BulkStaffTargetUpdate, admin: dict = Depends
 
         cache.delete_prefix("targets_")
         cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("district_targets_")
+        cache.delete_prefix("pacing_")
         cache.delete_prefix("statewide_top_")
         cache.delete_prefix("profile_")
         invalidate_staff_directory_cache()

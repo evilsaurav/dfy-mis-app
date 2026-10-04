@@ -22,7 +22,8 @@ from backend.core.helpers import (
     is_officer_name_match,
     get_previous_month,
     log_admin_activity,
-    DEFAULT_BIHAR_DISTRICTS
+    DEFAULT_BIHAR_DISTRICTS,
+    get_month_date_range
 )
 from backend.core.master_ledger import (
     get_cached_staff_targets_for_month,
@@ -361,8 +362,7 @@ def generate_district_kpi_bytes(
                 alias_queries.extend(["BHOJPUR", "Bhojpur"])
             alias_queries = list(dict.fromkeys(alias_queries))
 
-            start_date = f"{month_prefix}-01"
-            end_date = f"{month_prefix}-31"
+            start_date, end_date = get_month_date_range(month_prefix)
             docs = pg_execute_raw(
                 "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
                 [alias_queries, start_date, end_date],

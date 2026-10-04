@@ -31,7 +31,8 @@ from backend.core.helpers import (
     get_reporting_cutoff_hour,
     get_active_operational_month,
     DEFAULT_BIHAR_DISTRICTS,
-    log_admin_activity
+    log_admin_activity,
+    get_month_date_range
 )
 from backend.core.master_ledger import (
     get_raw_monthly_reports,
@@ -844,8 +845,7 @@ async def compute_profile_response(
     if cached_leaves is not None and isinstance(cached_leaves, list):
         leave_records = cached_leaves
     else:
-        start_date = f"{req_month}-01"
-        end_date = f"{req_month}-31"
+        start_date, end_date = get_month_date_range(req_month)
         try:
             leave_rows = pg_execute_raw(
                 "SELECT * FROM daily_staff_leaves WHERE district = %s AND date >= %s AND date <= %s",
@@ -1094,8 +1094,7 @@ async def legacy_my_profile_stats(req: ProfileStatsRequest, clean_wp: str, clean
 
             
         # Step 3: Fetch all reports for the month asynchronously
-        start_date = f"{req_month}-01"
-        end_date = f"{req_month}-31"
+        start_date, end_date = get_month_date_range(req_month)
         reports = pg_execute_raw(
             "SELECT * FROM daily_field_reports WHERE (fo_name = %s OR fo_name = %s) AND date_of_reporting >= %s AND date_of_reporting <= %s",
             [req.fo_name, req.fo_name.strip(), start_date, end_date],
@@ -1297,8 +1296,7 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         if not month:
             month = datetime.now().strftime("%Y-%m")
             
-        start_date = f"{month}-01"
-        end_date = f"{month}-31"
+        start_date, end_date = get_month_date_range(month)
         
         # 1. Fetch reports from shared cache
         report_docs = await get_raw_monthly_reports(month)
@@ -1385,8 +1383,7 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
 
 
 def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name: Optional[str] = None, districts: Optional[str] = None):
-    start_date = f"{month}-01"
-    end_date = f"{month}-31"
+    start_date, end_date = get_month_date_range(month)
     
     clean_district = canonicalize_district(district) if district else "All"
     clean_fo = fo_name.strip().lower() if fo_name else None

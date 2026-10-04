@@ -15,7 +15,8 @@ from backend.core.helpers import (
     canonicalize_district,
     canonicalize_fo_name,
     get_previous_month,
-    load_baseline_staff_directory
+    load_baseline_staff_directory,
+    get_month_date_range
 )
 from backend.core.supabase import pg_query_table, pg_fetch_one, pg_upsert_row, pg_execute_raw
 
@@ -441,8 +442,7 @@ async def get_raw_monthly_reports(
             if cached_dist is not None and isinstance(cached_dist, list):
                 return cached_dist
 
-    start_date = f"{month_prefix}-01"
-    end_date = f"{month_prefix}-31"
+    start_date, end_date = get_month_date_range(month_prefix)
 
     # 3. Try PostgreSQL primary source first
     raw_list = []
@@ -836,8 +836,7 @@ async def compute_profile_response(
     if cached_leaves is not None and isinstance(cached_leaves, list):
         leave_records = cached_leaves
     else:
-        start_date = f"{req_month}-01"
-        end_date = f"{req_month}-31"
+        start_date, end_date = get_month_date_range(req_month)
         try:
             leave_rows = pg_execute_raw(
                 "SELECT * FROM daily_staff_leaves WHERE district = %s AND date >= %s AND date <= %s",

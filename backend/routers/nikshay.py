@@ -1222,34 +1222,35 @@ async def get_patient_journey(patient_id: Optional[str] = None):
             if found_in_cache:
                 break
 
-        # Step 3: Targeted PostgreSQL query if not resolved from in-memory cache
-        if not found_in_cache:
-            start_date = (now - timedelta(days=180)).strftime("%Y-%m-01")
-            if known_district:
-                target_places = list(dict.fromkeys([known_district, known_district.title(), known_district.lower()]))[:10]
-                docs = pg_execute_raw(
-                    "SELECT * FROM daily_field_reports WHERE working_place = ANY(%s) AND date_of_reporting >= %s",
-                    [target_places, start_date],
-                    fetch=True
-                ) or []
-            else:
-                docs = pg_execute_raw(
-                    "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND (notification_ids::text LIKE %s OR sample_tested_ids::text LIKE %s OR dbt_ids::text LIKE %s)",
-                    [start_date, f"%{clean_id}%", f"%{clean_id}%", f"%{clean_id}%"],
-                    fetch=True
-                ) or []
-            # Normalize JSON list fields if PostgreSQL returned them as strings
-            import json as _json
-            for doc_item in docs:
-                for col in ["notification_ids", "sample_tested_ids", "dbt_ids", "hiv_dm_ids", "contact_tracing_ids", "differentiated_tb_ids"]:
-                    val = doc_item.get(col)
-                    if isinstance(val, str):
-                        try:
-                            doc_item[col] = _json.loads(val)
-                        except Exception:
-                            doc_item[col] = []
+        # Step 3: Relational PostgreSQL queries joined to daily_field_reports
+        kpi_sql = """
+            SELECT 
+                k.category, k.patient_id, r.id as report_id, r.fo_name, 
+                r.working_place as district, r.date_of_reporting, r.created_at
+            FROM report_kpi_entries k
+            JOIN daily_field_reports r ON k.report_id = r.id
+            WHERE k.patient_id = %s
+            ORDER BY r.date_of_reporting ASC, r.created_at ASC
+        """
+        fdc_sql = """
+            SELECT 
+                f.patient_id, f.fdc_type, f.regimen_name, f.phase, 
+                r.id as report_id, r.fo_name, r.working_place as district, 
+                r.date_of_reporting, r.created_at
+            FROM report_fdc_details f
+            JOIN daily_field_reports r ON f.report_id = r.id
+            WHERE f.patient_id = %s
+            ORDER BY r.date_of_reporting ASC, r.created_at ASC
+        """
 
-        
+        kpi_rows = []
+        fdc_rows = []
+        try:
+            kpi_rows = pg_execute_raw(kpi_sql, [clean_id], fetch=True) or []
+            fdc_rows = pg_execute_raw(fdc_sql, [clean_id], fetch=True) or []
+        except Exception as q_err:
+            print(f"[Patient Journey Relational Query Notice] {q_err}")
+
         milestones = []
         patient_meta = {
             "id": clean_id, 
@@ -1273,32 +1274,122 @@ async def get_patient_journey(patient_id: Optional[str] = None):
             "culture_dst_ids": ("Culture / DST Testing (Buxar Special)", "🧫", 10),
             "outcome_assigned_ids": ("Treatment Outcome Assigned", "🏁", 11)
         }
-        
-        for doc in docs:
-            d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
-            dt = d.get("date_of_reporting", "")
-            fo = d.get("fo_name", "")
-            dist = d.get("working_place", "")
-            
-            for field_key, (label, icon, order) in category_labels.items():
-                ids = d.get(field_key, []) or []
-                if clean_id in ids:
-                    if not patient_meta["district"]:
-                        patient_meta["district"] = dist
-                    if not patient_meta["primary_fo"]:
-                        patient_meta["primary_fo"] = fo
-                    if not patient_meta["first_reported"] or dt < patient_meta["first_reported"]:
-                        patient_meta["first_reported"] = dt
-                        
-                    milestones.append({
-                        "date": dt,
-                        "action": label,
-                        "icon": icon,
-                        "category": field_key,
-                        "fo_name": fo,
-                        "district": dist,
-                        "order": order
-                    })
+
+        # 1. Process relational KPI entries
+        for k_row in kpi_rows:
+            cat_raw = str(k_row.get("category", "")).strip()
+            cat_key = cat_raw if cat_raw.endswith("_ids") else f"{cat_raw}_ids"
+            if cat_key in category_labels:
+                label, icon, order = category_labels[cat_key]
+            elif cat_raw in category_labels:
+                cat_key = cat_raw
+                label, icon, order = category_labels[cat_raw]
+            else:
+                label = cat_raw.replace("_ids", "").replace("_", " ").title()
+                icon = "📌"
+                order = 50
+
+            dt = str(k_row.get("date_of_reporting", ""))[:10]
+            fo = str(k_row.get("fo_name", "")).strip()
+            dist = canonicalize_district(k_row.get("district", "") or k_row.get("working_place", ""))
+
+            if not patient_meta["district"] and dist:
+                patient_meta["district"] = dist
+            if not patient_meta["primary_fo"] and fo:
+                patient_meta["primary_fo"] = fo
+            if dt and (not patient_meta["first_reported"] or dt < patient_meta["first_reported"]):
+                patient_meta["first_reported"] = dt
+
+            milestones.append({
+                "date": dt,
+                "action": label,
+                "icon": icon,
+                "category": cat_key,
+                "fo_name": fo,
+                "district": dist,
+                "order": order
+            })
+
+        # 2. Process relational FDC detail entries
+        for f_row in fdc_rows:
+            dt = str(f_row.get("date_of_reporting", ""))[:10]
+            fo = str(f_row.get("fo_name", "")).strip()
+            dist = canonicalize_district(f_row.get("district", "") or f_row.get("working_place", ""))
+            fdc_desc = f_row.get("fdc_type") or f_row.get("regimen_name") or f_row.get("phase") or "Medication Kit"
+
+            if not patient_meta["district"] and dist:
+                patient_meta["district"] = dist
+            if not patient_meta["primary_fo"] and fo:
+                patient_meta["primary_fo"] = fo
+            if dt and (not patient_meta["first_reported"] or dt < patient_meta["first_reported"]):
+                patient_meta["first_reported"] = dt
+
+            milestones.append({
+                "date": dt,
+                "action": f"FDC Medication Kit Provided ({fdc_desc})",
+                "icon": "💊",
+                "category": "fdc_provided_ids",
+                "fo_name": fo,
+                "district": dist,
+                "order": 9
+            })
+
+        # 3. Backwards compatibility fallback for in-memory mock store and cached reports
+        if not milestones:
+            for doc in docs:
+                d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+                dt = str(d.get("date_of_reporting", ""))[:10]
+                fo = d.get("fo_name", "")
+                dist = d.get("working_place", "")
+                
+                for field_key, (label, icon, order) in category_labels.items():
+                    ids = d.get(field_key, []) or []
+                    if clean_id in ids:
+                        if not patient_meta["district"] and dist:
+                            patient_meta["district"] = dist
+                        if not patient_meta["primary_fo"] and fo:
+                            patient_meta["primary_fo"] = fo
+                        if dt and (not patient_meta["first_reported"] or dt < patient_meta["first_reported"]):
+                            patient_meta["first_reported"] = dt
+                            
+                        milestones.append({
+                            "date": dt,
+                            "action": label,
+                            "icon": icon,
+                            "category": field_key,
+                            "fo_name": fo,
+                            "district": dist,
+                            "order": order
+                        })
+
+            if not milestones:
+                try:
+                    mock_reports = await asyncio.to_thread(lambda: list(db.collection("daily_field_reports").stream()))
+                    for doc in mock_reports:
+                        d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+                        dt = str(d.get("date_of_reporting", ""))[:10]
+                        fo = d.get("fo_name", "")
+                        dist = d.get("working_place", "")
+                        for field_key, (label, icon, order) in category_labels.items():
+                            ids = d.get(field_key, []) or []
+                            if clean_id in ids:
+                                if not patient_meta["district"] and dist:
+                                    patient_meta["district"] = dist
+                                if not patient_meta["primary_fo"] and fo:
+                                    patient_meta["primary_fo"] = fo
+                                if dt and (not patient_meta["first_reported"] or dt < patient_meta["first_reported"]):
+                                    patient_meta["first_reported"] = dt
+                                milestones.append({
+                                    "date": dt,
+                                    "action": label,
+                                    "icon": icon,
+                                    "category": field_key,
+                                    "fo_name": fo,
+                                    "district": dist,
+                                    "order": order
+                                })
+                except Exception:
+                    pass
 
         # Apply Permanent Nikshay Cumulative Ledger Metadata
         if ledger_data:

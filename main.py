@@ -44,7 +44,8 @@ from backend.core.helpers import (
     get_active_operational_month,
     extract_client_info,
     get_ip_location,
-    log_admin_activity
+    log_admin_activity,
+    get_month_date_range
 )
 from backend.core.master_ledger import (
     STAFF_CACHE_KEY_RAW,
@@ -85,7 +86,8 @@ from backend.routers.targets import (
     update_target,
     update_district_target,
     update_district_targets_bulk,
-    update_targets_bulk
+    update_targets_bulk,
+    ensure_district_targets_table_exists
 )
 from backend.routers.backup import (
     router as backup_router,
@@ -255,6 +257,7 @@ def health_status():
 
 @app.on_event("startup")
 async def on_app_startup_tasks():
+    ensure_district_targets_table_exists()
     await init_default_super_admin()
     asyncio.create_task(prune_expired_audit_logs(retention_days=30))
     ensure_daily_backup_scheduled()
