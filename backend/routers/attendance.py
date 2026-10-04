@@ -28,6 +28,7 @@ from backend.core.helpers import (
     evict_officer_profile_cache,
     log_admin_activity,
     load_baseline_staff_directory,
+    resolve_staff_and_district_ids,
 )
 from backend.core.master_ledger import (
     get_cached_staff_directory_raw,
@@ -1333,8 +1334,12 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
         actor_role = admin.get("role", "SUB_ADMIN")
         marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
 
+        # Resolve foreign keys (staff_id, district_id) for relational schema
+        staff_id, district_id = resolve_staff_and_district_ids(req.fo_name.strip(), clean_dist)
+
         leave_data = {
-            "id": doc_id,
+            "staff_id": staff_id,
+            "district_id": district_id,
             "date": clean_date,
             "district": clean_dist,
             "fo_name": req.fo_name.strip(),
@@ -1344,10 +1349,14 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
             "marked_by_name": actor_name,
             "marked_by_id": actor_id,
             "marked_by_role": actor_role,
-            "marked_at": marked_at
+            "marked_at": marked_at,
+            "legacy_doc_id": doc_id
         }
 
-        pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["id"])
+        pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+        active_db = get_active_db()
+        if active_db:
+            active_db.collection("daily_staff_leaves").document(doc_id).set(leave_data)
 
         cache.delete_prefix(f"attendance_{clean_date}")
         cache.delete(f"daily_leaves_{clean_dist}_{clean_date[:7]}")
@@ -1397,7 +1406,11 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
                 raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
 
         doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
-        pg_delete_rows("daily_staff_leaves", filters={"id": doc_id})
+        pg_delete_rows("daily_staff_leaves", filters={"legacy_doc_id": doc_id})
+        pg_delete_rows("daily_staff_leaves", filters={"date": clean_date, "district": clean_dist, "fo_name": req.fo_name.strip()})
+        active_db = get_active_db()
+        if active_db:
+            active_db.collection("daily_staff_leaves").document(doc_id).delete()
 
 
         cache.delete_prefix(f"attendance_{clean_date}")
@@ -1499,8 +1512,10 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 print(f"Notice: daily_field_reports search failed: {q_err}")
 
             # Also store/merge in daily_staff_leaves so remark is preserved across views
+            staff_id, district_id = resolve_staff_and_district_ids(req.fo_name.strip(), clean_dist)
             leave_remark_data = {
-                "id": doc_id,
+                "staff_id": staff_id,
+                "district_id": district_id,
                 "date": clean_date,
                 "district": clean_dist,
                 "fo_name": req.fo_name.strip(),
@@ -1511,16 +1526,22 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "marked_by_role": actor_role,
                 "marked_at": marked_at,
                 "is_inspection_remark": True,
-                "is_override": False
+                "is_override": False,
+                "legacy_doc_id": doc_id
             }
-            pg_upsert_row("daily_staff_leaves", leave_remark_data, conflict_columns=["id"])
+            pg_upsert_row("daily_staff_leaves", leave_remark_data, conflict_columns=["legacy_doc_id"])
+            active_db = get_active_db()
+            if active_db:
+                active_db.collection("daily_staff_leaves").document(doc_id).set(leave_remark_data)
 
             details = f"Added admin inspection remark for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
             msg = "Attendance remark recorded successfully."
         else:
             # req.action == "override_leave"
+            staff_id, district_id = resolve_staff_and_district_ids(req.fo_name.strip(), clean_dist)
             leave_data = {
-                "id": doc_id,
+                "staff_id": staff_id,
+                "district_id": district_id,
                 "date": clean_date,
                 "district": clean_dist,
                 "fo_name": req.fo_name.strip(),
@@ -1532,9 +1553,13 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "marked_by_role": actor_role,
                 "marked_at": marked_at,
                 "is_override": True,
-                "is_inspection_remark": False
+                "is_inspection_remark": False,
+                "legacy_doc_id": doc_id
             }
-            pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["id"])
+            pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+            active_db = get_active_db()
+            if active_db:
+                active_db.collection("daily_staff_leaves").document(doc_id).set(leave_data)
             details = f"Overrode attendance to {req.status or 'leave'} ({req.reason_type or 'Casual'}) for {req.fo_name.strip()} ({clean_dist}) on {clean_date}: {req.remark.strip()}"
             msg = "Leave status overridden successfully."
 
