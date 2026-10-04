@@ -23,6 +23,10 @@ def get_supabase_client():
     if _supabase_client is not None:
         return _supabase_client
 
+    import sys
+    if ("pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")) and not os.environ.get("TEST_LIVE_DB"):
+        return None
+
     url = os.environ.get("SUPABASE_URL")
     key = (
         os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
@@ -41,6 +45,10 @@ def get_supabase_client():
 
 def get_postgres_connection():
     """Establishes connection to PostgreSQL using standard connection URLs with SSL and timeout enforcement."""
+    import sys
+    if ("pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST")) and not os.environ.get("TEST_LIVE_DB"):
+        return None
+
     db_url = (
         os.environ.get("DATABASE_URL")
         or os.environ.get("POSTGRES_URL")

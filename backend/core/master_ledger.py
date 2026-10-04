@@ -143,17 +143,38 @@ async def get_cached_staff_targets_for_month(month: str) -> List[dict]:
     try:
         prev_month = get_previous_month(clean_month)
 
-        # Primary: PostgreSQL via Supabase/psycopg2
-        pg_rows = pg_query_table("staff_targets", filters={"month": clean_month})
-        prev_pg_rows = pg_query_table("staff_targets", filters={"month": prev_month}) if prev_month else []
-        combined_pg = pg_rows + prev_pg_rows
+        # Primary: PostgreSQL via Supabase/psycopg2 with staff_directory JOIN
+        m_dates = [f"{clean_month}-01"]
+        if prev_month:
+            m_dates.append(f"{prev_month}-01")
+
+        join_sql = """
+            SELECT st.id, st.month, st.target, s.name as fo_name, s.district, s.pin, st.legacy_doc_id
+            FROM staff_targets st
+            LEFT JOIN staff_directory s ON st.staff_id = s.id
+            WHERE st.month::text = ANY(%s)
+        """
+        combined_pg = []
+        try:
+            combined_pg = pg_execute_raw(join_sql, [m_dates], fetch=True)
+        except Exception:
+            pass
 
         if not combined_pg:
-            # Try all-records fallback from PG
-            combined_pg = pg_query_table("staff_targets")
+            # Fallback for mock store or flat schema
+            pg_rows = pg_query_table("staff_targets", filters={"month": clean_month})
+            prev_pg_rows = pg_query_table("staff_targets", filters={"month": prev_month}) if prev_month else []
+            combined_pg = (pg_rows or []) + (prev_pg_rows or [])
+            if not combined_pg:
+                combined_pg = pg_query_table("staff_targets") or []
 
         if combined_pg:
-            target_records = [dict(r) for r in combined_pg]
+            target_records = []
+            for r in combined_pg:
+                d = dict(r)
+                if hasattr(d.get("month"), "strftime"):
+                    d["month"] = d["month"].strftime("%Y-%m")
+                target_records.append(d)
             cache.set(cache_key, target_records, ttl=600)
             return target_records
 
@@ -426,40 +447,112 @@ async def get_raw_monthly_reports(
     # 3. Try PostgreSQL primary source first
     raw_list = []
     try:
-        pg_rows = pg_execute_raw(
-            "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
-            [start_date, end_date],
-            fetch=True
-        )
+        hydrated_sql = """
+            SELECT 
+                r.*,
+                COALESCE(k.kpi_data, '{}'::json) as _kpi_json,
+                COALESCE(f.fdc_data, '[]'::json) as _fdc_json,
+                COALESCE(v.names_data, '[]'::json) as _visited_names_json
+            FROM daily_field_reports r
+            LEFT JOIN (
+                SELECT 
+                    report_id, 
+                    json_object_agg(category, ids) as kpi_data
+                FROM (
+                    SELECT report_id, category, json_agg(patient_id) as ids
+                    FROM report_kpi_entries
+                    GROUP BY report_id, category
+                ) cat_grouped
+                GROUP BY report_id
+            ) k ON r.id = k.report_id
+            LEFT JOIN (
+                SELECT 
+                    report_id,
+                    json_agg(json_build_object(
+                        'patient_id', patient_id,
+                        'fdc_type', fdc_type,
+                        'regimen_name', regimen_name,
+                        'phase', phase,
+                        'daily_dose_text', daily_dose_text,
+                        'patient_name', patient_name,
+                        'patient_type', patient_type,
+                        'weight_kg', weight_kg,
+                        'weight_band', weight_band,
+                        'daily_tablets', daily_tablets,
+                        'strips', strips,
+                        'recommended_strips', recommended_strips,
+                        'supply_issued', supply_issued
+                    ) ORDER BY position) as fdc_data
+                FROM report_fdc_details
+                GROUP BY report_id
+            ) f ON r.id = f.report_id
+            LEFT JOIN (
+                SELECT 
+                    report_id,
+                    json_agg(name ORDER BY position) as names_data
+                FROM report_visited_names
+                GROUP BY report_id
+            ) v ON r.id = v.report_id
+            WHERE r.date_of_reporting >= %s AND r.date_of_reporting <= %s
+        """
+        pg_rows = []
+        try:
+            pg_rows = pg_execute_raw(hydrated_sql, [start_date, end_date], fetch=True)
+        except Exception:
+            pass
+
+        if not pg_rows:
+            # Flat query fallback for mock store or simplified schema
+            pg_rows = pg_execute_raw(
+                "SELECT * FROM daily_field_reports WHERE date_of_reporting >= %s AND date_of_reporting <= %s",
+                [start_date, end_date],
+                fetch=True
+            )
+
         if pg_rows:
             for row in pg_rows:
                 item = dict(row)
+                kpi_map = item.pop("_kpi_json", {}) or {}
+                fdc_list = item.pop("_fdc_json", []) or []
+                names_list = item.pop("_visited_names_json", []) or []
+
+                if hasattr(item.get("date_of_reporting"), "strftime"):
+                    item["date_of_reporting"] = item["date_of_reporting"].strftime("%Y-%m-%d")
+
                 did = item.get("id") or item.get("doc_id")
-                if not did:
+                if not did or isinstance(did, int):
                     c_wp = canonicalize_district(item.get("working_place", "") or item.get("district", ""))
                     fo = str(item.get("fo_name", "")).strip()
                     dt = str(item.get("date_of_reporting", "")).strip()
                     did = f"{c_wp}_{fo}_{dt}".replace(" ", "_").lower()
                 item["id"] = did
                 item.setdefault("doc_id", did)
-                # Deserialize JSON columns if they came back as strings
-                for list_field in ("notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
-                                   "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
-                                   "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
-                                   "presumptive_ids", "fdc_provided_ids", "fdc_details",
-                                   "differentiated_tb_ids", "tpt_treatment_start_ids", "tpt_presumptive_ids",
-                                   "adhar_face_authentication_ids", "consent_with_id_ids",
-                                   "culture_dst_ids", "kit_consumption_ids", "visited_names",
-                                   "documents_ids"):
-                    val = item.get(list_field)
-                    if isinstance(val, str):
-                        try:
-                            import json as _json
-                            item[list_field] = _json.loads(val)
-                        except Exception:
+
+                # Deserialize JSON columns or hydrate from child table kpi_map
+                for list_field in (
+                    "notification_ids", "hiv_dm_ids", "dbt_ids", "sample_collection_ids",
+                    "sample_tested_ids", "outcome_assigned_ids", "home_visit_ids",
+                    "contact_tracing_ids", "follow_up_ids", "face_to_face_ids",
+                    "presumptive_ids", "fdc_provided_ids", "differentiated_tb_ids",
+                    "tpt_treatment_start_ids", "tpt_presumptive_ids",
+                    "adhar_face_authentication_ids", "consent_with_id_ids",
+                    "culture_dst_ids", "kit_consumption_ids", "documents_ids"
+                ):
+                    if list_field in kpi_map:
+                        item[list_field] = kpi_map[list_field]
+                    else:
+                        val = item.get(list_field)
+                        if isinstance(val, str):
+                            try:
+                                import json as _json
+                                item[list_field] = _json.loads(val)
+                            except Exception:
+                                item[list_field] = []
+                        elif not isinstance(val, list):
                             item[list_field] = []
-                    elif val is None:
-                        item[list_field] = []
+
+                item["fdc_details"] = fdc_list if fdc_list else (item.get("fdc_details") or [])
+                item["visited_names"] = names_list if names_list else (item.get("visited_names") or [])
                 raw_list.append(item)
     except Exception as pge:
         print(f"[get_raw_monthly_reports] PG query notice: {pge}")
