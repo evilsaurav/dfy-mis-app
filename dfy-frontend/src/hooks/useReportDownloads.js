@@ -46,13 +46,14 @@ export function useReportDownloads({
     setSelectedKpiDistricts([]);
   };
 
-  const handleDownloadKpi = async () => {
+  const handleDownloadKpi = async (districtOverride) => {
     if (isDownloadingKpi) return;
+    const override = (typeof districtOverride === 'string' && districtOverride.trim()) ? districtOverride.trim() : null;
     const validPermitted = (districts || []).filter(d => d !== 'All');
     const fallback = validPermitted.length > 0 ? validPermitted[0] : '';
-    const targetDist = (reportsDistrict && reportsDistrict !== 'All') 
+    const targetDist = override || ((reportsDistrict && reportsDistrict !== 'All') 
       ? reportsDistrict 
-      : (selectedDistrict !== 'All' ? selectedDistrict : fallback);
+      : (selectedDistrict !== 'All' ? selectedDistrict : fallback));
     if (!targetDist) {
       showToast("Please select a district to download.", "error");
       return;
@@ -121,12 +122,15 @@ export function useReportDownloads({
     setSelectedAttendanceDistricts([]);
   };
 
-  const handleDownloadMedicineReport = () => {
+  const handleDownloadMedicineReport = (districtOverride) => {
     if (isDownloadingMedicineReport) return;
     setIsDownloadingMedicineReport(true);
+    const override = (typeof districtOverride === 'string' && districtOverride.trim()) ? districtOverride.trim() : null;
     const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
     let url = `${API_BASE_URL}/admin/reports/medicine-consumption?month=${month}&token=${getAdminToken()}`;
-    if (selectedMedDistricts.length > 0) {
+    if (override) {
+      url += `&district=${encodeURIComponent(override)}`;
+    } else if (selectedMedDistricts.length > 0) {
       url += `&districts=${encodeURIComponent(selectedMedDistricts.join(','))}`;
     } else {
       const targetDist = selectedDistrict || 'All';
@@ -223,7 +227,12 @@ export function useReportDownloads({
     }
 
     setIsDownloadingKpi(true);
-    showToast(`📦 Preparing Scoped ZIP bundle for ${targetList.length} district(s)...`, "info");
+    const zipName = targetList.length === 1 
+      ? `District_KPI_${targetList[0]}_${month}.zip` 
+      : `District_KPI_Workbooks_${month}.zip`;
+    showToast(targetList.length === 1
+      ? `📦 Preparing KPI ZIP archive for ${targetList[0]}...`
+      : `📦 Preparing Scoped ZIP bundle for ${targetList.length} district(s)...`, "info");
 
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -237,12 +246,14 @@ export function useReportDownloads({
       const downloadUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `District_KPI_Workbooks_${month}.zip`;
+      link.download = zipName;
       document.body.appendChild(link);
       link.click();
       window.URL.revokeObjectURL(downloadUrl);
       link.remove();
-      showToast(`✓ KPI ZIP archive (${targetList.length} districts) downloaded successfully!`, "success");
+      showToast(targetList.length === 1
+        ? `✓ KPI ZIP archive for ${targetList[0]} downloaded successfully!`
+        : `✓ KPI ZIP archive (${targetList.length} districts) downloaded successfully!`, "success");
     } catch (err) {
       console.error("Error downloading scoped KPI zip:", err);
       showToast(`Bulk KPI Download Error: ${err.message}`, "error");

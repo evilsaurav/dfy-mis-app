@@ -325,6 +325,7 @@ export default function AdminModals(props) {
         isSavingDistrictTarget={props.isSavingDistrictTarget}
         saveAllTargets={props.saveAllTargets}
         handleSaveAllTargetsCombined={props.handleSaveAllTargetsCombined}
+        handleExecuteTargetSave={props.handleExecuteTargetSave}
         isSavingTargets={props.isSavingTargets}
         frontlineAllocated={props.frontlineAllocated || 0}
         staffDirectory={props.staffDirectory || {}}

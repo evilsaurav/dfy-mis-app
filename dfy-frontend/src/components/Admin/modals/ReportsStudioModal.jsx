@@ -180,6 +180,74 @@ export default function ReportsStudioModal({
                       </div>
                     )}
 
+                    {/* Single-District Dedicated Action Card (When exactly 1 district selected) */}
+                    {selectedKpiDistricts.length === 1 && (
+                      <div className="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border-2 border-indigo-400 shadow-xl space-y-3 animate-fade-in">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div>
+                            <h4 className="text-sm sm:text-base font-black flex items-center gap-2 text-white">
+                              <span>🎯</span>
+                              <span>Single District KPI Export ({selectedKpiDistricts[0]})</span>
+                            </h4>
+                            <p className="text-xs text-indigo-200 font-medium mt-0.5">
+                              Download full 33-sheet workbook or dedicated ZIP archive for {selectedKpiDistricts[0]} district only.
+                            </p>
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 px-2.5 py-1 rounded-full shrink-0 self-start sm:self-auto">
+                            Single District Active
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                          <button
+                            type="button"
+                            disabled={isDownloadingKpi}
+                            onClick={() => handleDownloadKpi(selectedKpiDistricts[0])}
+                            className={`w-full font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isDownloadingKpi
+                                ? 'bg-indigo-500/50 text-indigo-200 cursor-wait animate-pulse'
+                                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/30 cursor-pointer'
+                            }`}
+                          >
+                            {isDownloadingKpi ? (
+                              <>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                <span>Generating Workbook...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📊</span>
+                                <span>Download {selectedKpiDistricts[0]} KPI Workbook (.xlsx)</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isDownloadingKpi}
+                            onClick={handleDownloadScopedZip}
+                            className={`w-full font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                              isDownloadingKpi
+                                ? 'bg-slate-700 text-slate-300 cursor-wait animate-pulse'
+                                : 'bg-slate-800 hover:bg-slate-700 text-white border border-slate-600 shadow-slate-900/40 cursor-pointer'
+                            }`}
+                          >
+                            {isDownloadingKpi ? (
+                              <>
+                                <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                <span>Packaging ZIP...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>📦</span>
+                                <span>Download {selectedKpiDistricts[0]} KPI ZIP (.zip)</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Multi-District Download Action Cards */}
                     <div className={`grid grid-cols-1 ${canDownloadBulkZip ? 'sm:grid-cols-2' : ''} gap-3 pt-2`}>
                       {/* Option A: Scoped ZIP (Multi-District Only) */}
@@ -477,6 +545,51 @@ export default function ReportsStudioModal({
                           <p className="text-[10px] text-teal-300 font-medium">
                             Render memory protection active: generating one file at a time with 1-second server cooldown between requests.
                           </p>
+                        </div>
+                      )}
+
+                      {/* Single-District Dedicated Action Card (When exactly 1 district selected) */}
+                      {selectedMedDistricts.length === 1 && (
+                        <div className="bg-gradient-to-r from-teal-950 to-slate-900 text-white p-4 sm:p-5 rounded-2xl border-2 border-teal-400 shadow-xl space-y-3 animate-fade-in">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                              <h4 className="text-sm sm:text-base font-black flex items-center gap-2 text-white">
+                                <span>🎯</span>
+                                <span>Single District Medicine Export ({selectedMedDistricts[0]})</span>
+                              </h4>
+                              <p className="text-xs text-teal-200 font-medium mt-0.5">
+                                Download 2-sheet medicine consumption workbook for {selectedMedDistricts[0]} district only.
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider bg-teal-500/30 text-teal-200 border border-teal-400/30 px-2.5 py-1 rounded-full shrink-0 self-start sm:self-auto">
+                              Single District Active
+                            </span>
+                          </div>
+
+                          <div className="pt-1">
+                            <button
+                              type="button"
+                              disabled={isDownloadingMedicineReport}
+                              onClick={() => handleDownloadMedicineReport(selectedMedDistricts[0])}
+                              className={`w-full font-bold py-2.5 px-4 rounded-xl text-xs shadow-md transition-all flex items-center justify-center gap-2 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                                isDownloadingMedicineReport
+                                  ? 'bg-teal-500/50 text-teal-200 cursor-wait animate-pulse'
+                                  : 'bg-teal-600 hover:bg-teal-500 text-white shadow-teal-600/30 cursor-pointer'
+                              }`}
+                            >
+                              {isDownloadingMedicineReport ? (
+                                <>
+                                  <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                  <span>Generating Medicine Workbook...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <span>💊</span>
+                                  <span>Download {selectedMedDistricts[0]} Medicine Workbook (.xlsx)</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
                         </div>
                       )}
 

@@ -60,8 +60,7 @@ if (!hasNoChangeRecordFallback) {
 // 2. Behavioral Execution Simulation
 // ============================================================================
 
-// Extract the fetchData function body from AdminDashboard.jsx
-const fetchDataMatch = src.match(/const fetchData = async \((.*?)\) => \{([\s\S]*?)\n  \};\n\n  const handleHardAppReset/);
+const fetchDataMatch = src.match(/const fetchData = async \((.*?)\) => \{([\s\S]*?)\n  \};\s*const handleHardAppReset/);
 
 if (!fetchDataMatch) {
   console.error('FAIL: Could not extract fetchData function from AdminDashboard.jsx');

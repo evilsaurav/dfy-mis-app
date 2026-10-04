@@ -1123,16 +1123,23 @@ export function useAdminModals({
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const targetMonth = targetModalMonth || month;
       const res = await fetch(`${API_BASE_URL}/update-district-target`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ month: targetModalMonth, district: distName, official_target: val })
+        body: JSON.stringify({ month: targetMonth, district: distName, official_target: val })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         if (showToast) showToast(`Official target for ${distName} saved (${val})!`, 'success');
         if (targetModalDistrict === distName && setOfficialDistrictTarget) {
           setOfficialDistrictTarget(val);
+        }
+        if (typeof loadTargets === 'function') {
+          await loadTargets(selectedDistrict || 'All', targetMonth);
+        }
+        if (typeof fetchData === 'function') {
+          await fetchData(false);
         }
       } else {
         if (showToast) showToast(data.detail || `Failed to save target for ${distName}`, 'error');
@@ -1142,13 +1149,14 @@ export function useAdminModals({
     } finally {
       setIsSavingDistrictTarget(false);
     }
-  }, [getAdminToken, currentUser, targetModalMonth, showToast, targetModalDistrict, setOfficialDistrictTarget]);
+  }, [getAdminToken, currentUser, targetModalMonth, month, selectedDistrict, loadTargets, fetchData, showToast, targetModalDistrict, setOfficialDistrictTarget]);
 
   const handleSaveBulkDistrictTargets = useCallback(async () => {
     setIsSavingBulkDistrictTargets(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const targetMonth = targetModalMonth || month;
       const payloadTargets = (targetModalDistricts || []).map(dist => ({
         district: dist,
         official_target: Math.max(0, Number(tempOfficialTargets?.[dist] ?? officialDistrictTarget ?? 0))
@@ -1156,11 +1164,17 @@ export function useAdminModals({
       const res = await fetch(`${API_BASE_URL}/update-district-targets-bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ month: targetModalMonth, targets: payloadTargets })
+        body: JSON.stringify({ month: targetMonth, targets: payloadTargets })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         if (showToast) showToast(`✓ All ${payloadTargets.length} district official targets saved!`, 'success');
+        if (typeof loadTargets === 'function') {
+          await loadTargets(selectedDistrict || 'All', targetMonth);
+        }
+        if (typeof fetchData === 'function') {
+          await fetchData(false);
+        }
       } else {
         if (showToast) showToast(data.detail || 'Failed to bulk save district targets', 'error');
       }
@@ -1169,34 +1183,113 @@ export function useAdminModals({
     } finally {
       setIsSavingBulkDistrictTargets(false);
     }
-  }, [getAdminToken, currentUser, targetModalDistricts, tempOfficialTargets, officialDistrictTarget, targetModalMonth, showToast]);
+  }, [getAdminToken, currentUser, targetModalDistricts, tempOfficialTargets, officialDistrictTarget, targetModalMonth, month, selectedDistrict, loadTargets, fetchData, showToast]);
 
   const saveAllTargets = useCallback(async () => {
     setIsSavingTargets(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const targetMonth = targetModalMonth || month;
       const res = await fetch(`${API_BASE_URL}/update-targets-bulk`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ month: targetModalMonth, targets: targetsData })
+        body: JSON.stringify({ month: targetMonth, targets: targetsData })
       });
       const data = await res.json();
       if (res.ok && data.success) {
         if (showToast) showToast('✓ Frontline targets saved successfully!', 'success');
+        if (typeof loadTargets === 'function') {
+          await loadTargets(selectedDistrict || 'All', targetMonth);
+        }
+        if (typeof fetchData === 'function') {
+          await fetchData(false);
+        }
       }
     } catch (err) {
       console.error("saveAllTargets error", err);
     } finally {
       setIsSavingTargets(false);
     }
-  }, [getAdminToken, currentUser, targetModalMonth, targetsData, showToast]);
+  }, [getAdminToken, currentUser, targetModalMonth, month, targetsData, selectedDistrict, loadTargets, fetchData, showToast]);
 
   const handleSaveAllTargetsCombined = useCallback(async () => {
     await handleSaveBulkDistrictTargets();
     await saveAllTargets();
+    const targetMonth = targetModalMonth || month;
+    if (typeof loadTargets === 'function') {
+      await loadTargets(selectedDistrict || 'All', targetMonth);
+    }
+    if (typeof fetchData === 'function') {
+      await fetchData(false);
+    }
     if (showToast) showToast('✓ All Official Targets & Frontline Allocations Saved!', 'success');
-  }, [handleSaveBulkDistrictTargets, saveAllTargets, showToast]);
+  }, [handleSaveBulkDistrictTargets, saveAllTargets, selectedDistrict, targetModalMonth, month, loadTargets, fetchData, showToast]);
+
+  const handleExecuteTargetSave = useCallback(async (districtOrPayload, foNameArg, targetValArg, monthArg) => {
+    let district, fo_name, target, targetMonth;
+    if (districtOrPayload && typeof districtOrPayload === 'object' && !districtOrPayload.preventDefault) {
+      district = districtOrPayload.district;
+      fo_name = districtOrPayload.fo_name || districtOrPayload.officer_name || districtOrPayload.name;
+      target = districtOrPayload.target;
+      targetMonth = districtOrPayload.month || targetModalMonth || month;
+    } else {
+      district = districtOrPayload;
+      fo_name = foNameArg;
+      target = targetValArg;
+      targetMonth = monthArg || targetModalMonth || month;
+    }
+
+    if (!district || !fo_name) {
+      if (showToast) showToast("District and Field Officer name are required to set target.", "error");
+      return false;
+    }
+
+    const numTarget = Number(target);
+    if (isNaN(numTarget) || numTarget < 0) {
+      if (showToast) showToast("Target must be a non-negative number", "error");
+      return false;
+    }
+
+    setIsSavingTargets(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem("dfy_admin_token") || currentUser?.token);
+      const payload = {
+        district,
+        fo_name,
+        target: numTarget,
+        month: targetMonth
+      };
+
+      const res = await fetch(`${API_BASE_URL}/update-target`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (res.ok && (data.success || data.message || !data.detail)) {
+        if (showToast) showToast(`✓ Target for ${fo_name} (${district}) updated successfully!`, "success");
+        if (typeof loadTargets === 'function') {
+          await loadTargets(selectedDistrict || 'All', targetMonth);
+        }
+        if (typeof fetchData === 'function') {
+          await fetchData(false);
+        }
+        return true;
+      } else {
+        if (showToast) showToast(data.detail || `Failed to update target for ${fo_name}`, "error");
+        return false;
+      }
+    } catch (err) {
+      console.error("Error updating target:", err);
+      if (showToast) showToast("Network error updating target", "error");
+      return false;
+    } finally {
+      setIsSavingTargets(false);
+    }
+  }, [getAdminToken, currentUser, targetModalMonth, month, selectedDistrict, loadTargets, fetchData, showToast]);
 
   // 16. Duplicate Radar Handlers
   const fetchDuplicateAudit = useCallback(async () => {
@@ -2263,6 +2356,7 @@ export function useAdminModals({
     handleSaveBulkDistrictTargets,
     saveAllTargets,
     handleSaveAllTargetsCombined,
+    handleExecuteTargetSave,
     handleTargetChange, handleCopyFromLastMonth, frontlineAllocated,
 
     // 16. Attendance Radar

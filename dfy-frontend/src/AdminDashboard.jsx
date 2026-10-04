@@ -471,7 +471,7 @@ export default function AdminDashboard() {
 
   // High-Capacity IndexedDB & Delta Sync Data Fetcher
   const fetchData = async (forceRefresh = false, silent = false) => {
-    const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'admin'}`;
+    const cacheKey = `dfy_dash_cache_${month}_${currentUser?.user_id || 'guest'}`;
     let cachedData = null;
     if (!forceRefresh) {
       try {
@@ -491,6 +491,15 @@ export default function AdminDashboard() {
       await clearCachedDashboardData(cacheKey);
     }
 
+    // Historical & Empty Cache Guard: If cached data is empty or has 0 records, do not use cache
+    if (cachedData && (!cachedData.records || !Array.isArray(cachedData.records) || cachedData.records.length === 0)) {
+      try {
+        localStorage.removeItem(cacheKey);
+      } catch (e) {}
+      await clearCachedDashboardData(cacheKey);
+      cachedData = null;
+    }
+
     const hasValidIds = cachedData && Array.isArray(cachedData.records) && cachedData.records.some(r => Array.isArray(r.notification_ids));
     if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !hasValidIds) {
       try {
@@ -506,7 +515,10 @@ export default function AdminDashboard() {
       if (!silent) setIsLoading(false);
       setSyncStatus('UP_TO_DATE');
     } else {
-      if (!silent) setIsLoading(true);
+      if (!silent) {
+        setRawRecords([]);
+        setIsLoading(true);
+      }
     }
 
     if (!silent) setError('');
@@ -548,11 +560,11 @@ export default function AdminDashboard() {
         setSyncStatus('UP_TO_DATE');
         if (data.synced_at) setLastSyncedTime(data.synced_at);
         if (cachedData?.records && cachedData.records.length > 0 && hasValidIds) {
-          setRawRecords(prev => (prev && prev.length > 0) ? prev : cachedData.records);
+          setRawRecords(cachedData.records);
         }
       } else if (data.mode === 'DELTA') {
         setRawRecords(prev => {
-          const currentList = (prev && prev.length > 0) ? prev : (cachedData?.records || []);
+          const currentList = (cachedData?.records && cachedData.records.length > 0) ? cachedData.records : (prev || []);
           const map = new Map(currentList.map(r => [r.id || r.doc_id, r]));
           if (Array.isArray(data.deleted_ids)) {
             data.deleted_ids.forEach(delId => map.delete(delId));
@@ -566,17 +578,19 @@ export default function AdminDashboard() {
           const updated = Array.from(map.values());
           const fallbackStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
           const syncStamp = data.synced_at || fallbackStamp;
-          try {
-            setCachedDashboardData(cacheKey, {
-              synced_at: syncStamp,
-              records: updated
-            });
-            localStorage.setItem(cacheKey, JSON.stringify({
-              synced_at: syncStamp,
-              records: updated
-            }));
-          } catch (storageErr) {
-            console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+          if (updated.length > 0) {
+            try {
+              setCachedDashboardData(cacheKey, {
+                synced_at: syncStamp,
+                records: updated
+              });
+              localStorage.setItem(cacheKey, JSON.stringify({
+                synced_at: syncStamp,
+                records: updated
+              }));
+            } catch (storageErr) {
+              console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+            }
           }
           return updated;
         });
@@ -591,17 +605,19 @@ export default function AdminDashboard() {
         const syncStamp = data.synced_at || fallbackStamp;
         setLastSyncedTime(syncStamp);
         setSyncStatus('LIVE');
-        try {
-          setCachedDashboardData(cacheKey, {
-            synced_at: syncStamp,
-            records: newRecords
-          });
-          localStorage.setItem(cacheKey, JSON.stringify({
-            synced_at: syncStamp,
-            records: newRecords
-          }));
-        } catch (storageErr) {
-          console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+        if (newRecords.length > 0) {
+          try {
+            setCachedDashboardData(cacheKey, {
+              synced_at: syncStamp,
+              records: newRecords
+            });
+            localStorage.setItem(cacheKey, JSON.stringify({
+              synced_at: syncStamp,
+              records: newRecords
+            }));
+          } catch (storageErr) {
+            console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+          }
         }
       }
 

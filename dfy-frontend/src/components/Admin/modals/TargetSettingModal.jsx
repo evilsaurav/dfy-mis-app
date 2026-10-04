@@ -28,6 +28,7 @@ export default function TargetSettingModal({
   isSavingDistrictTarget,
   saveAllTargets,
   handleSaveAllTargetsCombined,
+  handleExecuteTargetSave,
   isSavingTargets,
   frontlineAllocated = 0,
   staffDirectory = {},
@@ -347,6 +348,17 @@ export default function TargetSettingModal({
                                         className="w-16 bg-white border border-slate-200 rounded-lg px-2 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-inner" 
                                         placeholder="50" 
                                       />
+                                      {handleExecuteTargetSave && (
+                                        <button
+                                          type="button"
+                                          title={`Save target for ${fo}`}
+                                          disabled={isSavingTargets}
+                                          onClick={() => handleExecuteTargetSave({ district: dist, fo_name: fo, target: currentTarget, month: targetModalMonth })}
+                                          className="p-1 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-40"
+                                        >
+                                          💾
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
                                 );
@@ -428,6 +440,17 @@ export default function TargetSettingModal({
                                   className="w-20 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-center font-black text-xs text-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 shadow-inner" 
                                   placeholder="50" 
                                 />
+                                {handleExecuteTargetSave && (
+                                  <button
+                                    type="button"
+                                    title={`Save target for ${fo}`}
+                                    disabled={isSavingTargets}
+                                    onClick={() => handleExecuteTargetSave({ district: dist, fo_name: fo, target: currentTarget, month: targetModalMonth })}
+                                    className="p-1 hover:bg-purple-100 text-purple-700 rounded-lg text-xs font-bold transition-all active:scale-95 cursor-pointer disabled:opacity-40"
+                                  >
+                                    💾
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );

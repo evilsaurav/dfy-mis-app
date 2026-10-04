@@ -133,23 +133,66 @@ export default function JourneyModal({
             </div>
 
             <div className="relative pl-6 border-l-2 border-indigo-200 space-y-4 my-2">
-              {(journeyResult.journey || []).map((step, idx) => (
-                <div key={idx} className="relative">
-                  {/* Step Dot */}
-                  <span className={`absolute -left-[31px] top-0.5 w-6 h-6 rounded-full bg-white border-2 ${step.category === 'nikshay_verified' ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-indigo-500 text-indigo-700'} flex items-center justify-center text-xs shadow-sm`}>
-                    {step.icon}
-                  </span>
-                  <div className={step.category === 'nikshay_verified' ? 'bg-emerald-50/70 border border-emerald-200 p-2.5 rounded-xl shadow-2xs' : ''}>
-                    <div className="flex items-center justify-between">
-                      <h4 className={`text-xs font-black ${step.category === 'nikshay_verified' ? 'text-emerald-950' : 'text-slate-800'}`}>{step.action}</h4>
-                      <span className="font-mono text-[10px] text-slate-400">{step.date}</span>
+              {(journeyResult.journey || []).map((step, idx) => {
+                const isVerified = step.category === 'nikshay_verified';
+                const foNameRaw = step.fo_name || '';
+                const foAttribution = (foNameRaw && !['Unknown', 'N/A', 'Official Record', 'null', 'undefined'].includes(foNameRaw.trim()))
+                  ? foNameRaw.trim()
+                  : 'Attributed Officer';
+                const districtRaw = step.district || '';
+                const districtDisplay = (districtRaw && !['Unknown', 'N/A', 'null', 'undefined'].includes(districtRaw.trim()))
+                  ? districtRaw.trim()
+                  : (journeyResult.metadata?.district || 'Official Record');
+
+                return (
+                  <div key={idx} className="relative">
+                    {/* Step Dot */}
+                    <span className={`absolute -left-[31px] top-1.5 w-6 h-6 rounded-full bg-white border-2 ${
+                      isVerified ? 'border-emerald-600 bg-emerald-50 text-emerald-800' : 'border-indigo-500 text-indigo-700'
+                    } flex items-center justify-center text-xs shadow-sm`}>
+                      {step.icon || '📌'}
+                    </span>
+
+                    <div className={`p-3.5 rounded-2xl border transition-all ${
+                      isVerified
+                        ? 'bg-emerald-50/70 border-emerald-200 shadow-2xs'
+                        : 'bg-white border-slate-200 shadow-2xs hover:border-slate-300'
+                    }`}>
+                      {/* Milestone Icon, Action Title & Date Badge */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className={`text-xs font-black flex items-center gap-1.5 ${
+                          isVerified ? 'text-emerald-950' : 'text-slate-800'
+                        }`}>
+                          <span className="text-sm">{step.icon || '📌'}</span>
+                          <span>{step.action}</span>
+                        </h4>
+                        {step.date && (
+                          <span className="font-mono text-[10px] font-bold px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 border border-slate-200/80 shadow-2xs">
+                            📅 {step.date}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Operational Field Officer Attribution & District Pills */}
+                      <div className="flex flex-wrap items-center gap-2 mt-2.5 pt-2 border-t border-slate-100">
+                        <span className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg border shadow-2xs ${
+                          isVerified 
+                            ? 'bg-emerald-100/70 text-emerald-900 border-emerald-300/60' 
+                            : 'bg-indigo-50 text-indigo-900 border-indigo-200/80'
+                        }`}>
+                          <span>👤 Field Officer:</span>
+                          <span className="font-black">{foAttribution}</span>
+                        </span>
+
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 shadow-2xs">
+                          <span>📍</span>
+                          <span>{districtDisplay}</span>
+                        </span>
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-500 mt-0.5">
-                      Logged by: <span className={`font-bold ${step.category === 'nikshay_verified' ? 'text-emerald-800' : 'text-slate-700'}`}>{step.fo_name}</span> ({step.district})
-                    </p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {(journeyResult.journey || []).length === 0 && (
                 <p className="text-xs text-slate-500 py-4 italic">No clinical milestones found for this patient ID yet.</p>
