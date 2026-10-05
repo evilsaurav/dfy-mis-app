@@ -225,10 +225,14 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
             "pin": clean_pin,
             "designation": req.designation or "Field Officer",
             "is_active": True,
+            "inactive_since": None,
+            "deleted_at": None,
             "created_at": now_str,
             "updated_at": now_str
         }
-        pg_upsert_row("staff_directory", payload, conflict_columns=["district_id", "slug"])
+        pg_ok = pg_upsert_row("staff_directory", payload, conflict_columns=["district_id", "slug"])
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to save officer '{clean_name}' to database. No changes were saved.")
 
         # Retrieve real bigint id from staff_directory
         pg_row = pg_fetch_one("staff_directory", filters={"slug": doc_id})
@@ -579,12 +583,14 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
             
         raw_id = existing_pg.get("id") if existing_pg else None
         staff_filter = {"id": int(raw_id)} if str(raw_id).isdigit() else {"slug": doc_id}
-        pg_update_row("staff_directory", {
+        pg_ok = pg_update_row("staff_directory", {
             "is_active": False,
             "inactive_since": today_str,
             "deleted_at": today_str,
             "updated_at": now_str
         }, staff_filter)
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to delete officer '{clean_name}' in database. No changes were saved.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("staff_directory").document(doc_id).update({
@@ -729,6 +735,7 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
             update_data = {
                 "is_active": True,
                 "inactive_since": None,
+                "deleted_at": None,
                 "updated_at": now_str
             }
         else:
@@ -736,7 +743,9 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
 
         raw_id = target_doc_data.get("id") if target_doc_data else None
         staff_filter = {"id": int(raw_id)} if str(raw_id).isdigit() else {"slug": str(target_doc_id)}
-        pg_update_row("staff_directory", update_data, staff_filter)
+        pg_ok = pg_update_row("staff_directory", update_data, staff_filter)
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to update status for '{clean_fo}' in database. No changes were saved.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("staff_directory").document(str(target_doc_id)).update({
