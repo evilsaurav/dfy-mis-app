@@ -17,6 +17,9 @@ firebase_key.json
 *firebase*.json
 *.pem
 *.key
+client_secret*.json
+token.json
+*.token.json
 
 # OS generated files
 .DS_Store
