@@ -1353,7 +1353,10 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
             "legacy_doc_id": doc_id
         }
 
-        pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+        leave_saved = pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+        if not leave_saved:
+            logger.error(f"[mark_leave] pg_upsert_row failed for daily_staff_leaves, doc_id={doc_id}")
+            raise HTTPException(status_code=500, detail="Failed to save leave record. Please try again.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("daily_staff_leaves").document(doc_id).set(leave_data)
@@ -1406,8 +1409,10 @@ async def unmark_leave(req: UnmarkLeaveReq, admin: dict = Depends(get_current_ad
                 raise HTTPException(status_code=403, detail=f"Permission denied for district: {clean_dist}")
 
         doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
-        pg_delete_rows("daily_staff_leaves", filters={"legacy_doc_id": doc_id})
-        pg_delete_rows("daily_staff_leaves", filters={"date": clean_date, "district": clean_dist, "fo_name": req.fo_name.strip()})
+        deleted_by_id = pg_delete_rows("daily_staff_leaves", filters={"legacy_doc_id": doc_id})
+        deleted_by_fields = pg_delete_rows("daily_staff_leaves", filters={"date": clean_date, "district": clean_dist, "fo_name": req.fo_name.strip()})
+        if not (deleted_by_id or deleted_by_fields):
+            logger.warning(f"[unmark_leave] No matching row deleted from daily_staff_leaves for doc_id={doc_id} (fo_name={req.fo_name.strip()}, date={clean_date}, district={clean_dist}). Leave may already be removed or never existed.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("daily_staff_leaves").document(doc_id).delete()
@@ -1489,7 +1494,7 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                     [req.remark.strip(), actor_name, marked_at, clean_date, req.fo_name.strip(), clean_fo]
                 )
             except Exception as upd_err:
-                print(f"Notice: Failed to update admin_remark on PG report: {upd_err}")
+                logger.error(f"[add_attendance_remark] Failed to update admin_remark on daily_field_reports: {upd_err}")
 
             # Also update candidate docs in db / mock store
             try:
@@ -1529,7 +1534,10 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "is_override": False,
                 "legacy_doc_id": doc_id
             }
-            pg_upsert_row("daily_staff_leaves", leave_remark_data, conflict_columns=["legacy_doc_id"])
+            remark_saved = pg_upsert_row("daily_staff_leaves", leave_remark_data, conflict_columns=["legacy_doc_id"])
+            if not remark_saved:
+                logger.error(f"[add_attendance_remark] pg_upsert_row failed for daily_staff_leaves (remark branch), doc_id={doc_id}")
+                raise HTTPException(status_code=500, detail="Failed to save attendance remark. Please try again.")
             active_db = get_active_db()
             if active_db:
                 active_db.collection("daily_staff_leaves").document(doc_id).set(leave_remark_data)
@@ -1556,7 +1564,10 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
                 "is_inspection_remark": False,
                 "legacy_doc_id": doc_id
             }
-            pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+            override_saved = pg_upsert_row("daily_staff_leaves", leave_data, conflict_columns=["legacy_doc_id"])
+            if not override_saved:
+                logger.error(f"[add_attendance_remark] pg_upsert_row failed for daily_staff_leaves (override_leave branch), doc_id={doc_id}")
+                raise HTTPException(status_code=500, detail="Failed to override leave status. Please try again.")
             active_db = get_active_db()
             if active_db:
                 active_db.collection("daily_staff_leaves").document(doc_id).set(leave_data)
