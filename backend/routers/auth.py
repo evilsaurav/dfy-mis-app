@@ -4,7 +4,10 @@ import asyncio
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from fastapi import APIRouter, HTTPException, Request, Depends
+import logging
 from pydantic import BaseModel
+
+logger = logging.getLogger("auth")
 
 from backend.core.database import db
 from backend.core.cache import cache
@@ -100,7 +103,7 @@ async def admin_update_credentials(req: AdminChangePasswordReq, request: Request
         
         current_hash = None
         if user_row:
-            current_hash = user_row.get("password")
+            current_hash = user_row.get("password_hash") or user_row.get("password")
         else:
             auth_data = await asyncio.to_thread(get_or_init_admin_auth)
             current_hash = auth_data.get("password")
@@ -111,18 +114,24 @@ async def admin_update_credentials(req: AdminChangePasswordReq, request: Request
         new_hashed = hash_password(req.new_password.strip())
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        pg_update_row("admin_users", {
-            "password": new_hashed,
-            "last_password_change": now_str
-        }, {"username": user_id})
+        clean_username = user_row.get("username") if user_row else user_id
+        pg_ok = pg_update_row("admin_users", {
+            "password_hash": new_hashed,
+            "updated_at": datetime.now().isoformat()
+        }, {"username": clean_username})
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail="Failed to update password in database.")
 
         if user_id == "admin":
-            pg_upsert_row("admin_config", {
-                "id": "auth_settings",
-                "key": "auth_settings",
-                "password": new_hashed,
-                "last_updated": now_str
-            }, conflict_columns=["id"])
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                try:
+                    active_db.collection("admin_config").document("auth_settings").set({
+                        "password": new_hashed,
+                        "last_updated": now_str
+                    })
+                except Exception as e:
+                    logger.error(f"Active DB mirror error for auth_settings: {e}")
 
 
         client_ip, client_device = extract_client_info(request)
