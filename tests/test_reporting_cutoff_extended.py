@@ -157,7 +157,7 @@ async def test_update_staff_details_syncs_month_and_fallback_targets():
     month_target_key = f"{current_month}_muzaffarpur_vinayprakash"
     fallback_target_key = "muzaffarpur_vinayprakash"
 
-    with patch("main.db", mock_db):
+    with patch("main.db", mock_db), patch("backend.routers.staff.pg_update_row", return_value=True):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
             res = await ac.post(
@@ -223,7 +223,7 @@ async def test_update_staff_details_allows_zero_target():
     headers = {"Authorization": f"Bearer {token}"}
     current_month = datetime.now().strftime("%Y-%m")
 
-    with patch("main.db", mock_db):
+    with patch("main.db", mock_db), patch("backend.routers.staff.pg_update_row", return_value=True):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
             res = await ac.post(

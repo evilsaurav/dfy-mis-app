@@ -478,7 +478,9 @@ def test_staff_designation_update_evicts_cache_and_shifts_bucket(super_admin_tok
         }
     ]
 
-    with patch("main.db", mock_db), patch("main.get_raw_monthly_reports", new=AsyncMock(return_value=mock_reports)):
+    with patch("main.db", mock_db), \
+         patch("main.get_raw_monthly_reports", new=AsyncMock(return_value=mock_reports)), \
+         patch("backend.routers.staff.pg_update_row", return_value=True):
         # 1. Fetch initial leaderboard: Rohan Das should be in top_fo
         res1 = client.get(
             "/api/statewide-top-performers?month=2026-09&period=monthly",

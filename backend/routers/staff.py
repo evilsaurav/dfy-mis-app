@@ -2,6 +2,7 @@ import os
 import io
 import re
 import json
+import logging
 import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -37,6 +38,7 @@ from backend.core.styles import (
 )
 
 router = APIRouter(tags=["staff"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/staff-directory")
@@ -247,13 +249,15 @@ async def add_staff_member(req: AddStaffReq, admin: dict = Depends(get_current_a
         month_doc_id = f"{current_month}_{clean_dist}_{clean_name}".replace(" ", "").lower()
         fallback_doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
         if staff_id:
-            pg_upsert_row("staff_targets", {
+            pg_ok_target = pg_upsert_row("staff_targets", {
                 "staff_id": staff_id,
                 "month": month_date,
                 "target": target_val,
                 "legacy_doc_id": month_doc_id,
                 "updated_at": now_str
             }, conflict_columns=["staff_id", "month"])
+            if not pg_ok_target:
+                logger.warning(f"[add_staff_member] Could not upsert initial staff_target for staff_id={staff_id}")
 
         # Mirror to active_db for test harness & mock resilience
         active_db = get_active_db()
@@ -357,10 +361,12 @@ async def update_staff_pin(req: UpdatePinReq, admin: dict = Depends(get_current_
 
         raw_id = existing_pg.get("id") if existing_pg else None
         staff_filter = {"id": int(raw_id)} if str(raw_id).isdigit() else {"slug": doc_id}
-        pg_update_row("staff_directory",
+        pg_ok = pg_update_row("staff_directory",
             {"pin": clean_pin, "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")},
             staff_filter
         )
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to update PIN for officer '{clean_name}' in database. No changes were saved.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("staff_directory").document(doc_id).update({
@@ -445,7 +451,9 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
             
         raw_id = existing_pg.get("id") if existing_pg else None
         staff_filter = {"id": int(raw_id)} if str(raw_id).isdigit() else {"slug": doc_id}
-        pg_update_row("staff_directory", update_data, staff_filter)
+        pg_ok = pg_update_row("staff_directory", update_data, staff_filter)
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to update details for officer '{clean_name}' in database. No changes were saved.")
         active_db = get_active_db()
         if active_db:
             active_db.collection("staff_directory").document(doc_id).update(update_data)
@@ -460,13 +468,15 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
             raw_staff_id = existing_pg.get("id") if existing_pg else None
             staff_id = int(raw_staff_id) if str(raw_staff_id).isdigit() else None
             if staff_id:
-                pg_upsert_row("staff_targets", {
+                pg_ok_target = pg_upsert_row("staff_targets", {
                     "staff_id": staff_id,
                     "month": month_date,
                     "target": target_val,
                     "legacy_doc_id": month_doc_id,
                     "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 }, conflict_columns=["staff_id", "month"])
+                if not pg_ok_target:
+                    logger.warning(f"[update_staff_details] Failed to upsert staff_target for staff_id={staff_id}")
 
             if active_db:
                 active_db.collection("staff_targets").document(month_doc_id).set({
@@ -497,13 +507,15 @@ async def update_staff_details(req: UpdateStaffDetailsReq, admin: dict = Depends
                         a_mid = f"{current_month}_{clean_dist}_{alias}".replace(" ", "").lower()
                         a_fid = f"{clean_dist}_{alias}".replace(" ", "").lower()
                         if a_staff_id:
-                            pg_upsert_row("staff_targets", {
+                            pg_ok_alias = pg_upsert_row("staff_targets", {
                                 "staff_id": a_staff_id,
                                 "month": month_date,
                                 "target": target_val,
                                 "legacy_doc_id": a_mid,
                                 "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                             }, conflict_columns=["staff_id", "month"])
+                            if not pg_ok_alias:
+                                logger.warning(f"[update_staff_details] Failed to upsert alias staff_target for a_staff_id={a_staff_id} ({alias})")
                         if active_db:
                             active_db.collection("staff_targets").document(a_mid).set({
                                 "id": a_mid,

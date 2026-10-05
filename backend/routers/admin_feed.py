@@ -2101,12 +2101,18 @@ async def admin_edit_day_report(
 
         if int_report_id or pg_rep:
             try:
+                pg_ok = False
                 if int_report_id:
-                    pg_update_row("daily_field_reports", pg_doc_update, filters={"id": int_report_id})
+                    pg_ok = pg_update_row("daily_field_reports", pg_doc_update, filters={"id": int_report_id})
                 elif pg_rep and pg_rep.get("legacy_doc_id"):
-                    pg_update_row("daily_field_reports", pg_doc_update, filters={"legacy_doc_id": pg_rep["legacy_doc_id"]})
+                    pg_ok = pg_update_row("daily_field_reports", pg_doc_update, filters={"legacy_doc_id": pg_rep["legacy_doc_id"]})
+                if not pg_ok:
+                    raise HTTPException(status_code=500, detail="Failed to update parent daily report in database. No changes were saved.")
+            except HTTPException:
+                raise
             except Exception as upd_err:
-                print(f"[edit-day PG parent update notice]: {upd_err}")
+                logger.error(f"[edit-day PG parent update error]: {upd_err}")
+                raise HTTPException(status_code=500, detail=f"Database error updating parent report: {upd_err}")
 
         # Reconcile child relational tables if int_report_id is known
         if int_report_id:
