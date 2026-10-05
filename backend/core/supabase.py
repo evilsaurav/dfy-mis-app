@@ -602,9 +602,12 @@ def pg_upsert_row(
         return False
 
     success = False
+    db_attempted = False
+
     # 1. Supabase REST
     sb = get_supabase_client()
     if sb:
+        db_attempted = True
         try:
             if conflict_columns:
                 sb.table(table).upsert(data, on_conflict=",".join(conflict_columns)).execute()
@@ -612,12 +615,13 @@ def pg_upsert_row(
                 sb.table(table).upsert(data).execute()
             success = True
         except Exception as e:
-            print(f"[pg_upsert_row:{table}] Supabase notice: {e}")
+            logger.error(f"[pg_upsert_row:{table}] Supabase REST error: {e}")
 
     # 2. psycopg2 (fallback if REST not used or failed)
     if not success:
         conn = get_postgres_connection()
         if conn:
+            db_attempted = True
             try:
                 import psycopg2.extras
                 cols = list(data.keys())
@@ -637,10 +641,15 @@ def pg_upsert_row(
                 sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholder_str}){conflict_str}"
                 with conn.cursor() as cur:
                     cur.execute(sql, vals)
+                    rc = cur.rowcount
                 conn.commit()
-                success = True
+                if updates:
+                    success = rc > 0
+                else:
+                    # ON CONFLICT DO NOTHING: rc==0 means row already exists as expected
+                    success = True
             except Exception as e:
-                print(f"[pg_upsert_row:{table}] psycopg2 notice: {e}")
+                logger.error(f"[pg_upsert_row:{table}] psycopg2 error: {e}")
             finally:
                 try:
                     conn.close()
@@ -667,9 +676,10 @@ def pg_upsert_row(
                 active_db.collection(table).document(str(doc_id)).set(mirror_data)
             else:
                 active_db.collection(table).add(mirror_data)
-            success = True
-    except Exception:
-        pass
+            if not db_attempted:
+                success = True
+    except Exception as e:
+        logger.error(f"[pg_upsert_row:{table}] active_db mirror error: {e}")
 
     return success
 
@@ -679,60 +689,75 @@ def pg_update_row(
     data: Dict[str, Any],
     filters: Dict[str, Any],
 ) -> bool:
-    """UPDATE existing rows matching filters. Returns True on success."""
+    """UPDATE existing rows matching filters. Returns True if at least one row was updated, False otherwise."""
     if not data or not filters:
         return False
 
     success = False
-    # 1. Supabase REST
+    db_attempted = False
+
+    # 1. Supabase REST (Primary in production)
     sb = get_supabase_client()
     if sb:
+        db_attempted = True
         try:
             q = sb.table(table).update(data)
             for col, val in filters.items():
                 q = q.eq(col, val)
-            q.execute()
-            success = True
+            res = q.execute()
+            if res.data and len(res.data) > 0:
+                success = True
+            else:
+                logger.warning(f"[pg_update_row:{table}] Supabase REST matched 0 rows for filters: {filters}")
+                success = False
         except Exception as e:
-            print(f"[pg_update_row:{table}] Supabase notice: {e}")
+            logger.error(f"[pg_update_row:{table}] Supabase REST error: {e}")
 
-    # 2. psycopg2
-    conn = get_postgres_connection()
-    if conn:
-        try:
-            import psycopg2.extras
-            set_parts = [f"{c} = %s" for c in data]
-            where_parts = [f"{c} = %s" for c in filters]
-            vals = []
-            for c in data:
-                v = data[c]
-                if isinstance(v, (dict, list)):
-                    vals.append(psycopg2.extras.Json(v))
-                else:
-                    vals.append(v)
-            for c in filters:
-                vals.append(filters[c])
-            sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
-            with conn.cursor() as cur:
-                cur.execute(sql, vals)
-            conn.commit()
-            success = True
-        except Exception as e:
-            print(f"[pg_update_row:{table}] psycopg2 notice: {e}")
-        finally:
+    # 2. psycopg2 (Fallback: only if REST not available or failed)
+    if not success:
+        conn = get_postgres_connection()
+        if conn:
+            db_attempted = True
             try:
-                conn.close()
-            except Exception:
-                pass
+                import psycopg2.extras
+                set_parts = [f"{c} = %s" for c in data]
+                where_parts = [f"{c} = %s" for c in filters]
+                vals = []
+                for c in data:
+                    v = data[c]
+                    if isinstance(v, (dict, list)):
+                        vals.append(psycopg2.extras.Json(v))
+                    else:
+                        vals.append(v)
+                for c in filters:
+                    vals.append(filters[c])
+                sql = f"UPDATE {table} SET {', '.join(set_parts)} WHERE {' AND '.join(where_parts)}"
+                with conn.cursor() as cur:
+                    cur.execute(sql, vals)
+                    rc = cur.rowcount
+                conn.commit()
+                if rc > 0:
+                    success = True
+                else:
+                    logger.warning(f"[pg_update_row:{table}] psycopg2 matched 0 rows for filters: {filters}")
+                    success = False
+            except Exception as e:
+                logger.error(f"[pg_update_row:{table}] psycopg2 error: {e}")
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-    # 3. Mirror to active_db
+    # 3. Mirror to active_db (Test harness & mock resilience)
     try:
         active_db = get_active_db()
         if active_db:
             target_id = filters.get("id") or filters.get("doc_id")
             if target_id:
                 active_db.collection(table).document(str(target_id)).update(data)
-                success = True
+                if not db_attempted:
+                    success = True
             else:
                 for doc in active_db.collection(table).stream():
                     d = doc.to_dict() if hasattr(doc, "to_dict") and callable(doc.to_dict) else dict(doc)
@@ -744,9 +769,10 @@ def pg_update_row(
                             break
                     if match and did:
                         active_db.collection(table).document(str(did)).update(data)
-                        success = True
-    except Exception:
-        pass
+                        if not db_attempted:
+                            success = True
+    except Exception as e:
+        logger.error(f"[pg_update_row:{table}] active_db mirror error: {e}")
 
     return success
 
@@ -755,50 +781,65 @@ def pg_delete_rows(
     table: str,
     filters: Dict[str, Any],
 ) -> bool:
-    """DELETE rows matching filters. Returns True on success."""
+    """DELETE rows matching filters. Returns True if at least one row was deleted, False otherwise."""
     if not filters:
         return False
 
     success = False
-    # 1. Supabase REST
+    db_attempted = False
+
+    # 1. Supabase REST (Primary in production)
     sb = get_supabase_client()
     if sb:
+        db_attempted = True
         try:
             q = sb.table(table).delete()
             for col, val in filters.items():
                 q = q.eq(col, val)
-            q.execute()
-            success = True
+            res = q.execute()
+            if res.data and len(res.data) > 0:
+                success = True
+            else:
+                logger.warning(f"[pg_delete_rows:{table}] Supabase REST matched 0 rows for filters: {filters}")
+                success = False
         except Exception as e:
-            print(f"[pg_delete_rows:{table}] Supabase notice: {e}")
+            logger.error(f"[pg_delete_rows:{table}] Supabase REST error: {e}")
 
-    # 2. psycopg2
-    conn = get_postgres_connection()
-    if conn:
-        try:
-            where_parts = [f"{c} = %s" for c in filters]
-            vals = list(filters.values())
-            sql = f"DELETE FROM {table} WHERE {' AND '.join(where_parts)}"
-            with conn.cursor() as cur:
-                cur.execute(sql, vals)
-            conn.commit()
-            success = True
-        except Exception as e:
-            print(f"[pg_delete_rows:{table}] psycopg2 notice: {e}")
-        finally:
+    # 2. psycopg2 (Fallback: only if REST not available or failed)
+    if not success:
+        conn = get_postgres_connection()
+        if conn:
+            db_attempted = True
             try:
-                conn.close()
-            except Exception:
-                pass
+                where_parts = [f"{c} = %s" for c in filters]
+                vals = list(filters.values())
+                sql = f"DELETE FROM {table} WHERE {' AND '.join(where_parts)}"
+                with conn.cursor() as cur:
+                    cur.execute(sql, vals)
+                    rc = cur.rowcount
+                conn.commit()
+                if rc > 0:
+                    success = True
+                else:
+                    logger.warning(f"[pg_delete_rows:{table}] psycopg2 matched 0 rows for filters: {filters}")
+                    success = False
+            except Exception as e:
+                logger.error(f"[pg_delete_rows:{table}] psycopg2 error: {e}")
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-    # 3. Mirror to active_db
+    # 3. Mirror to active_db (Test harness & mock resilience)
     try:
         active_db = get_active_db()
         if active_db:
             target_id = filters.get("id") or filters.get("doc_id")
             if target_id:
                 active_db.collection(table).document(str(target_id)).delete()
-                success = True
+                if not db_attempted:
+                    success = True
             else:
                 for doc in active_db.collection(table).stream():
                     d = doc.to_dict() if hasattr(doc, "to_dict") and callable(doc.to_dict) else dict(doc)
@@ -810,9 +851,10 @@ def pg_delete_rows(
                             break
                     if match and did:
                         active_db.collection(table).document(str(did)).delete()
-                        success = True
-    except Exception:
-        pass
+                        if not db_attempted:
+                            success = True
+    except Exception as e:
+        logger.error(f"[pg_delete_rows:{table}] active_db mirror error: {e}")
 
     return success
 
