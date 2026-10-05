@@ -8,12 +8,15 @@ import math
 import time
 import asyncio
 import calendar
+import logging
 from datetime import datetime, timedelta, date as dt_date, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from backend.core.database import db, project_id, ENABLE_IN_MEMORY_DERIVATION
 from backend.core.cache import cache
@@ -934,8 +937,11 @@ async def submit_daily_report(report: DailyActivityReport):
         int_report_id = None
         if report_id and isinstance(report_id, int):
             int_report_id = report_id
-            pg_payload["id"] = int_report_id
-            pg_upsert_row("daily_field_reports", pg_payload, conflict_columns=["id"])
+            pg_payload_update = {k: v for k, v in pg_payload.items() if k != "id"}
+            parent_updated = pg_update_row("daily_field_reports", pg_payload_update, filters={"id": int_report_id})
+            if not parent_updated:
+                logger.error(f"[submit_daily_report] Failed to update daily_field_reports for id={int_report_id}, doc_id={doc_id}")
+                raise HTTPException(status_code=500, detail="Failed to update daily report. Please try again.")
         else:
             pg_payload.pop("id", None)
             try:
@@ -988,6 +994,10 @@ async def submit_daily_report(report: DailyActivityReport):
 
         if not int_report_id and existing_report and isinstance(existing_report.get("id"), int):
             int_report_id = existing_report.get("id")
+
+        if not int_report_id or not isinstance(int_report_id, int):
+            logger.error(f"[submit_daily_report] Failed to obtain integer report_id for doc_id={doc_id}, staff_id={resolved_staff_id}, date={report.date_of_reporting}. Blocking child writes.")
+            raise HTTPException(status_code=500, detail="Failed to save daily report. Please try again.")
 
         report_id = int_report_id or doc_id
 
@@ -1078,7 +1088,7 @@ async def submit_daily_report(report: DailyActivityReport):
                                 )
                             conn.commit()
             except Exception as fdc_err:
-                print(f"[report_fdc_details Write Notice] {fdc_err}")
+                logger.exception(f"[submit_daily_report] Failed to save report_fdc_details for report_id={int_report_id}: {fdc_err}")
 
             # 3. report_visited_names
             try:
@@ -1099,7 +1109,8 @@ async def submit_daily_report(report: DailyActivityReport):
                                 )
                             conn.commit()
             except Exception as names_err:
-                print(f"[report_visited_names Write Notice] {names_err}")
+                logger.exception(f"[submit_daily_report] Failed to save report_visited_names for report_id={int_report_id}: {names_err}")
+                raise HTTPException(status_code=500, detail="Failed to save daily report. Please try again.")
 
         # Update daily_district_rollups in PostgreSQL
         try:
@@ -2494,12 +2505,13 @@ async def update_pacing_settings(
             "district": clean_dist,
             "declared_holidays": clamped_holidays,
             "updated_by": actor_name,
-            "updated_by_id": actor_id,
-            "updated_by_role": actor_role,
             "updated_at": updated_at
         }
 
-        pg_upsert_row("pacing_settings", doc_data, conflict_columns=["id"])
+        pacing_saved = pg_upsert_row("pacing_settings", doc_data, conflict_columns=["id"])
+        if not pacing_saved:
+            logger.error(f"[update_pacing_settings] pg_upsert_row failed for doc_id={doc_id}")
+            raise HTTPException(status_code=500, detail="Failed to save pacing settings. Please try again.")
 
 
         # Cache eviction

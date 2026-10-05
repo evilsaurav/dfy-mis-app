@@ -103,6 +103,17 @@ class MockFirestore:
         return MockCollection(name, self)
 
 @pytest.fixture(autouse=True)
+def mock_postgres_insert():
+    def fake_execute_raw(sql, params=None, fetch=False):
+        sql_upper = sql.upper()
+        if "INSERT INTO DAILY_FIELD_REPORTS" in sql_upper and "RETURNING ID" in sql_upper:
+            return [{"id": 1001}]
+        return [] if fetch else True
+
+    with patch("backend.routers.reports.pg_execute_raw", side_effect=fake_execute_raw):
+        yield
+
+@pytest.fixture(autouse=True)
 def clear_caches():
     cache.delete_prefix("dist_notif_registry_")
     cache.delete_prefix("submitting_")

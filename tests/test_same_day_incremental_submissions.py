@@ -51,6 +51,17 @@ class MockDB:
             return MockCollection(self.rollups)
         return MockCollection({})
 
+@pytest.fixture(autouse=True)
+def mock_postgres_insert():
+    def fake_execute_raw(sql, params=None, fetch=False):
+        sql_upper = sql.upper()
+        if "INSERT INTO DAILY_FIELD_REPORTS" in sql_upper and "RETURNING ID" in sql_upper:
+            return [{"id": 1001}]
+        return [] if fetch else True
+
+    with patch("backend.routers.reports.pg_execute_raw", side_effect=fake_execute_raw):
+        yield
+
 @pytest.mark.asyncio
 async def test_same_day_incremental_submission_appends_and_preserves_km():
     mock_db = MockDB()

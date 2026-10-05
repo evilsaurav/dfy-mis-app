@@ -15,6 +15,17 @@ from main import (
     fetch_district_notification_registry,
     DailyActivityReport
 )
+ 
+@pytest.fixture(autouse=True)
+def mock_postgres_insert():
+    def fake_execute_raw(sql, params=None, fetch=False):
+        sql_upper = sql.upper()
+        if "INSERT INTO DAILY_FIELD_REPORTS" in sql_upper and "RETURNING ID" in sql_upper:
+            return [{"id": 1001}]
+        return [] if fetch else True
+
+    with patch("backend.routers.reports.pg_execute_raw", side_effect=fake_execute_raw):
+        yield
 
 @pytest.fixture(autouse=True)
 def clean_cache():

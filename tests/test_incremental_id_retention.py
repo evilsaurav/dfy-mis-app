@@ -313,9 +313,20 @@ async def test_two_phase_submission_missing_category_retention():
             return True
         return True
 
+    def mock_pg_update(table, data, filters=None):
+        if table == "daily_field_reports":
+            rep_id = (filters or {}).get("id") or 777
+            if rep_id in mock_parent_reports:
+                mock_parent_reports[rep_id].update(data)
+            else:
+                mock_parent_reports[rep_id] = dict(data)
+            return True
+        return True
+
     with patch("backend.routers.reports.pg_execute_raw", side_effect=mock_pg_execute), \
          patch("backend.routers.reports.get_db_connection", return_value=mock_conn), \
          patch("backend.routers.reports.pg_upsert_row", side_effect=mock_pg_upsert), \
+         patch("backend.routers.reports.pg_update_row", side_effect=mock_pg_update), \
          patch("backend.routers.reports.resolve_staff_and_district_ids", return_value=(10, 1)), \
          patch("backend.routers.reports.check_patient_id_90day_notification_duplicate", return_value=None), \
          patch("backend.routers.reports.get_district_90day_notified_ids", return_value=set()):
