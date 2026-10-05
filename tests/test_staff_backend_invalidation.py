@@ -53,6 +53,7 @@ async def test_delete_staff_invalidates_staff_list_and_targets():
     with patch("backend.routers.staff.cache") as mock_cache, \
          patch("backend.routers.staff.invalidate_staff_directory_cache") as mock_inval_dir, \
          patch("backend.routers.staff.db") as mock_db, \
+         patch("backend.routers.staff.pg_update_row", return_value=True), \
          patch("backend.routers.staff.log_admin_activity") as mock_log:
         
         mock_doc = MagicMock()
@@ -76,6 +77,7 @@ async def test_toggle_staff_status_invalidates_staff_list_and_targets():
     with patch("backend.routers.staff.cache") as mock_cache, \
          patch("backend.routers.staff.invalidate_staff_directory_cache") as mock_inval_dir, \
          patch("backend.routers.staff.db") as mock_db, \
+         patch("backend.routers.staff.pg_update_row", return_value=True), \
          patch("backend.routers.staff.log_admin_activity") as mock_log:
         
         mock_doc = MagicMock()

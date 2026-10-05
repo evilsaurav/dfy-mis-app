@@ -251,6 +251,8 @@ async def test_staff_toggle_status_and_pin_block():
     jamui_doc_id = "jamui_rameshkumar"
     mock_db.store["staff_directory"] = {
         jamui_doc_id: {
+            "id": jamui_doc_id,
+            "slug": jamui_doc_id,
             "district": "Jamui",
             "name": "Ramesh Kumar",
             "pin": "1234",
@@ -260,6 +262,8 @@ async def test_staff_toggle_status_and_pin_block():
             "created_at": "2026-09-01 10:00:00"
         },
         "gaya_sunilkumar": {
+            "id": "gaya_sunilkumar",
+            "slug": "gaya_sunilkumar",
             "district": "Gaya",
             "name": "Sunil Kumar",
             "pin": "5678",
@@ -546,6 +550,8 @@ async def test_today_attendance_cutoff_and_leaves():
     # Pre-populate staff_directory with two active officers in Jamui
     mock_db.store["staff_directory"] = {
         "jamui_rameshkumar": {
+            "id": "jamui_rameshkumar",
+            "slug": "jamui_rameshkumar",
             "district": "Jamui",
             "name": "Ramesh Kumar",
             "pin": "1234",
@@ -555,6 +561,8 @@ async def test_today_attendance_cutoff_and_leaves():
             "created_at": "2026-09-01 10:00:00"
         },
         "jamui_sureshsingh": {
+            "id": "jamui_sureshsingh",
+            "slug": "jamui_sureshsingh",
             "district": "Jamui",
             "name": "Suresh Singh",
             "pin": "5678",
