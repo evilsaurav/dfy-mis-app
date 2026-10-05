@@ -19,15 +19,39 @@ def test_normalize_admin_user_row():
         "username": "patna_admin",
         "password_hash": "hash123",
         "role": "SUB_ADMIN",
-        "allowed_districts": "Patna, Nalanda",
-        "permissions": "{\"can_view_dashboard\": true}"
+        "has_all_districts": False,
+        "district_names": ["Patna", "Nalanda"],
+        "can_view_dashboard": True,
+        "can_edit_targets": False,
+        "can_manage_staff": False,
+        "can_edit_patient_ids": False,
+        "can_export_reports": True
     }
     norm = _normalize_admin_user_row(raw)
     assert norm["user_id"] == "1"
     assert norm["username"] == "patna_admin"
     assert norm["password"] == "hash123"
     assert norm["allowed_districts"] == ["Patna", "Nalanda"]
-    assert norm["permissions"] == {"can_view_dashboard": True}
+    assert norm["permissions"]["can_export_reports"] == True
+    assert norm["permissions"]["can_edit_targets"] == False
+    assert norm["permissions"]["can_view_audit_logs"] == False  # SUB_ADMIN role
+
+    # Also test has_all_districts=True case (e.g. SUPER_ADMIN)
+    raw2 = {
+        "id": 2,
+        "username": "admin",
+        "password_hash": "hash456",
+        "role": "SUPER_ADMIN",
+        "has_all_districts": True,
+        "district_names": [],
+        "can_export_reports": True,
+        "can_edit_targets": True,
+        "can_manage_staff": True,
+        "can_edit_patient_ids": True
+    }
+    norm2 = _normalize_admin_user_row(raw2)
+    assert norm2["allowed_districts"] == ["All"]
+    assert norm2["permissions"]["can_view_audit_logs"] == True  # SUPER_ADMIN role
 
 def test_fetch_admin_user_fallback():
     user = fetch_admin_user("admin")
@@ -62,21 +86,31 @@ async def test_admin_user_login_invalid_password():
 
 @pytest.mark.asyncio
 async def test_admin_user_login_with_mocked_supabase():
-    mock_supabase_client = MagicMock()
-    mock_res = MagicMock()
-    mock_res.data = [{
+    mock_row = {
+        "id": 101,
         "user_id": "subadmin_gaya",
         "username": "subadmin_gaya",
-        "password": hash_password("gaya2026"),
+        "name": "Gaya Incharge",
+        "password_hash": hash_password("gaya2026"),
         "role": "SUB_ADMIN",
-        "allowed_districts": ["Gaya"],
-        "permissions": {"can_view_dashboard": True},
         "status": "ACTIVE",
-        "name": "Gaya Incharge"
-    }]
-    mock_supabase_client.table().select().or_().limit().execute.return_value = mock_res
+        "has_all_districts": False,
+        "district_names": ["Gaya"],
+        "can_view_dashboard": True,
+        "can_export_reports": True,
+        "can_edit_patient_ids": False,
+        "can_edit_targets": False,
+        "can_manage_staff": False,
+    }
+    mock_cur = MagicMock()
+    mock_cur.fetchone.return_value = mock_row
+    mock_conn = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
 
-    with patch("backend.core.supabase.get_supabase_client", return_value=mock_supabase_client):
+    with patch("backend.core.supabase.get_db_connection") as mock_get_conn:
+        mock_get_conn.return_value.__enter__.return_value = mock_conn
+
+        # 1. Successful login
         req = AdminUserLoginReq(username="subadmin_gaya", password="gaya2026")
         mock_request = MagicMock()
         mock_request.headers = {}
@@ -86,3 +120,12 @@ async def test_admin_user_login_with_mocked_supabase():
         assert res["success"] is True
         assert res["user"]["username"] == "subadmin_gaya"
         assert res["user"]["role"] == "SUB_ADMIN"
+        assert res["user"]["allowed_districts"] == ["Gaya"]
+        assert res["user"]["permissions"]["can_export_reports"] is True
+        assert "token" in res
+
+        # 2. Invalid password raises 401
+        req_bad = AdminUserLoginReq(username="subadmin_gaya", password="wrong_password")
+        with pytest.raises(HTTPException) as exc_bad:
+            await admin_user_login(req_bad, mock_request)
+        assert exc_bad.value.status_code == 401

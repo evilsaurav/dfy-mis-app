@@ -172,45 +172,77 @@ async def create_admin_user(req: AdminUserCreateReq, admin: dict = Depends(requi
         if not clean_user or not req.password:
             raise HTTPException(status_code=400, detail="Username and password are required.")
 
-        # Check for existing user in PG
         existing_pg = pg_fetch_one("admin_users", filters={"username": clean_user})
         if not existing_pg:
             existing_pg = pg_fetch_one("admin_users", filters={"user_id": clean_user})
         if existing_pg:
             raise HTTPException(status_code=400, detail=f"Username '{clean_user}' is already taken.")
 
-        new_user = {
-            "user_id": clean_user,
-            "username": clean_user,
-            "name": req.name.strip(),
-            "password": hash_password(req.password),
-            "role": req.role or "SUB_ADMIN",
-            "allowed_districts": req.allowed_districts or ["All"],
-            "permissions": req.permissions or {
-                "can_view_dashboard": True,
-                "can_edit_targets": False,
-                "can_manage_staff": False,
-                "can_edit_patient_ids": False,
-                "can_export_reports": True,
-                "can_view_audit_logs": False
-            },
-            "status": req.status or "ACTIVE",
-            "created_by": req.created_by or admin.get("username", "Super Admin"),
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "last_login": ""
-        }
-        import json as _json
-        pg_upsert_row("admin_users", {
-            **new_user,
-            "allowed_districts": _json.dumps(new_user["allowed_districts"]),
-            "permissions": _json.dumps(new_user["permissions"]),
-        }, conflict_columns=["username"])
+        role = req.role or "SUB_ADMIN"
+        allowed_districts = req.allowed_districts or ["All"]
+        has_all_districts = (role in ("SUPER_ADMIN", "MAIN_INCHARGE")) or ("All" in allowed_districts)
+        perms = req.permissions or {}
+        created_at_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        from backend.core.supabase import get_db_connection
+        new_admin_id = None
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection unavailable.")
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """INSERT INTO admin_users
+                           (user_id, username, name, password_hash, role, status, has_all_districts, created_by)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                        (clean_user, clean_user, req.name.strip(), hash_password(req.password),
+                         role, req.status or "ACTIVE", has_all_districts,
+                         req.created_by or admin.get("username", "Super Admin"))
+                    )
+                    new_admin_id = cur.fetchone()[0]
+
+                    cur.execute(
+                        """INSERT INTO admin_permissions
+                           (admin_id, can_export_reports, can_edit_patient_ids, can_edit_targets, can_manage_staff)
+                           VALUES (%s, %s, %s, %s, %s)""",
+                        (new_admin_id,
+                         bool(perms.get("can_export_reports", False)),
+                         bool(perms.get("can_edit_patient_ids", False)),
+                         bool(perms.get("can_edit_targets", False)),
+                         bool(perms.get("can_manage_staff", False)))
+                    )
+
+                    if not has_all_districts and allowed_districts:
+                        for dname in allowed_districts:
+                            cur.execute(
+                                "SELECT id FROM districts WHERE LOWER(name) = LOWER(%s) OR LOWER(slug) = LOWER(%s) LIMIT 1",
+                                (dname.strip(), dname.strip())
+                            )
+                            drow = cur.fetchone()
+                            if not drow:
+                                raise HTTPException(status_code=400, detail=f"Invalid district name: '{dname}'")
+                            cur.execute(
+                                "INSERT INTO admin_district_access (admin_id, district_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                (new_admin_id, drow[0])
+                            )
+                conn.commit()
+            except HTTPException:
+                conn.rollback()
+                raise
+            except Exception as e:
+                conn.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to create admin user: {e}")
 
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
-        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {req.role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
-        
-        safe_user = {k: v for k, v in new_user.items() if k != "password"}
+        await log_admin_activity("ADMIN_USER_CREATED", f"Created new admin account '{clean_user}' ({req.name}) with role {role}", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
+
+        safe_user = {
+            "user_id": clean_user, "username": clean_user, "name": req.name.strip(),
+            "role": role, "allowed_districts": allowed_districts, "permissions": perms,
+            "status": req.status or "ACTIVE", "created_by": req.created_by or admin.get("username", "Super Admin"),
+            "created_at": created_at_str
+        }
         return {"success": True, "user": safe_user, "message": f"User {req.name} successfully created!"}
     except HTTPException:
         raise
@@ -228,23 +260,78 @@ async def update_admin_user(req: AdminUserUpdateReq, admin: dict = Depends(requi
             existing_pg = pg_fetch_one("admin_users", filters={"user_id": clean_user})
         if not existing_pg:
             raise HTTPException(status_code=404, detail=f"Admin user '{clean_user}' not found.")
-            
-        import json as _json
-        update_data = {"updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        if req.name is not None:
-            update_data["name"] = req.name.strip()
-        if req.password:
-            update_data["password"] = hash_password(req.password)
-        if req.role is not None:
-            update_data["role"] = req.role
-        if req.allowed_districts is not None:
-            update_data["allowed_districts"] = _json.dumps(req.allowed_districts)
-        if req.permissions is not None:
-            update_data["permissions"] = _json.dumps(req.permissions)
-        if req.status is not None:
-            update_data["status"] = req.status
-            
-        pg_update_row("admin_users", update_data, {"username": clean_user})
+
+        admin_id = existing_pg["id"]
+        new_role = req.role if req.role is not None else existing_pg.get("role")
+        has_all_districts = None
+        if req.role is not None or req.allowed_districts is not None:
+            effective_districts = req.allowed_districts if req.allowed_districts is not None else []
+            has_all_districts = (new_role in ("SUPER_ADMIN", "MAIN_INCHARGE")) or ("All" in effective_districts)
+
+        from backend.core.supabase import get_db_connection
+        with get_db_connection() as conn:
+            if not conn:
+                raise HTTPException(status_code=500, detail="Database connection unavailable.")
+            try:
+                with conn.cursor() as cur:
+                    set_parts = ["updated_at = %s"]
+                    vals = [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
+                    if req.name is not None:
+                        set_parts.append("name = %s"); vals.append(req.name.strip())
+                    if req.password:
+                        set_parts.append("password_hash = %s"); vals.append(hash_password(req.password))
+                    if req.role is not None:
+                        set_parts.append("role = %s"); vals.append(req.role)
+                    if req.status is not None:
+                        set_parts.append("status = %s"); vals.append(req.status)
+                    if has_all_districts is not None:
+                        set_parts.append("has_all_districts = %s"); vals.append(has_all_districts)
+                    vals.append(admin_id)
+                    cur.execute(f"UPDATE admin_users SET {', '.join(set_parts)} WHERE id = %s", vals)
+
+                    if req.permissions is not None:
+                        cur.execute(
+                            """INSERT INTO admin_permissions (admin_id, can_export_reports, can_edit_patient_ids, can_edit_targets, can_manage_staff)
+                               VALUES (%s, %s, %s, %s, %s)
+                               ON CONFLICT (admin_id) DO UPDATE SET
+                                 can_export_reports = EXCLUDED.can_export_reports,
+                                 can_edit_patient_ids = EXCLUDED.can_edit_patient_ids,
+                                 can_edit_targets = EXCLUDED.can_edit_targets,
+                                 can_manage_staff = EXCLUDED.can_manage_staff,
+                                 updated_at = now()""",
+                            (admin_id,
+                             bool(req.permissions.get("can_export_reports", False)),
+                             bool(req.permissions.get("can_edit_patient_ids", False)),
+                             bool(req.permissions.get("can_edit_targets", False)),
+                             bool(req.permissions.get("can_manage_staff", False)))
+                        )
+
+                    if has_all_districts is True:
+                        cur.execute("DELETE FROM admin_district_access WHERE admin_id = %s", (admin_id,))
+                    elif req.allowed_districts is not None:
+                        cur.execute("DELETE FROM admin_district_access WHERE admin_id = %s", (admin_id,))
+                        for dname in req.allowed_districts:
+                            if dname == "All":
+                                continue
+                            cur.execute(
+                                "SELECT id FROM districts WHERE LOWER(name) = LOWER(%s) OR LOWER(slug) = LOWER(%s) LIMIT 1",
+                                (dname.strip(), dname.strip())
+                            )
+                            drow = cur.fetchone()
+                            if not drow:
+                                raise HTTPException(status_code=400, detail=f"Invalid district name: '{dname}'")
+                            cur.execute(
+                                "INSERT INTO admin_district_access (admin_id, district_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                                (admin_id, drow[0])
+                            )
+                conn.commit()
+            except HTTPException:
+                conn.rollback()
+                raise
+            except Exception as e:
+                conn.rollback()
+                raise HTTPException(status_code=500, detail=f"Failed to update admin user: {e}")
+
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity("PERMISSIONS_UPDATED", f"Updated settings/permissions for admin user '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
@@ -260,8 +347,11 @@ async def delete_admin_user(user_id: str, admin: dict = Depends(require_super_ad
         clean_user = user_id.strip().lower()
         if clean_user == "admin":
             raise HTTPException(status_code=400, detail="Cannot delete master root admin account.")
-            
-        pg_delete_rows("admin_users", {"username": clean_user})
+
+        deleted_ok = pg_delete_rows("admin_users", {"username": clean_user})
+        if not deleted_ok:
+            raise HTTPException(status_code=500, detail=f"Failed to delete admin user '{clean_user}' — database write did not succeed.")
+
         actor_name = admin.get("name") or admin.get("username", "Super Admin")
         actor_id = admin.get("user_id") or admin.get("username", "admin")
         await log_admin_activity("ADMIN_USER_DELETED", f"Deleted admin user account '{clean_user}'", user_name=actor_name, user_id=actor_id, role="SUPER_ADMIN")
