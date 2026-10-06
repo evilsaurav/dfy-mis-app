@@ -450,7 +450,7 @@ async def fetch_district_notification_registry(clean_dist: str, months: int = 3)
             JOIN daily_field_reports r ON k.report_id = r.id
             WHERE (r.working_place = ANY(%s) OR r.district_id::text = ANY(%s))
               AND r.date_of_reporting >= %s
-              AND k.category IN ('notification_ids', 'notifications')
+              AND k.category::text IN ('notification_ids', 'notifications')
             ORDER BY r.date_of_reporting ASC, r.created_at ASC
         """
         relational_rows = pg_execute_raw(sql, [target_places, target_places, start_date], fetch=True) or []
