@@ -3,6 +3,7 @@ import { downloadOrShareCanvas } from '../canvasShare';
 import { feedCategoriesConfig, formatAuditTimestamp, TOP_PERFORMER_MESSAGES, canonicalizeDistrict, isOfficerNameMatch } from '../utils/districtHelpers';
 import { getPreviousMonth } from '../utils/operationalMonth';
 import { setCachedDashboardData } from '../adminCache';
+import { useAdminTA } from './useAdminTA';
 
 export function useAdminModals({
   month,
@@ -267,6 +268,18 @@ export function useAdminModals({
   // 20. Reports Studio
   const [showReportsStudio, setShowReportsStudio] = useState(false);
   const [reportsStudioTab, setReportsStudioTab] = useState("kpi_workbooks");
+
+  // 24. Travel Allowance
+  const [showTaModal, setShowTaModal] = useState(false);
+
+  const taHook = useAdminTA({
+    month,
+    currentUser,
+    authFetch,
+    getAdminToken,
+    showToast,
+    districts,
+  });
 
   // ==========================================
   // HANDLERS FOR ALL 24 ADMIN MODALS
@@ -2466,6 +2479,10 @@ export function useAdminModals({
 
     // Shared & Context
     districts, authFetch, getAdminToken, showToast,
-    isSuperAdmin: currentUser?.role === 'SUPER_ADMIN'
+    isSuperAdmin: currentUser?.role === 'SUPER_ADMIN',
+
+    // 24. Travel Allowance
+    showTaModal, setShowTaModal,
+    ...taHook,
   };
 }

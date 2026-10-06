@@ -26,6 +26,7 @@ import AdminEditIdModal from './modals/AdminEditIdModal';
 import DeleteDayReportModal from './modals/DeleteDayReportModal';
 import EditDayReportModal from './modals/EditDayReportModal';
 import ReportsStudioModal from './modals/ReportsStudioModal';
+import TravelAllowanceModal from './modals/TravelAllowanceModal';
 
 export default function AdminModals(props) {
   const { showAppGuideModal = props.showAppGuideModal } = props;
@@ -516,6 +517,64 @@ export default function AdminModals(props) {
         copyWhatsAppBulletin={props.copyWhatsAppBulletin}
         copiedBulletin={props.copiedBulletin || false}
         liveWhatsAppBulletin={props.liveWhatsAppBulletin}
+        onOpenTravelAllowance={() => props.setShowTaModal?.(true)}
+      />
+
+      {/* 25. Travel Allowance Modal */}
+      <TravelAllowanceModal
+        isOpen={props.showTaModal}
+        onClose={() => props.setShowTaModal(false)}
+        taMonth={props.taMonth}
+        setTaMonth={props.setTaMonth}
+        taDistrict={props.taDistrict}
+        setTaDistrict={props.setTaDistrict}
+        roster={props.roster}
+        selectedOfficer={props.selectedOfficer}
+        setSelectedOfficer={props.setSelectedOfficer}
+        viewMode={props.viewMode}
+        setViewMode={props.setViewMode}
+        ratePerKm={props.ratePerKm}
+        editingRate={props.editingRate}
+        setEditingRate={props.setEditingRate}
+        newRateInput={props.newRateInput}
+        setNewRateInput={props.setNewRateInput}
+        showContextMenu={props.showContextMenu}
+        setShowContextMenu={props.setShowContextMenu}
+        loadingRoster={props.loadingRoster}
+        isSubmitting={props.isSubmitting}
+        revertModalStaff={props.revertModalStaff}
+        setRevertModalStaff={props.setRevertModalStaff}
+        revertReason={props.revertReason}
+        setRevertReason={props.setRevertReason}
+        drilldownLog={props.drilldownLog}
+        setDrilldownLog={props.setDrilldownLog}
+        deductionAmount={props.deductionAmount}
+        setDeductionAmount={props.setDeductionAmount}
+        deductionReason={props.deductionReason}
+        setDeductionReason={props.setDeductionReason}
+        canPrefill={props.canPrefill}
+        prefillAccessList={props.prefillAccessList}
+        loadingAccessList={props.loadingAccessList}
+        showPrefillManageModal={props.showPrefillManageModal}
+        setShowPrefillManageModal={props.setShowPrefillManageModal}
+        fetchPrefillAccessList={props.fetchPrefillAccessList}
+        handleTogglePrefillAccess={props.handleTogglePrefillAccess}
+        isSuperAdmin={props.isSuperAdmin}
+        isSubAdmin={props.isSubAdmin || props.isSuperAdmin}
+        isIncharge={props.isIncharge || props.isSuperAdmin}
+        canEdit={props.canEdit}
+        fetchRoster={props.fetchRoster}
+        fetchRate={props.fetchRate}
+        handlePrefill={props.handlePrefill}
+        handleSaveLog={props.handleSaveLog}
+        handleSubmitRoster={props.handleSubmitRoster}
+        handlePassStaff={props.handlePassStaff}
+        handleRevertStaff={props.handleRevertStaff}
+        handleUnlockStaff={props.handleUnlockStaff}
+        handleUpdateRate={props.handleUpdateRate}
+        handleExportExcel={props.handleExportExcel}
+        districts={props.districts || []}
+        currentUser={props.currentUser}
       />
     </>
   );
