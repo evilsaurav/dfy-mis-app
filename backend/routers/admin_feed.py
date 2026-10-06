@@ -714,28 +714,29 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             except Exception as r_err:
                 logger.warning(f"Error updating daily_district_rollups in mock: {r_err}")
         
-        # 4. Audit Log entry
-        log_entry = {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "working_place": req.working_place,
-            "fo_name": req.fo_name,
-            "date": clean_date,
-            "category": cat_key,
-            "action": req.action,
-            "old_id": req.old_id,
-            "new_id": req.new_id,
-            "edited_by": req.edited_by
-        }
-        if is_mock_env and active_db and hasattr(active_db, "collection"):
-            try:
-                active_db.collection("id_edit_logs").add(log_entry)
-            except Exception:
-                pass
-        else:
-            try:
-                asyncio.create_task(asyncio.to_thread(lambda: db.collection("id_edit_logs").add(log_entry)))
-            except Exception:
-                pass
+
+        try:
+            log_staff_id = pg_rep.get("staff_id") if (isinstance(pg_rep, dict) and pg_rep.get("staff_id")) else None
+            log_district_id = pg_rep.get("district_id") if (isinstance(pg_rep, dict) and pg_rep.get("district_id")) else None
+            if not log_staff_id or not log_district_id:
+                try:
+                    res_s, res_d = resolve_staff_and_district_ids(req.fo_name, c_wp)
+                    log_staff_id = log_staff_id or res_s
+                    log_district_id = log_district_id or res_d
+                except Exception:
+                    pass
+
+            pg_execute_raw(
+                """INSERT INTO patient_id_edit_logs 
+                   (report_date, category, edited_by, staff_id, fo_name_snapshot, 
+                    district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                [clean_date, cat_key, str(req.edited_by or "Admin"), log_staff_id, req.fo_name, 
+                 log_district_id, c_wp, req.action, req.old_id or None, req.new_id or None, (doc_id if doc_id else None)]
+            )
+        except Exception as e:
+            print(f"[id_edit_logs insert error] {e}")
+
 
         if admin:
             actor_name = admin.get("name") or admin.get("username") or "Admin"
@@ -1992,37 +1993,43 @@ async def admin_edit_day_report(
                     all_added_ids.extend([{"cat": cat_key, "id": x} for x in added])
                     all_deleted_ids.extend([{"cat": cat_key, "id": x} for x in deleted])
 
-                    # Log each ID addition/deletion to id_edit_logs
-                    now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Log each ID addition/deletion to patient_id_edit_logs
+                    log_staff_id = target_snap.get("staff_id") if isinstance(target_snap, dict) else None
+                    log_district_id = target_snap.get("district_id") if isinstance(target_snap, dict) else None
+                    if not log_staff_id or not log_district_id:
+                        try:
+                            res_s, res_d = resolve_staff_and_district_ids(clean_fo, clean_wp)
+                            log_staff_id = log_staff_id or res_s
+                            log_district_id = log_district_id or res_d
+                        except Exception:
+                            pass
+                    snap_doc_id = (target_snap.get("legacy_doc_id") or str(target_snap.get("id"))) if isinstance(target_snap, dict) else None
+
                     for aid in added:
-                        log_entry = {
-                            "timestamp": now_str,
-                            "working_place": clean_wp,
-                            "district": clean_wp,
-                            "fo_name": clean_fo,
-                            "date": clean_date,
-                            "category": cat_key,
-                            "action": "add",
-                            "old_id": "",
-                            "new_id": aid,
-                            "edited_by": f"{admin_user} ({admin_role})"
-                        }
-                        await asyncio.to_thread(lambda l=log_entry: db.collection("id_edit_logs").add(l))
+                        try:
+                            pg_execute_raw(
+                                """INSERT INTO patient_id_edit_logs 
+                                   (report_date, category, edited_by, staff_id, fo_name_snapshot, 
+                                    district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
+                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                [clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
+                                 log_district_id, clean_wp, "add", None, aid, snap_doc_id]
+                            )
+                        except Exception as e:
+                            print(f"[id_edit_logs insert error] {e}")
 
                     for did in deleted:
-                        log_entry = {
-                            "timestamp": now_str,
-                            "working_place": clean_wp,
-                            "district": clean_wp,
-                            "fo_name": clean_fo,
-                            "date": clean_date,
-                            "category": cat_key,
-                            "action": "delete",
-                            "old_id": did,
-                            "new_id": "",
-                            "edited_by": f"{admin_user} ({admin_role})"
-                        }
-                        await asyncio.to_thread(lambda l=log_entry: db.collection("id_edit_logs").add(l))
+                        try:
+                            pg_execute_raw(
+                                """INSERT INTO patient_id_edit_logs 
+                                   (report_date, category, edited_by, staff_id, fo_name_snapshot, 
+                                    district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
+                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                                [clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
+                                 log_district_id, clean_wp, "delete", did, None, snap_doc_id]
+                            )
+                        except Exception as e:
+                            print(f"[id_edit_logs insert error] {e}")
 
                     if cat_key in metric_map:
                         diff = len(clean_new_ids) - len(old_ids)
@@ -2245,12 +2252,17 @@ async def get_recent_id_edits(
             return cached_result
 
         cutoff_dt = datetime.now() - timedelta(days=days_num)
-        cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-        docs = await asyncio.to_thread(lambda: list(db.collection("id_edit_logs")
-            .order_by("timestamp", direction="DESCENDING")
-            .limit(limit or 300)
-            .stream()))
+        rows = pg_execute_raw(
+            """SELECT id, occurred_at, fo_name_snapshot, district_name_snapshot, report_date, 
+                      category::text, action::text, old_id, new_id, edited_by 
+               FROM patient_id_edit_logs 
+               WHERE occurred_at >= %s 
+               ORDER BY occurred_at DESC 
+               LIMIT %s""",
+            [cutoff_dt, limit or 300],
+            fetch=True
+        ) or []
 
         edits = []
         allowed_c = [canonicalize_district(a).lower() for a in allowed_dists]
@@ -2269,31 +2281,25 @@ async def get_recent_id_edits(
             except Exception:
                 return str(ts_val)
 
-        for d in docs:
-            data = d.to_dict()
-            ts_str = str(data.get("timestamp", ""))
-            if ts_str and ts_str < cutoff_str:
-                continue
-
-            wp = data.get("working_place") or data.get("district", "")
-            c_wp = canonicalize_district(wp)
+        for row in rows:
+            dist_val = row.get("district_name_snapshot") or ""
+            c_wp = canonicalize_district(dist_val)
 
             if admin_role == "SUB_ADMIN" and allowed_dists and "All" not in allowed_dists:
-                if c_wp.lower() not in allowed_c and wp.lower() not in allowed_c:
+                if c_wp.lower() not in allowed_c and dist_val.lower() not in allowed_c:
                     continue
 
             edits.append({
-                "id": d.id,
-                "timestamp": format_log_to_ist(data.get("timestamp")),
-                "raw_timestamp": ts_str,
-                "fo_name": data.get("fo_name", ""),
-                "district": c_wp or wp,
-                "date": data.get("date", ""),
-                "category": data.get("category", ""),
-                "action": (data.get("action") or "edit").lower(),
-                "old_id": data.get("old_id", ""),
-                "new_id": data.get("new_id", ""),
-                "edited_by": data.get("edited_by", "Admin")
+                "id": row.get("id"),
+                "timestamp": format_log_to_ist(row.get("occurred_at")),
+                "fo_name": row.get("fo_name_snapshot") or "",
+                "district": c_wp or dist_val,
+                "date": str(row.get("report_date") or ""),
+                "category": row.get("category") or "",
+                "action": (row.get("action") or "edit").lower(),
+                "old_id": row.get("old_id") or "",
+                "new_id": row.get("new_id") or "",
+                "edited_by": row.get("edited_by") or "Admin"
             })
 
         result = {
