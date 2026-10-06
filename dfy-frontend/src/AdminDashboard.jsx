@@ -475,17 +475,9 @@ export default function AdminDashboard() {
     let cachedData = null;
     if (!forceRefresh) {
       try {
-        const rawCache = localStorage.getItem(cacheKey);
-        if (rawCache) cachedData = JSON.parse(rawCache);
-        if (!cachedData) {
-          cachedData = await getCachedDashboardData(cacheKey);
-        }
-      } catch (e) {
-        try {
-          cachedData = await getCachedDashboardData(cacheKey);
-        } catch (err) {
-          cachedData = null;
-        }
+        cachedData = await getCachedDashboardData(cacheKey);
+      } catch (err) {
+        cachedData = null;
       }
     } else {
       await clearCachedDashboardData(cacheKey);
@@ -495,7 +487,9 @@ export default function AdminDashboard() {
     if (cachedData && (!cachedData.records || !Array.isArray(cachedData.records) || cachedData.records.length === 0)) {
       try {
         localStorage.removeItem(cacheKey);
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Failed to evict legacy localStorage cache key:', cacheKey, e);
+      }
       await clearCachedDashboardData(cacheKey);
       cachedData = null;
     }
@@ -504,16 +498,27 @@ export default function AdminDashboard() {
     if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && !hasValidIds) {
       try {
         localStorage.removeItem(cacheKey);
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Failed to evict legacy localStorage cache key:', cacheKey, e);
+      }
       await clearCachedDashboardData(cacheKey);
       cachedData = null;
     }
+
+    const opMonth = typeof getOperationalMonth === 'function' ? getOperationalMonth().operationalMonth : month;
+    const isHistoricalMonth = month < opMonth;
 
     if (cachedData && Array.isArray(cachedData.records) && cachedData.records.length > 0 && hasValidIds && !forceRefresh) {
       setRawRecords(cachedData.records);
       if (cachedData.synced_at) setLastSyncedTime(cachedData.synced_at);
       if (!silent) setIsLoading(false);
       setSyncStatus('UP_TO_DATE');
+
+      // Past/Closed Month Guard: Historical months are finalized and immutable.
+      // If valid cached data exists in IndexedDB, return immediately without network overhead.
+      if (isHistoricalMonth) {
+        return true;
+      }
     } else {
       if (!silent) {
         setRawRecords([]);
@@ -565,9 +570,14 @@ export default function AdminDashboard() {
             const delSet = new Set(data.deleted_ids);
             recordsToUse = recordsToUse.filter(r => !delSet.has(r.id) && !delSet.has(r.doc_id));
             try {
-              setCachedDashboardData(cacheKey, { synced_at: data.synced_at || cachedData.synced_at, records: recordsToUse });
-              localStorage.setItem(cacheKey, JSON.stringify({ synced_at: data.synced_at || cachedData.synced_at, records: recordsToUse }));
-            } catch (e) {}
+              await setCachedDashboardData(cacheKey, {
+                synced_at: data.synced_at || cachedData.synced_at,
+                cached_at: Date.now(),
+                records: recordsToUse
+              });
+            } catch (storageErr) {
+              console.warn("IndexedDB storage notice:", storageErr);
+            }
           }
           setRawRecords(recordsToUse);
         }
@@ -591,14 +601,11 @@ export default function AdminDashboard() {
             try {
               setCachedDashboardData(cacheKey, {
                 synced_at: syncStamp,
+                cached_at: Date.now(),
                 records: updated
               });
-              localStorage.setItem(cacheKey, JSON.stringify({
-                synced_at: syncStamp,
-                records: updated
-              }));
             } catch (storageErr) {
-              console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+              console.warn("IndexedDB storage notice:", storageErr);
             }
           }
           return updated;
@@ -616,16 +623,13 @@ export default function AdminDashboard() {
         setSyncStatus('LIVE');
         if (newRecords.length > 0) {
           try {
-            setCachedDashboardData(cacheKey, {
+            await setCachedDashboardData(cacheKey, {
               synced_at: syncStamp,
+              cached_at: Date.now(),
               records: newRecords
             });
-            localStorage.setItem(cacheKey, JSON.stringify({
-              synced_at: syncStamp,
-              records: newRecords
-            }));
           } catch (storageErr) {
-            console.warn("Storage quota full, continuing with in-memory state:", storageErr);
+            console.warn("IndexedDB storage notice:", storageErr);
           }
         }
       }
@@ -746,7 +750,6 @@ export default function AdminDashboard() {
       loadTargets('All', month); 
       fetchStaffList(); 
       fetchActiveBroadcasts();
-      fetchTopPerformers(topPerformersPeriod, adminTargetViewMode);
     }
   }, [month, isAuthenticated]);
 
@@ -757,10 +760,10 @@ export default function AdminDashboard() {
   }, [isAuthenticated, topPerformersPeriod, adminTargetViewMode, fetchTopPerformers]);
 
   useEffect(() => {
-    if (isAuthenticated && selectedDistrict) {
+    if (isAuthenticated && selectedDistrict && activeMainTab === 'staff_pacing') {
       fetchPacingSettings(month, selectedDistrict);
     }
-  }, [selectedDistrict, isAuthenticated, month]);
+  }, [selectedDistrict, isAuthenticated, month, activeMainTab]);
 
   useEffect(() => {
     if (isAuthenticated && activeMainTab === 'district_benchmarks') {

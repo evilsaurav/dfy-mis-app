@@ -5672,7 +5672,7 @@ function App() {
         try {
           const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout for spotty 2G/3G
+          const timeoutId = setTimeout(() => controller.abort(), 9000); // 9.0s timeout to avoid false offline fallback on latent mobile connections
 
           const res = await fetch(`${API_BASE_URL}/verify-pin`, {
             method: "POST",

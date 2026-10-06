@@ -357,7 +357,7 @@ async def check_today_status(req: CheckStatusRequest):
                 res = {"status": "completed", "submission_count": 1, "data": dict(rows[0])}
             else:
                 for cid in candidate_ids:
-                    doc = pg_fetch_one("daily_field_reports", filters={"id": cid})
+                    doc = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": cid})
                     if doc:
                         res = {"status": "completed", "submission_count": 1, "data": doc}
                         break
@@ -385,7 +385,7 @@ async def check_today_status(req: CheckStatusRequest):
 
             try:
                 for ycid in yesterday_candidate_ids:
-                    ydoc = pg_fetch_one("daily_field_reports", filters={"id": ycid})
+                    ydoc = pg_fetch_one("daily_field_reports", filters={"legacy_doc_id": ycid})
                     if ydoc:
                         yd = ydoc
                         created_today = False
