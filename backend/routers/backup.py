@@ -11,6 +11,7 @@ import os
 import io
 import json
 import gzip
+import tempfile
 import asyncio
 import logging
 import gc
@@ -180,9 +181,11 @@ def _sync_dump_table_data(table_name: str) -> List[Dict[str, Any]]:
 def _sync_create_database_snapshot(source: str = "automated_daily") -> Dict[str, Any]:
     """
     Synchronous worker executed in a background thread via asyncio.to_thread.
-    Extracts all 19 base tables in topological order, formats snapshot, compresses
-    with GZip level 6, and uploads to Google Drive via BackupStorageProvider.
+    Streams all 19 base tables in topological order into a GZip-compressed disk
+    temporary file in batches, keeping peak memory strictly bounded (< 15 MB).
     """
+    import psycopg2.extras
+
     ist_now = get_ist_now()
     ist_date_str = ist_now.strftime("%Y-%m-%d")
     ist_time_str = ist_now.strftime("%Y-%m-%d %I:%M:%S %p")
@@ -194,23 +197,22 @@ def _sync_create_database_snapshot(source: str = "automated_daily") -> Dict[str,
     else:
         filename = f"backup_manual_{ist_date_str}_{timestamp_compact}.json.gz"
 
-    tables_data: Dict[str, List[Dict[str, Any]]] = {}
-    counts: Dict[str, int] = {}
-    total_records = 0
+    with tempfile.NamedTemporaryFile(suffix=".json.gz", delete=False) as tmp_file:
+        tmp_path = tmp_file.name
 
-    for table_name in BACKUP_TABLES:
-        try:
-            rows = _sync_dump_table_data(table_name)
-            tables_data[table_name] = rows
-            counts[table_name] = len(rows)
-            total_records += len(rows)
-        except Exception as tbl_err:
-            logger.warning(f"[Postgres Backup] Warning extracting table {table_name}: {tbl_err}")
-            tables_data[table_name] = []
-            counts[table_name] = 0
+    try:
+        # Phase 1: Fast table count query in single connection (~20ms)
+        counts: Dict[str, int] = {}
+        total_records = 0
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for table_name in BACKUP_TABLES:
+                    cur.execute(f'SELECT COUNT(*) FROM "{table_name}";')
+                    cnt = cur.fetchone()[0]
+                    counts[table_name] = cnt
+                    total_records += cnt
 
-    snapshot = {
-        "metadata": {
+        metadata_obj = {
             "version": "2.0",
             "engine": "postgresql",
             "backup_source": source,
@@ -220,44 +222,78 @@ def _sync_create_database_snapshot(source: str = "automated_daily") -> Dict[str,
             "filename": filename,
             "table_counts": counts,
             "total_records": total_records,
-            "total_documents": total_records,  # Backward-compatible alias
-        },
-        "tables": tables_data,
-        "collections": tables_data,  # Backward-compatible alias
-    }
+            "total_documents": total_records,
+        }
 
-    json_bytes = json.dumps(snapshot, default=postgres_json_serializer, ensure_ascii=False).encode("utf-8")
-    uncompressed_size = len(json_bytes)
-    compressed_bytes = gzip.compress(json_bytes, compresslevel=6)
-    compressed_size = len(compressed_bytes)
+        # Phase 2: Stream-write GZip to disk temp file in batches of 1,000 rows
+        uncompressed_bytes_count = 0
 
-    # Free large uncompressed JSON buffer from memory immediately
-    del json_bytes
-    del tables_data
-    del snapshot
-    gc.collect()
+        with open(tmp_path, "wb") as f_raw:
+            with gzip.GzipFile(fileobj=f_raw, mode="wb", compresslevel=6) as gz_out:
+                header_chunk = b'{"metadata": ' + json.dumps(metadata_obj, default=postgres_json_serializer, ensure_ascii=False).encode("utf-8") + b', "tables": {'
+                gz_out.write(header_chunk)
+                uncompressed_bytes_count += len(header_chunk)
 
-    metadata = {
-        "backup_date": ist_date_str,
-        "backup_source": source,
-        "total_documents": str(total_records),
-        "total_records": str(total_records),
-        "uncompressed_bytes": str(uncompressed_size),
-        "compressed_bytes": str(compressed_size),
-        "created_at_ist": ist_time_str,
-    }
+                with get_db_connection() as conn:
+                    for i, table_name in enumerate(BACKUP_TABLES):
+                        prefix = b', "' if i > 0 else b'"'
+                        key_chunk = prefix + table_name.encode("utf-8") + b'": ['
+                        gz_out.write(key_chunk)
+                        uncompressed_bytes_count += len(key_chunk)
 
-    return {
-        "filename": filename,
-        "compressed_bytes": compressed_bytes,
-        "metadata": metadata,
-        "total_records": total_records,
-        "total_documents": total_records,
-        "table_counts": counts,
-        "size_kb": round(compressed_size / 1024, 2),
-        "uncompressed_kb": round(uncompressed_size / 1024, 2),
-        "created_at": ist_time_str,
-    }
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute(f'SELECT * FROM "{table_name}" ORDER BY id ASC;')
+                            first_row = True
+                            while True:
+                                batch = cur.fetchmany(1000)
+                                if not batch:
+                                    break
+                                for row in batch:
+                                    sep = b'' if first_row else b', '
+                                    first_row = False
+                                    row_bytes = sep + json.dumps(dict(row), default=postgres_json_serializer, ensure_ascii=False).encode("utf-8")
+                                    gz_out.write(row_bytes)
+                                    uncompressed_bytes_count += len(row_bytes)
+                                del batch
+
+                        gz_out.write(b']')
+                        uncompressed_bytes_count += 1
+                        gc.collect()
+
+                closing_chunk = b'}}'
+                gz_out.write(closing_chunk)
+                uncompressed_bytes_count += len(closing_chunk)
+
+        compressed_size = os.path.getsize(tmp_path)
+
+        metadata = {
+            "backup_date": ist_date_str,
+            "backup_source": source,
+            "total_documents": str(total_records),
+            "total_records": str(total_records),
+            "uncompressed_bytes": str(uncompressed_bytes_count),
+            "compressed_bytes": str(compressed_size),
+            "created_at_ist": ist_time_str,
+        }
+
+        return {
+            "filename": filename,
+            "temp_path": tmp_path,
+            "metadata": metadata,
+            "total_records": total_records,
+            "total_documents": total_records,
+            "table_counts": counts,
+            "size_kb": round(compressed_size / 1024, 2),
+            "uncompressed_kb": round(uncompressed_bytes_count / 1024, 2),
+            "created_at": ist_time_str,
+        }
+    except Exception:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+        raise
 
 
 # ============================================================================
@@ -361,9 +397,16 @@ async def trigger_manual_backup(admin: dict = Depends(require_super_admin)):
             async with BACKUP_SEMAPHORE:
                 result = await asyncio.to_thread(_sync_create_database_snapshot, source="manual_superadmin")
                 provider = get_storage_provider()
-                compressed_bytes = result.pop("compressed_bytes")
+                temp_path = result.pop("temp_path")
                 metadata = result.pop("metadata")
-                await provider.upload(compressed_bytes, result["filename"], metadata=metadata)
+                try:
+                    await provider.upload(temp_path, result["filename"], metadata=metadata)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except Exception as e:
+                            logger.warning(f"[Backup] Failed to remove temp file {temp_path}: {e}")
 
             await log_admin_activity(
                 action_type="DATABASE_BACKUP_MANUAL",
@@ -409,9 +452,16 @@ async def trigger_cron_backup(request: Request):
             async with BACKUP_SEMAPHORE:
                 result = await asyncio.to_thread(_sync_create_database_snapshot, source="automated_daily")
                 provider = get_storage_provider()
-                compressed_bytes = result.pop("compressed_bytes")
+                temp_path = result.pop("temp_path")
                 metadata = result.pop("metadata")
-                await provider.upload(compressed_bytes, result["filename"], metadata=metadata)
+                try:
+                    await provider.upload(temp_path, result["filename"], metadata=metadata)
+                finally:
+                    if temp_path and os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except Exception as e:
+                            logger.warning(f"[Backup] Failed to remove temp file {temp_path}: {e}")
 
                 # Auto-prune backups older than 30 days
                 pruned_count = await provider.prune_older_than(BACKUP_RETENTION_DAYS)

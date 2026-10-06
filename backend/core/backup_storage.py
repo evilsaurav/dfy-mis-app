@@ -16,8 +16,8 @@ import logging
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
-from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
+from typing import List, Dict, Any, Optional, Union
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload, MediaFileUpload
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger("backup_storage")
@@ -59,12 +59,12 @@ class BackupStorageProvider(ABC):
     @abstractmethod
     async def upload(
         self,
-        file_bytes: bytes,
+        file_data: Union[bytes, str],
         filename: str,
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
         """
-        Uploads archive bytes.
+        Uploads archive bytes or file path.
         Returns the remote file ID string.
         Raises BackupStorageError on failure.
         """
@@ -274,7 +274,7 @@ class GoogleDriveProvider(BackupStorageProvider):
     # -------------------------------------------------------------------------
     def _upload_sync(
         self,
-        file_bytes: bytes,
+        file_data: Union[bytes, str],
         filename: str,
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
@@ -289,13 +289,20 @@ class GoogleDriveProvider(BackupStorageProvider):
             file_metadata["description"] = json.dumps(metadata)
 
         def _do_upload() -> str:
-            # Recreate buffer on every attempt so retries read from offset 0
-            bio = io.BytesIO(file_bytes)
-            media = MediaIoBaseUpload(
-                bio,
-                mimetype="application/gzip",
-                resumable=False,
-            )
+            # Recreate buffer/upload object on every attempt so retries read from offset 0
+            if isinstance(file_data, str) and os.path.exists(file_data):
+                media = MediaFileUpload(
+                    file_data,
+                    mimetype="application/gzip",
+                    resumable=False,
+                )
+            else:
+                bio = io.BytesIO(file_data)
+                media = MediaIoBaseUpload(
+                    bio,
+                    mimetype="application/gzip",
+                    resumable=False,
+                )
             created = service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -418,12 +425,12 @@ class GoogleDriveProvider(BackupStorageProvider):
 
     async def upload(
         self,
-        file_bytes: bytes,
+        file_data: Union[bytes, str],
         filename: str,
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Uploads archive bytes asynchronously via worker thread."""
-        return await asyncio.to_thread(self._upload_sync, file_bytes, filename, metadata)
+        """Uploads archive bytes or file path asynchronously via worker thread."""
+        return await asyncio.to_thread(self._upload_sync, file_data, filename, metadata)
 
     async def list_backups(self) -> List[Dict[str, Any]]:
         """Lists available backup archives asynchronously via worker thread."""
