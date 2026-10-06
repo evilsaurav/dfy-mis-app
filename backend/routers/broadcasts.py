@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from backend.core.database import db
 from backend.core.cache import cache
 from backend.core.security import get_current_admin
-from backend.core.helpers import log_admin_activity
+from backend.core.helpers import log_admin_activity, get_ist_now
 from backend.core.supabase import (
     pg_query_table,
     pg_fetch_one,
@@ -66,11 +66,13 @@ async def create_broadcast(req: BroadcastCreateReq, admin: dict = Depends(get_cu
             "target_districts": target_dists,
             "created_by_user": req.created_by_user or "Admin",
             "created_by_role": role,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "created_at": get_ist_now().replace(microsecond=0).isoformat(),
             "is_active": True
         }
 
-        pg_upsert_row("broadcast_alerts", doc_data, conflict_columns=["id"])
+        ok = pg_upsert_row("broadcast_alerts", doc_data, conflict_columns=["id"])
+        if not ok:
+            raise HTTPException(status_code=500, detail="Failed to save broadcast to database.")
         active_db = get_active_db()
         if active_db and hasattr(active_db, "collection"):
             try:
