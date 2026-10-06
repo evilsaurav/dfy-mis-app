@@ -646,7 +646,7 @@ async def submit_daily_report(report: DailyActivityReport):
         payload = report.model_dump(exclude_unset=True) if hasattr(report, "model_dump") else report.dict(exclude_unset=True)
         payload["notification_ids"] = valid_new_notifs
         payload["status"] = "completed"
-        payload["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        payload["timestamp_completed"] = get_ist_now().replace(microsecond=0).isoformat()
         payload["submission_count"] = 1
         
         # Storage Guard: Prevent massive base64 strings from inflating document size
@@ -1156,7 +1156,7 @@ async def submit_daily_report(report: DailyActivityReport):
         cached_payload = dict(payload)
         cached_payload["id"] = doc_id
         cached_payload["doc_id"] = doc_id
-        cached_payload["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        cached_payload["timestamp_completed"] = get_ist_now().replace(microsecond=0).isoformat()
         cached_payload["submitted_at"] = cached_payload["timestamp_completed"]
 
         record_report_mutation("submit", doc_id, district=report.working_place, date=report.date_of_reporting, report_data=cached_payload)

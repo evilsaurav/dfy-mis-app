@@ -384,7 +384,7 @@ def record_report_mutation(
                 "doc_id": str(doc_id).strip(),
                 "id": str(doc_id).strip(),
                 "district": clean_dist,
-                "deleted_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+                "deleted_at": get_ist_now().replace(microsecond=0).isoformat()
             })
             if len(DELETED_REPORTS_TOMBSTONES) > 500:
                 DELETED_REPORTS_TOMBSTONES.pop(0)

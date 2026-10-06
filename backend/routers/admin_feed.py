@@ -778,7 +778,7 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
         data.update(doc_update)
         data["id"] = doc_id
         data["doc_id"] = doc_id
-        data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        data["last_edited_at"] = get_ist_now().replace(microsecond=0).isoformat()
         record_report_mutation("edit", doc_id, district=c_wp, date=clean_date, report_data=data)
 
         # 5. Evict only relevant cache keys
@@ -1093,7 +1093,7 @@ async def admin_feed_officer_data(
                 "pin": "ADMIN_FEED",
                 "status": "completed",
                 "timestamp": now_iso,
-                "timestamp_completed": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp_completed": get_ist_now().replace(microsecond=0).isoformat(),
                 "submission_count": 1,
                 "admin_fed": True,
                 "fed_by": admin_user,
@@ -1430,7 +1430,7 @@ async def admin_feed_officer_data(
 
         if new_report_created:
             feed_cached = dict(doc_data)
-            feed_cached["timestamp_completed"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+            feed_cached["timestamp_completed"] = get_ist_now().replace(microsecond=0).isoformat()
             feed_cached["submitted_at"] = feed_cached["timestamp_completed"]
         else:
             feed_cached = dict(existing_data)
@@ -1438,7 +1438,7 @@ async def admin_feed_officer_data(
 
         feed_cached["id"] = doc_id
         feed_cached["doc_id"] = doc_id
-        feed_cached["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        feed_cached["last_edited_at"] = get_ist_now().replace(microsecond=0).isoformat()
         record_report_mutation("feed", doc_id, district=clean_wp, date=clean_date, report_data=feed_cached)
         if doc_id:
             cache.delete(f"status_{doc_id}")
@@ -1913,7 +1913,7 @@ async def admin_edit_day_report(
         }
 
         doc_update = {
-            "last_edited_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_edited_at": get_ist_now().replace(microsecond=0).isoformat(),
             "last_edited_by": admin_user,
             "last_edited_role": admin_role
         }
@@ -2152,7 +2152,7 @@ async def admin_edit_day_report(
             try:
                 rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
                 set_clauses = ["last_updated = %s"]
-                vals = [get_ist_now().strftime("%Y-%m-%d %H:%M:%S")]
+                vals = [get_ist_now().replace(microsecond=0).isoformat()]
                 for mk, dv in metric_deltas.items():
                     set_clauses.append(f"{mk} = GREATEST(0, COALESCE({mk}, 0) + %s)")
                     vals.append(dv)
@@ -2174,7 +2174,7 @@ async def admin_edit_day_report(
 
         # 6. Invalidate caches and record tombstones (Scoped)
         old_wp = canonicalize_district(old_data.get("working_place", ""))
-        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_ist_now().replace(microsecond=0).isoformat()
         for d in matching_docs:
             d_safe_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
             updated_report = dict(old_data)

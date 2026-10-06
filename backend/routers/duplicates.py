@@ -423,7 +423,7 @@ async def repair_duplicate_notifications(
                 try:
                     pg_execute_raw(
                         "UPDATE daily_field_reports SET legacy_count_notifications = %s, last_repaired_at = %s, last_repaired_by = %s WHERE id = %s",
-                        [len(filtered), get_ist_now().strftime("%Y-%m-%d %H:%M:%S"), admin.get("username") or admin.get("user_id") or "admin", int_report_id]
+                        [len(filtered), get_ist_now().replace(microsecond=0).isoformat(), admin.get("username") or admin.get("user_id") or "admin", int_report_id]
                     )
                 except Exception as upd_err:
                     print(f"[repair-duplicate PG parent update notice]: {upd_err}")
@@ -432,7 +432,7 @@ async def repair_duplicate_notifications(
                 if doc_ref and hasattr(doc_ref, "update"):
                     await asyncio.to_thread(lambda: doc_ref.update({
                         "notification_ids": filtered,
-                        "last_repaired_at": get_ist_now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "last_repaired_at": get_ist_now().replace(microsecond=0).isoformat(),
                         "last_repaired_by": admin.get("username") or admin.get("user_id") or "admin"
                     }))
             except Exception:
@@ -479,7 +479,7 @@ async def repair_duplicate_notifications(
             report_data["notifications"] = len(filtered)
             report_data["id"] = clean_doc_id
             report_data["doc_id"] = clean_doc_id
-            report_data["last_edited_at"] = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+            report_data["last_edited_at"] = get_ist_now().replace(microsecond=0).isoformat()
             record_report_mutation("repair", clean_doc_id, district=doc_district, date=report_date, report_data=report_data)
             cache.delete(f"status_{clean_doc_id}")
             evict_officer_profile_cache(doc_district, report_data.get("fo_name", ""), report_date)

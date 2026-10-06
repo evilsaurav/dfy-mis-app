@@ -578,7 +578,7 @@ async def delete_staff_member(req: DeleteStaffReq, admin: dict = Depends(get_cur
         
         doc_id = f"{clean_dist}_{clean_name}".replace(" ", "").lower()
         today_str = get_ist_now().strftime("%Y-%m-%d")
-        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_ist_now().replace(microsecond=0).isoformat()
 
         existing_pg = pg_fetch_one("staff_directory", filters={"slug": doc_id})
         if not existing_pg:
@@ -728,7 +728,7 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
             raise HTTPException(status_code=404, detail=f"Staff record for '{clean_fo}' in '{clean_dist}' not found.")
 
         today_str = get_ist_now().strftime("%Y-%m-%d")
-        now_str = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = get_ist_now().replace(microsecond=0).isoformat()
 
         status_norm = req.status.strip().lower()
         if status_norm == "inactive":

@@ -1330,7 +1330,7 @@ async def mark_leave(req: MarkLeaveReq, admin: dict = Depends(get_current_admin)
         actor_name = admin.get("name") or admin.get("username") or "Admin"
         actor_id = admin.get("user_id") or admin.get("username") or "admin"
         actor_role = admin.get("role", "SUB_ADMIN")
-        marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        marked_at = get_ist_now().replace(microsecond=0).isoformat()
 
         # Resolve foreign keys (staff_id, district_id) for relational schema
         staff_id, district_id = resolve_staff_and_district_ids(req.fo_name.strip(), clean_dist)
@@ -1478,7 +1478,7 @@ async def add_attendance_remark(req: AttendanceRemarkReq, admin: dict = Depends(
         actor_name = admin.get("name") or admin.get("username") or "Admin"
         actor_id = admin.get("user_id") or admin.get("username") or "admin"
         actor_role = admin.get("role", "SUB_ADMIN")
-        marked_at = get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
+        marked_at = get_ist_now().replace(microsecond=0).isoformat()
 
         doc_id = f"{clean_date}_{clean_dist}_{clean_fo}"
 
