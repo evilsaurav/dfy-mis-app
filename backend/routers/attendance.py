@@ -53,7 +53,6 @@ from backend.core.styles import (
     EXCEL_THIN_BORDER,
     EXCEL_TOTAL_ROW_BORDER,
 )
-from backend.routers.backup import ensure_daily_backup_scheduled
 
 router = APIRouter(tags=["attendance"])
 logger = logging.getLogger("attendance")
@@ -501,7 +500,6 @@ async def get_today_attendance(
     admin: dict = Depends(get_current_admin)
 ):
     try:
-        ensure_daily_backup_scheduled()
         target_date = date.strip() if date and date.strip() else get_ist_now().strftime("%Y-%m-%d")
             
         allowed_dist_set = None

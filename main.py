@@ -90,16 +90,7 @@ from backend.routers.targets import (
     update_targets_bulk,
     ensure_district_targets_table_exists
 )
-from backend.routers.backup import (
-    router as backup_router,
-    BackupRestoreReq,
-    ensure_daily_backup_scheduled,
-    check_and_trigger_daily_backup,
-    get_backup_status,
-    trigger_manual_backup,
-    download_backup_file,
-    restore_database_backup
-)
+from backend.routers.backup import router as backup_router
 from backend.routers.broadcasts import (
     router as broadcasts_router,
     BroadcastCreateReq,
@@ -272,7 +263,6 @@ async def on_app_startup_tasks():
     ensure_database_indexes_exist()
     await init_default_super_admin()
     asyncio.create_task(prune_expired_audit_logs(retention_days=30))
-    ensure_daily_backup_scheduled()
 
 @app.on_event("shutdown")
 def on_app_shutdown_tasks():

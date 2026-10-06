@@ -63,7 +63,6 @@ from backend.core.styles import (
     EXCEL_THIN_BORDER,
     EXCEL_TOTAL_ROW_BORDER
 )
-from backend.routers.backup import ensure_daily_backup_scheduled
 from backend.routers.targets import get_targets
 from backend.core.supabase import (
     get_postgres_connection,
@@ -565,7 +564,6 @@ async def get_district_90day_notified_ids(
 @router.post("/submit-daily-report")
 async def submit_daily_report(report: DailyActivityReport):
     try:
-        ensure_daily_backup_scheduled()
         if report.working_place:
             report.working_place = canonicalize_district(report.working_place.strip())
         if report.fo_name:
