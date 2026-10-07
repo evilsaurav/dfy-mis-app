@@ -189,21 +189,45 @@ def calculate_log_totals(
     total_km = 0.0
     for d in days:
         if isinstance(d, dict):
+            m = float(d.get("morning_km") or 0.0)
+            e = float(d.get("evening_km") or 0.0)
+            calc_diff = max(0.0, e - m)
+            is_manual = bool(d.get("is_manual_override") or d.get("is_override"))
+            manual_t = d.get("manual_total_km")
             t = d.get("total_km")
-            if t is not None:
+
+            if is_manual and manual_t is not None and str(manual_t).strip() != "":
+                try:
+                    total_km += max(0.0, float(manual_t))
+                except (ValueError, TypeError):
+                    total_km += calc_diff
+            elif t is not None and float(t or 0.0) > 0:
                 try:
                     total_km += float(t)
                 except (ValueError, TypeError):
-                    pass
+                    total_km += calc_diff
             else:
-                m = float(d.get("morning_km") or 0.0)
-                e = float(d.get("evening_km") or 0.0)
-                total_km += max(0.0, e - m)
-        elif hasattr(d, "total_km") and getattr(d, "total_km") is not None:
-            try:
-                total_km += float(getattr(d, "total_km"))
-            except (ValueError, TypeError):
-                pass
+                total_km += calc_diff
+        elif hasattr(d, "total_km"):
+            m = float(getattr(d, "morning_km", 0.0) or 0.0)
+            e = float(getattr(d, "evening_km", 0.0) or 0.0)
+            calc_diff = max(0.0, e - m)
+            is_manual = bool(getattr(d, "is_manual_override", False) or getattr(d, "is_override", False))
+            manual_t = getattr(d, "manual_total_km", None)
+            t = getattr(d, "total_km", None)
+
+            if is_manual and manual_t is not None and str(manual_t).strip() != "":
+                try:
+                    total_km += max(0.0, float(manual_t))
+                except (ValueError, TypeError):
+                    total_km += calc_diff
+            elif t is not None and float(t or 0.0) > 0:
+                try:
+                    total_km += float(t)
+                except (ValueError, TypeError):
+                    total_km += calc_diff
+            else:
+                total_km += calc_diff
         else:
             m = float(getattr(d, "morning_km", 0.0) or 0.0)
             e = float(getattr(d, "evening_km", 0.0) or 0.0)
@@ -273,18 +297,24 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
         d = day_map.get(day, {})
         m_km = float(d.get("morning_km") if d.get("morning_km") is not None else (d.get("initial_reading") or 0.0))
         e_km = float(d.get("evening_km") if d.get("evening_km") is not None else (d.get("final_reading") or 0.0))
+        calc_diff = max(0.0, e_km - m_km)
+        override = bool(d.get("is_manual_override") or d.get("is_override") or False)
+        manual_t = d.get("manual_total_km")
 
-        if d.get("total_km") is not None:
+        if override and manual_t is not None and str(manual_t).strip() != "":
+            try:
+                t_km = max(0.0, float(manual_t))
+            except (ValueError, TypeError):
+                t_km = calc_diff
+        elif d.get("total_km") is not None and float(d.get("total_km") or 0.0) > 0:
             try:
                 t_km = float(d.get("total_km"))
             except (ValueError, TypeError):
-                t_km = max(0.0, e_km - m_km)
+                t_km = calc_diff
         else:
-            t_km = max(0.0, e_km - m_km)
-
+            t_km = calc_diff
         visited = str(d.get("visited_names") or d.get("to_location") or d.get("places_visited") or "")
         purpose = str(d.get("purpose") or d.get("remarks") or "")
-        override = bool(d.get("is_manual_override") or d.get("is_override") or False)
         admin_remarks = str(d.get("admin_remarks") or "")
 
         normalized.append({
@@ -1375,10 +1405,25 @@ def save_travel_allowance_log(
                 d_date = str(d.get("date", f"{req.month}-{d_day:02d}"))
                 m_km = float(d.get("morning_km") or 0.0)
                 e_km = float(d.get("evening_km") or 0.0)
-                t_km = float(d.get("total_km") if d.get("total_km") is not None else max(0.0, e_km - m_km))
+                calc_diff = max(0.0, e_km - m_km)
+                is_over = bool(d.get("is_manual_override", False) or d.get("is_override", False))
+                manual_t = d.get("manual_total_km")
+
+                if is_over and manual_t is not None and str(manual_t).strip() != "":
+                    try:
+                        t_km = max(0.0, float(manual_t))
+                    except (ValueError, TypeError):
+                        t_km = calc_diff
+                elif d.get("total_km") is not None and float(d.get("total_km") or 0.0) > 0:
+                    try:
+                        t_km = float(d.get("total_km"))
+                    except (ValueError, TypeError):
+                        t_km = calc_diff
+                else:
+                    t_km = calc_diff
+
                 v_names = str(d.get("visited_names") or "")
                 purp = str(d.get("purpose") or "")
-                is_over = bool(d.get("is_manual_override", False))
                 rem = str(d.get("admin_remarks") or "")
 
                 pg_execute_raw(

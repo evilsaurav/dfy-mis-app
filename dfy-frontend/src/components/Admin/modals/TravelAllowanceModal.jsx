@@ -112,19 +112,41 @@ export default function TravelAllowanceModal({
     // Populate drilldown log from officer days, normalizing array or dictionary
     let days = [];
     if (Array.isArray(officer?.days) && officer.days.length > 0) {
-      days = officer.days;
+      days = officer.days.map((d, idx) => {
+        const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
+        const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
+        const diff = Math.max(0, e - m);
+        const tKm = (d.total_km != null && parseFloat(d.total_km) > 0) ? parseFloat(d.total_km) : diff;
+        return {
+          day: d.day || idx + 1,
+          date: d.date || '',
+          morning_km: d.morning_km ?? d.initial_reading ?? '',
+          evening_km: d.evening_km ?? d.final_reading ?? '',
+          total_km: tKm,
+          visited_names: d.visited_names ?? d.to_location ?? '',
+          purpose: d.purpose ?? d.remarks ?? '',
+          is_manual_override: !!(d.is_manual_override || d.is_override),
+          admin_remarks: d.admin_remarks ?? '',
+        };
+      });
     } else if (officer?.days && typeof officer.days === 'object') {
-      days = Object.entries(officer.days).map(([k, v], idx) => ({
-        day: v.day || idx + 1,
-        date: v.date || k,
-        morning_km: v.morning_km ?? v.initial_reading ?? '',
-        evening_km: v.evening_km ?? v.final_reading ?? '',
-        total_km: v.total_km ?? '',
-        visited_names: v.visited_names ?? v.to_location ?? '',
-        purpose: v.purpose ?? v.remarks ?? '',
-        is_manual_override: !!(v.is_manual_override || v.is_override),
-        admin_remarks: v.admin_remarks ?? '',
-      }));
+      days = Object.entries(officer.days).map(([k, v], idx) => {
+        const m = parseFloat(v.morning_km ?? v.initial_reading ?? 0) || 0;
+        const e = parseFloat(v.evening_km ?? v.final_reading ?? 0) || 0;
+        const diff = Math.max(0, e - m);
+        const tKm = (v.total_km != null && parseFloat(v.total_km) > 0) ? parseFloat(v.total_km) : diff;
+        return {
+          day: v.day || idx + 1,
+          date: v.date || k,
+          morning_km: v.morning_km ?? v.initial_reading ?? '',
+          evening_km: v.evening_km ?? v.final_reading ?? '',
+          total_km: tKm,
+          visited_names: v.visited_names ?? v.to_location ?? '',
+          purpose: v.purpose ?? v.remarks ?? '',
+          is_manual_override: !!(v.is_manual_override || v.is_override),
+          admin_remarks: v.admin_remarks ?? '',
+        };
+      });
     } else {
       days = Array.from({ length: 31 }, (_, i) => ({
         day: i + 1,
@@ -148,9 +170,22 @@ export default function TravelAllowanceModal({
   const handleDrilldownFieldChange = (dayIndex, field, value) => {
     setDrilldownLog((prev) => {
       const updated = [...prev];
+      const currentDay = updated[dayIndex] || {};
       const isOverrideField = ['morning_km', 'evening_km', 'visited_names', 'purpose'].includes(field);
-      const isManual = field === 'is_manual_override' ? Boolean(value) : (isOverrideField ? true : Boolean(updated[dayIndex]?.is_manual_override));
-      updated[dayIndex] = { ...updated[dayIndex], [field]: value, is_manual_override: isManual };
+      const isManual = field === 'is_manual_override' ? Boolean(value) : (isOverrideField ? true : Boolean(currentDay.is_manual_override));
+
+      const newMorning = field === 'morning_km' ? value : currentDay.morning_km;
+      const newEvening = field === 'evening_km' ? value : currentDay.evening_km;
+      const mKm = parseFloat(newMorning) || 0;
+      const eKm = parseFloat(newEvening) || 0;
+      const calculatedTotalKm = Math.max(0, eKm - mKm);
+
+      updated[dayIndex] = {
+        ...currentDay,
+        [field]: value,
+        is_manual_override: isManual,
+        total_km: calculatedTotalKm,
+      };
       return updated;
     });
   };
