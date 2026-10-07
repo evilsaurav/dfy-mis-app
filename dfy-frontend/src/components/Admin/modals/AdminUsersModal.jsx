@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 
 export default function AdminUsersModal({
   show,
@@ -9,8 +9,40 @@ export default function AdminUsersModal({
   userFormModal,
   setUserFormModal,
   saveAdminUser,
-  staffDirectory = {}
+  staffDirectory = {},
+  isSuperAdmin,
+  prefillAccessList = [],
+  fetchPrefillAccessList,
+  handleTogglePrefillAccess
 }) {
+  const [isUpdatingPrefill, setIsUpdatingPrefill] = useState(false);
+
+  useEffect(() => {
+    if (show && isSuperAdmin && fetchPrefillAccessList) {
+      fetchPrefillAccessList();
+    }
+  }, [show, isSuperAdmin, fetchPrefillAccessList]);
+
+  const targetAdmin = (prefillAccessList || []).find(
+    (p) => (userFormModal?.id && p.id === userFormModal.id) ||
+           (userFormModal?.username && p.username && p.username.toLowerCase() === userFormModal.username.toLowerCase()) ||
+           (userFormModal?.user_id && p.user_id && p.user_id.toLowerCase() === userFormModal.user_id.toLowerCase())
+  );
+  const currentCanPrefill = userFormModal?.mode === 'create' ? false : Boolean(targetAdmin?.can_prefill);
+
+  const handleTogglePrefill = async () => {
+    if (userFormModal?.mode === 'create' || !isSuperAdmin) return;
+    const targetAdminId = userFormModal?.id || targetAdmin?.id;
+    if (!targetAdminId) return;
+
+    setIsUpdatingPrefill(true);
+    try {
+      await handleTogglePrefillAccess?.(targetAdminId, currentCanPrefill);
+    } finally {
+      setIsUpdatingPrefill(false);
+    }
+  };
+
   if (!show) return null;
 
   return (
@@ -87,8 +119,14 @@ export default function AdminUsersModal({
                           {u.name}
                         </td>
                         <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${u.role === 'SUPER_ADMIN' ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' : 'bg-slate-100 text-slate-700 border border-slate-200'}`}>
-                            {u.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                            u.role === 'SUPER_ADMIN'
+                              ? 'bg-indigo-100 text-indigo-800 border border-indigo-200'
+                              : u.role === 'MAIN_INCHARGE'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700 border border-slate-200'
+                          }`}>
+                            {u.role === 'SUPER_ADMIN' ? '👑 Super Admin' : u.role === 'MAIN_INCHARGE' ? '🎖️ Incharge' : '🛡️ Sub Admin'}
                           </span>
                         </td>
                         <td className="py-3 px-3">
@@ -102,6 +140,8 @@ export default function AdminUsersModal({
                           <div className="flex flex-wrap gap-1">
                             {u.role === 'SUPER_ADMIN' ? (
                               <span className="bg-emerald-50 text-emerald-700 text-[10px] font-bold px-1.5 py-0.2 rounded border border-emerald-200">Full Master Access</span>
+                            ) : u.role === 'MAIN_INCHARGE' ? (
+                              <span className="bg-amber-50 text-amber-700 text-[10px] font-bold px-1.5 py-0.2 rounded border border-amber-200">TA Approval & Statewide Review</span>
                             ) : (
                               <>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${u.permissions?.can_edit_targets ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-slate-100 text-slate-400 line-through border-slate-200'}`}>Targets</span>
@@ -122,6 +162,7 @@ export default function AdminUsersModal({
                               onClick={() => {
                                 setUserFormModal({
                                   mode: 'edit',
+                                  id: u.id,
                                   user_id: u.user_id || u.username,
                                   username: u.username,
                                   name: u.name || '',
@@ -229,62 +270,88 @@ export default function AdminUsersModal({
                 <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1">Account Role</label>
                 <select
                   value={userFormModal.role}
-                  onChange={(e) => setUserFormModal({ ...userFormModal, role: e.target.value })}
+                  onChange={(e) => {
+                    const newRole = e.target.value;
+                    setUserFormModal({
+                      ...userFormModal,
+                      role: newRole,
+                      allowed_districts: (newRole === 'SUPER_ADMIN' || newRole === 'MAIN_INCHARGE') ? ['All'] : userFormModal.allowed_districts
+                    });
+                  }}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="SUB_ADMIN">Sub Admin / District MIS (Restricted)</option>
+                  <option value="MAIN_INCHARGE">Incharge / State Coordinator (TA Approver)</option>
                   <option value="SUPER_ADMIN">Super Admin (Full Master Authority)</option>
                 </select>
               </div>
 
               {/* Permitted Districts */}
-              <div>
-                <div className="flex justify-between items-center mb-1.5">
-                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Permitted Districts</label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (userFormModal.allowed_districts.includes('All')) {
-                        setUserFormModal({ ...userFormModal, allowed_districts: [] });
-                      } else {
-                        setUserFormModal({ ...userFormModal, allowed_districts: ['All'] });
-                      }
-                    }}
-                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
-                  >
-                    {userFormModal.allowed_districts.includes('All') ? 'Deselect All' : 'Select All (Statewide)'}
-                  </button>
+              {userFormModal.role === 'MAIN_INCHARGE' ? (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Permitted Districts</label>
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-900 flex items-center gap-2">
+                    <span>🎖️</span>
+                    <span>Statewide Access (All Districts) — required for this role</span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-50 rounded-xl border border-slate-200 custom-scrollbar">
-                  {Object.keys(staffDirectory).sort().map(d => {
-                    const isChecked = userFormModal.allowed_districts.includes('All') || userFormModal.allowed_districts.includes(d);
-                    return (
-                      <label key={d} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            let curr = userFormModal.allowed_districts.includes('All') 
-                              ? Object.keys(staffDirectory) 
-                              : [...userFormModal.allowed_districts];
-                            if (e.target.checked) {
-                              if (!curr.includes(d)) curr.push(d);
-                            } else {
-                              curr = curr.filter(x => x !== d && x !== 'All');
-                            }
-                            setUserFormModal({ ...userFormModal, allowed_districts: curr });
-                          }}
-                          className="rounded text-indigo-600 focus:ring-indigo-500"
-                        />
-                        <span className="truncate">{d}</span>
-                      </label>
-                    );
-                  })}
+              ) : userFormModal.role === 'SUPER_ADMIN' ? (
+                <div>
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Permitted Districts</label>
+                  <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs font-bold text-indigo-900 flex items-center gap-2">
+                    <span>👑</span>
+                    <span>Statewide Access (All Districts) — Full Master Authority</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Permitted Districts</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (userFormModal.allowed_districts.includes('All')) {
+                          setUserFormModal({ ...userFormModal, allowed_districts: [] });
+                        } else {
+                          setUserFormModal({ ...userFormModal, allowed_districts: ['All'] });
+                        }
+                      }}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800"
+                    >
+                      {userFormModal.allowed_districts.includes('All') ? 'Deselect All' : 'Select All (Statewide)'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-2.5 bg-slate-50 rounded-xl border border-slate-200 custom-scrollbar">
+                    {Object.keys(staffDirectory).sort().map(d => {
+                      const isChecked = userFormModal.allowed_districts.includes('All') || userFormModal.allowed_districts.includes(d);
+                      return (
+                        <label key={d} className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              let curr = userFormModal.allowed_districts.includes('All') 
+                                ? Object.keys(staffDirectory) 
+                                : [...userFormModal.allowed_districts];
+                              if (e.target.checked) {
+                                if (!curr.includes(d)) curr.push(d);
+                              } else {
+                                curr = curr.filter(x => x !== d && x !== 'All');
+                              }
+                              setUserFormModal({ ...userFormModal, allowed_districts: curr });
+                            }}
+                            className="rounded text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <span className="truncate">{d}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Granular Tool Permissions */}
-              {userFormModal.role !== 'SUPER_ADMIN' && (
+              {userFormModal.role === 'SUB_ADMIN' && (
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-400 block mb-1.5">Granular Permissions</label>
                   <div className="space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
@@ -336,6 +403,25 @@ export default function AdminUsersModal({
                         className="rounded text-indigo-600"
                       />
                     </label>
+                    <label className="flex items-center justify-between text-xs font-bold text-slate-700 cursor-pointer pt-2 border-t border-slate-200">
+                      <div className="flex flex-col">
+                        <span>🗺️ Prefill Travel Allowance (Morning/Evening KM)</span>
+                        <span className="text-[10px] font-normal text-slate-500">Allow this Sub-Admin to auto-populate bike KM from daily reports</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        {isUpdatingPrefill && <span className="text-[10px] text-indigo-600 animate-spin">⏳</span>}
+                        <input
+                          type="checkbox"
+                          checked={currentCanPrefill}
+                          disabled={isUpdatingPrefill || userFormModal.mode === 'create' || !isSuperAdmin}
+                          onChange={handleTogglePrefill}
+                          className="rounded text-indigo-600 ml-2"
+                        />
+                      </div>
+                    </label>
+                    {userFormModal.mode === 'create' && (
+                      <p className="text-[10px] text-slate-400 italic">Note: TA Prefill permission can be toggled after creating the account.</p>
+                    )}
                   </div>
                 </div>
               )}

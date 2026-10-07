@@ -103,8 +103,14 @@ export default function AdminHeader({
                   <div className="flex items-center gap-1.5 bg-teal-50 border border-teal-200/90 px-2.5 py-0.5 rounded-full shadow-2xs">
                     <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                     <span className="text-xs font-black text-teal-950">{currentUser?.name || 'Super Admin'}</span>
-                    <span className="text-[9px] font-black uppercase tracking-wider bg-teal-200/80 text-teal-900 px-2 py-0.5 rounded-full">
-                      {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : '🛡️ Sub Admin'}
+                    <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                      currentUser?.role === 'SUPER_ADMIN'
+                        ? 'bg-teal-200/80 text-teal-900'
+                        : currentUser?.role === 'MAIN_INCHARGE'
+                          ? 'bg-amber-200 text-amber-900 border border-amber-300'
+                          : 'bg-slate-200 text-slate-800'
+                    }`}>
+                      {currentUser?.role === 'SUPER_ADMIN' ? '👑 Super Admin' : currentUser?.role === 'MAIN_INCHARGE' ? '🎖️ Incharge' : '🛡️ Sub Admin'}
                     </span>
                   </div>
                 </div>

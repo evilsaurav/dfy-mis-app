@@ -150,6 +150,10 @@ export default function AdminModals(props) {
         setUserFormModal={props.setUserFormModal}
         saveAdminUser={props.saveAdminUser}
         staffDirectory={props.staffDirectory || {}}
+        isSuperAdmin={props.isSuperAdmin}
+        prefillAccessList={props.prefillAccessList || []}
+        fetchPrefillAccessList={props.fetchPrefillAccessList}
+        handleTogglePrefillAccess={props.handleTogglePrefillAccess}
       />
 
       {/* 9. Audit Trail Inspector */}
