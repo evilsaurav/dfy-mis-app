@@ -619,6 +619,7 @@ def update_travel_allowance_rate(
 
     cache.set("ta_global_rate", {"rate_per_km": rate_val}, ttl=300)
     cache.delete_prefix("ta_roster_")
+    cache.delete_prefix("ta_statewide_summary_")
 
     return {
         "status": "success",
@@ -785,6 +786,160 @@ def revoke_prefill_access(
         "status": "success",
         "message": f"Prefill permission revoked from admin {target_id}."
     }
+
+
+# --- Statewide Executive Summary ---
+
+@router.get("/admin/ta/statewide-summary")
+def get_statewide_ta_summary(
+    month: str = Query(..., description="Target month in YYYY-MM format"),
+    force_refresh: Optional[bool] = Query(False),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Returns aggregated statewide TA statistics across all active districts for Super Admin and Main Incharge.
+    Gated strictly to SUPER_ADMIN and MAIN_INCHARGE roles.
+    Backed by 60s TTL cache with live invalidation on roster modifications.
+    """
+    role = current_user.get("role", "")
+    if role not in ("SUPER_ADMIN", "MAIN_INCHARGE"):
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Only Super Admin and Main Incharge can view statewide TA."
+        )
+
+    month_clean = month.strip()[:7]
+    cache_key = f"ta_statewide_summary_{month_clean}"
+
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+    current_rate = get_current_ta_rate_value()
+
+    # Query PostgreSQL for aggregated district figures
+    sql = """
+        SELECT 
+            r.district,
+            COUNT(r.id) AS total_officers,
+            COALESCE(SUM(r.total_km), 0) AS total_km,
+            COALESCE(SUM(r.gross_amount), 0) AS total_gross,
+            COALESCE(SUM(r.deduction_amount), 0) AS total_deductions,
+            COALESCE(SUM(r.final_payable_amount), 0) AS total_payable,
+            COUNT(CASE WHEN r.status = 'APPROVED' THEN 1 END) AS approved_count,
+            COUNT(CASE WHEN r.status = 'SUBMITTED' THEN 1 END) AS submitted_count,
+            COUNT(CASE WHEN r.status = 'REVERTED' THEN 1 END) AS reverted_count,
+            COUNT(CASE WHEN r.status = 'DRAFT' OR r.status IS NULL THEN 1 END) AS draft_count,
+            COUNT(CASE WHEN r.dispute_status = 'PENDING' OR r.has_dispute = true THEN 1 END) AS dispute_count,
+            MAX(r.updated_at) AS last_updated_at
+        FROM travel_allowance_rosters r
+        WHERE r.month = %s
+        GROUP BY r.district
+        ORDER BY r.district ASC
+    """
+    rows = []
+    try:
+        rows = pg_execute_raw(sql, [month_clean], fetch=True) or []
+    except Exception as e:
+        logger.warning(f"Error querying statewide TA summary from postgres: {e}")
+
+    # Build district summary objects
+    districts = []
+    tot_km = 0.0
+    tot_gross = 0.0
+    tot_ded = 0.0
+    tot_payable = 0.0
+    tot_officers = 0
+    approved_districts = 0
+    pending_districts = 0
+    disputed_districts = 0
+
+    for row in rows:
+        d_name = row.get("district") or "Unknown"
+        d_officers = int(row.get("total_officers") or 0)
+        d_km = round(float(row.get("total_km") or 0.0), 2)
+        d_gross = round(float(row.get("total_gross") or 0.0), 2)
+        d_ded = round(float(row.get("total_deductions") or row.get("deduction_amount") or 0.0), 2)
+        d_payable = round(float(row.get("total_payable") or row.get("final_payable_amount") or 0.0), 2)
+        app_count = int(row.get("approved_count") or 0)
+        sub_count = int(row.get("submitted_count") or 0)
+        rev_count = int(row.get("reverted_count") or 0)
+        dft_count = int(row.get("draft_count") or 0)
+        disp_count = int(row.get("dispute_count") or 0)
+        last_updated = row.get("last_updated_at")
+        if hasattr(last_updated, "isoformat"):
+            last_updated = last_updated.isoformat()
+        elif last_updated is not None:
+            last_updated = str(last_updated)
+
+        completion_pct = round((app_count / d_officers * 100.0), 1) if d_officers > 0 else 0.0
+
+        if app_count == d_officers and d_officers > 0:
+            approved_districts += 1
+        if sub_count > 0:
+            pending_districts += 1
+        if disp_count > 0:
+            disputed_districts += 1
+
+        if app_count == d_officers and d_officers > 0:
+            d_status = "APPROVED"
+        elif sub_count > 0:
+            d_status = "SUBMITTED"
+        elif rev_count > 0:
+            d_status = "REVERTED"
+        elif disp_count > 0:
+            d_status = "DISPUTED"
+        else:
+            d_status = "DRAFT"
+
+        tot_officers += d_officers
+        tot_km += d_km
+        tot_gross += d_gross
+        tot_ded += d_ded
+        tot_payable += d_payable
+
+        districts.append({
+            "district": d_name,
+            "total_officers": d_officers,
+            "total_km": d_km,
+            "gross_amount": d_gross,
+            "deduction_amount": d_ded,
+            "final_payable_amount": d_payable,
+            "approved_count": app_count,
+            "submitted_count": sub_count,
+            "reverted_count": rev_count,
+            "draft_count": dft_count,
+            "dispute_count": disp_count,
+            "completion_pct": completion_pct,
+            "status": d_status,
+            "last_updated_at": last_updated
+        })
+
+    total_districts = len(districts)
+    overall_completion_pct = round((approved_districts / total_districts * 100.0), 1) if total_districts > 0 else 0.0
+
+    result = {
+        "status": "success",
+        "month": month_clean,
+        "rate_per_km": current_rate,
+        "summary": {
+            "total_districts": total_districts,
+            "total_officers": tot_officers,
+            "total_km": round(tot_km, 2),
+            "total_gross": round(tot_gross, 2),
+            "total_deductions": round(tot_ded, 2),
+            "total_payable": round(tot_payable, 2),
+            "approved_districts": approved_districts,
+            "pending_districts": pending_districts,
+            "disputed_districts": disputed_districts,
+            "overall_completion_pct": overall_completion_pct
+        },
+        "districts": districts
+    }
+
+    cache.set(cache_key, result, ttl=60)
+    return result
 
 
 # --- Roster & Log Management ---
@@ -1477,6 +1632,7 @@ def save_travel_allowance_log(
             logger.debug(f"mock sync skipped: {e}")
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
 
     return {
         "status": "success",
@@ -1564,6 +1720,7 @@ def submit_district_ta_roster(
             logger.debug(f"mock sync skipped: {e}")
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
     return {
         "status": "success",
         "message": "Successfully submitted staff records for approval.",
@@ -1643,6 +1800,7 @@ def pass_staff_record(
             )
 
         cache.delete_prefix(f"ta_roster_{req.month}")
+        cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
         return {
             "status": "success",
             "message": "Staff records approved successfully.",
@@ -1693,6 +1851,7 @@ def pass_staff_record(
         )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
     return {
         "status": "success",
         "message": f"Staff record {req.staff_key} approved.",
@@ -1774,6 +1933,7 @@ def revert_staff_record(
         )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
     return {
         "status": "success",
         "message": f"Staff record {req.staff_key} reverted.",
@@ -1848,6 +2008,7 @@ def unlock_staff_record(
         )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
     return {
         "status": "success",
         "message": f"Staff record {req.staff_key} unlocked.",
@@ -2070,6 +2231,9 @@ def raise_fo_ta_dispute(
             detail="Failed to update TA record, please retry."
         )
 
+    cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
+
     return {
         "status": "success",
         "message": "Dispute submitted successfully to Incharge and Sub-Admin."
@@ -2151,6 +2315,7 @@ def resolve_ta_dispute(
         )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
     return {
         "status": "success",
         "message": f"Dispute {action.lower()}ed successfully.",
