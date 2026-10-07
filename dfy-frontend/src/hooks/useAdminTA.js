@@ -31,6 +31,11 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
   const [showPrefillManageModal, setShowPrefillManageModal] = useState(false);
   const [canPrefill, setCanPrefill] = useState(currentUser?.role === 'SUPER_ADMIN');
 
+  // Statewide TA Executive Summary states
+  const [statewideSummary, setStatewideSummary] = useState(null);
+  const [loadingStatewideSummary, setLoadingStatewideSummary] = useState(false);
+  const [statewideSummaryError, setStatewideSummaryError] = useState('');
+
   // ── Role derivations ─────────────────────────────────────────────────────
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
   const isSubAdmin = currentUser?.role === 'SUB_ADMIN' || isSuperAdmin;
@@ -338,6 +343,32 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     }
   }, [isSubmitting, taMonth, taDistrict, authFetch, API_BASE_URL, showToast]);
 
+  const fetchStatewideSummary = useCallback(async (targetMonth, forceRefresh = false) => {
+    const m = targetMonth || taMonth || month;
+    if (!m) return;
+    setLoadingStatewideSummary(true);
+    setStatewideSummaryError('');
+    try {
+      const url = `${API_BASE_URL}/admin/ta/statewide-summary?month=${encodeURIComponent(m)}${forceRefresh ? '&force_refresh=true' : ''}`;
+      const res = await authFetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setStatewideSummary(data);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const msg = errData.detail || 'Failed to load statewide TA summary';
+        setStatewideSummaryError(msg);
+        if (showToast) showToast(msg, 'error');
+      }
+    } catch (err) {
+      console.error('fetchStatewideSummary error', err);
+      setStatewideSummaryError('Network error loading statewide summary');
+      if (showToast) showToast('Network error loading statewide summary', 'error');
+    } finally {
+      setLoadingStatewideSummary(false);
+    }
+  }, [authFetch, API_BASE_URL, taMonth, month, showToast]);
+
   return {
     taMonth, setTaMonth,
     taDistrict, setTaDistrict,
@@ -361,6 +392,10 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     showPrefillManageModal, setShowPrefillManageModal,
     fetchPrefillAccessList,
     handleTogglePrefillAccess,
+    statewideSummary, setStatewideSummary,
+    loadingStatewideSummary,
+    statewideSummaryError,
+    fetchStatewideSummary,
     isSuperAdmin, isSubAdmin, isIncharge, canEdit,
     fetchRoster, fetchRate,
     handlePrefill, handleSaveLog,
