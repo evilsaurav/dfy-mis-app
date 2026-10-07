@@ -7,7 +7,7 @@ if str(BASE_DIR) not in sys.path:
 
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from main import app
 from backend.core.helpers import (
@@ -85,6 +85,9 @@ def test_edit_patient_id_90day_notification_duplicate_rejected():
             "working_place": "Gaya"
         }
 
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         # Mock finding the report in Postgres
         def pg_exec(sql, params=None, fetch=False):
             sql_clean = " ".join(sql.split()).upper()
@@ -93,8 +96,9 @@ def test_edit_patient_id_90day_notification_duplicate_rejected():
                     "id": 101,
                     "fo_name": "Sameer Arya",
                     "working_place": "Gaya",
-                    "date_of_reporting": "2026-10-04",
-                    "legacy_doc_id": "gaya_sameer_arya_2026-10-04"
+                    "date_of_reporting": today_str,
+                    "timestamp_completed": now_iso,
+                    "legacy_doc_id": f"gaya_sameer_arya_{today_str}"
                 }]
             if "FROM STAFF_DIRECTORY" in sql_clean:
                 return [{"pin": "1234"}]
@@ -107,7 +111,7 @@ def test_edit_patient_id_90day_notification_duplicate_rejected():
         payload = {
             "working_place": "Gaya",
             "fo_name": "Sameer Arya",
-            "date": "2026-10-04",
+            "date": today_str,
             "category": "notification_ids",
             "action": "add",
             "new_id": "123456789",
@@ -124,6 +128,9 @@ def test_edit_patient_id_same_day_duplicate_returns_409():
     with patch("backend.core.helpers.check_patient_id_90day_notification_duplicate", return_value=None), \
          patch("backend.routers.admin_feed.pg_execute_raw") as mock_pg:
         
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         def pg_exec(sql, params=None, fetch=False):
             sql_clean = " ".join(sql.split()).upper()
             if "FROM DAILY_FIELD_REPORTS" in sql_clean:
@@ -131,8 +138,9 @@ def test_edit_patient_id_same_day_duplicate_returns_409():
                     "id": 102,
                     "fo_name": "Sameer Arya",
                     "working_place": "Gaya",
-                    "date_of_reporting": "2026-10-04",
-                    "legacy_doc_id": "gaya_sameer_arya_2026-10-04"
+                    "date_of_reporting": today_str,
+                    "timestamp_completed": now_iso,
+                    "legacy_doc_id": f"gaya_sameer_arya_{today_str}"
                 }]
             if "FROM STAFF_DIRECTORY" in sql_clean:
                 return [{"pin": "1234"}]
@@ -146,7 +154,7 @@ def test_edit_patient_id_same_day_duplicate_returns_409():
         payload = {
             "working_place": "Gaya",
             "fo_name": "Sameer Arya",
-            "date": "2026-10-04",
+            "date": today_str,
             "category": "sample_tested_ids",
             "action": "add",
             "new_id": "987654321",
@@ -164,6 +172,9 @@ def test_edit_patient_id_safe_mutation_increments_and_preserves_parent():
     with patch("backend.core.helpers.check_patient_id_90day_notification_duplicate", return_value=None), \
          patch("backend.routers.admin_feed.pg_execute_raw") as mock_pg:
         
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_iso = datetime.now(timezone.utc).isoformat()
+
         def pg_exec(sql, params=None, fetch=False):
             executed_sqls.append((sql, params))
             sql_clean = " ".join(sql.split()).upper()
@@ -172,9 +183,10 @@ def test_edit_patient_id_safe_mutation_increments_and_preserves_parent():
                     "id": 103,
                     "fo_name": "Sameer Arya",
                     "working_place": "Gaya",
-                    "date_of_reporting": "2026-10-04",
+                    "date_of_reporting": today_str,
+                    "timestamp_completed": now_iso,
                     "legacy_count_sample_tested": 5,
-                    "legacy_doc_id": "gaya_sameer_arya_2026-10-04"
+                    "legacy_doc_id": f"gaya_sameer_arya_{today_str}"
                 }]
             if "FROM STAFF_DIRECTORY" in sql_clean:
                 return [{"pin": "1234"}]
@@ -189,7 +201,7 @@ def test_edit_patient_id_safe_mutation_increments_and_preserves_parent():
         payload = {
             "working_place": "Gaya",
             "fo_name": "Sameer Arya",
-            "date": "2026-10-04",
+            "date": today_str,
             "category": "sample_tested_ids",
             "action": "add",
             "new_id": "987654321",

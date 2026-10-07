@@ -113,11 +113,14 @@ async def test_field_officer_edit_id_pin_auth():
     """
     from fastapi import HTTPException
 
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now_iso = datetime.now(timezone.utc).isoformat()
     mock_pg_report = {
         "id": 102,
         "working_place": "Gaya",
         "fo_name": "Ramesh Kumar",
-        "date_of_reporting": "2026-10-04",
+        "date_of_reporting": today_str,
+        "timestamp_completed": now_iso,
         "legacy_count_notifications": 1
     }
 
@@ -152,7 +155,7 @@ async def test_field_officer_edit_id_pin_auth():
         req3 = EditIdRequest(
             working_place="Gaya",
             fo_name="Ramesh Kumar",
-            date="2026-10-04",
+            date=today_str,
             category="notification_ids",
             action="add",
             new_id="777777777",

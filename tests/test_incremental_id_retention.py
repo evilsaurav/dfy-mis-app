@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import os
 import sys
@@ -138,6 +139,8 @@ async def test_edit_patient_id_category_alias_and_retention():
     Verifies that edit_patient_id in admin_feed supports category aliases ('notification' vs 'notification_ids')
     and performs targeted add/replace/delete operations without dropping other category patient IDs.
     """
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     mock_db_reports = [
         {
             "id": 888,
@@ -145,9 +148,9 @@ async def test_edit_patient_id_category_alias_and_retention():
             "district_id": 2,
             "fo_name": "Suresh Kumar",
             "working_place": "Gaya",
-            "date_of_reporting": "2026-10-04",
-            "created_at": "2026-10-04 10:00:00",
-            "timestamp_completed": "2026-10-04 10:00:00",
+            "date_of_reporting": today_str,
+            "created_at": now_iso,
+            "timestamp_completed": now_iso,
             "legacy_count_notifications": 1,
         }
     ]
@@ -211,7 +214,7 @@ async def test_edit_patient_id_category_alias_and_retention():
         req = EditIdRequest(
             working_place="Gaya",
             fo_name="Suresh Kumar",
-            date="2026-10-04",
+            date=today_str,
             category="notification",
             action="add",
             new_id="987654321",
