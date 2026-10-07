@@ -3600,6 +3600,127 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "travel_allowance",
+      icon: "🏍️",
+      badge: "TA & Odometer SOP",
+      badgeColor: "bg-teal-100 text-teal-800 border-teal-200",
+      title: "12. Travel Allowance (Bike Log) & Odometer Audit SOP",
+      subtitle: "Daily odometer reading, rate calculation aur dispute resolution guidelines",
+      keywords: "travel allowance bike km meter reading photo dispute claim reimbursement fuel petrol ta",
+      content: (
+        <div className="space-y-3.5 text-xs text-slate-700 leading-relaxed">
+          {/* Target & Timing Bento Header */}
+          <div className="bg-gradient-to-r from-indigo-50 to-teal-50/60 border border-indigo-200/90 rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-2xs">
+            <div className="flex items-center gap-2.5">
+              <span className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-sm font-bold shadow-2xs shrink-0">🏍️</span>
+              <div>
+                <strong className="text-indigo-950 font-black block text-xs">Travel Allowance Lifecycle:</strong>
+                <span className="text-indigo-800 text-[11px]">Rozana field visit ke samay odometer photo capture karein. Month-end par <strong>₹4.00/KM</strong> reimbursement calculate hota hai.</span>
+              </div>
+            </div>
+            <span className="text-[10px] font-black text-indigo-800 bg-white/80 border border-indigo-300 px-2.5 py-1 rounded-xl shadow-2xs shrink-0">
+              ₹4.00 / KM
+            </span>
+          </div>
+
+          {/* 4-Card Sequential Bento Flowchart Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Step 1: Daily KM Logging */}
+            <div className="bg-gradient-to-br from-indigo-50/60 to-slate-50 border border-indigo-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">1</span>
+                <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100/80 px-2 py-0.5 rounded-full border border-indigo-200/60">Step 01 &bull; Daily Log</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🌅</span>
+                  <span>Daily Odometer Capture</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Rozana field reporting ke samay subah (Morning KM) aur sham (Evening KM) bike speedometer reading darj karein aur meter ki saaf photo upload karein.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                <span>Field Evidence</span>
+                <span className="text-indigo-600 font-black">➔ Step 2</span>
+              </div>
+            </div>
+
+            {/* Step 2: Under Review Privacy Shield */}
+            <div className="bg-gradient-to-br from-amber-50/60 to-slate-50 border border-amber-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">2</span>
+                <span className="text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full border border-amber-200/60">Step 02 &bull; Verification</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>⏳</span>
+                  <span>Supervisor Review Shield</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Month-end me District Coordinator KM readings verify karte hain. Jab tak review draft ya pending state me hai, privacy guard amount ko confidential rakhta hai.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                <span>Privacy Guard</span>
+                <span className="text-amber-600 font-black">➔ Step 3</span>
+              </div>
+            </div>
+
+            {/* Step 3: Incharge Approval & Final Calculation */}
+            <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 border border-emerald-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">3</span>
+                <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-200/60">Step 03 &bull; Approval</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>🔒</span>
+                  <span>Approval &amp; Security Lock</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Main Incharge dwara Pass kiye jane par rate apply hota hai (Gross = Total KM &times; ₹4.00, Net = Gross - Deductions) aur record strictly locked ho jata hai.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                <span>Tamper-Proof Lock</span>
+                <span className="text-emerald-600 font-black">➔ Step 4</span>
+              </div>
+            </div>
+
+            {/* Step 4: 24h Dispute Window */}
+            <div className="bg-gradient-to-br from-purple-50/60 to-slate-50 border border-purple-200/80 rounded-2xl p-3.5 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+              <div className="flex items-center justify-between">
+                <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shadow-2xs">4</span>
+                <span className="text-[9px] font-bold text-purple-800 bg-purple-100/80 px-2 py-0.5 rounded-full border border-purple-200/60">Step 04 &bull; Dispute Window</span>
+              </div>
+              <div>
+                <h5 className="text-xs font-black text-slate-900 leading-snug flex items-center gap-1.5">
+                  <span>⚖️</span>
+                  <span>24-Hour Dispute Window</span>
+                </h5>
+                <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                  Approve hote hi Profile card me payable amount dikhta hai aur 24 ghante ka timer shuru hota hai. Discrepancy hone par FO seedhe app se Dispute darj kar sakte hain.
+                </p>
+              </div>
+              <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
+                <span>Frontline Rights</span>
+                <span className="text-purple-700 font-black">✓ 24h Timer Active</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Audit & Transparency Note */}
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-[11px] text-slate-700 font-medium flex items-center gap-2">
+            <span className="text-lg shrink-0">🛡️</span>
+            <div>
+              <strong>Strict Transparency Guard:</strong> Har kilometer aur photo audit trail me surakshit rehti hai. Kisi bhi query ya dispute ke samay State Office aur Supervisor ko turant notification bheji jaati hai.
+            </div>
+          </div>
+        </div>
+      )
     }
   ];
 
@@ -3701,6 +3822,15 @@ const FoHelpGuide = () => {
               }`}
             >
               System Stages
+            </button>
+            <button
+              type="button"
+              onClick={() => setBentoTab("travel_allowance")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "travel_allowance" ? "bg-white text-indigo-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              Travel Allowance
             </button>
           </div>
         </div>
@@ -4025,9 +4155,107 @@ const FoHelpGuide = () => {
             })()}
           </div>
         )}
+
+        {/* 5. Travel Allowance & Bike Log Lifecycle Bento Flowchart */}
+        {bentoTab === "travel_allowance" && (
+          <div className="space-y-3.5 animate-fade-in">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>🏍️</span>
+                  <span>Travel Allowance (Bike Log) Workflow &amp; Audit</span>
+                </h4>
+                <p className="text-[11px] text-slate-500 font-medium">Odometer capture se lekar Incharge approval aur 24h dispute resolution SOP</p>
+              </div>
+              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full shrink-0">
+                Monthly Cycle &bull; ₹4.00/KM
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+              {/* Step 1 */}
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50/40 border border-indigo-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                  <span className="text-base">🌅</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">1. Daily KM Logging</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Subah aur sham bike odometer meter photo &amp; readings darj karein.</p>
+                </div>
+                <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[9px] font-bold text-indigo-700">
+                  <span>Field Entry</span>
+                  <span>➔ Step 2</span>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50/40 border border-amber-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                  <span className="text-base">⏳</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">2. Under Review Shield</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Coordinator audit ke dauran amount hidden rehta hai (Privacy Protection).</p>
+                </div>
+                <div className="pt-1.5 border-t border-amber-100 flex items-center justify-between text-[9px] font-bold text-amber-700">
+                  <span>Supervisor Audit</span>
+                  <span>➔ Step 3</span>
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50/40 border border-emerald-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                  <span className="text-base">🔒</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">3. Incharge Pass &amp; Lock</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Incharge verified staff ko Pass karte hain; rate apply hokar record lock hota hai.</p>
+                </div>
+                <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[9px] font-bold text-emerald-700">
+                  <span>Approved &amp; Locked</span>
+                  <span>➔ Step 4</span>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="bg-gradient-to-br from-purple-50 to-indigo-50/40 border border-purple-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                  <span className="text-base">⚖️</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">4. 24h Dispute Window</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">FO profile card me amount visible hota hai; 24h timer dispute ke liye active.</p>
+                </div>
+                <div className="pt-1.5 border-t border-purple-100 flex items-center justify-between text-[9px] font-bold text-purple-700">
+                  <span>Dispute Rights</span>
+                  <span>✓ Complete</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Guard Card */}
+            <div className="bg-indigo-50/80 border border-indigo-200/80 rounded-2xl p-3 flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🛡️</span>
+                <div>
+                  <strong className="text-xs font-black text-indigo-950 block">Audit &amp; Anti-Tampering Guarantee</strong>
+                  <span className="text-[11px] text-indigo-800">Har kilometer entry PostgreSQL database me timestamped hai. Approved records ko bina State Incharge unlock ke koi badal nahi sakta.</span>
+                </div>
+              </div>
+              <span className="text-[10px] font-black text-indigo-800 bg-white border border-indigo-200 px-2 py-0.5 rounded-lg shrink-0">
+                100% Transparent
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 7 Accordion Topic Cards */}
+      {/* 12 Accordion Topic Cards */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">

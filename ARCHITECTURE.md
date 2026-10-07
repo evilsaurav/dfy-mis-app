@@ -337,6 +337,25 @@ flowchart TD
 - **Centralized Admin SOP (`AdminDashboard.jsx`)**:
   - 10 operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, and Security Governance.
 
+### 6.14 Relational Travel Allowance Subsystem & Per-Staff State Machine (PostgreSQL)
+- **ACID Relational Architecture on PostgreSQL**:
+  - Engineered with 4 dedicated relational tables:
+    1. `travel_allowance_settings`: Global configurations, dynamic `rate_per_km` (default ₹4.00), policy limits, and modification audit timestamps.
+    2. `travel_allowance_rosters`: District and monthly roster rolls (`district`, `month`, `status`, `total_km`, `gross_amount`, `deductions`, `net_payable`, `submitted_at`, `approved_at`, `approved_by`).
+    3. `travel_allowance_daily_logs`: Granular per-staff daily odometer readings (`staff_id`, `date`, `morning_km`, `evening_km`, `total_km`, `morning_photo_url`, `evening_photo_url`, `is_edited`, `remarks`).
+    4. `travel_allowance_permissions`: Fine-grained authorization granting specific Sub-Admins pre-fill access while keeping unauthorized coordinators restricted.
+- **Granular Per-Staff State Machine**:
+  - Replaces fragile district-wide locking with independent per-staff status transitions:
+    `DRAFT` $\rightarrow$ `SUBMITTED` $\rightarrow$ `APPROVED` (Locked) or `REVERTED` (Needs Review).
+  - Approving one staff member does not block or force premature approval of other staff within the same district.
+- **Locking & Anti-Tampering Enforcement**:
+  - Approved records enforce `is_locked = True`. Any mutation attempt returns HTTP 423 (Locked) unless explicitly unlocked by a Main Incharge or Super Admin (`POST /admin/ta/unlock-staff`).
+- **FO Privacy Guard & 24h Dispute Protocol**:
+  - In `DRAFT`, `SUBMITTED`, or `REVERTED` states, endpoints return an `UNDER_REVIEW` privacy guard to frontline devices, hiding calculated amounts.
+  - Upon `APPROVED` transition, a 24-hour dispute window opens on the FO's mobile profile, allowing formal dispute submission (`POST /fo/ta/dispute`) with dual real-time broadcast alerts dispatched to supervisors.
+- **High-Density Multi-Sheet Excel Engine**:
+  - Generates `TA_<district>_<month>.xlsx` with openpyxl. Sheet 1 produces an Executive District Summary utilizing native Excel `=SUM(...)` formulas for dynamic recalculation. Sheets 2..N provide individual officer travel logs with complete odometer verification trails.
+
 ---
 
 ## 7. Audit Trail & Automated 30-Day Retention Engine

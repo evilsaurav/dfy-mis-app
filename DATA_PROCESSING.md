@@ -296,6 +296,33 @@ For every field staff member (ADC, TC, FO):
   - Invalidates in-memory attendance cache for the specified date: `cache.delete_prefix(f"attendance_{date}")`.
   - Transmits updated status to Field Officer calendar view.
 
+### 3.15 Relational Travel Allowance Processing, Granular State Machine & Multi-Sheet Excel Pipeline
+- **Core Endpoints**:
+  - `GET /admin/ta/rate`, `POST /admin/ta/rate` (Rate management)
+  - `GET /admin/ta/roster`, `POST /admin/ta/prefill`, `POST /admin/ta/save-log` (Roster & Daily Logs)
+  - `POST /admin/ta/submit-roster`, `POST /admin/ta/pass-staff`, `POST /admin/ta/revert-staff`, `POST /admin/ta/unlock-staff` (State transitions)
+  - `GET /admin/ta/export-excel` (Multi-sheet export)
+  - `GET /fo/ta/monthly-summary`, `POST /fo/ta/dispute` (Frontline integration)
+- **Data Flow & Calculation Engine**:
+  1. **Pre-fill Sync**: Queries `daily_field_reports` for `morning_km`, `evening_km`, and odometer photos. Aggregates into `travel_allowance_daily_logs`.
+  2. **Total Calculation**:
+     $$\text{Gross Amount} = \text{Total Verified KM} \times \text{Rate per KM (₹4.00)}$$
+     $$\text{Net Payable} = \max(0, \text{Gross Amount} - \text{Deduction Amount})$$
+  3. **State Machine & Locking**:
+     - Sub-Admin reviews logs and submits roster (`SUBMITTED`).
+     - Main Incharge performs granular review per staff member:
+       - `PASS`: Sets status to `APPROVED`, calculates net payable, and sets `is_locked = True`.
+       - `REVERT`: Sets status to `REVERTED` with reason; unlocks day logs for coordinator correction.
+     - While locked, mutation endpoints return HTTP 423. Unlocking requires `/admin/ta/unlock-staff`.
+  4. **Privacy Shield & 24h Dispute Protocol**:
+     - Frontend queries `/fo/ta/monthly-summary`.
+     - If unapproved (`DRAFT` / `SUBMITTED` / `REVERTED`), financial amounts are shielded (`UNDER_REVIEW`).
+     - If `APPROVED`, displays payable amount and activates a 24-hour countdown.
+     - If FO files a dispute, dispatches dual alerts to central notifications tray and flags the record.
+  5. **Excel Generation Engine**:
+     - Sheet 1: Executive District Summary with dynamic `=SUM(C2:C{n})` formulas for Total KM, Gross, Deductions, and Net Payable.
+     - Sheets 2..N: Dedicated individual sheets per staff member detailing date, route/activity, opening KM, closing KM, daily distance, photo status, and supervisor notes.
+
 ---
 
 ## 4. Comprehensive Clinical Indicator Catalog

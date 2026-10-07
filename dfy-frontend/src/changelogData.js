@@ -1,16 +1,53 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.8.6";
-export const LAST_UPDATED_DATE = "30 Sep 2026";
+export const APP_VERSION = "2.9.0";
+export const LAST_UPDATED_DATE = "07 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.0",
+    date: "07 Oct 2026",
+    title: "Relational Travel Allowance & Bike Log Engine (PostgreSQL), Super Admin Dynamic Rate Management, Multi-Sheet Excel Studio & Attendance Radar Normalization",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🏍️ Relational Travel Allowance (TA) Engine: Deployed an enterprise-grade, PostgreSQL-backed Travel Allowance subsystem with 4 relational tables (travel_allowance_settings, travel_allowance_rosters, travel_allowance_daily_logs, and travel_allowance_permissions) ensuring zero data loss and strict ACID compliance.",
+      "⚙️ Dynamic Rate Management (₹4.00/KM Default): Super Admins and Main Incharges can configure and update the statewide reimbursement rate dynamically via a dedicated admin modal control, automatically invalidating caches and applying to subsequent roster calculations.",
+      "🔒 Granular Per-Staff Status & 24h Dispute Window: Replaced all-or-nothing district locking with granular per-staff lifecycle transitions (Draft → Submitted → Approved / Reverted). Approved records are strictly locked against modification, giving Field Officers an active 24-hour window to review and raise disputes directly from their mobile profile.",
+      "📊 Multi-Sheet Openpyxl Excel Export: Integrated an executive multi-sheet Excel generator producing TA_<district>_<month>.xlsx with Sheet 1 Executive District Summary (featuring dynamic =SUM() formulas) and Sheets 2..N containing individual staff daily travel logs.",
+      "🛡️ Super-Admin Pre-fill Permission Gate: Implemented a security gate allowing Super Admins to authorize specific Sub-Admins to pre-fill district logs from daily field reports, while restricting unauthorized coordinators.",
+      "📡 Attendance Radar District Normalization: Normalized district lookup keys across the Attendance Radar, resolving defaulter collisions in multi-word districts (e.g. Purba Champaran / East Champaran) without losing streak history."
+    ],
+    details: [
+      {
+        tag: "Travel Allowance Architecture",
+        color: "indigo",
+        text: "Normalized PostgreSQL relational schema with foreign-key cascade protection and strict transactional persistence."
+      },
+      {
+        tag: "Workflow & RBAC",
+        color: "teal",
+        text: "Granular per-staff review states (Pass, Revert, Unlock) with privacy guards hiding unapproved amounts from frontline officers."
+      },
+      {
+        tag: "Export Studio",
+        color: "emerald",
+        text: "High-density openpyxl multi-sheet workbook generation with executive summary and per-officer odometer audit sheets."
+      },
+      {
+        tag: "Attendance Radar Fix",
+        color: "amber",
+        text: "Canonical district normalization eliminates multi-word naming mismatches in real-time defaulter monitoring."
+      }
+    ]
+  },
   {
     version: "v2.8.6",
     date: "30 Sep 2026",
     title: "Staff Target Synchronization Across Admin Tools, Resilient Master Table Matching & Smart 12 PM Month-End Reporting Cutoff",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🎯 Unified Staff Target Synchronization: Synchronized staff target persistence across 'Set Targets' and 'Staff & PINs' admin suites. Target mutations now atomically write both month-scoped documents and general fallback documents with full cache invalidation.",
       "👥 Staff & PINs Target Management: Added a dedicated Monthly Target input field inside the 'Edit Staff Details' modal, allowing supervisors to adjust designations, PINs, and monthly targets in a single unified form with automatic real-time dashboard refresh.",

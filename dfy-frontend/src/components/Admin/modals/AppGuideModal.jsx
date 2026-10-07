@@ -71,7 +71,8 @@ export default function AppGuideModal({
                   { key: 'excel_reports', label: 'Excel Reports & State KPI', icon: '📊', desc: '33-sheet KPI, Nikshay & dumps' },
                   { key: 'audit_trail', label: 'Admin vs Sub-Admin (RBAC)', icon: '📜', desc: 'District boundary protection & logs' },
                   { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' },
-                  { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' }
+                  { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' },
+                  { key: 'travel_allowance', label: 'Travel Allowance & Bike Log', icon: '🏍️', desc: 'Pre-fill, Rate Config, Audit & 24h Dispute' }
                 ]
                   .filter(topic => {
                     if (!appGuideSearch.trim()) return true;
@@ -299,6 +300,69 @@ export default function AppGuideModal({
                           </div>
                           <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Dual-Sheet Attendance Workbook (.xlsx)</strong>
                           <p className="text-[10px] text-slate-600">Sheet 1: Monthly Matrix; Sheet 2: Granular Activity Log.</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FLOWCHART 4: Travel Allowance (Bike Log) Workflow & Audit Trail */}
+                    <div className="bg-slate-50/70 border border-slate-200 rounded-2xl p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base p-1.5 bg-indigo-50 text-indigo-700 rounded-xl">🏍️</span>
+                          <div>
+                            <h5 className="text-xs font-black text-slate-900">Travel Allowance (Bike Log) Workflow &amp; Audit Trail</h5>
+                            <p className="text-[10px] text-slate-500 font-medium">Pre-fill, Dynamic Rates, Per-Staff Approval &amp; 24h Dispute</p>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-bold uppercase bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full">
+                          PostgreSQL Relational Engine
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">1</span>
+                            <span className="text-sm">🔄</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Pre-fill or Manual Log</strong>
+                          <p className="text-[10px] text-slate-600">Daily field reports ke odometer readings auto-sync ya manual day entry.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">2</span>
+                            <span className="text-sm">⚙️</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Dynamic Rate Config</strong>
+                          <p className="text-[10px] text-slate-600">Super Admin / Incharge rate set karte hain (Default: ₹4.00/KM).</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">3</span>
+                            <span className="text-sm">📝</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Sub-Admin Review &amp; Edit</strong>
+                          <p className="text-[10px] text-slate-600">KM readings audit karein, deductions apply karein aur roster submit karein.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">4</span>
+                            <span className="text-sm">🔒</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">Incharge Pass / Lock</strong>
+                          <p className="text-[10px] text-slate-600">Per-staff pass ya revert. Approved record turant lock ho jata hai.</p>
+                        </div>
+
+                        <div className="bg-white border border-slate-200/90 rounded-xl p-2.5 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="w-4 h-4 rounded-full bg-indigo-600 text-white font-mono text-[9px] font-bold flex items-center justify-center">5</span>
+                            <span className="text-sm">⚖️</span>
+                          </div>
+                          <strong className="text-[11px] font-bold text-slate-900 block leading-tight">24h Dispute &amp; Excel Export</strong>
+                          <p className="text-[10px] text-slate-600">FO mobile profile me 24h dispute window khulti hai; multi-sheet Excel export.</p>
                         </div>
                       </div>
                     </div>
@@ -1389,6 +1453,162 @@ export default function AppGuideModal({
                   </div>
                 )}
 
+                {/* TOPIC 10: Travel Allowance & Bike Log Engine */}
+                {appGuideActiveTopic === 'travel_allowance' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏍️</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Travel Allowance (Bike Log) &amp; Relational Audit Engine</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">PostgreSQL-backed monthly travel claims, dynamic rates, per-staff review &amp; multi-sheet Excel</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full border border-indigo-200">
+                        PostgreSQL ACID &bull; ₹4.00/KM &bull; 24h Window
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Step 1: Pre-fill & Permission Gate */}
+                      <div className="bg-gradient-to-br from-indigo-50/70 to-slate-50 border border-indigo-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full">Step 01 &bull; Ingestion</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Auto Pre-fill &amp; Security Gate
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Daily field report ke odometer data ko monthly travel log me safely populate karne ka rule:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🛡️</span>
+                              <div><strong>Permission Gate:</strong> Super Admin se permission pane wale Sub-Admins hi contextual menu (&bull;&bull;&bull;) se Pre-fill trigger kar sakte hain.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📸</span>
+                              <div><strong>Odometer Readings:</strong> Morning KM, Evening KM aur Meter Photo URLs automatically link ho jate hain.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>✍️</span>
+                              <div><strong>Manual Override:</strong> District Coordinator kisi bhi din ka KM, opening/closing reading aur remarks manually edit kar sakte hain.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                          <span>Data Ingestion</span>
+                          <span className="text-indigo-600 font-black">➔ Step 2</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2: Dynamic Rate Management */}
+                      <div className="bg-gradient-to-br from-emerald-50/70 to-slate-50 border border-emerald-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">Step 02 &bull; Configuration</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Dynamic Rate Control (₹4.00/KM)
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Fixed code ke bajaye dynamic reimbursement rate configuration:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>👑</span>
+                              <div><strong>Authorized Roles:</strong> Super Admin aur Main Incharge Travel Allowance Modal se reimbursement rate (₹/KM) live update kar sakte hain.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔄</span>
+                              <div><strong>Immediate Effect:</strong> Rate update hone par system server cache turant flush karta hai aur agle roster calculations par naya rate apply hota hai.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📜</span>
+                              <div><strong>Rate History:</strong> Changes PostgreSQL database me timestamp aur updated_by metadata ke saath record hote hain.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                          <span>Rate Governance</span>
+                          <span className="text-emerald-600 font-black">➔ Step 3</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3: Granular Approval & Security Lock */}
+                      <div className="bg-gradient-to-br from-amber-50/70 to-slate-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Step 03 &bull; Review &amp; Lock</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Granular Per-Staff Lifecycle &amp; Security Lock
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Kisi ek officer ki wajah se pure district ka roster nahi rukta:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>✅</span>
+                              <div><strong>Pass Individual Staff:</strong> Main Incharge verified staff ko "Pass" karte hain, jisse wo record turant locked state me chala jata hai.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>↩️</span>
+                              <div><strong>Revert for Correction:</strong> Discrepancy hone par specific staff ko Sub-Admin ke pass reason ke saath Revert kiya jata hai.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔒</span>
+                              <div><strong>Tamper-Proof Lock:</strong> Approved record par Sub-Admin koi edit nahi kar sakte jab tak Incharge ya Super Admin se Unlock na karwaya jaye.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                          <span>Review &amp; Lock</span>
+                          <span className="text-amber-600 font-black">➔ Step 4</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4: 24h Dispute Window & Multi-Sheet Excel */}
+                      <div className="bg-gradient-to-br from-purple-50/70 to-slate-50 border border-purple-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">Step 04 &bull; Dispute &amp; Export</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            24h Dispute Window &amp; Multi-Sheet Excel Export
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Frontline transparency aur executive reporting standards:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>⏱️</span>
+                              <div><strong>24h Active Dispute:</strong> Staff approval ke baad FO profile par 24 ghante ka timer start hota hai; staff reason dekar instant dispute raise kar sakte hain.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🙈</span>
+                              <div><strong>Privacy Guard:</strong> Draft ya Reverted state me FO ko calculation amounts nahi dikhte (&ldquo;Verification in Progress&rdquo; privacy shield).</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📊</span>
+                              <div><strong>Multi-Sheet Excel Studio:</strong> 1-click download me Sheet 1 Executive District Summary (=SUM() formulas) aur Sheets 2..N staff daily logs generate hoti hain.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
+                          <span>Transparency &amp; Export</span>
+                          <span className="text-purple-700 font-black">✓ Production Active</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
               </div>
             </div>
 
@@ -1396,7 +1616,7 @@ export default function AppGuideModal({
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>DFY Bihar MIS Operations Standard &bull; Version 2.8.4</span>
+                <span>DFY Bihar MIS Operations Standard &bull; Version 2.9.0</span>
               </span>
               <button
                 type="button"

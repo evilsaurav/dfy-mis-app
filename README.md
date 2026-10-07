@@ -51,6 +51,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [22. Official Doctors For You Branding & Visual Overhaul](#22--official-doctors-for-you-branding--visual-overhaul)
   - [23. 17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Spooling & RBAC Security](#23--17-indicator-33-sheet-district-kpi-excel-engine-render-anti-oom-spooling--rbac-security)
   - [24. Staff Target Synchronization Across Admin Tools, Resilient Master Matching & 12 PM Cutoff](#24--staff-target-synchronization-across-admin-tools-resilient-master-matching--12-pm-cutoff)
+  - [25. Relational Travel Allowance & Bike Log Engine (PostgreSQL), Dynamic Rate Controls & Multi-Sheet Excel Studio](#25--relational-travel-allowance--bike-log-engine-postgresql-dynamic-rate-controls--multi-sheet-excel-studio)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -423,6 +424,22 @@ flowchart TD
 
 ---
 
+### 25. 🏍️ Relational Travel Allowance & Bike Log Engine (PostgreSQL), Dynamic Rate Controls & Multi-Sheet Excel Studio
+- **Normalized PostgreSQL Relational Schema**:
+  - Engineered an enterprise-grade Travel Allowance subsystem running on Supabase PostgreSQL with 4 normalized relational tables: `travel_allowance_settings` (dynamic reimbursement rate & policy), `travel_allowance_rosters` (district & month roster summary, status, total KM, gross & net payable), `travel_allowance_daily_logs` (per-staff day-by-day odometer readings, morning/evening photos, and supervisor remarks), and `travel_allowance_permissions` (Super-Admin granted pre-fill access).
+- **Dynamic Rate Management (₹4.00/KM Default)**:
+  - Empowered Super Admins and Main Incharges to update statewide reimbursement rates dynamically from a dedicated modal control without server restarts or redeployments. Rate updates atomically invalidate memory caches and apply to subsequent roster calculations.
+- **Granular Per-Staff Approval Lifecycle & Security Locking**:
+  - Replaced legacy all-or-nothing district locks with independent per-staff status transitions (`DRAFT` $\rightarrow$ `SUBMITTED` $\rightarrow$ `APPROVED` / `REVERTED`). Approved records transition to `is_locked = True`, preventing edits by Sub-Admins unless unlocked by an authorized Incharge or Super Admin (`POST /admin/ta/unlock-staff`).
+- **24-Hour Dispute Window & Privacy Shield**:
+  - Frontline Field Officers enjoy a transparent 24-hour dispute window (`POST /fo/ta/dispute`) upon roster approval directly on their mobile profile card. While rosters are in `DRAFT`, `SUBMITTED`, or `REVERTED` states, a strict privacy guard hides unapproved calculation figures, presenting an informative "Verification in Progress" status.
+- **Multi-Sheet Openpyxl Excel Export Studio**:
+  - Integrated high-density Excel export (`GET /admin/ta/export-excel`) generating `TA_<district>_<month>.xlsx`. Sheet 1 features an Executive District Summary with native dynamic `=SUM(...)` formulas for Total KM, Gross Amount, Deductions, and Net Payable, while Sheets 2..N contain individual staff daily travel logs with odometer audit trails.
+- **Attendance Radar District Normalization**:
+  - Hardened district lookup keys across the real-time Attendance Radar, resolving defaulter collisions in multi-word district names (e.g. Purba Champaran / East Champaran) without losing streak history.
+
+---
+
 ## 📍 Districts Covered
 
 The system supports active staff and reporting across **22+ Districts of Bihar**:
@@ -574,6 +591,23 @@ Mis field report/
 | `POST` | `/admin/backup/trigger-now` | Super Admin: On-demand immediate database snapshot creation |
 | `GET` | `/admin/backup/download/{filename}` | Super Admin: Stream compressed `.json.gz` backup archive directly to local device |
 | `POST` | `/admin/backup/restore` | Super Admin: Emergency disaster recovery restore with `RESTORE-CONFIRM` safety guard |
+
+### 9. Travel Allowance & Bike Log Subsystem
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/admin/ta/rate` | Get current statewide TA rate configuration (₹/KM) |
+| `POST` | `/admin/ta/rate` | Super Admin & Incharge: Update dynamic reimbursement rate (₹/KM) |
+| `GET` | `/admin/ta/roster` | Fetch district monthly TA roster with staff records and daily logs |
+| `POST` | `/admin/ta/prefill` | Pre-fill monthly TA roster from daily field reports (permission-gated) |
+| `POST` | `/admin/ta/save-log` | Save/update staff daily travel log entries and deductions |
+| `POST` | `/admin/ta/submit-roster` | Submit district monthly TA roster to Incharge for approval |
+| `POST` | `/admin/ta/pass-staff` | Incharge: Pass/approve individual staff travel claim and lock record |
+| `POST` | `/admin/ta/revert-staff` | Incharge: Revert individual staff claim to Sub-Admin with reason |
+| `POST` | `/admin/ta/unlock-staff` | Incharge & Super Admin: Unlock approved staff claim for corrections |
+| `POST` | `/admin/ta/resolve-dispute` | Incharge & Super Admin: Resolve an open FO travel dispute |
+| `GET` | `/admin/ta/export-excel` | Download multi-sheet Travel Allowance workbook (`.xlsx`) |
+| `GET` | `/fo/ta/monthly-summary` | Field Officer: View personal monthly TA status, payable amount, and dispute timer |
+| `POST` | `/fo/ta/dispute` | Field Officer: Raise a formal travel allowance dispute within the 24h window |
 
 ---
 
