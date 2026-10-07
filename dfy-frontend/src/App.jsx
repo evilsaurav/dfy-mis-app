@@ -6469,6 +6469,10 @@ function App() {
       text += '\nNone\n';
     }
 
+    if (formData.remark && formData.remark.trim() !== '') {
+      text += `\n*Remarks:*\n` + formData.remark.trim() + '\n';
+    }
+
     if (formData.morning_km !== "" || formData.evening_km !== "") {
       const calcKm = (formData.morning_km !== "" && formData.evening_km !== "")
         ? Math.max(0, Math.round(Number(formData.evening_km) - Number(formData.morning_km)))
