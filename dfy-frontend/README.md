@@ -53,7 +53,7 @@ flowchart TD
 - Generates 1-click bilingual WhatsApp attendance digests that automatically exclude approved leaves from the missing roster.
 
 ### 6. 📜 In-App Release History & Changelog Modal (`changelogData.js`)
-- Client-side in-app changelog modal with zero Firestore read cost.
+- Client-side in-app changelog modal with zero database query overhead.
 - Automatically notifies users of new updates with version badges and highlights (v2.8.3).
 
 ### 7. 📊 Dual-Sheet Staff Attendance Export & Multi-District Queue

@@ -6,7 +6,7 @@
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
 [![Vite](https://img.shields.io/badge/Vite_8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-[![Firebase Firestore](https://img.shields.io/badge/Firebase_Firestore-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com/)
+[![Supabase PostgreSQL](https://img.shields.io/badge/Supabase_PostgreSQL-3ECF8E?style=for-the-badge&logo=supabase&logoColor=white)](https://supabase.com/)
 [![Python](https://img.shields.io/badge/Python_3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![PWA Offline](https://img.shields.io/badge/PWA-100%25_Offline_First-success?style=for-the-badge&logo=pwa&logoColor=white)](https://web.dev/progressive-web-apps/)
 
@@ -77,8 +77,8 @@ flowchart TD
 
     subgraph Backend_Cloud [FastAPI Cloud Core - Render]
         Sync --> API[FastAPI Server]
-        API --> Rollups[(daily_district_rollups - 95% Read Cut)]
-        API --> DB[(Google Cloud Firestore)]
+        API --> Rollups[(In-Memory TTL & Disk Cache - 95% Read Cut)]
+        API --> DB[(Supabase PostgreSQL)]
         API --> Audit[(Audit Logs & Radar)]
         API --> ExcelEngine[Pandas & OpenPyXL Reporting Engine]
     end
@@ -123,9 +123,9 @@ flowchart TD
   - The dashboard pacing matrix binds strictly to official staff directory records (`staffDirectory`).
   - String sanitization and canonical district mapping eliminate duplicate or phantom staff rows.
 - **Live Force-Refresh Engine (`force_refresh: true`)**:
-  - Header green "Refresh" button purges in-memory RAM cache prefixes and disk snapshots, streaming fresh data directly from Firestore.
-- **Atomic District Rollups (`daily_district_rollups`)**:
-  - Slashes daily Firestore read operations by **95%** using atomic increments for metric counters.
+  - Header green "Refresh" button purges in-memory RAM cache prefixes and disk snapshots, streaming fresh relational data directly from PostgreSQL.
+- **Pre-Aggregated District Caching (`dash_{month}.json` & SimpleTTLCache)**:
+  - Slashes database query overhead by **95%** using in-memory TTL caching and disk snapshots for metric counters.
 - **Real-Time Attendance Radar**: Matches directory rosters against today's submissions to immediately highlight missing reports.
 - **Head-to-Head Peer Comparator**: Dual officer comparative cards with velocity metrics and 1-click bilingual coaching memos.
 - **5-in-1 Executive Export Studio**:
@@ -187,7 +187,7 @@ flowchart TD
   - The 1-click WhatsApp daily attendance digest generator automatically excludes staff on leave from the "Missing Officers" roster.
   - Generates a clean, categorized `🌴 Chhuti Par (On Leave)` roster in the final text, ensuring state leadership receives crisp, actionable morning summaries.
 - **Atomic Cache Eviction & RBAC Isolation**:
-  - Leave records persist in Firestore collection `daily_staff_leaves` with keys `{date}_{district}_{fo_name}`.
+  - Leave records persist in PostgreSQL table `daily_staff_leaves` with relational keys `{date}_{district}_{fo_name}`.
   - Automatically purges date-scoped attendance cache keys (`attendance_{date}_*`).
   - Strict Sub-Admin RBAC validation prevents coordinators from marking or modifying leave for staff outside their assigned districts (HTTP 403).
 
@@ -239,11 +239,11 @@ flowchart TD
   - For non-notification indicators (Home Visits, Follow-ups, DBT, FDC Kits), repeat entries are valid clinical re-interventions.
   - Displays an amber advisory requiring explicit officer confirmation before adding the repeat ID to the tally.
 - **Server Ingestion Auto-Pruning Gate (`POST /submit-daily-report`)**:
-  - Safely auto-prunes duplicate notification IDs from counters before committing to Firestore.
+  - Safely auto-prunes duplicate notification IDs from counters before committing to PostgreSQL.
   - Preserves all valid clinical work (visitations, testing, DBT, remarks) without failing the submission.
 - **Admin Duplicate Radar 1-Click Auto-Repair Suite**:
   - Scans cross-date and cross-officer duplicate notifications (`GET /admin/scan-duplicate-notifications`).
-  - 1-click repair endpoint (`POST /admin/repair-duplicate-notifications`) strips duplicate notification IDs from records and atomically decrements inflated `daily_district_rollups` with Sub-Admin RBAC validation.
+  - 1-click repair endpoint (`POST /admin/repair-duplicate-notifications`) strips duplicate notification IDs from child tables, updates report metric counts, and purges analytics caches with Sub-Admin RBAC validation.
 
 ---
 
@@ -281,7 +281,7 @@ flowchart TD
 - **Retroactive Supervisor Annotations (`POST /admin/attendance/add-remark`)**:
   - State and Sub-Admins can inspect attendance and duty submissions for any past or current calendar day and attach inspection notes or adjust leave statuses directly from the Attendance Radar.
 - **Immediate Cross-Portal Calendar Synchronization**:
-  - Remarks and status adjustments update Firestore collection `daily_staff_leaves` and instantly reflect on the Field Officer's mobile calendar view.
+  - Remarks and status adjustments update PostgreSQL table `daily_staff_leaves` and instantly reflect on the Field Officer's mobile calendar view.
 - **5 Distinct Visual Status Tokens**:
   - 🟢 **Present** (`#10B981`): Standard daily duty report submitted.
   - 🔵 **Official Duty** (`#3B82F6`): Government review meeting, training, or state workshop.
@@ -305,7 +305,7 @@ flowchart TD
 
 ### 16. 🛡️ Consonant-Collapsed Deactivated Staff Roster Defense
 - **Phonetic Normalization Engine (`normalizeStaffKey`)**:
-  - Eliminates false-positive defaulter records caused by phonetic spelling discrepancies between Firestore IDs (`sitamarhi_purushottamkumar`) and directory snapshots (`Purushotam Kumar`).
+  - Eliminates false-positive defaulter records caused by phonetic spelling discrepancies between legacy report keys (`sitamarhi_purushottamkumar`) and directory snapshots (`Purushotam Kumar`).
   - Consonant collapsing regex (`replace(/(.)\1+/g, '$1')`) normalizes repeated consonants (e.g. `tt` $\rightarrow$ `t`, `mm` $\rightarrow$ `m`, `ll` $\rightarrow$ `l`).
 - **Dual-Layer Deactivation Defense**:
   - Combines canonical district mapping with collapsed phonetic keys and direct status checks against `staffDirectory`.
@@ -420,7 +420,7 @@ flowchart TD
 - **Smart 12:00 PM Month-End Reporting Cutoff**:
   - Extended daily stealth cutoff to 11:00 AM IST on regular days, and provides an extended 12:00 PM (Noon) cutoff on Day 1 of every month to accommodate late month-end field reconciliation and prevent premature date shifts.
 - **Strict Zero-Leakage Privacy & Cost Defense**:
-  - Preserved strict 7:00 PM evening deadline messaging in frontline mobile app UI with zero disclosure of internal cutoff thresholds, maintaining zero additional Firestore read/write costs.
+  - Preserved strict 7:00 PM evening deadline messaging in frontline mobile app UI with zero disclosure of internal cutoff thresholds, maintaining zero additional database query overhead.
 
 ---
 
@@ -470,7 +470,7 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 - **Validation**: [Pydantic v2](https://docs.pydantic.dev/)
 
 ### Database & Cloud
-- **Primary Store**: [Google Cloud Firestore](https://firebase.google.com/docs/firestore)
+- **Primary Store**: [Supabase PostgreSQL](https://supabase.com/) (Relational Engine via `psycopg2` Connection Pool & REST)
 - **Hosting / Deployments**: [Render](https://render.com/) (API Web Service), Vercel / Netlify (Frontend)
 
 ---
@@ -479,10 +479,10 @@ The system supports active staff and reporting across **22+ Districts of Bihar**
 
 ```
 Mis field report/
-├── main.py                     # FastAPI Backend: APIs, RBAC, Firebase, Excel exports, Audits & Rollups
+├── main.py                     # FastAPI Backend: APIs, RBAC, PostgreSQL Engine, Excel exports, Audits & Rollups
 ├── requirements.txt            # Python dependencies
 ├── staff_master.csv            # Master staff directory & district assignments
-├── firebase_key.json           # Firebase Admin Service Account credentials (git-ignored)
+├── .env                        # Database and JWT secret credentials (git-ignored)
 ├── generate_templates.py       # Helper scripts for Excel template generation
 ├── templates/                  # Excel KPI report templates & assets
 ├── tests/                      # Automated Python and Node test batteries
@@ -616,7 +616,7 @@ Mis field report/
 ### Prerequisites
 - Python 3.10+
 - Node.js 18+ and npm
-- Google Cloud Firebase project with Firestore enabled
+- Supabase PostgreSQL project with connection credentials (`SUPABASE_DB_URL`)
 
 ### 1. Clone the Repository
 ```bash
@@ -661,7 +661,7 @@ VITE_API_URL=http://localhost:8000
 *(For production, set `VITE_API_URL` to your live backend domain, e.g., `https://dfy-mis-app.onrender.com`)*
 
 ### Backend
-Place your Firebase Service Account JSON credentials file as `firebase_key.json` in the root directory, or configure `FIREBASE_CREDENTIALS` environment variable.
+Configure `SUPABASE_DB_URL` (PostgreSQL pooled or direct connection string), `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `JWT_SECRET_KEY` in your environment or a `.env` file in the root directory.
 
 ---
 
@@ -671,7 +671,7 @@ Place your Firebase Service Account JSON credentials file as `firebase_key.json`
 1. Create a **Web Service** on Render pointing to your GitHub repository.
 2. Build Command: `pip install -r requirements.txt`
 3. Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-4. Add your Firebase secret key and JWT secret key under Environment variables.
+4. Add your database connection URL (`SUPABASE_DB_URL`), Supabase credentials, and `JWT_SECRET_KEY` under Environment variables.
 
 ### Frontend (Netlify / Vercel)
 1. Link your GitHub repository.

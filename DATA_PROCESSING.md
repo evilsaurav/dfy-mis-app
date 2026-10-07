@@ -2,7 +2,7 @@
 
 > **Doctors For You (DFY) - Tuberculosis Elimination Field MIS**  
 > *Author:* Health Informatics & Analytics Engineering  
-> *Platform:* FastAPI Backend + Google Cloud Firestore + React 19 Engine  
+> *Platform:* FastAPI Backend + Supabase PostgreSQL + React 19 Engine  
 > *Coverage:* 22+ Districts in Bihar, India  
 > *Version:* 2.8.3 (Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet, Consonant Defense & Documents Cohort Partitioning)  
 > *Status:* Production Active
@@ -17,7 +17,7 @@ The platform ingests clinical records from mobile field workers, validates them 
 flowchart TD
     Step1["1. Field Data Ingestion<br/>Mobile Form Entry (20+ KPIs)<br/>Odometer Photo Capture & Compress"] --> Step2["2. Offline Queuing & In-Flight Guard<br/>IndexedDB Offline Storage<br/>Double-Submit Lock Protection"]
     Step2 --> Step3["3. Transport & API Ingestion<br/>HTTPS POST /submit-daily-report<br/>GZip Compressed Payload"]
-    Step3 --> Step4["4. Backend Validation & Persistence<br/>4-Digit PIN Security Check<br/>Array Deduplication & Server Timestamp<br/>Firestore Atomic Merge"]
+    Step3 --> Step4["4. Backend Validation & Persistence<br/>4-Digit PIN Security Check<br/>Deduplication & Relational Normalization<br/>PostgreSQL Upsert & Child Inserts"]
     Step4 --> Step5["5. Cache Invalidation Matrix<br/>Purge dash_, dupe_audit_, profile_, attendance_"]
     Step5 --> Step6["6. Real-Time Analytical Engines<br/>• Dynamic Working Days Engine<br/>• Pacing, Velocity & Month-End Forecast<br/>• Duplicate ID Registry Mapping<br/>• Cascade Linkage & Drop-out Detection"]
     Step6 --> Step7["7. Executive Consumption & Export<br/>Live Marquee Ticker Stream<br/>OpenPyXL Multi-District Excel Workbooks<br/>WhatsApp 1-Click Briefs & Auto-Pruned Audit Logs"]
@@ -31,7 +31,7 @@ flowchart TD
 - Field health advocates record daily patient interactions via the mobile PWA (`App.jsx`).
 - **Input Sanitization & Normalization**:
   - Patient IDs (Nikshay registration numbers) entered as comma-separated or space-separated strings are automatically stripped of whitespace, normalized to uppercase, and filtered for minimum length ($\ge 5$ characters).
-  - Odometer morning and evening photos are converted to base64 or stored in Firebase Cloud Storage, recording travel distance.
+  - Odometer morning and evening photos are converted to base64 or stored in cloud object storage, recording travel distance.
 
 ### Step 2: Offline Resilience & Sync Engine
 - **IndexedDB Store (`dfy_offline_reports`)**:
@@ -55,7 +55,7 @@ flowchart TD
   payload[field_key] = list(dict.fromkeys(combined))
   ```
 - **Remark Chaining**: Multiple operational remarks throughout the day are chained with divider bars: `\"Morning clinic visit | Evening contact tracing in block X\"`.
-- **Server Timestamp**: Stamped with `firestore.SERVER_TIMESTAMP` for auditable submission chronology.
+- **Server Timestamp**: Stamped with database `NOW()` / `CURRENT_TIMESTAMP` (or IST `datetime.now()` timestamp) for auditable submission chronology.
 
 ### Step 5: In-Memory TTL Cache Invalidation
 Upon successful persistence, the backend immediately executes prefix-based cache invalidation:
@@ -173,11 +173,11 @@ For every field staff member (ADC, TC, FO):
     $$\Delta \text{Rollup}_{\text{notif}} = \text{len}(\text{clean\_notifs})$$
   - Preserves all valid clinical outreach (Visits, DBT, Remarks) without rejecting the submission.
 - **1-Click Admin Repair & Rollback Pipeline (`POST /admin/repair-duplicate-notifications`)**:
-  1. Reads target document from `daily_field_reports`.
-  2. Filters out specified duplicate IDs: $\text{filtered} = [id \text{ for } id \in \text{current} \text{ if } id \notin \text{duplicate\_ids}]$.
-  3. Updates report document in Firestore with `last_repaired_at` and `last_repaired_by`.
-  4. Atomically decrements daily district rollup:
-     $$\text{daily\_district\_rollups}.\text{update}(\{\text{"notifications"}: \text{firestore.Increment}(-\text{removed\_count})\})$$
+  1. Reads target record from `daily_field_reports` and child table `report_kpi_entries`.
+  2. Filters out specified duplicate IDs: $\text{filtered} = [id \text{ for } id \in \text{current} \text{ if } id \notin \text{duplicate\_ids}]$ and deletes them from `report_kpi_entries`.
+  3. Updates parent report record in PostgreSQL with `last_repaired_at`, `last_repaired_by`, and decremented metric count (`legacy_count_notifications`).
+  4. Atomically decrements daily district rollup in PostgreSQL:
+     $$\text{UPDATE daily\_district\_rollups SET notifications = GREATEST(0, COALESCE(notifications, 0) - removed\_count), last\_updated = NOW() WHERE id = rollup\_id}$$
   5. Purges scoped cache keys (`status_{doc_id}`, `dash_`, `profile_`) and writes an immutable audit record to `admin_audit_logs`.
 
 ---
@@ -185,10 +185,11 @@ For every field staff member (ADC, TC, FO):
 ### 3.8 Automated 30-Day Audit Trail Retention Engine
 - **Lifecycle of an Administrative Action**:
   1. Target edit, ID deletion, leave marking, or staff status toggle triggers `log_admin_activity()`.
-  2. Appends document to `admin_audit_logs` collection with `timestamp: YYYY-MM-DD HH:MM:SS`.
+  2. Inserts row into `admin_audit_logs` table with `occurred_at: YYYY-MM-DD HH:MM:SS`.
   3. Every 6 hours and upon server boot, `prune_expired_audit_logs(30)` evaluates:
      $$\text{cutoff} = (\text{now} - 30\text{ days}).\text{strftime}("%Y-%m-%d %H:%M:%S")$$
-  4. Deletes matching documents via Firestore batch commits (`db.batch().delete(doc.reference)`).
+  4. Deletes expired records in PostgreSQL via parameterized SQL batch deletion:
+     $$\text{DELETE FROM admin\_audit\_logs WHERE occurred\_at < cutoff}$$
   5. The UI displays an active retention status chip: `🛡️ Retention: 30 Days (Auto-Pruned)`.
 
 ---
@@ -216,11 +217,11 @@ For every field staff member (ADC, TC, FO):
   - `is_next_day_submission`: `True`
   - `submitted_morning_time`: Current time formatted as `HH:MM:SS` (IST).
   - `morning_submission_label`: User-facing badge text `⏰ Next day morning HH:MM AM`.
-- **Idempotent Merge & Rollup Processing**:
+- **Idempotent Merge & Metric Processing**:
   - If a report already exists for $D_{\text{target}}$ (e.g. partial evening report), incoming arrays are merged uniquely:
     $$\text{merged\_ids} = \text{list}(\text{dict.fromkeys}(\text{existing\_ids} + \text{incoming\_ids}))$$
-  - Daily district rollups (`daily_district_rollups`) are updated with the incremental difference:
-    $$\Delta \text{Rollup} = \text{len}(\text{merged\_ids}) - \text{len}(\text{existing\_ids})$$
+  - Child KPI entries and parent report metrics are updated with the incremental difference:
+    $$\Delta \text{Metric} = \text{len}(\text{merged\_ids}) - \text{len}(\text{existing\_ids})$$
 
 ---
 
@@ -256,7 +257,7 @@ For every field staff member (ADC, TC, FO):
 
 ### 3.12 Consonant-Collapsed Deactivated Staff Roster Defense
 - **Normalization Algorithm**:
-  - Standardizes staff matching across disparate datasets (Firestore documents, Excel rosters, directory snapshots):
+  - Standardizes staff matching across disparate datasets (PostgreSQL records, legacy report keys, Excel rosters, directory snapshots):
     $$\text{clean\_name} = \text{re.sub}(r'[^a-z0-9]', '', \text{name.lower()})$$
     $$\text{collapsed\_name} = \text{re.sub}(r'(.)\1+', r'\1', \text{clean\_name})$$
     $$\text{Normalized Key} = \text{canonicalizeDistrict}(D) + \text{"\_"} + \text{collapsed\_name}$$
@@ -292,7 +293,7 @@ For every field staff member (ADC, TC, FO):
   - `remark`: Supervisor observation / inspection note
   - `leave_type`: Optional status override (`Present`, `Medical`, `Casual`, `Official Work`, `Absent`)
 - **Persistence & Eviction**:
-  - Writes to Firestore collection `daily_staff_leaves` with document ID `{date}_{canonicalDistrict}_{fo_name_normalized}`.
+  - Upserts to PostgreSQL table `daily_staff_leaves` resolving foreign keys (`staff_id`, `district_id`) with unique constraint on `legacy_doc_id` (`{date}_{canonicalDistrict}_{fo_name_normalized}`).
   - Invalidates in-memory attendance cache for the specified date: `cache.delete_prefix(f"attendance_{date}")`.
   - Transmits updated status to Field Officer calendar view.
 

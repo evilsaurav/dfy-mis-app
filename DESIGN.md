@@ -107,7 +107,7 @@ The 4-digit PIN input features real-time dynamic micro-feedback directly beneath
 ### 4.2 Live Force-Refresh Action Control
 - Located in the Admin Header next to the date/month selector.
 - Features a vibrant emerald icon button: `🔄 Refresh`.
-- Triggers `fetchData(true)`, rotates the refresh icon with CSS transition, and displays a toast confirming: `"✓ Fresh live data fetched directly from Firestore!"`.
+- Triggers `fetchData(true)`, rotates the refresh icon with CSS transition, and displays a toast confirming: `"✓ Live database refresh complete."` (streaming fresh relational records directly from Supabase PostgreSQL).
 
 ### 4.3 Atomic Single-Day Report Deletion Modal
 - Inside the Field Officer Detailed Inspector, each date card displays a discreet red action: `🗑️ Delete Day`.

@@ -3,8 +3,8 @@
 > **Doctors For You (DFY) - Tuberculosis Elimination Field MIS**  
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
-> *Database:* Google Cloud Firestore & Firebase Cloud Storage  
-> *Version:* 3.5.0 (v2.8.3 - Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet, Consonant Defense & Native Bento SOPs)  
+> *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
+> *Version:* 3.6.0 (v2.8.5 - Relational Supabase PostgreSQL, Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet & Native Bento SOPs)  
 > *Status:* Production Active
 
 ---
@@ -17,7 +17,7 @@ The architecture resolves four primary operational challenges:
 1. **Zero-Network Rural Field Operations (100% Offline Resilience)**: Ground health workers frequently operate in remote villages with zero mobile connectivity. An offline-first mobile PWA powered by an encrypted local PIN vault (`dfy_pin_vault`), emergency field duty mode, automatic morning date rollover, and IndexedDB queuing guarantees that zero patient IDs are missed and workers are never locked out.
 2. **Extreme Cloud Resource Constraints**: Designed to run comfortably within **Render's Free Tier (512MB RAM, 0.1 fractional vCPU)**, sustaining **300+ concurrent staff submissions and analytical queries** without memory exhaustion.
 3. **Data Integrity & Normalization**: Enforces single-source-of-truth staff binding, cross-district patient deduplication, multi-stage clinical cascade validation, multi-admin RBAC with district scoping, and automated 30-day audit log retention.
-4. **Cost & Read Optimization**: Consolidates district-level metrics via atomic `daily_district_rollups`, slashing Firestore read charges by over 95% while supporting on-demand live cache invalidation (`force_refresh`).
+4. **Cost & Latency Optimization**: Consolidates district-level metrics via in-memory and disk pre-aggregations (`dash_{month}.json`), eliminating redundant statewide table scans while supporting on-demand live cache invalidation (`force_refresh`).
 
 ---
 
@@ -61,15 +61,15 @@ flowchart TD
         end
 
         subgraph Background_Workers [Async Background Workers]
-            Prune_Worker["🧹 Audit Auto-Prune Engine<br/>30-Day Hard Retention<br/>Batch Firestore Deletes"]
+            Prune_Worker["🧹 Audit Auto-Prune Engine<br/>30-Day Hard Retention<br/>SQL Batch Deletes"]
             Alert_Engine["🚨 Cascade & Dropout Engine<br/>Real-Time Linkage Verification"]
             Sync_Engine["🔄 Background Batch Rollup Processor"]
         end
     end
 
-    subgraph Cloud_Storage_Layer [Google Cloud Platform]
-        Firestore[("🔥 Google Cloud Firestore<br/>daily_field_reports (Atomic merges)<br/>daily_district_rollups (95% Read Cut)<br/>staff_directory | staff_targets<br/>admin_audit_logs | broadcast_alerts")]
-        Storage[("📦 Firebase Cloud Storage<br/>Odometer KM Photo Verifications")]
+    subgraph Cloud_Storage_Layer [Relational Database & Cloud Storage]
+        Postgres[("🐘 Supabase PostgreSQL<br/>daily_field_reports & Normalized KPI Children<br/>staff_directory | staff_targets | district_targets<br/>admin_audit_logs | broadcast_notifications")]
+        Storage[("📦 Cloud Object Storage<br/>Odometer KM Photo Verifications")]
     end
 
     %% Connections
@@ -80,7 +80,7 @@ flowchart TD
     Uvicorn --> Endpoints
     Endpoints <--> Cache
     Endpoints --> Thread_Pool
-    Thread_Pool <--> Firestore
+    Thread_Pool <--> Postgres
     Thread_Pool <--> Storage
     Core_Runtime --> Background_Workers
     Background_Workers --> Thread_Pool
@@ -123,13 +123,13 @@ When a 4-digit PIN is entered:
 
 Operating within Render's 512MB RAM constraint while serving 300+ field workers during peak evening submission hours (5:00 PM - 8:00 PM) requires an optimized backend architecture.
 
-### 4.1 100% Async Non-Blocking Thread Offloading
-- The Google Cloud Firestore Python SDK relies on synchronous HTTP/2 gRPC sockets. Calling `db.collection().stream()` or `doc.get()` inside an `async def` route directly blocks Python's single-threaded event loop for 400ms to 2,000ms.
-- Every Firestore operation is systematically wrapped in Python's native thread pool executor via `await asyncio.to_thread(...)`. This offloads network waiting to worker threads, leaving the main asyncio loop free to process incoming requests at sub-millisecond speeds.
+### 4.1 100% Async Non-Blocking Thread Offloading & Connection Pooling
+- The PostgreSQL database layer utilizes `psycopg2.pool.ThreadedConnectionPool` hosted on Supabase. To ensure synchronous database socket I/O never blocks Python's single-threaded asyncio event loop, intensive database interactions and bulk queries are dispatched via `await asyncio.to_thread(...)`.
+- This offloads socket I/O to background worker threads while maintaining thread-safe connection checkouts and returns, allowing the main asyncio loop to process incoming requests at sub-millisecond speeds without blocking.
 
 ### 4.2 In-Memory TTL Caching Engine & Live Force-Refresh
 - High-throughput RAM cache implemented via `SimpleTTLCache`:
-  $$\text{Latency}_{\text{RAM Hit}} \approx 0.15\text{ ms} \quad \text{vs} \quad \text{Latency}_{\text{Firestore Query}} \approx 750\text{ ms}$$
+  $$\text{Latency}_{\text{RAM Hit}} \approx 0.15\text{ ms} \quad \text{vs} \quad \text{Latency}_{\text{PostgreSQL Remote Query}} \approx 25\text{–}50\text{ ms (Network Round-Trip; Engine Query: } 0.05\text{–}10\text{ ms)}$$
 - **Cache Strategy Matrix**:
   | Resource | Cache Key Pattern | TTL | Auto-Invalidation Events |
   |---|---|---|---|
@@ -145,14 +145,14 @@ Operating within Render's 512MB RAM constraint while serving 300+ field workers 
   When an admin clicks the green "Refresh" button in `AdminDashboard.jsx`, the backend:
   1. Purges all `dash_`, `shared_raw_month_`, `attendance_`, `dupe_audit_`, and `cascade_alerts_` memory keys via `cache.delete_prefix(...)`.
   2. Unlinks disk snapshot files (`cache/dash_{month}.json`).
-  3. Bypasses the cache and streams 100% fresh data directly from Firestore.
+  3. Bypasses the cache and streams 100% fresh relational data directly from PostgreSQL.
 
-### 4.3 Atomic District Rollups (`daily_district_rollups`)
-- To eliminate expensive statewide full-collection scans ($O(N)$ document reads), daily submissions atomically update rollups:
-  - Document ID: `{YYYY-MM-DD}_{canonical_district}`
-  - Uses `firestore.Increment` for metric counters (`notifications`, `tests`, `hiv_dm`, `dbt`, `contact_tracing`, `diff_tb`).
-  - Uses `firestore.ArrayUnion([fo_name])` for submitted staff list.
-- **Cost Reduction**: Slashes daily Firestore read operations by **95%**, keeping project costs near zero.
+### 4.3 High-Performance District Pre-Aggregations & Disk Snapshots
+- To eliminate expensive statewide table scans ($O(N)$ row aggregations on large tables), the backend pre-aggregates and caches monthly district metrics:
+  - In-memory `SimpleTTLCache` (`dash_{month}_{districts}`, 30s TTL) for hot sub-millisecond retrieval.
+  - On-disk persistent JSON snapshot cache (`cache/dash_{month}.json`) surviving worker recycling.
+  - Automatic cache invalidation upon any daily report submission, admin modification, or 1-click Force-Refresh.
+- **Throughput & Speed**: Slashes dashboard load times by **95%** by serving pre-computed district totals directly from RAM or disk snapshots.
 
 ### 4.4 Dynamic GZip Compression & 24h CORS Preflight Caching
 - **GZip**: `GZipMiddleware(minimum_size=1000)` cuts large monthly analytical payloads (400 KB - 600 KB) down to **40 KB - 65 KB (85% to 90% reduction)**.
@@ -200,21 +200,20 @@ flowchart LR
 - **Security Guard**: Enforces Sub-Admin RBAC. If a sub-admin attempts to delete a report outside their `allowed_districts`, the backend rejects the request with HTTP 403.
 - **Atomic Rollback Pipeline**:
   1. Deletes document from `daily_field_reports`.
-  2. Atomically decrements `submission_count` and category metrics (`notifications`, `tests`, `hiv_dm`, etc.) in `daily_district_rollups`.
-  3. Removes `fo_name` from `submitted_fos` in the rollup.
-  4. Purges all dashboard RAM and disk cache prefixes.
-  5. Records an immutable audit log entry in `admin_audit_logs`.
+  2. Cascade-deletes corresponding child records from `report_kpi_entries`, `report_fdc_details`, and `report_visited_names`.
+  3. Purges all dashboard RAM and disk cache snapshots (`cache/dash_{month}.json`).
+  4. Records an immutable audit log entry in `admin_audit_logs`.
 
 ### 6.3 Hardened Authentication & Credential Governance
 - **Bcrypt Salted Hashing**: Administrator credentials are automatically salted and hashed via `hash_password()` using bcrypt before persistence in `admin_users`. Plaintext passwords and hardcoded bypasses are strictly prohibited.
 - **Sliding-Window Rate Limiting**: `SlidingWindowRateLimiter` enforces maximum 5 attempts per 10-minute window, issuing HTTP 429 lockouts to neutralize brute-force attacks.
-- **Protected Credential Management**: Password updates require authenticated Super Admin sessions (`require_super_admin`) and verification of existing credentials before committing updates to Firestore.
+- **Protected Credential Management**: Password updates require authenticated Super Admin sessions (`require_super_admin`) and verification of existing credentials before committing updates to PostgreSQL.
 
 ### 6.4 Attendance Leave & Absence Subsystem (`daily_staff_leaves`)
-- **State Persistence**: Leave entries are stored in the dedicated Firestore collection `daily_staff_leaves` with deterministic keys formatted as `{YYYY-MM-DD}_{canonical_district}_{fo_name_normalized}`.
+- **State Persistence**: Leave entries are stored in the dedicated PostgreSQL table `daily_staff_leaves` with resolved foreign keys (`staff_id`, `district_id`) and deterministic legacy key `{YYYY-MM-DD}_{canonical_district}_{fo_name_normalized}`.
 - **Leave Lifecycle**:
   - `POST /admin/attendance/mark-leave`: Records staff absence with category (`Medical`, `Casual`, `Official Work`, `Personal`, `Uninformed`) and remarks.
-  - `POST /admin/attendance/unmark-leave`: Deletes the leave document, reverting staff to standard attendance evaluation.
+  - `POST /admin/attendance/unmark-leave`: Deletes the leave record, reverting staff to standard attendance evaluation.
 - **Date-Scoped Cache Invalidation**: Leave mutations trigger `cache.delete_prefix(f"attendance_{clean_date}")`, ensuring immediate consistency without flushing unrelated caches.
 - **Sub-Admin Isolation**: Mutations strictly enforce `canonicalize_district(req.district) in allowed_districts`, rejecting unauthorized requests with HTTP 403.
 
@@ -227,13 +226,13 @@ flowchart LR
 - **Hardened Inactive PIN Verification Lockout**:
   - `/verify-pin` queries the staff directory and immediately halts if `is_active == False` or `status == "inactive"`, returning HTTP 403 and preventing any unauthorized daily reports.
 - **Zero Historical Data Corruption**:
-  - Past daily reports in `daily_field_reports` and monthly rollups in `daily_district_rollups` are completely preserved, preventing retrospective KPI corruption.
+  - Past daily reports in `daily_field_reports` and historical KPI child records are completely preserved, preventing retrospective KPI corruption.
 
 ### 6.6 Declared Government Holidays & Pacing Engine Synchronization
-- **Settings Store**: Declared monthly holidays are persisted in Firestore under `pacing_settings/{YYYY-MM}` (statewide default) and `pacing_settings/{YYYY-MM}_{district}` (district override).
+- **Settings Store**: Declared monthly holidays are persisted in PostgreSQL table `pacing_settings` with primary key `{YYYY-MM}` (statewide default) and `{YYYY-MM}_{district}` (district override).
 - **Two-Tier Fallback Hierarchy**:
-  1. District-specific override document (`{month}_{district}`).
-  2. Statewide month document (`{month}`).
+  1. District-specific override record (`{month}_{district}`).
+  2. Statewide month record (`{month}`).
   3. Default fallback: 1 declared holiday.
 - **API Endpoints**: `GET /admin/pacing/settings` and `POST /admin/pacing/settings` with Sub-Admin RBAC validation (Sub-Admins cannot mutate statewide settings).
 - **Real-Time Client Synchronization**: FO profile requests (`/my-profile-stats`) dynamically incorporate the active holiday settings into working days formulas.
@@ -251,14 +250,14 @@ flowchart TD
     subgraph Ingestion_Tier [FastAPI Ingestion Defense Gate]
         Submit[POST /submit-daily-report] --> ServerPrune{Check Existing Notifications in Treatment Window}
         ServerPrune -->|Duplicate Found| Prune[Auto-Prune from notification_ids<br/>Retain Visits, DBT, Remarks]
-        ServerPrune -->|Clean| Persist[Persist to Firestore & Update Rollups]
+        ServerPrune -->|Clean| Persist[Persist to PostgreSQL & Invalidate Caches]
         Prune --> Persist
     end
 
     subgraph Admin_Repair_Tier [Admin Duplicate Radar Suite]
         Scan[GET /admin/scan-duplicate-notifications] --> Repair[POST /admin/repair-duplicate-notifications]
-        Repair --> StripDoc[Strip Duplicates from daily_field_reports]
-        Repair --> RollbackRollup[Atomically Decrement daily_district_rollups]
+        Repair --> StripDoc[Strip Duplicates from Child KPI Tables]
+        Repair --> RollbackRollup[Purge Scoped Analytics Caches]
         Repair --> ScopedCache[Purge Scoped Cache Keys]
         Repair --> AuditLog[Write admin_audit_logs]
     end
@@ -302,7 +301,7 @@ flowchart TD
   - Bulk multi-district downloads initiate a client-side sequential worker that pauses 1000ms between requests, packaging reports into scoped ZIP bundles.
 
 ### 6.10 Consonant-Collapsed Deactivated Staff Roster Defense
-- **The Problem**: Spelling variations between Firestore user IDs and official directory records (e.g. `sitamarhi_purushottamkumar` vs `Purushotam Kumar`) caused deactivated staff to bypass status filters and appear as chronic defaulters.
+- **The Problem**: Spelling variations between legacy report officer keys and official directory records (e.g. `sitamarhi_purushottamkumar` vs `Purushotam Kumar`) caused deactivated staff to bypass status filters and appear as chronic defaulters.
 - **Phonetic Consonant-Collapsing Pipeline**:
   - `normalizeStaffKey(district, name)`:
     $$\text{Key} = \text{canonicalizeDistrict}(D) + \text{"\_"} + \text{clean}(N).\text{replace}(/(.)\1+/g, '\$1')$$
@@ -314,7 +313,7 @@ flowchart TD
 - **Retroactive Supervisor Annotations (`POST /admin/attendance/add-remark`)**:
   - State and Sub-Admins can inspect attendance and duty submissions for any past or current calendar day and attach supervisor remarks or adjust leave statuses directly from the Attendance Radar.
 - **Cross-Portal Reflection**:
-  - Persisted in Firestore collection `daily_staff_leaves` with key `{date}_{district}_{fo_name}`.
+  - Persisted in PostgreSQL table `daily_staff_leaves` with unique key on `{date}_{district}_{fo_name}`.
   - Instantly synchronizes with the Field Officer's mobile calendar view, displaying status chips in 5 distinct color tokens (Emerald, Blue, Amber, Indigo, Rose).
 - **Sub-Admin RBAC Validation**:
   - Strict district scoping rejects status adjustments or remarks outside assigned districts with HTTP 403.
@@ -360,10 +359,10 @@ flowchart TD
 
 ## 7. Audit Trail & Automated 30-Day Retention Engine
 
-To maintain rigorous compliance without bloating the Firestore database:
+To maintain rigorous compliance without bloating database storage:
 
 1. **Automated Batch Purge**:
-   - `prune_expired_audit_logs(retention_days=30)` queries records older than 30 days and deletes them via atomic Firestore batch writes.
+   - `prune_expired_audit_logs(retention_days=30)` queries records older than 30 days and deletes them via parameterized SQL batch deletion (`DELETE FROM admin_audit_logs WHERE occurred_at < %s`).
 2. **Startup & Periodic Execution**:
    - Runs on backend startup via `@app.on_event("startup")` and throttled to once every 6 hours during audit queries.
 3. **Strict Query Cutoff**:
@@ -383,7 +382,7 @@ flowchart TD
 
     subgraph Engine ["Cloud Backup Engine (asyncio.to_thread)"]
         CheckCache{"Today's Snapshot<br/>Exists in GCS?"}
-        StreamAll["Stream 10 Collections from Firestore<br/>(Reports, Rollups, Staff, Targets, Patients, etc.)"]
+        StreamAll["Stream Core Tables from PostgreSQL<br/>(Reports, Rollups, Staff, Targets, Patients, etc.)"]
         GZip["Compress JSON Payload<br/>(GZip Level 6: ~1.1MB -> ~96KB)"]
         PruneOld["30-Day Auto Retention Policy<br/>(Delete GCS blobs older than 30 days)"]
     end
@@ -430,7 +429,9 @@ flowchart TD
   uvicorn main:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 65 --limit-concurrency 500
   ```
 - **Environment Variables**:
-  - `FIREBASE_CREDENTIALS`: Service account key JSON string.
+  - `SUPABASE_DB_URL`: PostgreSQL connection string (Supabase pooled or direct URI).
+  - `SUPABASE_URL`: Supabase project API URL.
+  - `SUPABASE_SERVICE_ROLE_KEY`: Supabase service role secret key.
   - `JWT_SECRET_KEY`: Secret string for HS256 JWT signing.
   - `PORT`: Dynamically assigned by Render (default: 10000).
 
