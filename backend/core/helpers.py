@@ -205,6 +205,42 @@ def is_officer_name_match(name_a: str, name_b: str, district: str = "") -> bool:
             return True
     return False
 
+def build_report_candidate_doc_ids(
+    working_place: str,
+    fo_name: str,
+    date_str: str,
+    date_iso: Optional[str] = None
+) -> List[str]:
+    """
+    Centralized generation of candidate document IDs for daily_field_reports.
+    Consistently collapses internal whitespace on working_place and fo_name
+    before underscore-joining to prevent double-underscore divergence.
+    """
+    c_wp = canonicalize_district(working_place or "")
+    clean_wp = re.sub(r'\s+', ' ', str(c_wp or "")).strip()
+    raw_wp = re.sub(r'\s+', ' ', str(working_place or "")).strip()
+    clean_fo = re.sub(r'\s+', ' ', str(fo_name or "")).strip()
+    clean_fo_alpha = re.sub(r'[^a-z0-9]', '', clean_fo.lower())
+
+    d_raw = str(date_str or "").strip()[:10]
+    d_iso = str(date_iso or normalize_date_to_iso(d_raw) or d_raw).strip()[:10]
+
+    date_variants = [d_iso, d_raw] if d_iso != d_raw else [d_iso]
+
+    candidates = []
+    for d_val in date_variants:
+        if not d_val:
+            continue
+        candidates.extend([
+            f"{clean_wp}_{clean_fo}_{d_val}".replace(" ", "_").lower(),
+            f"{raw_wp}_{clean_fo}_{d_val}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo}__{d_val}".replace(" ", "_").lower(),
+            f"{clean_wp}_{clean_fo_alpha}_{d_val}".replace(" ", "_").lower(),
+            f"{raw_wp}_{clean_fo_alpha}_{d_val}".replace(" ", "_").lower(),
+        ])
+
+    return list(dict.fromkeys(c for c in candidates if c))
+
 def get_previous_month(month_str: Optional[str]) -> str:
     """Returns YYYY-MM formatted string for the calendar month immediately preceding month_str."""
     if not month_str or not isinstance(month_str, str) or "-" not in month_str:
