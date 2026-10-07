@@ -854,6 +854,18 @@ async def submit_daily_report(report: DailyActivityReport):
                 payload["submitted_morning_time"] = existing_report.get("submitted_morning_time", "")
                 payload["morning_submission_label"] = existing_report.get("morning_submission_label", "")
 
+        # Authoritative server-side total_km computation (Model A subtraction)
+        sub_m = getattr(report, "morning_km", None)
+        sub_e = getattr(report, "evening_km", None)
+        has_new_km = (sub_m is not None and int(sub_m) > 0) or (sub_e is not None and int(sub_e) > 0)
+
+        if has_new_km:
+            m_val = int(payload.get("morning_km") or 0)
+            e_val = int(payload.get("evening_km") or 0)
+            payload["total_km"] = max(0, e_val - m_val)
+        elif not payload.get("total_km"):
+            payload.pop("total_km", None)
+
         payload["id"] = doc_id
 
         # Parent table daily_field_reports in PostgreSQL does NOT have array columns
