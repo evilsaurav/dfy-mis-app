@@ -5367,7 +5367,8 @@ function App() {
     adhar_face_authentication_ids: [],
     consent_with_id_ids: [],
     culture_dst_ids: [],
-    remark: "", visited_names: []
+    remark: "", visited_names: [],
+    morning_km: "", evening_km: ""
   });
 
       
@@ -5765,7 +5766,8 @@ function App() {
                   tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                   adhar_face_authentication_ids: [], consent_with_id_ids: [],
                   culture_dst_ids: [],
-                  remark: "", visited_names: []
+                  remark: "", visited_names: [],
+                  morning_km: "", evening_km: ""
                 }));
               }
             })
@@ -5997,7 +5999,8 @@ function App() {
       tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
       adhar_face_authentication_ids: [], consent_with_id_ids: [],
       culture_dst_ids: [],
-      remark: "", visited_names: []
+      remark: "", visited_names: [],
+      morning_km: "", evening_km: ""
     });
     setPinStatus(null);
     setCurrentView('form');
@@ -6038,7 +6041,8 @@ function App() {
                 tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
                 adhar_face_authentication_ids: [], consent_with_id_ids: [],
                 culture_dst_ids: [],
-                remark: "", visited_names: []
+                remark: "", visited_names: [],
+                morning_km: "", evening_km: ""
               }));
               try {
                 const canonicalWp = canonicalizeDistrict(formData.working_place);
@@ -6465,8 +6469,11 @@ function App() {
       text += '\nNone\n';
     }
 
-    if (formData.remark && formData.remark.trim() !== '') {
-      text += `\n*Remarks:*\n` + formData.remark.trim() + '\n';
+    if (formData.morning_km !== "" || formData.evening_km !== "") {
+      const calcKm = (formData.morning_km !== "" && formData.evening_km !== "")
+        ? Math.max(0, Math.round(Number(formData.evening_km) - Number(formData.morning_km)))
+        : null;
+      text += `\n*Bike KM Log:*\nMorning: ${formData.morning_km || '—'}, Evening: ${formData.evening_km || '—'}${calcKm !== null ? ` (Total: ${calcKm} km)` : ''}\n`;
     }
 
     return text.trim();
@@ -6488,11 +6495,20 @@ function App() {
     }
     
     setIsSubmitting(true);
+    const mKm = parseInt(formData.morning_km, 10) || 0;
+    const eKm = parseInt(formData.evening_km, 10) || 0;
+    const calculatedTotalKm = (formData.morning_km !== "" && formData.evening_km !== "")
+      ? Math.max(0, eKm - mKm)
+      : (parseInt(formData.total_km, 10) || 0);
+
     const payload = { 
       ...formData, 
       working_place: (formData.working_place || '').trim(),
       fo_name: (formData.fo_name || '').trim(),
-      date: formData.date_of_reporting || new Date().toISOString().split('T')[0] 
+      date: formData.date_of_reporting || new Date().toISOString().split('T')[0],
+      morning_km: formData.morning_km !== "" ? parseInt(formData.morning_km, 10) : 0,
+      evening_km: formData.evening_km !== "" ? parseInt(formData.evening_km, 10) : 0,
+      total_km: calculatedTotalKm
     };
 
     // Keep credentials secured in offline vault
@@ -6544,7 +6560,8 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
-          remark: "", visited_names: []
+          remark: "", visited_names: [],
+          morning_km: "", evening_km: ""
         }));
 
         setTodaySubmittedReport({
@@ -6601,7 +6618,8 @@ function App() {
           tpt_treatment_start_ids: [], tpt_presumptive_ids: [],
           adhar_face_authentication_ids: [], consent_with_id_ids: [],
           culture_dst_ids: [],
-          remark: "", visited_names: []
+          remark: "", visited_names: [],
+          morning_km: "", evening_km: ""
         }));
 
         setTodaySubmittedReport({
@@ -7412,6 +7430,72 @@ function App() {
                 </div>
               </div>
 
+              {/* Daily Travel Log (Morning & Evening KM) */}
+              <div id="sec-travel-km" className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden transition-all duration-200">
+                <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-transparent px-4 py-3 sm:px-5 sm:py-3.5 border-b border-amber-200/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base sm:text-lg">🛣️</span>
+                    <div>
+                      <label className="block text-xs font-black text-amber-950 tracking-wide uppercase">Daily Travel Log (Morning &amp; Evening KM)</label>
+                      <span className="text-[10px] text-amber-800 font-medium">Optional • Morning start &amp; evening end odometer reading</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-4 sm:p-5 space-y-3.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1">
+                        Morning KM (Start Reading)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={formData.morning_km ?? ""}
+                        onChange={(e) => setFormData({ ...formData, morning_km: e.target.value })}
+                        placeholder="e.g. 10420"
+                        className="w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wide mb-1">
+                        Evening KM (End Reading)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={formData.evening_km ?? ""}
+                        onChange={(e) => setFormData({ ...formData, evening_km: e.target.value })}
+                        placeholder="e.g. 10464"
+                        className="w-full h-12 bg-slate-50/90 border border-slate-300 text-slate-900 text-sm font-semibold rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-600 focus:bg-white transition-all placeholder:text-slate-400 shadow-2xs"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Inline Warning if evening < morning */}
+                  {formData.morning_km !== "" && formData.evening_km !== "" && Number(formData.evening_km) < Number(formData.morning_km) && (
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 animate-fade-in">
+                      <span>⚠️</span>
+                      <span>Evening reading cannot be less than Morning reading</span>
+                    </div>
+                  )}
+
+                  {/* Live Distance Calculation Display */}
+                  {(formData.morning_km !== "" || formData.evening_km !== "") && (
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-600">Total Distance Travelled Today:</span>
+                      <span className="text-sm font-black text-amber-800 tabular-nums">
+                        {formData.morning_km !== "" && formData.evening_km !== ""
+                          ? `${Math.max(0, Math.round(Number(formData.evening_km) - Number(formData.morning_km)))} km`
+                          : "—"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Spacer for Sticky Footer */}
               <div className="h-36 w-full pointer-events-none"></div>
 
@@ -7763,6 +7847,20 @@ function App() {
                 <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs">
                   <span className="font-bold text-slate-400 uppercase text-[10px] block mb-1">Visited Doctors / Stores</span>
                   <p className="font-semibold text-slate-700">{formData.visited_names.join(', ')}</p>
+                </div>
+              )}
+
+              {(formData.morning_km !== "" || formData.evening_km !== "") && (
+                <div className="bg-amber-50/70 p-3 rounded-2xl border border-amber-200/70 text-xs">
+                  <span className="font-bold text-amber-850 uppercase text-[10px] block mb-1">🛣️ Travel Log (Bike KM)</span>
+                  <div className="flex justify-between items-center text-slate-700 font-semibold">
+                    <span>Morning: {formData.morning_km || "—"} | Evening: {formData.evening_km || "—"}</span>
+                    <span className="font-black text-amber-900">
+                      {formData.morning_km !== "" && formData.evening_km !== ""
+                        ? `Total: ${Math.max(0, Math.round(Number(formData.evening_km) - Number(formData.morning_km)))} km`
+                        : ""}
+                    </span>
+                  </div>
                 </div>
               )}
             </div>

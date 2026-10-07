@@ -98,8 +98,10 @@ export default function TravelAllowanceModal({
 
   // ── Drilldown view helpers ────────────────────────────────────────────────
   const drilldownTotalKm = drilldownLog.reduce((sum, d) => {
-    if (d.is_manual_override) return sum + (d.manual_total_km || 0);
-    return sum + Math.max(0, (d.evening_km || 0) - (d.morning_km || 0));
+    if (d.is_manual_override && d.manual_total_km != null && d.manual_total_km !== '') {
+      return sum + (parseFloat(d.manual_total_km) || 0);
+    }
+    return sum + Math.max(0, (parseFloat(d.evening_km) || 0) - (parseFloat(d.morning_km) || 0));
   }, 0);
   const drilldownGross = drilldownTotalKm * ratePerKm;
   const drilldownNet = Math.max(0, drilldownGross - (parseFloat(deductionAmount) || 0));
@@ -146,7 +148,9 @@ export default function TravelAllowanceModal({
   const handleDrilldownFieldChange = (dayIndex, field, value) => {
     setDrilldownLog((prev) => {
       const updated = [...prev];
-      updated[dayIndex] = { ...updated[dayIndex], [field]: value };
+      const isOverrideField = ['morning_km', 'evening_km', 'visited_names', 'purpose'].includes(field);
+      const isManual = field === 'is_manual_override' ? Boolean(value) : (isOverrideField ? true : Boolean(updated[dayIndex]?.is_manual_override));
+      updated[dayIndex] = { ...updated[dayIndex], [field]: value, is_manual_override: isManual };
       return updated;
     });
   };
@@ -695,8 +699,8 @@ export default function TravelAllowanceModal({
             </thead>
             <tbody>
               {drilldownLog.map((row, idx) => {
-                const dayKm = row.is_manual_override
-                  ? (row.manual_total_km || 0)
+                const dayKm = (row.is_manual_override && row.manual_total_km != null && row.manual_total_km !== '')
+                  ? (parseFloat(row.manual_total_km) || 0)
                   : Math.max(0, (parseFloat(row.evening_km) || 0) - (parseFloat(row.morning_km) || 0));
 
                 return (
@@ -708,7 +712,7 @@ export default function TravelAllowanceModal({
                         type="number"
                         value={row.morning_km ?? ''}
                         onChange={(e) => handleDrilldownFieldChange(idx, 'morning_km', e.target.value)}
-                        disabled={!canEdit || isLocked || row.is_manual_override}
+                        disabled={!canEdit || isLocked}
                         className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
                         placeholder="0"
                       />
@@ -718,7 +722,7 @@ export default function TravelAllowanceModal({
                         type="number"
                         value={row.evening_km ?? ''}
                         onChange={(e) => handleDrilldownFieldChange(idx, 'evening_km', e.target.value)}
-                        disabled={!canEdit || isLocked || row.is_manual_override}
+                        disabled={!canEdit || isLocked}
                         className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
                         placeholder="0"
                       />
