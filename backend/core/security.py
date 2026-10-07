@@ -73,6 +73,8 @@ def get_current_admin(
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid authentication token. Access denied.")
 
+get_current_user = get_current_admin
+
 def require_super_admin(admin: dict = Depends(get_current_admin)) -> dict:
     """Guarantees caller possesses SUPER_ADMIN privileges."""
     if admin.get("role") != "SUPER_ADMIN":

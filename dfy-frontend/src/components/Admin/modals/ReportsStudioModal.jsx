@@ -1,5 +1,6 @@
 import React from 'react';
 import { canonicalizeDistrict } from '../../../utils/districtHelpers';
+import { TA_FEATURE_ENABLED } from '../../../config/featureFlags';
 
 export default function ReportsStudioModal({
   showReportsStudio,
@@ -47,7 +48,8 @@ export default function ReportsStudioModal({
   totals = {},
   copyWhatsAppBulletin,
   copiedBulletin,
-  liveWhatsAppBulletin
+  liveWhatsAppBulletin,
+  onOpenTravelAllowance
 }) {
   if (!showReportsStudio) return null;
 
@@ -983,6 +985,26 @@ export default function ReportsStudioModal({
               )}
 
             </div>
+
+            {/* Travel Allowance Payroll Launch Tile */}
+            {TA_FEATURE_ENABLED && (
+              <div className="pt-3 border-t border-slate-100">
+                <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Payroll</p>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={() => { setShowReportsStudio(false); onOpenTravelAllowance?.(); }}
+                    className="flex flex-col items-start gap-2 p-4 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                  >
+                    <span className="text-2xl">🚗</span>
+                    <div>
+                      <p className="font-bold text-slate-800 text-sm">Travel Allowance</p>
+                      <p className="text-slate-500 text-xs">Monthly bike log, per-staff approval &amp; payroll export</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Modal Footer */}
             <div className="pt-3 border-t border-slate-100 flex justify-end">

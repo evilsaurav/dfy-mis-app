@@ -211,6 +211,10 @@ from backend.routers.reports import (
     get_pacing_settings,
     update_pacing_settings
 )
+from backend.routers.travel_allowance import (
+    router as travel_allowance_router,
+    calculate_log_totals
+)
 
 app = FastAPI(title="DFY TB MIS API", version="2.8.3")
 
@@ -246,6 +250,7 @@ app.include_router(admin_feed_router)
 app.include_router(rbac_audit_router)
 app.include_router(top_performers_router)
 app.include_router(reports_router)
+app.include_router(travel_allowance_router)
 # Target cache eviction: cache.delete_prefix("profile_") implemented in backend.routers.targets
 
 @app.get("/")

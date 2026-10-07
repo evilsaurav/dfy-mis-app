@@ -2,6 +2,9 @@
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
+EXCEL_NAVY_HEADER_FILL = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+EXCEL_WHITE_BOLD_FONT = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+
 EXCEL_THIN_BORDER = Border(
     left=Side(style='thin', color='CBD5E1'),
     right=Side(style='thin', color='CBD5E1'),
