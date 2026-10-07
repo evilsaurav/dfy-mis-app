@@ -71,25 +71,23 @@ def test_check_today_status_at_10_30_am_on_day_1():
         "date": "2026-10-01"
     }
 
-    with patch("main.get_ist_now", return_value=datetime(2026, 10, 1, 10, 30)), \
-         patch("main.db") as mock_db:
-        # Today doc does not exist, but yesterday's doc exists
-        def mock_doc_impl(doc_id):
-            doc = MagicMock()
-            if "2026-09-30" in doc_id:
-                doc.exists = True
-                doc.to_dict.return_value = {
-                    "date_of_reporting": "2026-09-30",
-                    "status": "completed",
-                    "timestamp_completed": "2026-10-01T10:15:00"
-                }
-            else:
-                doc.exists = False
-                doc.to_dict.return_value = {}
-            return doc
+    mock_doc = {
+        "date_of_reporting": "2026-09-30",
+        "status": "completed",
+        "timestamp_completed": "2026-10-01T10:15:00"
+    }
 
-        mock_db.collection.return_value.document.side_effect = mock_doc_impl
+    def fake_pg_fetch_one(table, filters=None):
+        if table == "daily_field_reports":
+            legacy_id = (filters or {}).get("legacy_doc_id", "")
+            if "2026-09-30" in str(legacy_id):
+                return dict(mock_doc)
+        return None
 
+    with patch("backend.routers.reports.get_ist_now", return_value=datetime(2026, 10, 1, 10, 30)), \
+         patch("main.get_ist_now", return_value=datetime(2026, 10, 1, 10, 30)), \
+         patch("backend.routers.reports.pg_execute_raw", return_value=[]), \
+         patch("backend.routers.reports.pg_fetch_one", side_effect=fake_pg_fetch_one):
         res = client.post("/check-today-status", json=req_body)
         assert res.status_code == 200
         data = res.json()

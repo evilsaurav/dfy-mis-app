@@ -234,57 +234,65 @@ async def test_submit_daily_report_stamps_next_day_morning_metadata():
 
 @pytest.mark.asyncio
 async def test_check_today_status_before_10am_yesterday_submitted_today():
-    mock_db = MockDB()
-    original_db = main.db
-    main.db = mock_db
-    try:
-        # Yesterday doc exists, but its timestamp_completed indicates it was submitted TODAY at 8:30 AM
-        mock_db.reports["muzaffarpur_raja_kumar_2026-09-24"] = {
-            "fo_name": "Raja Kumar",
-            "working_place": "Muzaffarpur",
-            "date_of_reporting": "2026-09-24",
-            "status": "completed",
-            "timestamp_completed": "2026-09-25 08:30:00",
-            "submission_count": 1
-        }
-        mock_now = datetime(2026, 9, 25, 8, 35, tzinfo=main.IST_TIMEZONE)
-        with patch("main.get_ist_now", return_value=mock_now):
-            req = main.CheckStatusRequest(
-                working_place="Muzaffarpur",
-                fo_name="Raja Kumar",
-                date="2026-09-25"
-            )
-            status_res = await main.check_today_status(req)
-            assert status_res["status"] == "completed"
-            assert status_res["submission_count"] == 1
-            assert status_res["data"]["date_of_reporting"] == "2026-09-24"
-    finally:
-        main.db = original_db
+    mock_now = datetime(2026, 9, 25, 8, 35, tzinfo=main.IST_TIMEZONE)
+    mock_doc = {
+        "fo_name": "Raja Kumar",
+        "working_place": "Muzaffarpur",
+        "date_of_reporting": "2026-09-24",
+        "status": "completed",
+        "timestamp_completed": "2026-09-25 08:30:00",
+        "submission_count": 1
+    }
+
+    def fake_pg_fetch_one(table, filters=None):
+        if table == "daily_field_reports":
+            legacy_id = (filters or {}).get("legacy_doc_id", "")
+            if "2026-09-24" in str(legacy_id):
+                return dict(mock_doc)
+        return None
+
+    with patch("backend.routers.reports.get_ist_now", return_value=mock_now), \
+         patch("main.get_ist_now", return_value=mock_now), \
+         patch("backend.routers.reports.pg_execute_raw", return_value=[]), \
+         patch("backend.routers.reports.pg_fetch_one", side_effect=fake_pg_fetch_one):
+        req = main.CheckStatusRequest(
+            working_place="Muzaffarpur",
+            fo_name="Raja Kumar",
+            date="2026-09-25"
+        )
+        status_res = await main.check_today_status(req)
+        assert status_res["status"] == "completed"
+        assert status_res["submission_count"] == 1
+        assert status_res["data"]["date_of_reporting"] == "2026-09-24"
 
 @pytest.mark.asyncio
 async def test_check_today_status_before_10am_yesterday_submitted_yesterday():
-    mock_db = MockDB()
-    original_db = main.db
-    main.db = mock_db
-    try:
-        # Yesterday doc exists, and its timestamp_completed was YESTERDAY
-        mock_db.reports["muzaffarpur_raja_kumar_2026-09-24"] = {
-            "fo_name": "Raja Kumar",
-            "working_place": "Muzaffarpur",
-            "date_of_reporting": "2026-09-24",
-            "status": "completed",
-            "timestamp_completed": "2026-09-24 18:30:00",
-            "submission_count": 1
-        }
-        mock_now = datetime(2026, 9, 25, 8, 35, tzinfo=main.IST_TIMEZONE)
-        with patch("main.get_ist_now", return_value=mock_now):
-            req = main.CheckStatusRequest(
-                working_place="Muzaffarpur",
-                fo_name="Raja Kumar",
-                date="2026-09-25"
-            )
-            status_res = await main.check_today_status(req)
-            # Since yesterday was submitted yesterday, today is genuinely not started
-            assert status_res["status"] == "not_started"
-    finally:
-        main.db = original_db
+    mock_now = datetime(2026, 9, 25, 8, 35, tzinfo=main.IST_TIMEZONE)
+    mock_doc = {
+        "fo_name": "Raja Kumar",
+        "working_place": "Muzaffarpur",
+        "date_of_reporting": "2026-09-24",
+        "status": "completed",
+        "timestamp_completed": "2026-09-24 18:30:00",
+        "submission_count": 1
+    }
+
+    def fake_pg_fetch_one(table, filters=None):
+        if table == "daily_field_reports":
+            legacy_id = (filters or {}).get("legacy_doc_id", "")
+            if "2026-09-24" in str(legacy_id):
+                return dict(mock_doc)
+        return None
+
+    with patch("backend.routers.reports.get_ist_now", return_value=mock_now), \
+         patch("main.get_ist_now", return_value=mock_now), \
+         patch("backend.routers.reports.pg_execute_raw", return_value=[]), \
+         patch("backend.routers.reports.pg_fetch_one", side_effect=fake_pg_fetch_one):
+        req = main.CheckStatusRequest(
+            working_place="Muzaffarpur",
+            fo_name="Raja Kumar",
+            date="2026-09-25"
+        )
+        status_res = await main.check_today_status(req)
+        # Since yesterday was submitted yesterday, today is genuinely not started
+        assert status_res["status"] == "not_started"
