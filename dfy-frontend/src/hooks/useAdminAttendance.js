@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { canonicalizeDistrict, normalizeStaffKey } from '../utils/districtHelpers';
+import { canonicalizeDistrict, normalizeStaffKey, buildAttendanceKey } from '../utils/districtHelpers';
 
 export function useAdminAttendance({
   currentUser,
@@ -38,9 +38,7 @@ export function useAdminAttendance({
     // Fast lookup for inactive_since / lifecycle status from staffList
     const staffMetaMap = {};
     (staffList || []).forEach(s => {
-      const d = canonicalizeDistrict(s.district || '').toLowerCase();
-      const cleanFo = (s.name || s.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      staffMetaMap[`${d}_${cleanFo}`] = s;
+      staffMetaMap[buildAttendanceKey(s.district, s.name || s.fo_name)] = s;
     });
 
     const staffRoster = [];
@@ -50,8 +48,7 @@ export function useAdminAttendance({
       (names || []).forEach(name => {
         if (name && String(name).trim()) {
           const foName = String(name).trim();
-          const cleanFo = foName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-          const meta = staffMetaMap[`${cDist.toLowerCase()}_${cleanFo}`];
+          const meta = staffMetaMap[buildAttendanceKey(cDist, foName)];
 
           // Filter out any staff whose inactive_since is on or before targetDate
           if (meta) {
@@ -74,14 +71,13 @@ export function useAdminAttendance({
     });
 
     // Also include any active staff from staffList not in static staffDirectory
-    const existingRosterKeys = new Set(staffRoster.map(s => `${canonicalizeDistrict(s.district).toLowerCase()}_${s.fo_name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`));
+    const existingRosterKeys = new Set(staffRoster.map(s => buildAttendanceKey(s.district, s.fo_name)));
     (staffList || []).forEach(s => {
       const cDist = canonicalizeDistrict(s.district || '');
       if (allowedDistSet && !allowedDistSet.has(cDist.toLowerCase())) return;
       const foName = (s.name || s.fo_name || '').trim();
       if (!foName) return;
-      const cleanFo = foName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      const key = `${cDist.toLowerCase()}_${cleanFo}`;
+      const key = buildAttendanceKey(cDist, foName);
       if (existingRosterKeys.has(key)) return;
 
       const isInactive = s.is_active === false || s.status === 'inactive';
@@ -108,8 +104,7 @@ export function useAdminAttendance({
     dateReports.forEach(r => {
       const dist = canonicalizeDistrict(r.working_place || '');
       if (allowedDistSet && !allowedDistSet.has(dist.toLowerCase())) return;
-      const cleanFo = (r.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      const key = `${dist}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
+      const key = buildAttendanceKey(dist, r.fo_name);
 
       const rawTs = r.timestamp_completed || r.timestamp || r.submitted_at || r.timestamp_raw || '';
       let submittedTime = (r.submitted_time || '').trim();
@@ -193,9 +188,7 @@ export function useAdminAttendance({
     const leavesMap = {};
     if (attendance && (attendance.date === targetDate || !attendance.date) && attendance.on_leave_fos) {
       attendance.on_leave_fos.forEach(l => {
-        const dist = canonicalizeDistrict(l.district || '');
-        const cleanFo = (l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        leavesMap[`${dist}_${cleanFo}`.toLowerCase()] = l;
+        leavesMap[buildAttendanceKey(l.district, l.fo_name)] = l;
       });
     }
 
@@ -206,8 +199,7 @@ export function useAdminAttendance({
     const matchedKeys = new Set();
 
     staffRoster.forEach(s => {
-      const cleanFo = s.fo_name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      const key = `${s.district}_${cleanFo}`.replace(/\s+/g, '').toLowerCase();
+      const key = buildAttendanceKey(s.district, s.fo_name);
       if (reportsMap[key]) {
         matchedKeys.add(key);
         const rep = reportsMap[key];
@@ -561,11 +553,11 @@ export function useAdminAttendance({
   const copyMissingReminder = () => {
     if (!attendance || !attendance.missing_fos) return;
     const onLeaveSet = new Set(
-      (attendance.on_leave_fos || []).map(l => `${canonicalizeDistrict(l.district || '').toLowerCase()}_${(l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`)
+      (attendance.on_leave_fos || []).map(l => buildAttendanceKey(l.district, l.fo_name))
     );
     const byDistrict = {};
     attendance.missing_fos.forEach(fo => {
-      const key = `${canonicalizeDistrict(fo.district || '').toLowerCase()}_${(fo.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`;
+      const key = buildAttendanceKey(fo.district, fo.fo_name);
       if (onLeaveSet.has(key)) return; // Strictly exclude staff on leave
       if (!byDistrict[fo.district]) byDistrict[fo.district] = [];
       byDistrict[fo.district].push(fo.fo_name);
@@ -715,10 +707,8 @@ export function useAdminAttendance({
     const submissionSet = new Set();
     (rawRecords || []).forEach(r => {
       const d = String(r.date_of_reporting || r.date || '').split('T')[0];
-      const cDist = canonicalizeDistrict(r.working_place || '').toLowerCase();
-      const cleanFo = (r.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      if (d && cDist && cleanFo) {
-        submissionSet.add(`${cDist}_${cleanFo}_${d}`);
+      if (d && r.working_place && r.fo_name) {
+        submissionSet.add(`${buildAttendanceKey(r.working_place, r.fo_name)}_${d}`);
       }
     });
 
@@ -732,18 +722,17 @@ export function useAdminAttendance({
 
     // Set of officers currently on leave or absent today
     const onLeaveSet = new Set(
-      (attendance?.on_leave_fos || []).map(l => `${canonicalizeDistrict(l.district || '').toLowerCase()}_${(l.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase()}`)
+      (attendance?.on_leave_fos || []).map(l => buildAttendanceKey(l.district, l.fo_name))
     );
 
     // Inactive cutoff lookup from staffList
     const inactiveCutoffMap = {};
     (staffList || []).forEach(s => {
-      const d = canonicalizeDistrict(s.district || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const n = (s.name || s.fo_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const attKey = buildAttendanceKey(s.district, s.name || s.fo_name);
       const normKey = normalizeStaffKey(s.district, s.name || s.fo_name);
       if (s.is_active === false || s.status === 'inactive' || s.inactive_since) {
         const cutoff = (s.inactive_since || '').slice(0, 10);
-        inactiveCutoffMap[`${d}_${n}`] = cutoff;
+        inactiveCutoffMap[attKey] = cutoff;
         inactiveCutoffMap[normKey] = cutoff;
       }
     });
@@ -760,9 +749,7 @@ export function useAdminAttendance({
       (names || []).forEach(name => {
         const cleanName = String(name || '').trim();
         if (!cleanName) return;
-        const cleanFo = cleanName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-        const distKey = cDist.toLowerCase().replace(/[^a-z0-9]/g, '');
-        const foKey = `${distKey}_${cleanFo}`;
+        const foKey = buildAttendanceKey(cDist, cleanName);
         const normKey = normalizeStaffKey(cDist, cleanName);
 
         // Exclude staff on leave/absent today
@@ -785,7 +772,7 @@ export function useAdminAttendance({
           const dayOfWeek = new Date(cd).getDay();
           if (dayOfWeek === 0) continue; // Skip Sunday field break
 
-          const hasReport = submissionSet.has(`${distKey}_${cleanFo}_${cd}`);
+          const hasReport = submissionSet.has(`${foKey}_${cd}`);
           if (!hasReport) {
             consecutiveMissed++;
             missedDates.push(cd);

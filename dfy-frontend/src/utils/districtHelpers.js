@@ -50,6 +50,12 @@ export const normalizeStaffKey = (dist, name) => {
   return `${d}_${n}`;
 };
 
+export const buildAttendanceKey = (district, foName) => {
+  const d = canonicalizeDistrict(district || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const n = (foName || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+  return `${d}_${n}`;
+};
+
 export const isOfficerNameMatch = (nameA, nameB, dist = '') => {
   if (!nameA || !nameB) return false;
   const a = String(nameA).trim().toLowerCase();
