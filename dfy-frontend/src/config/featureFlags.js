@@ -1,1 +1,1 @@
-export const TA_FEATURE_ENABLED = false;
+export const TA_FEATURE_ENABLED = true;
