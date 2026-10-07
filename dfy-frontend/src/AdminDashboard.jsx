@@ -26,6 +26,7 @@ import AdminHeader from './components/Admin/AdminHeader';
 import OverviewTab from './components/Admin/tabs/OverviewTab';
 import StaffPacingTab from './components/Admin/tabs/StaffPacingTab';
 import DistrictBenchmarksTab from './components/Admin/tabs/DistrictBenchmarksTab';
+import TravelAllowanceTab from './components/Admin/tabs/TravelAllowanceTab';
 import AdminLogin from './components/Admin/AdminLogin';
 import AdminModals from './components/Admin/AdminModals';
 
@@ -56,7 +57,7 @@ export default function AdminDashboard() {
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   // 2. Navigation & Filter States
-  const [activeMainTab, setActiveMainTab] = useState('overview'); // 'overview' | 'staff_pacing' | 'district_benchmarks'
+  const [activeMainTab, setActiveMainTab] = useState('overview'); // 'overview' | 'staff_pacing' | 'district_benchmarks' | 'travel_allowance'
   const [selectedDistrict, setSelectedDistrict] = useState('All');
   const [selectedFO, setSelectedFO] = useState('All');
   const [sortConfig, setSortConfig] = useState({ key: 'notifications', direction: 'desc' });
@@ -1012,6 +1013,25 @@ export default function AdminDashboard() {
           setSelectedDistrict={setSelectedDistrict}
           setActiveMainTab={setActiveMainTab}
           showToast={showToast}
+        />
+
+        {/* Tab 4: Statewide Travel Allowance Executive Deck */}
+        <TravelAllowanceTab
+          activeMainTab={activeMainTab}
+          month={month}
+          setMonth={setMonth}
+          statewideSummary={modals.statewideSummary}
+          loadingStatewideSummary={modals.loadingStatewideSummary}
+          statewideSummaryError={modals.statewideSummaryError}
+          fetchStatewideSummary={modals.fetchStatewideSummary}
+          onInspectDistrict={(targetDist) => {
+            modals.setTaDistrict(targetDist);
+            modals.setShowTaModal(true);
+          }}
+          handleExportExcel={modals.handleExportExcel}
+          showToast={showToast}
+          isSuperAdmin={isSuperAdmin}
+          isIncharge={currentUser?.role === 'MAIN_INCHARGE' || isSuperAdmin}
         />
 
         {/* Branding Footer */}

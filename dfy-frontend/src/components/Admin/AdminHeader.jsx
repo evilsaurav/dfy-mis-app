@@ -748,6 +748,20 @@ export default function AdminHeader({
                 <span>District Benchmarks &amp; Pacing</span>
               </button>
             )}
+            {(isSuperAdmin || currentUser?.role === 'MAIN_INCHARGE') && (
+              <button
+                type="button"
+                onClick={() => setActiveMainTab('travel_allowance')}
+                className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 shrink-0 cursor-pointer ${
+                  activeMainTab === 'travel_allowance'
+                    ? 'bg-teal-700 text-white shadow-sm shadow-teal-700/25 font-black'
+                    : 'bg-slate-50 hover:bg-teal-50/70 text-slate-700 hover:text-teal-900 border border-slate-200/90 font-bold'
+                }`}
+              >
+                <span>🏍️</span>
+                <span>Travel Allowance Statewide</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-[11px] font-bold text-teal-950 px-3 py-1.5 bg-teal-50/80 rounded-xl border border-teal-200/90 self-start md:self-auto tabular-num">
