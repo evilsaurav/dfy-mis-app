@@ -131,12 +131,18 @@ def test_ta_save_log_and_locking():
 
     # 1. Sub-Admin saving draft record -> 200
     with patch("backend.core.security.get_current_user", return_value={"uid": "u_sub", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}):
-        with patch("backend.core.database.db.collection") as mock_coll:
-            mock_doc = MagicMock()
-            # Existing doc is not locked
-            mock_doc.get.return_value.exists = True
-            mock_doc.get.return_value.to_dict.return_value = {"is_locked": False, "status": "DRAFT"}
-            mock_coll.return_value.document.return_value = mock_doc
+        with patch("backend.routers.travel_allowance.pg_execute_raw") as mock_pg:
+            def fake_pg(sql, params=None, fetch=False):
+                if "FROM staff_directory" in sql:
+                    return [{"id": 101, "district_id": 1}]
+                if "FROM districts" in sql:
+                    return [{"id": 1}]
+                if "SELECT id, status, is_locked FROM travel_allowance_rosters" in sql:
+                    return [{"id": 1, "status": "DRAFT", "is_locked": False}]
+                if "INSERT INTO travel_allowance_rosters" in sql:
+                    return [{"id": 1}]
+                return True
+            mock_pg.side_effect = fake_pg
 
             res = client.post("/admin/ta/save-log", json=save_payload)
             assert res.status_code == 200
@@ -150,11 +156,16 @@ def test_ta_save_log_and_locking():
 
     # 2. Locked record rejects Sub-Admin mutation with 423
     with patch("backend.core.security.get_current_user", return_value={"uid": "u_sub", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}):
-        with patch("backend.core.database.db.collection") as mock_coll:
-            mock_doc = MagicMock()
-            mock_doc.get.return_value.exists = True
-            mock_doc.get.return_value.to_dict.return_value = {"is_locked": True, "status": "APPROVED"}
-            mock_coll.return_value.document.return_value = mock_doc
+        with patch("backend.routers.travel_allowance.pg_execute_raw") as mock_pg:
+            def fake_pg_locked(sql, params=None, fetch=False):
+                if "FROM staff_directory" in sql:
+                    return [{"id": 101, "district_id": 1}]
+                if "FROM districts" in sql:
+                    return [{"id": 1}]
+                if "SELECT id, status, is_locked FROM travel_allowance_rosters" in sql:
+                    return [{"id": 1, "status": "APPROVED", "is_locked": True}]
+                return True
+            mock_pg.side_effect = fake_pg_locked
 
             res = client.post("/admin/ta/save-log", json=save_payload)
             assert res.status_code == 423

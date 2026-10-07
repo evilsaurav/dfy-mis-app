@@ -379,3 +379,146 @@ def test_fo_summary_and_dispute_workflow():
             assert data["dispute_status"] == "REJECTED"
             assert data["is_locked"] is True
             assert data["status"] == "APPROVED"
+
+
+def test_pass_staff_error_handling_404_and_500():
+    # Test (a): Calling POST /admin/ta/pass-staff with non-existent staff_key returns 404
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", return_value=[]):
+            with patch("backend.core.database.db.collection") as mock_coll:
+                mock_ref = MagicMock()
+                mock_get = MagicMock()
+                mock_get.exists = False
+                mock_ref.get.return_value = mock_get
+                mock_coll.return_value.document.return_value = mock_ref
+
+                res = client.post("/admin/ta/pass-staff", json={
+                    "month": "2026-09",
+                    "district": "Gaya",
+                    "staff_key": "non_existent_staff"
+                })
+                assert res.status_code == 404
+                assert res.json()["detail"] == "Staff TA record not found for the given month/district/staff_key."
+
+    # Test (b): Calling POST /admin/ta/pass-staff when pg_execute_raw raises DB exception returns 500
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", side_effect=RuntimeError("DB down")):
+            res = client.post("/admin/ta/pass-staff", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_key": "ramesh_kumar"
+            })
+            assert res.status_code == 500
+            assert res.json()["detail"] == "Failed to update TA record, please retry."
+
+    # Revert 404 on non-existent staff
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", return_value=[]):
+            with patch("backend.core.database.db.collection") as mock_coll:
+                mock_ref = MagicMock()
+                mock_get = MagicMock()
+                mock_get.exists = False
+                mock_ref.get.return_value = mock_get
+                mock_coll.return_value.document.return_value = mock_ref
+
+                res = client.post("/admin/ta/revert-staff", json={
+                    "month": "2026-09",
+                    "district": "Gaya",
+                    "staff_key": "non_existent_staff",
+                    "revert_reason": "Correction needed"
+                })
+                assert res.status_code == 404
+                assert res.json()["detail"] == "Staff TA record not found for the given month/district/staff_key."
+
+    # Revert 500 on DB exception
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", side_effect=RuntimeError("DB down")):
+            res = client.post("/admin/ta/revert-staff", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_key": "ramesh_kumar",
+                "revert_reason": "Excess fuel claim"
+            })
+            assert res.status_code == 500
+            assert res.json()["detail"] == "Failed to update TA record, please retry."
+
+    # Unlock 404 on non-existent staff
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", return_value=[]):
+            with patch("backend.core.database.db.collection") as mock_coll:
+                mock_ref = MagicMock()
+                mock_get = MagicMock()
+                mock_get.exists = False
+                mock_ref.get.return_value = mock_get
+                mock_coll.return_value.document.return_value = mock_ref
+
+                res = client.post("/admin/ta/unlock-staff", json={
+                    "month": "2026-09",
+                    "district": "Gaya",
+                    "staff_key": "non_existent_staff"
+                })
+                assert res.status_code == 404
+                assert res.json()["detail"] == "Staff TA record not found for the given month/district/staff_key."
+
+    # Unlock 500 on DB exception
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u2", "name": "Incharge Gaya", "role": "MAIN_INCHARGE", "allowed_districts": ["All"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", side_effect=RuntimeError("DB down")):
+            res = client.post("/admin/ta/unlock-staff", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_key": "ramesh_kumar"
+            })
+            assert res.status_code == 500
+            assert res.json()["detail"] == "Failed to update TA record, please retry."
+
+    # Save-log lock-check 500 on DB exception during lock verification
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u1", "name": "SubAdmin 1", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", side_effect=RuntimeError("DB down")):
+            res = client.post("/admin/ta/save-log", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_name": "Ramesh Kumar",
+                "staff_key": "ramesh_kumar",
+                "days": [{"day": 1, "morning_km": 10.0, "evening_km": 30.0}]
+            })
+            assert res.status_code == 500
+            assert res.json()["detail"] == "Failed to verify record lock status, please retry."
+
+
+def test_ta_save_log_unknown_staff_returns_404():
+    # Production-like context: active_db is truthy (_DatabaseProxy), pg_execute_raw not finding matching staff
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u1", "name": "SubAdmin 1", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw", return_value=[]):
+            res = client.post("/admin/ta/save-log", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_name": "Non Existent Staff Member",
+                "staff_key": "non_existent_staff_member",
+                "days": [{"day": 1, "morning_km": 10.0, "evening_km": 30.0}]
+            })
+            assert res.status_code == 404
+            assert res.json()["detail"] == "Staff not found in staff_directory for the given name/key."
+
+
+def test_ta_save_log_unresolved_district_returns_404():
+    # staff_id resolves from staff_directory (district_id is None in directory row), but districts table returns []
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u1", "name": "SubAdmin 1", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}):
+        with patch("backend.routers.travel_allowance.pg_execute_raw") as mock_pg:
+            def fake_pg(sql, params=None, fetch=False):
+                if "FROM staff_directory" in sql:
+                    return [{"id": 101, "district_id": None}]
+                if "FROM districts" in sql:
+                    return []
+                return []
+            mock_pg.side_effect = fake_pg
+            res = client.post("/admin/ta/save-log", json={
+                "month": "2026-09",
+                "district": "Gaya",
+                "staff_name": "Ramesh Kumar",
+                "staff_key": "ramesh_kumar",
+                "days": [{"day": 1, "morning_km": 10.0, "evening_km": 30.0}]
+            })
+            assert res.status_code == 404
+            assert res.json()["detail"] == "District 'Gaya' not found in districts table."
+
+

@@ -237,8 +237,8 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
             parts = month.split("-")
             year = int(parts[0])
             month_num = int(parts[1])
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"month parsing fallback: {e}")
     _, num_days = calendar.monthrange(year, month_num)
 
     day_map: Dict[int, Dict[str, Any]] = {}
@@ -250,8 +250,8 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
             if "-" in str(k):
                 try:
                     day_num = int(str(k).split("-")[2])
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"day key parsing fallback: {e}")
             elif str(k).isdigit():
                 day_num = int(k)
             else:
@@ -264,8 +264,8 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
                 day_num = d.get("day") or idx
                 try:
                     day_map[int(day_num)] = d
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"day list map fallback: {e}")
 
     normalized: List[Dict[str, Any]] = []
     for day in range(1, num_days + 1):
@@ -468,8 +468,8 @@ def get_current_ta_rate_value() -> float:
             if hasattr(doc, "exists") and doc.exists:
                 d = doc.to_dict() if callable(doc.to_dict) else dict(doc)
                 return float(d.get("rate_per_km", 4.0))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"app_settings mock lookup skipped: {e}")
 
     return 4.0
 
@@ -570,8 +570,11 @@ def update_travel_allowance_rate(
                ON CONFLICT (id) DO UPDATE SET rate_per_km = EXCLUDED.rate_per_km, updated_at = NOW(), updated_by = EXCLUDED.updated_by""",
             [rate_val, actor]
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres rate update notice: {e}")
+        logger.error(f"Postgres rate update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update TA rate, please retry.")
 
     # Mirror to active_db mock if present
     active_db = get_active_db()
@@ -581,8 +584,8 @@ def update_travel_allowance_rate(
                 {"rate_per_km": rate_val, "updated_by": actor, "updated_at": datetime.utcnow().isoformat()},
                 merge=True
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
 
     cache.set("ta_global_rate", {"rate_per_km": rate_val}, ttl=300)
     cache.delete_prefix("ta_roster_")
@@ -673,8 +676,8 @@ def grant_prefill_access(
             )
             if u_rows:
                 target_id = u_rows[0]["id"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"username resolution error: {e}")
 
     if not target_id:
         raise HTTPException(status_code=400, detail="Admin ID or username is required.")
@@ -686,8 +689,11 @@ def grant_prefill_access(
                ON CONFLICT (admin_id) DO UPDATE SET can_prefill = true, granted_by = EXCLUDED.granted_by, updated_at = NOW()""",
             [target_id, actor]
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres grant prefill access notice: {e}")
+        logger.error(f"Postgres grant prefill access error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to grant prefill permission, please retry.")
 
     # Sync in-memory store for fallback / unit tests
     _IN_MEMORY_PREFILL_PERMS[str(target_id)] = {"can_prefill": True, "granted_by": actor}
@@ -721,8 +727,8 @@ def revoke_prefill_access(
             )
             if u_rows:
                 target_id = u_rows[0]["id"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"username resolution error: {e}")
 
     if not target_id:
         raise HTTPException(status_code=400, detail="Admin ID or username is required.")
@@ -734,8 +740,11 @@ def revoke_prefill_access(
                ON CONFLICT (admin_id) DO UPDATE SET can_prefill = false, granted_by = EXCLUDED.granted_by, updated_at = NOW()""",
             [target_id, actor]
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres revoke prefill access notice: {e}")
+        logger.error(f"Postgres revoke prefill access error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to revoke prefill permission, please retry.")
 
     # Sync in-memory store for fallback / unit tests
     _IN_MEMORY_PREFILL_PERMS[str(target_id)] = {"can_prefill": False, "granted_by": actor}
@@ -814,8 +823,8 @@ async def get_district_ta_roster(
                         "id": s_id,
                         "key": s_id
                     })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"cached directory lookup skipped: {e}")
 
     if not district_staff:
         try:
@@ -830,8 +839,8 @@ async def get_district_ta_roster(
                     "id": s_id,
                     "key": s_id
                 })
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"get_directory fallback skipped: {e}")
 
     # 2. Query saved travel allowance rosters and daily logs from PostgreSQL
     saved_list = []
@@ -1016,7 +1025,8 @@ def prefill_district_ta_from_reports(
         year = int(year_str)
         month_num = int(month_str)
         _, num_days = calendar.monthrange(year, month_num)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"invalid month format: {e}")
         raise HTTPException(status_code=400, detail="Invalid month format. Expected YYYY-MM.")
 
     staff_name = (req.staff_name or "").strip()
@@ -1086,8 +1096,8 @@ def prefill_district_ta_from_reports(
                 try:
                     d_num = int(r_date.split("-")[2])
                     reports_by_day[d_num] = r
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"prefill day num parse error: {e}")
     except Exception as e:
         logger.warning(f"Notice querying daily_field_reports during prefill: {e}")
 
@@ -1109,10 +1119,10 @@ def prefill_district_ta_from_reports(
                         try:
                             d_num = int(r_date.split("-")[2])
                             reports_by_day[d_num] = r
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as e:
+                            logger.debug(f"mock date parse error: {e}")
+            except Exception as e:
+                logger.debug(f"mock daily reports stream skipped: {e}")
 
     # Build 31-day array
     days = []
@@ -1207,8 +1217,17 @@ def save_travel_allowance_log(
         if s_rows:
             staff_id = s_rows[0].get("id")
             district_id = s_rows[0].get("district_id")
-    except Exception:
-        pass
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Postgres staff directory lookup error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify record lock status, please retry.")
+
+    if staff_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Staff not found in staff_directory for the given name/key."
+        )
 
     if not district_id:
         try:
@@ -1219,8 +1238,17 @@ def save_travel_allowance_log(
             )
             if d_rows:
                 district_id = d_rows[0]["id"]
-        except Exception:
-            pass
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Postgres district lookup error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to verify record lock status, please retry.")
+
+    if district_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"District '{canon_dist}' not found in districts table."
+        )
 
     # 2. Check existing record for lock/permission constraints
     existing_status = "DRAFT"
@@ -1231,7 +1259,7 @@ def save_travel_allowance_log(
                WHERE month = %s 
                  AND (staff_id = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)) OR staff_key = %s)
                LIMIT 1""",
-            [req.month, staff_id if staff_id else -1, req.staff_name, staff_key],
+            [req.month, staff_id, req.staff_name, staff_key],
             fetch=True
         )
         if ex_rows:
@@ -1264,8 +1292,8 @@ def save_travel_allowance_log(
                         mock_locked = True
                 except HTTPException:
                     raise
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"mock lock check skipped: {e}")
 
             if not mock_locked:
                 allowed, err = validate_edit_permission({"status": "DRAFT", "is_locked": False}, current_user.get("role", ""))
@@ -1274,7 +1302,11 @@ def save_travel_allowance_log(
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning(f"Lock check notice: {e}")
+        logger.error(f"Postgres lock check error: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to verify record lock status, please retry."
+        )
 
     current_rate = get_current_ta_rate_value()
     totals = calculate_log_totals(
@@ -1290,47 +1322,49 @@ def save_travel_allowance_log(
     # 3. Upsert into travel_allowance_rosters
     roster_pk = existing_id
     try:
-        if staff_id and district_id:
-            res = pg_execute_raw(
-                """INSERT INTO travel_allowance_rosters (
-                       month, district_id, district, staff_id, staff_name, staff_key, designation,
-                       rate_per_km, total_km, gross_amount, deduction_amount, deduction_reason,
-                       final_payable_amount, admin_remarks, status, is_locked, updated_at, updated_by
-                   ) VALUES (
-                       %s, %s, %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, %s,
-                       %s, %s, %s, %s, NOW(), %s
-                   )
-                   ON CONFLICT (staff_id, month)
-                   DO UPDATE SET
-                       district_id = EXCLUDED.district_id,
-                       district = EXCLUDED.district,
-                       staff_name = EXCLUDED.staff_name,
-                       staff_key = EXCLUDED.staff_key,
-                       designation = EXCLUDED.designation,
-                       rate_per_km = EXCLUDED.rate_per_km,
-                       total_km = EXCLUDED.total_km,
-                       gross_amount = EXCLUDED.gross_amount,
-                       deduction_amount = EXCLUDED.deduction_amount,
-                       deduction_reason = EXCLUDED.deduction_reason,
-                       final_payable_amount = EXCLUDED.final_payable_amount,
-                       admin_remarks = EXCLUDED.admin_remarks,
-                       updated_at = NOW(),
-                       updated_by = EXCLUDED.updated_by
-                   RETURNING id""",
-                [
-                    req.month, district_id, canon_dist, staff_id, final_staff_name, staff_key,
-                    req.designation or "Field Officer", current_rate, totals["total_km"],
-                    totals["gross_amount"], totals["deduction_amount"], req.deduction_reason or "",
-                    totals["final_payable_amount"], req.admin_remarks or "", existing_status,
-                    is_locked, actor_name
-                ],
-                fetch=True
-            )
-            if res:
-                roster_pk = res[0].get("id")
+        res = pg_execute_raw(
+            """INSERT INTO travel_allowance_rosters (
+                   month, district_id, district, staff_id, staff_name, staff_key, designation,
+                   rate_per_km, total_km, gross_amount, deduction_amount, deduction_reason,
+                   final_payable_amount, admin_remarks, status, is_locked, updated_at, updated_by
+               ) VALUES (
+                   %s, %s, %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, %s,
+                   %s, %s, %s, %s, NOW(), %s
+               )
+               ON CONFLICT (staff_id, month)
+               DO UPDATE SET
+                   district_id = EXCLUDED.district_id,
+                   district = EXCLUDED.district,
+                   staff_name = EXCLUDED.staff_name,
+                   staff_key = EXCLUDED.staff_key,
+                   designation = EXCLUDED.designation,
+                   rate_per_km = EXCLUDED.rate_per_km,
+                   total_km = EXCLUDED.total_km,
+                   gross_amount = EXCLUDED.gross_amount,
+                   deduction_amount = EXCLUDED.deduction_amount,
+                   deduction_reason = EXCLUDED.deduction_reason,
+                   final_payable_amount = EXCLUDED.final_payable_amount,
+                   admin_remarks = EXCLUDED.admin_remarks,
+                   updated_at = NOW(),
+                   updated_by = EXCLUDED.updated_by
+               RETURNING id""",
+            [
+                req.month, district_id, canon_dist, staff_id, final_staff_name, staff_key,
+                req.designation or "Field Officer", current_rate, totals["total_km"],
+                totals["gross_amount"], totals["deduction_amount"], req.deduction_reason or "",
+                totals["final_payable_amount"], req.admin_remarks or "", existing_status,
+                is_locked, actor_name
+            ],
+            fetch=True
+        )
+        if res:
+            roster_pk = res[0].get("id")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres upsert roster notice: {e}")
+        logger.error(f"Postgres upsert roster error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save travel allowance log, please retry.")
 
     # 4. Upsert child daily logs into travel_allowance_daily_logs
     if roster_pk:
@@ -1354,37 +1388,48 @@ def save_travel_allowance_log(
                        ) VALUES (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, NOW())""",
                     [roster_pk, d_day, d_date, m_km, e_km, t_km, v_names, purp, is_over, rem]
                 )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.warning(f"Postgres daily logs insert notice: {e}")
+            logger.error(f"Postgres daily logs insert error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save daily log entries, please retry.")
 
-    # Mirror to active_db mock if running in unit tests
+    if not roster_pk:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save travel allowance log: unable to persist record."
+        )
+
+    # Mirror to active_db mock if running in test environment with active collection
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
             m_id = f"{req.month}_{canon_dist.lower()}_{staff_key}"
-            mock_doc = {
-                "doc_id": m_id,
-                "month": req.month,
-                "district": canon_dist,
-                "staff_name": final_staff_name,
-                "staff_key": staff_key,
-                "designation": req.designation or "Field Officer",
-                "rate_per_km": current_rate,
-                "total_km": totals["total_km"],
-                "gross_amount": totals["gross_amount"],
-                "deduction_amount": totals["deduction_amount"],
-                "deduction_reason": req.deduction_reason or "",
-                "final_payable_amount": totals["final_payable_amount"],
-                "admin_remarks": req.admin_remarks or "",
-                "status": existing_status,
-                "is_locked": is_locked,
-                "days": req.days,
-                "updated_at": datetime.utcnow().isoformat(),
-                "updated_by": actor_name
-            }
-            active_db.collection("travel_allowance_logs").document(m_id).set(mock_doc, merge=True)
-        except Exception:
-            pass
+            doc = active_db.collection("travel_allowance_logs").document(m_id).get()
+            if hasattr(doc, "exists") and doc.exists:
+                mock_doc = {
+                    "doc_id": m_id,
+                    "month": req.month,
+                    "district": canon_dist,
+                    "staff_name": final_staff_name,
+                    "staff_key": staff_key,
+                    "designation": req.designation or "Field Officer",
+                    "rate_per_km": current_rate,
+                    "total_km": totals["total_km"],
+                    "gross_amount": totals["gross_amount"],
+                    "deduction_amount": totals["deduction_amount"],
+                    "deduction_reason": req.deduction_reason or "",
+                    "final_payable_amount": totals["final_payable_amount"],
+                    "admin_remarks": req.admin_remarks or "",
+                    "status": existing_status,
+                    "is_locked": is_locked,
+                    "days": req.days,
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_by": actor_name
+                }
+                active_db.collection("travel_allowance_logs").document(m_id).set(mock_doc, merge=True)
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
 
     cache.delete_prefix(f"ta_roster_{req.month}")
 
@@ -1418,6 +1463,7 @@ def submit_district_ta_roster(
     actor_name = current_user.get("name") or current_user.get("username") or "Sub-Admin"
 
     count = 0
+    updated_rows = []
     try:
         sql = """UPDATE travel_allowance_rosters
                  SET status = 'SUBMITTED', is_locked = true, submitted_at = NOW(), submitted_by = %s, updated_at = NOW()
@@ -1428,9 +1474,15 @@ def submit_district_ta_roster(
         if req.staff_keys:
             sql += " AND staff_key = ANY(%s)"
             params.append(req.staff_keys)
-        pg_execute_raw(sql, params)
+        sql += " RETURNING id"
+        updated_rows = pg_execute_raw(sql, params, fetch=True)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres submit-roster notice: {e}")
+        logger.error(f"Postgres submit-roster error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit roster, please retry.")
+
+    count = len(updated_rows) if updated_rows else 0
 
     # Mirror to active_db mock
     active_db = get_active_db()
@@ -1440,12 +1492,14 @@ def submit_district_ta_roster(
             docs = []
             try:
                 docs = list(coll.where("month", "==", req.month).where("district", "==", canon_dist).stream())
-            except Exception:
+            except Exception as e:
+                logger.debug(f"where stream skipped: {e}")
                 docs = []
             if not docs:
                 try:
                     docs = list(coll.stream())
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"stream skipped: {e}")
                     docs = []
             for doc in docs:
                 d = doc.to_dict() if callable(doc.to_dict) else dict(doc)
@@ -1459,9 +1513,10 @@ def submit_district_ta_roster(
                         d["submitted_at"] = datetime.utcnow().isoformat()
                         d["submitted_by"] = actor_name
                         getattr(doc, "reference", doc).set(d, merge=True)
-                        count += 1
-        except Exception:
-            pass
+                        if not updated_rows:
+                            count += 1
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
 
     cache.delete_prefix(f"ta_roster_{req.month}")
     return {
@@ -1493,6 +1548,7 @@ def pass_staff_record(
     # Batch passing
     if req.staff_key.upper() == "ALL" or req.staff_keys:
         target_keys = req.staff_keys or []
+        updated_rows = []
         try:
             sql = """UPDATE travel_allowance_rosters
                      SET status = 'APPROVED', is_locked = true, approved_at = NOW(), approved_by = %s, updated_at = NOW()
@@ -1503,13 +1559,18 @@ def pass_staff_record(
             if target_keys:
                 sql += " AND staff_key = ANY(%s)"
                 params.append(target_keys)
-            pg_execute_raw(sql, params)
+            sql += " RETURNING staff_key, id"
+            updated_rows = pg_execute_raw(sql, params, fetch=True)
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.warning(f"Postgres batch pass notice: {e}")
+            logger.error(f"Postgres batch pass error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
         # Sync mock store
         active_db = get_active_db()
-        passed = []
+        passed = [r["staff_key"] for r in updated_rows] if updated_rows else []
+        mock_synced = False
         if active_db and hasattr(active_db, "collection"):
             try:
                 for doc in active_db.collection("travel_allowance_logs").stream():
@@ -1524,9 +1585,17 @@ def pass_staff_record(
                             d["approved_at"] = datetime.utcnow().isoformat()
                             d["approved_by"] = actor_name
                             getattr(doc, "reference", doc).set(d, merge=True)
-                            passed.append(s_key)
-            except Exception:
-                pass
+                            if s_key not in passed:
+                                passed.append(s_key)
+                            mock_synced = True
+            except Exception as e:
+                logger.debug(f"mock sync skipped: {e}")
+
+        if not updated_rows and not mock_synced:
+            raise HTTPException(
+                status_code=404,
+                detail="Staff TA record not found for the given month/district/staff_key."
+            )
 
         cache.delete_prefix(f"ta_roster_{req.month}")
         return {
@@ -1536,19 +1605,26 @@ def pass_staff_record(
         }
 
     # Single staff passing
+    updated_rows = []
     try:
-        pg_execute_raw(
+        updated_rows = pg_execute_raw(
             """UPDATE travel_allowance_rosters
                SET status = 'APPROVED', is_locked = true, approved_at = NOW(), approved_by = %s, updated_at = NOW()
                WHERE month = %s 
                  AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
-                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))""",
-            [actor_name, req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key]
+                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))
+               RETURNING id""",
+            [actor_name, req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key],
+            fetch=True
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres single pass notice: {e}")
+        logger.error(f"Postgres single pass error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
     # Sync mock store
+    mock_synced = False
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
@@ -1561,8 +1637,15 @@ def pass_staff_record(
                 d["approved_at"] = datetime.utcnow().isoformat()
                 d["approved_by"] = actor_name
                 active_db.collection("travel_allowance_logs").document(m_id).set(d, merge=True)
-        except Exception:
-            pass
+                mock_synced = True
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
+
+    if not updated_rows and not mock_synced:
+        raise HTTPException(
+            status_code=404,
+            detail="Staff TA record not found for the given month/district/staff_key."
+        )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
     return {
@@ -1602,19 +1685,26 @@ def revert_staff_record(
     canon_dist = check_district_access(current_user, req.district)
     actor_name = current_user.get("name") or current_user.get("username") or "Incharge"
 
+    updated_rows = []
     try:
-        pg_execute_raw(
+        updated_rows = pg_execute_raw(
             """UPDATE travel_allowance_rosters
                SET status = 'REVERTED', is_locked = false, reverted_at = NOW(), reverted_by = %s,
                    revert_reason = %s, updated_at = NOW()
                WHERE month = %s 
                  AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
-                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))""",
-            [actor_name, req.revert_reason.strip(), req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key]
+                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))
+               RETURNING id""",
+            [actor_name, req.revert_reason.strip(), req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key],
+            fetch=True
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres revert staff notice: {e}")
+        logger.error(f"Postgres revert staff error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
+    mock_synced = False
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
@@ -1628,8 +1718,15 @@ def revert_staff_record(
                 d["reverted_by"] = actor_name
                 d["revert_reason"] = req.revert_reason.strip()
                 active_db.collection("travel_allowance_logs").document(m_id).set(d, merge=True)
-        except Exception:
-            pass
+                mock_synced = True
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
+
+    if not updated_rows and not mock_synced:
+        raise HTTPException(
+            status_code=404,
+            detail="Staff TA record not found for the given month/district/staff_key."
+        )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
     return {
@@ -1664,18 +1761,25 @@ def unlock_staff_record(
     canon_dist = check_district_access(current_user, req.district)
     actor_name = current_user.get("name") or current_user.get("username") or "Incharge"
 
+    updated_rows = []
     try:
-        pg_execute_raw(
+        updated_rows = pg_execute_raw(
             """UPDATE travel_allowance_rosters
                SET status = 'REVERTED', is_locked = false, unlocked_at = NOW(), unlocked_by = %s, updated_at = NOW()
                WHERE month = %s 
                  AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
-                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))""",
-            [actor_name, req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key]
+                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))
+               RETURNING id""",
+            [actor_name, req.month, canon_dist, req.district, req.staff_key, req.staff_key, req.staff_key],
+            fetch=True
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres unlock staff notice: {e}")
+        logger.error(f"Postgres unlock staff error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
+    mock_synced = False
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
@@ -1688,8 +1792,15 @@ def unlock_staff_record(
                 d["unlocked_at"] = datetime.utcnow().isoformat()
                 d["unlocked_by"] = actor_name
                 active_db.collection("travel_allowance_logs").document(m_id).set(d, merge=True)
-        except Exception:
-            pass
+                mock_synced = True
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
+
+    if not updated_rows and not mock_synced:
+        raise HTTPException(
+            status_code=404,
+            detail="Staff TA record not found for the given month/district/staff_key."
+        )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
     return {
@@ -1751,8 +1862,8 @@ def get_fo_monthly_summary(
                 doc = active_db.collection("travel_allowance_logs").document(m_id).get()
                 if hasattr(doc, "exists") and doc.exists:
                     record = doc.to_dict() if callable(doc.to_dict) else dict(doc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"mock sync skipped: {e}")
 
     if not record or record.get("status") != "APPROVED":
         return {
@@ -1814,8 +1925,10 @@ def raise_fo_ta_dispute(
         )
         if rows:
             record = rows[0]
-    except Exception:
-        pass
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.debug(f"Postgres dispute lookup notice: {e}")
 
     if not record:
         active_db = get_active_db()
@@ -1825,8 +1938,8 @@ def raise_fo_ta_dispute(
                 doc = active_db.collection("travel_allowance_logs").document(m_id).get()
                 if hasattr(doc, "exists") and doc.exists:
                     record = doc.to_dict() if callable(doc.to_dict) else dict(doc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"mock lookup skipped: {e}")
 
     if not record:
         raise HTTPException(status_code=404, detail="TA record not found.")
@@ -1841,15 +1954,22 @@ def raise_fo_ta_dispute(
         )
 
     now_str = datetime.utcnow().isoformat()
-    try:
-        pg_execute_raw(
-            """UPDATE travel_allowance_rosters
-               SET dispute_status = 'PENDING', dispute_reason = %s, disputed_at = NOW(), updated_at = NOW()
-               WHERE id = %s""",
-            [effective_reason, record.get("id")]
-        )
-    except Exception as e:
-        logger.warning(f"Postgres dispute update notice: {e}")
+    updated_rows = []
+    if record.get("id"):
+        try:
+            updated_rows = pg_execute_raw(
+                """UPDATE travel_allowance_rosters
+                   SET dispute_status = 'PENDING', dispute_reason = %s, disputed_at = NOW(), updated_at = NOW()
+                   WHERE id = %s
+                   RETURNING id""",
+                [effective_reason, record.get("id")],
+                fetch=True
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Postgres dispute update error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
     # Dispatch notification to broadcast_alerts table
     try:
@@ -1870,30 +1990,40 @@ def raise_fo_ta_dispute(
         logger.warning(f"Notice dispatching dispute alert: {e}")
 
     # Sync mock store
+    mock_synced = False
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
             m_id = f"{req.month}_{canon_dist.lower()}_{clean_alphanumeric(req.fo_name)}"
-            record["dispute_status"] = "PENDING"
-            record["dispute_reason"] = effective_reason
-            record["disputed_at"] = now_str
-            active_db.collection("travel_allowance_logs").document(m_id).set(record, merge=True)
-            active_db.collection("broadcast_notifications").add({
-                "title": f"TA Dispute: {req.fo_name} ({canon_dist})",
-                "message": effective_reason,
-                "type": "TA_DISPUTE",
-                "target_roles": ["SUB_ADMIN", "ADMIN", "SUPER_ADMIN", "MAIN_INCHARGE"],
-                "target_district": canon_dist,
-                "metadata": {
-                    "month": req.month,
-                    "district": canon_dist,
-                    "staff_name": req.fo_name,
-                    "dispute_reason": effective_reason,
-                    "type": "TA_DISPUTE"
-                }
-            })
-        except Exception:
-            pass
+            doc = active_db.collection("travel_allowance_logs").document(m_id).get()
+            if hasattr(doc, "exists") and doc.exists:
+                record["dispute_status"] = "PENDING"
+                record["dispute_reason"] = effective_reason
+                record["disputed_at"] = now_str
+                active_db.collection("travel_allowance_logs").document(m_id).set(record, merge=True)
+                active_db.collection("broadcast_notifications").add({
+                    "title": f"TA Dispute: {req.fo_name} ({canon_dist})",
+                    "message": effective_reason,
+                    "type": "TA_DISPUTE",
+                    "target_roles": ["SUB_ADMIN", "ADMIN", "SUPER_ADMIN", "MAIN_INCHARGE"],
+                    "target_district": canon_dist,
+                    "metadata": {
+                        "month": req.month,
+                        "district": canon_dist,
+                        "staff_name": req.fo_name,
+                        "dispute_reason": effective_reason,
+                        "type": "TA_DISPUTE"
+                    }
+                })
+                mock_synced = True
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
+
+    if not updated_rows and not mock_synced:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update TA record, please retry."
+        )
 
     return {
         "status": "success",
@@ -1926,24 +2056,31 @@ def resolve_ta_dispute(
     new_disp_status = "RESOLVED" if action == "ACCEPT" else "REJECTED"
     new_locked = False if action == "ACCEPT" else True
 
+    updated_rows = []
     try:
-        pg_execute_raw(
+        updated_rows = pg_execute_raw(
             """UPDATE travel_allowance_rosters
                SET status = %s, is_locked = %s, dispute_status = %s,
                    dispute_resolved_at = NOW(), dispute_resolved_by = %s,
                    dispute_resolution_remarks = %s, updated_at = NOW()
                WHERE month = %s 
                  AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
-                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))""",
+                 AND (staff_key = %s OR staff_id::text = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)))
+               RETURNING id""",
             [
                 new_status, new_locked, new_disp_status, actor_name,
                 req.resolution_remarks or "", req.month, canon_dist, req.district,
                 req.staff_key, req.staff_key, req.staff_key
-            ]
+            ],
+            fetch=True
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.warning(f"Postgres resolve dispute notice: {e}")
+        logger.error(f"Postgres resolve dispute error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update TA record, please retry.")
 
+    mock_synced = False
     active_db = get_active_db()
     if active_db and hasattr(active_db, "collection"):
         try:
@@ -1958,8 +2095,15 @@ def resolve_ta_dispute(
                 d["dispute_resolved_by"] = actor_name
                 d["dispute_resolution_remarks"] = req.resolution_remarks or ""
                 active_db.collection("travel_allowance_logs").document(m_id).set(d, merge=True)
-        except Exception:
-            pass
+                mock_synced = True
+        except Exception as e:
+            logger.debug(f"mock sync skipped: {e}")
+
+    if not updated_rows and not mock_synced:
+        raise HTTPException(
+            status_code=404,
+            detail="Staff TA record not found for the given month/district/staff_key."
+        )
 
     cache.delete_prefix(f"ta_roster_{req.month}")
     return {
