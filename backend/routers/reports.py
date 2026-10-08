@@ -1053,7 +1053,8 @@ async def submit_daily_report(report: DailyActivityReport):
                                 )
                             conn.commit()
             except Exception as kpi_err:
-                print(f"[report_kpi_entries Write Notice] {kpi_err}")
+                logger.error(f"[submit_daily_report report_kpi_entries Write Error] Failed to save patient IDs for report_id={int_report_id}: {kpi_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save patient IDs to report_kpi_entries: {str(kpi_err)}")
 
             # 2. report_fdc_details
             try:
@@ -1098,7 +1099,8 @@ async def submit_daily_report(report: DailyActivityReport):
                                 )
                             conn.commit()
             except Exception as fdc_err:
-                logger.exception(f"[submit_daily_report] Failed to save report_fdc_details for report_id={int_report_id}: {fdc_err}")
+                logger.error(f"[submit_daily_report report_fdc_details Write Error] Failed to save FDC details for report_id={int_report_id}: {fdc_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save FDC details to report_fdc_details: {str(fdc_err)}")
 
             # 3. report_visited_names
             try:
@@ -1119,8 +1121,8 @@ async def submit_daily_report(report: DailyActivityReport):
                                 )
                             conn.commit()
             except Exception as names_err:
-                logger.exception(f"[submit_daily_report] Failed to save report_visited_names for report_id={int_report_id}: {names_err}")
-                raise HTTPException(status_code=500, detail="Failed to save daily report. Please try again.")
+                logger.error(f"[submit_daily_report report_visited_names Write Error] Failed to save visited names for report_id={int_report_id}: {names_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save visited names to report_visited_names: {str(names_err)}")
 
         # Update daily_district_rollups in PostgreSQL
         try:

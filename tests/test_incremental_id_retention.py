@@ -83,6 +83,8 @@ async def test_incremental_patient_id_retention_and_lookup():
             pass
         def cursor(self):
             cur = MagicMock()
+            cur.connection.encoding = 'UTF8'
+            cur.mogrify.return_value = b"(1, 'cat', 'pid')"
             cur.__enter__.return_value = cur
             return cur
         def commit(self):
@@ -255,6 +257,8 @@ async def test_two_phase_submission_missing_category_retention():
             pass
         def cursor(self):
             cur = MagicMock()
+            cur.connection.encoding = 'UTF8'
+            cur.mogrify.return_value = b"(1, 'cat', 'pid')"
             cur.__enter__.return_value = cur
             return cur
         def commit(self):
