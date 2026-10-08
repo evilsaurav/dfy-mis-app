@@ -883,7 +883,7 @@ export default function AdminDashboard() {
           setTargetModalDistrict={modals.setTargetModalDistrict}
           officialTargetsByDistrict={officialTargetsByDistrict}
           setOfficialDistrictTarget={setOfficialDistrictTarget}
-          canManageStaff={isSuperAdmin}
+          canManageStaff={isSuperAdmin || Boolean(currentUser?.permissions?.can_manage_staff)}
           setShowStaffSuite={modals.setShowStaffSuite}
           fetchAdminUsers={modals.fetchAdminUsers}
           setShowAdminUsersModal={modals.setShowAdminUsersModal}

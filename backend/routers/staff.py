@@ -827,11 +827,18 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/staff/export-pins")
-async def export_staff_pins(district: Optional[str] = "All", districts: Optional[str] = None, admin: dict = Depends(require_super_admin)):
+async def export_staff_pins(district: Optional[str] = "All", districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
         allowed_dist_set = None
-        if districts and districts.strip() and districts.strip() != "All":
-            allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed:
+                if district != "All" and district not in allowed:
+                    raise HTTPException(status_code=403, detail=f"Permission denied for district '{district}'.")
+                allowed_dist_set = set(allowed)
+        else:
+            if districts and districts.strip() and districts.strip() != "All":
+                allowed_dist_set = set([d.strip() for d in districts.split(",") if d.strip()])
 
         records = await get_cached_staff_directory_raw()
         rows = []
