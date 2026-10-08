@@ -1566,25 +1566,74 @@ async def purge_old_nikshay_records(
         # Step 3: Delete exact patient_ids from backup step (chunked)
         patient_ids_to_delete = [r.get("patient_id") for r in rows if r.get("patient_id")]
         total_deleted = 0
+        deleted_patient_ids = []
         chunk_size = 500
-        for i in range(0, len(patient_ids_to_delete), chunk_size):
-            chunk_pids = patient_ids_to_delete[i:i + chunk_size]
-            del_res = pg_execute_raw(
-                "DELETE FROM nikshay_verified_patients WHERE patient_id = ANY(%s) RETURNING id;",
-                [chunk_pids],
-                fetch=True
+        last_successful_chunk_index = -1
+        current_chunk_index = 0
+        total_chunks = (len(patient_ids_to_delete) + chunk_size - 1) // chunk_size if patient_ids_to_delete else 0
+
+        try:
+            for chunk_idx, i in enumerate(range(0, len(patient_ids_to_delete), chunk_size)):
+                current_chunk_index = chunk_idx
+                chunk_pids = patient_ids_to_delete[i:i + chunk_size]
+                del_res = pg_execute_raw(
+                    "DELETE FROM nikshay_verified_patients WHERE patient_id = ANY(%s) RETURNING id;",
+                    [chunk_pids],
+                    fetch=True
+                )
+                if del_res:
+                    total_deleted += len(del_res)
+                    deleted_patient_ids.extend(chunk_pids)
+                last_successful_chunk_index = chunk_idx
+
+        except Exception as delete_exc:
+            failed_chunk_number = current_chunk_index + 1
+            logger.exception(
+                f"[Nikshay Purge] Database delete failure at chunk {failed_chunk_number}/{total_chunks}: {delete_exc}"
             )
-            if del_res:
-                total_deleted += len(del_res)
+            # Sync test mock / active_db for any records that were actually deleted
+            active_db = get_active_db()
+            if active_db and hasattr(active_db, "collection"):
+                for pid in deleted_patient_ids:
+                    try:
+                        active_db.collection("nikshay_verified_patients").document(str(pid)).delete()
+                    except Exception as sync_exc:
+                        logger.warning(f"[Nikshay Purge] Failed to sync mock delete for patient {pid}: {sync_exc}")
+
+            if total_deleted > 0:
+                cache.delete_prefix("ledger_")
+                cache.delete_prefix("journey_")
+
+            await log_admin_activity(
+                action_type="NIKSHAY_PURGE_6M_PARTIAL_FAILURE",
+                details=(
+                    f"PARTIAL PURGE FAILURE at chunk {failed_chunk_number}/{total_chunks}. "
+                    f"Successfully deleted {total_deleted}/{matched_count} records before failure. "
+                    f"Google Drive archive is intact: {backup_filename} ({remote_id}). "
+                    f"Error: {delete_exc}"
+                ),
+                user_name=admin.get("username", "admin"),
+                user_id=admin.get("user_id", "admin"),
+                role=admin.get("role", "SUPER_ADMIN")
+            )
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Database deletion failed mid-operation at chunk {failed_chunk_number}/{total_chunks}: {delete_exc}. "
+                    f"Partial status: {total_deleted} of {matched_count} records were permanently deleted from database. "
+                    f"All {matched_count} records are safely backed up in Google Drive ({backup_filename}): {drive_file_link}."
+                )
+            )
 
         # Sync test mock / active_db if applicable
         active_db = get_active_db()
         if active_db and hasattr(active_db, "collection"):
-            for pid in patient_ids_to_delete:
+            for pid in deleted_patient_ids:
                 try:
                     active_db.collection("nikshay_verified_patients").document(str(pid)).delete()
-                except Exception:
-                    pass
+                except Exception as sync_exc:
+                    logger.warning(f"[Nikshay Purge] Failed to sync mock delete for patient {pid}: {sync_exc}")
 
         # Invalidate caches & audit log
         cache.delete_prefix("ledger_")

@@ -336,3 +336,56 @@ async def test_purge_aborts_deletion_if_drive_upload_fails(super_admin_token):
             assert "Google Drive backup failed" in res.json()["detail"]
             # CRITICAL: DELETE must NOT have been called!
             assert delete_called is False
+
+
+@pytest.mark.asyncio
+async def test_purge_partial_failure_logs_audit_and_returns_actionable_error(super_admin_token):
+    """Verify that if deletion fails midway through chunks, partial progress is audited and returned."""
+    # 501 rows ensures 2 chunks (chunk 1: 500, chunk 2: 1)
+    fake_old_rows = [
+        {"id": i, "patient_id": f"PT_{i:04d}", "last_reconciled_at": datetime(2026, 1, 1, tzinfo=timezone.utc)}
+        for i in range(1, 502)
+    ]
+
+    mock_provider = AsyncMock()
+    mock_provider.upload.return_value = "drive_partial_abc"
+
+    delete_chunk_calls = 0
+
+    def mock_pg(sql, params=None, fetch=False):
+        nonlocal delete_chunk_calls
+        if "SELECT" in sql:
+            return fake_old_rows
+        if "DELETE" in sql:
+            delete_chunk_calls += 1
+            if delete_chunk_calls == 1:
+                # Chunk 1 of 500 records succeeds
+                return [{"id": i} for i in range(1, 501)]
+            # Chunk 2 fails midway
+            raise RuntimeError("Database connection dropped on chunk 2")
+        return []
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("backend.routers.nikshay.pg_execute_raw", side_effect=mock_pg), \
+             patch("backend.routers.nikshay.get_storage_provider", return_value=mock_provider), \
+             patch("backend.routers.nikshay.log_admin_activity") as mock_audit:
+
+            res = await ac.post(
+                "/admin/nikshay/purge-old-records?dry_run=false",
+                headers={"Authorization": f"Bearer {super_admin_token}"}
+            )
+            assert res.status_code == 500
+            detail = res.json()["detail"]
+
+            # Verify actionable message
+            assert "Database deletion failed mid-operation at chunk 2/2" in detail
+            assert "500 of 501 records were permanently deleted from database" in detail
+            assert "drive_partial_abc" in detail
+
+            # Verify partial failure audit log was recorded
+            assert mock_audit.called
+            audit_kwargs = mock_audit.call_args[1]
+            assert audit_kwargs["action_type"] == "NIKSHAY_PURGE_6M_PARTIAL_FAILURE"
+            assert "Successfully deleted 500/501 records before failure" in audit_kwargs["details"]
+            assert "drive_partial_abc" in audit_kwargs["details"]
