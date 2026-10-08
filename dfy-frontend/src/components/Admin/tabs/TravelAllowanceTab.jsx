@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 export default function TravelAllowanceTab({
   activeMainTab,
   month,
-  setMonth,
+  _setMonth,
   statewideSummary,
   loadingStatewideSummary,
   statewideSummaryError,
@@ -11,8 +11,8 @@ export default function TravelAllowanceTab({
   onInspectDistrict,
   handleExportExcel,
   showToast,
-  isSuperAdmin,
-  isIncharge
+  _isSuperAdmin,
+  _isIncharge
 }) {
   // ── 1. useState Declarations (TDZ Safe lexical order) ────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
@@ -43,7 +43,7 @@ export default function TravelAllowanceTab({
     overall_completion_pct: 0
   };
 
-  const rawDistricts = statewideSummary?.districts || [];
+  const rawDistricts = useMemo(() => statewideSummary?.districts || [], [statewideSummary?.districts]);
   const ratePerKm = statewideSummary?.rate_per_km ?? 4.0;
 
   // Filtered & Sorted districts list
@@ -161,6 +161,19 @@ export default function TravelAllowanceTab({
           </button>
         </div>
       </div>
+
+      {statewideSummaryError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl text-xs font-bold text-rose-800 flex items-center justify-between shadow-2xs">
+          <span>⚠️ {statewideSummaryError}</span>
+          <button
+            type="button"
+            onClick={() => fetchStatewideSummary?.(month, true)}
+            className="underline hover:text-rose-950 font-black cursor-pointer"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* ── 2. Top 4 Executive KPI Hero Cards ─────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
