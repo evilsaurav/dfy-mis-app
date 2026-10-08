@@ -1,5 +1,5 @@
-import React from 'react';
-import { canonicalizeDistrict, isOfficerNameMatch, parseTargetVal } from '../../../utils/districtHelpers';
+import React, { useState, useMemo } from 'react';
+import { canonicalizeDistrict, isOfficerNameMatch, parseTargetVal, DEFAULT_BIHAR_DISTRICTS } from '../../../utils/districtHelpers';
 
 export default function StaffManagementModal({
   showStaffSuite,
@@ -28,9 +28,122 @@ export default function StaffManagementModal({
   staffToggleModal,
   setStaffToggleModal,
   handleExecuteToggleStaffStatus,
-  isTogglingStaff
+  isTogglingStaff,
+  fetchStaffList
 }) {
-  if (!showStaffSuite && !pinChangeModal && !addStaffModal && !deleteStaffModal && !staffToggleModal) {
+  // 1. Internal states for Transfer Modal & Local Staff Overrides
+  const [transferModal, setTransferModal] = useState(null);
+  const [staffOverrides, setStaffOverrides] = useState({});
+
+  // 2. Role Gating: SUPER_ADMIN or MAIN_INCHARGE
+  const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.username === 'admin';
+  const isMainIncharge = currentUser?.role === 'MAIN_INCHARGE';
+  const canTransferStaff = isSuperAdmin || isMainIncharge;
+
+  // 3. Derived Staff List with Optimistic Overrides
+  const displayStaffList = useMemo(() => {
+    return (staffList || []).map(s => {
+      if (staffOverrides[s.id]) {
+        return { ...s, ...staffOverrides[s.id] };
+      }
+      return s;
+    });
+  }, [staffList, staffOverrides]);
+
+  // 4. Available Destination Districts for selected officer
+  const availableDestinationDistricts = useMemo(() => {
+    if (!transferModal || !transferModal.officer) return [];
+    const currentOfficerDist = canonicalizeDistrict(transferModal.officer.district || '');
+    const candidateList = districts && districts.length > 0 ? districts : DEFAULT_BIHAR_DISTRICTS;
+    return candidateList.filter(d => d !== 'All' && canonicalizeDistrict(d) !== currentOfficerDist);
+  }, [districts, transferModal]);
+
+  // 5. Transfer Execution Handler
+  const handleExecuteTransfer = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (!transferModal || !transferModal.officer || !transferModal.toDistrict) return;
+
+    const { officer, toDistrict, requiresConfirmation } = transferModal;
+    const isConfirm = Boolean(requiresConfirmation);
+
+    setTransferModal(prev => ({ ...prev, loading: true, error: '' }));
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = localStorage.getItem('dfy_admin_token') || '';
+      const res = await fetch(`${API_BASE_URL}/admin/staff/transfer`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { "Authorization": `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          staff_id: officer.id,
+          to_district: toDistrict,
+          confirm_despite_active_roster: isConfirm
+        })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 409 && data.detail && data.detail.requires_confirmation) {
+        setTransferModal(prev => ({
+          ...prev,
+          loading: false,
+          requiresConfirmation: true,
+          warningMessage: data.detail.message || "Active TA roster exists for current month in old district.",
+          error: ''
+        }));
+        return;
+      }
+
+      if (!res.ok) {
+        const errMsg = typeof data.detail === 'string' ? data.detail : (data.detail?.message || data.message || "Transfer failed.");
+        setTransferModal(prev => ({
+          ...prev,
+          loading: false,
+          error: errMsg
+        }));
+        return;
+      }
+
+      // Success: Mutate in-place and trigger state override with district, district_id, and slug
+      const updatedDistrict = data.district || toDistrict;
+      const updatedDistrictId = data.district_id;
+      const updatedSlug = data.slug;
+
+      officer.district = updatedDistrict;
+      if (updatedDistrictId !== undefined) officer.district_id = updatedDistrictId;
+      if (updatedSlug) officer.slug = updatedSlug;
+
+      setStaffOverrides(prev => ({
+        ...prev,
+        [officer.id]: {
+          district: updatedDistrict,
+          ...(updatedDistrictId !== undefined ? { district_id: updatedDistrictId } : {}),
+          ...(updatedSlug ? { slug: updatedSlug } : {})
+        }
+      }));
+
+      if (typeof fetchStaffList === 'function') {
+        try {
+          fetchStaffList();
+        } catch (fe) {
+          console.warn("Background fetchStaffList error after transfer:", fe);
+        }
+      }
+
+      setTransferModal(null);
+    } catch (err) {
+      setTransferModal(prev => ({
+        ...prev,
+        loading: false,
+        error: err.message || "Network error transferring staff."
+      }));
+    }
+  };
+
+  if (!showStaffSuite && !pinChangeModal && !addStaffModal && !deleteStaffModal && !staffToggleModal && !transferModal) {
     return null;
   }
 
@@ -48,7 +161,7 @@ export default function StaffManagementModal({
                 </div>
                 <div>
                   <h3 className="text-xl font-black text-slate-800">Field Staff &amp; PIN Management Suite</h3>
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{staffList.filter(s => s.is_active !== false && s.status !== 'inactive').length} Active Officers ({staffList.length} Total) across {districts.filter(d => d !== 'All').length} Districts</p>
+                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{displayStaffList.filter(s => s.is_active !== false && s.status !== 'inactive').length} Active Officers ({displayStaffList.length} Total) across {districts.filter(d => d !== 'All').length} Districts</p>
                 </div>
               </div>
               <button onClick={() => setShowStaffSuite(false)} className="text-slate-400 hover:text-slate-600 text-2xl font-bold p-1 leading-none self-end sm:self-center cursor-pointer">&times;</button>
@@ -62,9 +175,9 @@ export default function StaffManagementModal({
                   onChange={(e) => setStaffFilterDistrict(e.target.value)}
                   className="bg-slate-50 border border-slate-200 text-xs font-bold text-slate-700 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                  <option value="All">All Districts ({staffList.length})</option>
+                  <option value="All">All Districts ({displayStaffList.length})</option>
                   {districts.filter(d => d !== 'All').map(d => (
-                    <option key={d} value={d}>{d} ({staffList.filter(s => s.district === d).length})</option>
+                    <option key={d} value={d}>{d} ({displayStaffList.filter(s => s.district === d).length})</option>
                   ))}
                 </select>
 
@@ -99,11 +212,11 @@ export default function StaffManagementModal({
 
             {/* Filter Tabs: All | Active | Inactive */}
             {(() => {
-              const totalCount = staffList.length;
-              const activeCount = staffList.filter(s => s.is_active !== false && s.status !== 'inactive').length;
-              const inactiveCount = staffList.filter(s => s.is_active === false || s.status === 'inactive').length;
+              const totalCount = displayStaffList.length;
+              const activeCount = displayStaffList.filter(s => s.is_active !== false && s.status !== 'inactive').length;
+              const inactiveCount = displayStaffList.filter(s => s.is_active === false || s.status === 'inactive').length;
 
-              const filteredStaff = staffList.filter(s => {
+              const filteredStaff = displayStaffList.filter(s => {
                 if (staffFilterDistrict !== 'All' && s.district !== staffFilterDistrict) return false;
 
                 const isActive = s.is_active !== false && s.status !== 'inactive';
@@ -245,6 +358,33 @@ export default function StaffManagementModal({
                                   )}
                                 </td>
                                 <td className="p-3 text-right space-x-2">
+                                  {canTransferStaff && (
+                                    <button
+                                      type="button"
+                                      disabled={!isActive}
+                                      onClick={() => {
+                                        const cDist = canonicalizeDistrict(s.district || '');
+                                        const candidateList = (districts && districts.length > 0 ? districts : DEFAULT_BIHAR_DISTRICTS)
+                                          .filter(d => d !== 'All' && canonicalizeDistrict(d) !== cDist);
+                                        setTransferModal({
+                                          officer: s,
+                                          toDistrict: candidateList[0] || '',
+                                          requiresConfirmation: false,
+                                          warningMessage: '',
+                                          loading: false,
+                                          error: ''
+                                        });
+                                      }}
+                                      className={`text-xs font-bold px-2.5 py-1 rounded-lg transition-colors cursor-pointer ${
+                                        isActive
+                                          ? 'text-purple-600 bg-purple-50 hover:bg-purple-100'
+                                          : 'text-slate-300 bg-slate-50 cursor-not-allowed'
+                                      }`}
+                                      title={isActive ? "Transfer officer to another district" : "Officer inactive hai, transfer ke liye pehle reactivate karein"}
+                                    >
+                                      🔄 Transfer
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => {
                                       const cDist = canonicalizeDistrict(s.district);
@@ -624,6 +764,104 @@ export default function StaffManagementModal({
                     </>
                   ) : (
                     <span>{staffToggleModal.targetStatus === 'inactive' ? 'Deactivate' : 'Reactivate'}</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer Staff Modal */}
+      {transferModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 font-sans">
+          <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl border border-slate-100 animate-fade-in">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center text-lg font-black">
+                  🔄
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-800">Transfer Officer District</h4>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                    {transferModal.officer?.name} (Current: {transferModal.officer?.district})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !transferModal.loading && setTransferModal(null)}
+                disabled={transferModal.loading}
+                className="text-slate-400 hover:text-slate-600 text-xl font-bold leading-none cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            <form onSubmit={handleExecuteTransfer} className="space-y-4">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
+                  Destination District
+                </label>
+                <select
+                  value={transferModal.toDistrict}
+                  onChange={(e) => setTransferModal(prev => ({ ...prev, toDistrict: e.target.value, requiresConfirmation: false, warningMessage: '', error: '' }))}
+                  disabled={transferModal.loading}
+                  className="w-full bg-slate-50 border border-slate-200 text-xs font-bold text-slate-800 rounded-xl px-3.5 py-2.5 outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  {availableDestinationDistricts.map(d => (
+                    <option key={d} value={d}>{d} District</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Warning / Confirmation Banner (Option B: Active TA roster) */}
+              {transferModal.requiresConfirmation && (
+                <div className="p-3.5 bg-amber-50 rounded-2xl border border-amber-200/80 text-amber-900 text-xs">
+                  <p className="font-bold mb-1 flex items-center gap-1.5">
+                    <span>⚠️</span> Active Travel Allowance Roster Detected
+                  </p>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    {transferModal.warningMessage || "This officer has an existing TA roster for this month in their current district. Transferring will leave that roster in the current district; the new district starts next month."}
+                  </p>
+                  <p className="text-[11px] font-bold text-amber-900 mt-2">
+                    Are you sure you want to proceed with the transfer?
+                  </p>
+                </div>
+              )}
+
+              {transferModal.error && (
+                <p className="text-red-500 text-xs font-bold bg-red-50 p-2.5 rounded-xl border border-red-100">
+                  {transferModal.error}
+                </p>
+              )}
+
+              {/* Action Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTransferModal(null)}
+                  disabled={transferModal.loading}
+                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 disabled:opacity-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={transferModal.loading || !transferModal.toDistrict}
+                  className={`font-bold px-4 py-2 rounded-xl text-xs shadow-md active:scale-95 transition-all text-white flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed ${
+                    transferModal.requiresConfirmation
+                      ? 'bg-amber-600 hover:bg-amber-700 shadow-amber-600/20'
+                      : 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/20'
+                  }`}
+                >
+                  {transferModal.loading ? (
+                    <>
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                      <span>Transferring...</span>
+                    </>
+                  ) : (
+                    <span>{transferModal.requiresConfirmation ? 'Confirm & Transfer Anyway' : 'Transfer Officer'}</span>
                   )}
                 </button>
               </div>

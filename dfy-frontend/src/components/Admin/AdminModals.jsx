@@ -450,6 +450,7 @@ export default function AdminModals(props) {
         setStaffToggleModal={props.setStaffToggleModal}
         handleExecuteToggleStaffStatus={props.handleExecuteToggleStaffStatus}
         isTogglingStaff={props.isTogglingStaff}
+        fetchStaffList={props.fetchStaffList}
       />
 
       {/* 21. Admin Edit ID Modal */}

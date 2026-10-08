@@ -115,6 +115,11 @@ class ToggleStaffStatusReq(BaseModel):
     status: str  # "active" | "inactive"
     effective_date: Optional[str] = None  # YYYY-MM-DD
 
+class TransferStaffReq(BaseModel):
+    staff_id: int
+    to_district: str
+    confirm_despite_active_roster: Optional[bool] = False
+
 @router.get("/admin/staff/list")
 @router.get("/admin/staff-list")
 async def get_staff_full_list(
@@ -821,6 +826,170 @@ async def toggle_staff_status(req: ToggleStaffStatusReq, admin: dict = Depends(g
         )
 
         return {"success": True, "message": f"Staff '{req.fo_name}' status set to {req.status}."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/admin/staff/transfer")
+async def transfer_staff_district(req: TransferStaffReq, admin: dict = Depends(get_current_admin)):
+    try:
+        # 1. AUTHORIZATION
+        if admin.get("role") not in ("SUPER_ADMIN", "MAIN_INCHARGE"):
+            raise HTTPException(
+                status_code=403,
+                detail="Only Super Admin or Incharge can transfer staff between districts."
+            )
+
+        # 2. Fetch the staff row
+        existing = pg_fetch_one("staff_directory", filters={"id": req.staff_id})
+        if not existing:
+            raise HTTPException(status_code=404, detail="Staff record not found.")
+
+        # 3. Inactive check
+        if existing.get("is_active") is False or existing.get("deleted_at") is not None:
+            raise HTTPException(status_code=400, detail="Cannot transfer an inactive officer. Reactivate first.")
+
+        # 4. District change check
+        old_district = existing.get("district")
+        new_district = canonicalize_district(req.to_district.strip())
+        if not new_district:
+            raise HTTPException(status_code=400, detail="Target district is required.")
+        if new_district.lower() == str(old_district or "").strip().lower():
+            raise HTTPException(status_code=400, detail="Officer is already in this district.")
+
+        # 5. Resolve new district_id
+        d_rows = pg_execute_raw(
+            "SELECT id FROM districts WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s)) LIMIT 1",
+            [new_district],
+            fetch=True
+        )
+        if not d_rows:
+            d_rows = pg_execute_raw(
+                "SELECT id FROM districts WHERE name ILIKE %s LIMIT 1",
+                [f"%{new_district}%"],
+                fetch=True
+            )
+        if not d_rows:
+            raise HTTPException(status_code=400, detail=f"'{new_district}' is not a recognized district.")
+        new_district_id = int(d_rows[0]["id"])
+
+        # 6. Compute new_slug and check collision
+        clean_name = existing["name"].strip()
+        new_slug = f"{new_district}_{clean_name}".replace(" ", "").lower()
+        conflict = pg_fetch_one("staff_directory", filters={"slug": new_slug})
+        if not conflict:
+            conflict = pg_fetch_one("staff_directory", filters={"legacy_doc_id": new_slug})
+        if not conflict:
+            dir_list = pg_query_table("staff_directory", filters={"district": new_district})
+            for s in dir_list:
+                if is_officer_name_match(s.get("name"), existing["name"], new_district):
+                    conflict = s
+                    break
+        if conflict and conflict.get("id") != req.staff_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"An officer with a conflicting identity already exists in '{new_district}'. Rename required before transfer."
+            )
+
+        # 7. GUARD CHECK (Option B): travel_allowance_rosters
+        current_month = get_ist_now().strftime("%Y-%m")
+        roster_rows = pg_execute_raw(
+            "SELECT status, district FROM travel_allowance_rosters WHERE staff_id = %s AND month = %s LIMIT 1",
+            [req.staff_id, current_month],
+            fetch=True
+        )
+        if roster_rows and not req.confirm_despite_active_roster:
+            roster_status = roster_rows[0].get("status") or "DRAFT"
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "requires_confirmation": True,
+                    "message": f"This officer has an existing TA roster for {current_month} in '{old_district}' with status '{roster_status}'. Transferring will NOT modify this roster — it remains under '{old_district}'. The new district will apply starting next month. Proceed anyway?"
+                }
+            )
+
+        # 8. Update staff_directory (do NOT touch legacy_doc_id)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        pg_ok = pg_update_row("staff_directory", {
+            "district": new_district,
+            "district_id": new_district_id,
+            "slug": new_slug,
+            "updated_at": now_str
+        }, {"id": req.staff_id})
+        if not pg_ok:
+            raise HTTPException(status_code=500, detail="Failed to update staff record in database. No changes were saved.")
+
+        active_db = get_active_db()
+        if active_db:
+            doc_id = existing.get("legacy_doc_id") or existing.get("slug")
+            if doc_id:
+                try:
+                    active_db.collection("staff_directory").document(doc_id).update({
+                        "district": new_district,
+                        "district_id": new_district_id,
+                        "slug": new_slug,
+                        "updated_at": now_str
+                    })
+                except Exception as fe:
+                    print(f"Failed to update active_db staff_directory document: {fe}")
+
+        if os.path.exists("staff_directory_snapshot.json"):
+            try:
+                with open("staff_directory_snapshot.json", "r", encoding="utf-8") as f:
+                    snap = json.load(f)
+                if snap and isinstance(snap, dict):
+                    clean_name = existing.get("name", "")
+                    if old_district in snap:
+                        snap[old_district] = [n for n in snap[old_district] if n.strip().lower() != clean_name.lower()]
+                    if new_district not in snap:
+                        snap[new_district] = []
+                    if clean_name not in snap[new_district]:
+                        snap[new_district].append(clean_name)
+                        snap[new_district].sort()
+                    with open("staff_directory_snapshot.json", "w", encoding="utf-8") as f:
+                        json.dump(snap, f, indent=2)
+            except Exception as se:
+                print(f"Failed to update staff_directory_snapshot.json: {se}")
+
+        # 9. Cache invalidation
+        invalidate_staff_directory_cache()
+        cache.delete_prefix("staff_list_")
+        cache.delete_prefix("staff_targets_raw_")
+        cache.delete_prefix("targets_")
+        cache.delete_prefix("attendance_")
+        cache.delete_prefix("statewide_top_")
+        evict_officer_profile_cache(
+            new_district,
+            existing["name"],
+            current_month,
+            old_district=old_district
+        )
+
+        # 10. Audit log via log_admin_activity
+        actor_name = admin.get("name") or admin.get("username", "Admin")
+        actor_id = admin.get("user_id") or admin.get("username", "admin")
+        actor_role = admin.get("role", "SUPER_ADMIN")
+        await log_admin_activity(
+            action_type="STAFF_TRANSFERRED",
+            details=f"Admin {actor_name} transferred officer '{existing['name']}' from '{old_district}' to '{new_district}'",
+            district=new_district,
+            target_officer=existing["name"],
+            user_name=actor_name,
+            user_id=actor_id,
+            role=actor_role,
+            diff={"old_district": old_district, "new_district": new_district, "staff_id": req.staff_id}
+        )
+
+        # 11. Return success response
+        return {
+            "success": True,
+            "message": f"'{existing['name']}' transferred from '{old_district}' to '{new_district}'.",
+            "staff_id": req.staff_id,
+            "district": new_district,
+            "district_id": new_district_id,
+            "slug": new_slug
+        }
     except HTTPException:
         raise
     except Exception as e:
