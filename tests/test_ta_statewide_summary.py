@@ -153,3 +153,56 @@ def test_statewide_summary_cache_and_invalidation():
         # Cache invalidation works
         cache.delete(cache_key)
         assert cache.get(cache_key) is None
+
+
+def test_statewide_summary_not_started_district():
+    mock_db_rows = [
+        {
+            "district": "Jehanabad",
+            "total_officers": 3,
+            "total_km": 150.0,
+            "total_gross": 600.0,
+            "total_deductions": 0.0,
+            "total_payable": 600.0,
+            "approved_count": 0,
+            "submitted_count": 0,
+            "reverted_count": 0,
+            "draft_count": 3,
+            "dispute_count": 0,
+            "last_updated_at": "2026-10-07T12:00:00Z"
+        },
+        {
+            "district": "Begusarai",
+            "total_officers": 10,
+            "total_km": 0.0,
+            "total_gross": 0.0,
+            "total_deductions": 0.0,
+            "total_payable": 0.0,
+            "approved_count": 0,
+            "submitted_count": 0,
+            "reverted_count": 0,
+            "draft_count": 0,
+            "dispute_count": 0,
+            "last_updated_at": None
+        }
+    ]
+
+    with patch("backend.core.security.get_current_user", return_value={"uid": "u_sup", "role": "SUPER_ADMIN"}), \
+         patch("backend.routers.travel_allowance.pg_execute_raw", return_value=mock_db_rows), \
+         patch("backend.routers.travel_allowance.get_current_ta_rate_value", return_value=4.0):
+
+        res = client.get("/admin/ta/statewide-summary?month=2026-10", headers={"Authorization": "Bearer mock"})
+        assert res.status_code == 200
+        data = res.json()
+
+        assert len(data["districts"]) == 2
+        jehanabad = data["districts"][0]
+        begusarai = data["districts"][1]
+
+        assert jehanabad["district"] == "Jehanabad"
+        assert jehanabad["status"] == "DRAFT"
+
+        assert begusarai["district"] == "Begusarai"
+        assert begusarai["status"] == "NOT_STARTED"
+        assert begusarai["completion_pct"] == 0.0
+

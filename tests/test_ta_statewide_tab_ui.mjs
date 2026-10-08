@@ -120,6 +120,10 @@ assert(
   tabSrc.includes("fetchStatewideSummary?.(month"),
   'TravelAllowanceTab.jsx must fetch statewide summary on active month change'
 );
+assert(
+  tabSrc.includes("⚪ Not Started"),
+  'TravelAllowanceTab.jsx must handle ⚪ Not Started status for districts without a roster'
+);
 console.log('✅ TravelAllowanceTab.jsx components, KPIs, Bento Cards, Table & Drilldown verified.');
 
 console.log('\n🎉 ALL FRONTEND AND INTEGRATION WIRING TESTS PASSED 100%!');

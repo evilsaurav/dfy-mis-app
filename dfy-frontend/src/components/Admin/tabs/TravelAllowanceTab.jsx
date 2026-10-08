@@ -423,6 +423,9 @@ export default function TravelAllowanceTab({
             } else if (isSubmitted) {
               badgeBg = 'bg-amber-50 text-amber-800 border-amber-200';
               badgeText = '🟡 Pending Review';
+            } else if (d.status === 'NOT_STARTED') {
+              badgeBg = 'bg-slate-100 text-slate-500 border-slate-200';
+              badgeText = '⚪ Not Started';
             }
 
             return (
@@ -554,6 +557,8 @@ export default function TravelAllowanceTab({
                   const isApproved = d.status === 'APPROVED';
                   const isDisputed = d.dispute_count > 0 || d.status === 'DISPUTED';
                   const isSubmitted = d.submitted_count > 0 || d.status === 'SUBMITTED';
+                  const isReverted = d.reverted_count > 0 || d.status === 'REVERTED';
+                  const isNotStarted = d.status === 'NOT_STARTED';
 
                   return (
                     <tr key={d.district} className="hover:bg-teal-50/30 transition-colors">
@@ -589,8 +594,12 @@ export default function TravelAllowanceTab({
                               ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                               : isDisputed
                               ? 'bg-rose-50 text-rose-800 border-rose-200'
+                              : isReverted
+                              ? 'bg-rose-50 text-rose-800 border-rose-200'
                               : isSubmitted
                               ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : isNotStarted
+                              ? 'bg-slate-100 text-slate-500 border-slate-200'
                               : 'bg-slate-100 text-slate-600 border-slate-200'
                           }`}
                         >
@@ -598,8 +607,12 @@ export default function TravelAllowanceTab({
                             ? '🟢 Approved'
                             : isDisputed
                             ? `🔴 Dispute (${d.dispute_count})`
+                            : isReverted
+                            ? '🟠 Reverted'
                             : isSubmitted
                             ? '🟡 Submitted'
+                            : isNotStarted
+                            ? '⚪ Not Started'
                             : '⚪ Draft'}
                         </span>
                       </td>

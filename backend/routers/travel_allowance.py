@@ -818,29 +818,59 @@ def get_statewide_ta_summary(
 
     current_rate = get_current_ta_rate_value()
 
-    # Query PostgreSQL for aggregated district figures
+    # Query PostgreSQL for aggregated district figures across all active staff districts
     sql = """
         SELECT 
-            r.district,
-            COUNT(r.id) AS total_officers,
-            COALESCE(SUM(r.total_km), 0) AS total_km,
-            COALESCE(SUM(r.gross_amount), 0) AS total_gross,
-            COALESCE(SUM(r.deduction_amount), 0) AS total_deductions,
-            COALESCE(SUM(r.final_payable_amount), 0) AS total_payable,
-            COUNT(CASE WHEN r.status = 'APPROVED' THEN 1 END) AS approved_count,
-            COUNT(CASE WHEN r.status = 'SUBMITTED' THEN 1 END) AS submitted_count,
-            COUNT(CASE WHEN r.status = 'REVERTED' THEN 1 END) AS reverted_count,
-            COUNT(CASE WHEN r.status = 'DRAFT' OR r.status IS NULL THEN 1 END) AS draft_count,
-            COUNT(CASE WHEN r.dispute_status = 'PENDING' OR r.has_dispute = true THEN 1 END) AS dispute_count,
-            MAX(r.updated_at) AS last_updated_at
-        FROM travel_allowance_rosters r
-        WHERE r.month = %s
-        GROUP BY r.district
-        ORDER BY r.district ASC
+            d.district,
+            COALESCE(s.staff_count, r.roster_count, 0) AS total_officers,
+            COALESCE(r.total_km, 0) AS total_km,
+            COALESCE(r.total_gross, 0) AS total_gross,
+            COALESCE(r.total_deductions, 0) AS total_deductions,
+            COALESCE(r.total_payable, 0) AS total_payable,
+            COALESCE(r.approved_count, 0) AS approved_count,
+            COALESCE(r.submitted_count, 0) AS submitted_count,
+            COALESCE(r.reverted_count, 0) AS reverted_count,
+            COALESCE(r.draft_count, 0) AS draft_count,
+            COALESCE(r.dispute_count, 0) AS dispute_count,
+            r.last_updated_at
+        FROM (
+            SELECT DISTINCT TRIM(district) as district 
+            FROM staff_directory 
+            WHERE is_active = true AND deleted_at IS NULL AND district IS NOT NULL AND TRIM(district) != ''
+            UNION
+            SELECT DISTINCT TRIM(district) as district 
+            FROM travel_allowance_rosters 
+            WHERE month = %s AND district IS NOT NULL AND TRIM(district) != ''
+        ) d
+        LEFT JOIN (
+            SELECT TRIM(district) as district, COUNT(id) as staff_count
+            FROM staff_directory
+            WHERE is_active = true AND deleted_at IS NULL
+            GROUP BY TRIM(district)
+        ) s ON LOWER(s.district) = LOWER(d.district)
+        LEFT JOIN (
+            SELECT 
+                TRIM(district) as district,
+                COUNT(id) as roster_count,
+                COALESCE(SUM(total_km), 0) AS total_km,
+                COALESCE(SUM(gross_amount), 0) AS total_gross,
+                COALESCE(SUM(deduction_amount), 0) AS total_deductions,
+                COALESCE(SUM(final_payable_amount), 0) AS total_payable,
+                COUNT(CASE WHEN status = 'APPROVED' THEN 1 END) AS approved_count,
+                COUNT(CASE WHEN status = 'SUBMITTED' THEN 1 END) AS submitted_count,
+                COUNT(CASE WHEN status = 'REVERTED' THEN 1 END) AS reverted_count,
+                COUNT(CASE WHEN status = 'DRAFT' OR status IS NULL THEN 1 END) AS draft_count,
+                COUNT(CASE WHEN dispute_status = 'PENDING' THEN 1 END) AS dispute_count,
+                MAX(updated_at) AS last_updated_at
+            FROM travel_allowance_rosters
+            WHERE month = %s
+            GROUP BY TRIM(district)
+        ) r ON LOWER(r.district) = LOWER(d.district)
+        ORDER BY d.district ASC
     """
     rows = []
     try:
-        rows = pg_execute_raw(sql, [month_clean], fetch=True) or []
+        rows = pg_execute_raw(sql, [month_clean, month_clean], fetch=True) or []
     except Exception as e:
         logger.warning(f"Error querying statewide TA summary from postgres: {e}")
 
@@ -890,6 +920,8 @@ def get_statewide_ta_summary(
             d_status = "REVERTED"
         elif disp_count > 0:
             d_status = "DISPUTED"
+        elif last_updated is None and dft_count == 0:
+            d_status = "NOT_STARTED"
         else:
             d_status = "DRAFT"
 
