@@ -35,7 +35,8 @@ from backend.core.master_ledger import (
 )
 from backend.core.supabase import (
     pg_execute_raw,
-    get_active_db
+    get_active_db,
+    get_db_connection
 )
 
 logger = logging.getLogger("travel_allowance")
@@ -1587,6 +1588,7 @@ def save_travel_allowance_log(
     if roster_pk:
         try:
             pg_execute_raw("DELETE FROM travel_allowance_daily_logs WHERE roster_id = %s", [roster_pk])
+            daily_logs_batch = []
             for d in req.days:
                 d_day = int(d.get("day", 1))
                 d_date = str(d.get("date", f"{req.month}-{d_day:02d}"))
@@ -1613,17 +1615,29 @@ def save_travel_allowance_log(
                 purp = str(d.get("purpose") or "")
                 rem = str(d.get("admin_remarks") or "")
 
-                pg_execute_raw(
-                    """INSERT INTO travel_allowance_daily_logs (
-                           roster_id, day, date, morning_km, evening_km, total_km,
-                           visited_names, purpose, is_manual_override, admin_remarks, updated_at
-                       ) VALUES (%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, NOW())""",
-                    [roster_pk, d_day, d_date, m_km, e_km, t_km, v_names, purp, is_over, rem]
-                )
+                daily_logs_batch.append((
+                    roster_pk, d_day, d_date, m_km, e_km, t_km, v_names, purp, is_over, rem
+                ))
+
+            if daily_logs_batch:
+                with get_db_connection() as conn:
+                    if conn:
+                        import psycopg2.extras
+                        with conn.cursor() as cur:
+                            psycopg2.extras.execute_values(
+                                cur,
+                                """INSERT INTO travel_allowance_daily_logs (
+                                       roster_id, day, date, morning_km, evening_km, total_km,
+                                       visited_names, purpose, is_manual_override, admin_remarks, updated_at
+                                   ) VALUES %s""",
+                                daily_logs_batch,
+                                template="(%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, NOW())"
+                            )
+                        conn.commit()
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Postgres daily logs insert error: {e}")
+            logger.error(f"Postgres daily logs insert error: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to save daily log entries, please retry.")
 
     if not roster_pk:
