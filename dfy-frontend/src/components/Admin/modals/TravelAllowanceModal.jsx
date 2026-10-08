@@ -101,6 +101,9 @@ export default function TravelAllowanceModal({
     if (d.is_manual_override && d.manual_total_km != null && d.manual_total_km !== '') {
       return sum + (parseFloat(d.manual_total_km) || 0);
     }
+    if (d.is_manual_override && d.total_km != null && parseFloat(d.total_km) > 0) {
+      return sum + (parseFloat(d.total_km) || 0);
+    }
     return sum + Math.max(0, (parseFloat(d.evening_km) || 0) - (parseFloat(d.morning_km) || 0));
   }, 0);
   const drilldownGross = drilldownTotalKm * ratePerKm;
@@ -116,16 +119,21 @@ export default function TravelAllowanceModal({
         const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
         const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
         const diff = Math.max(0, e - m);
+        const isMan = !!(d.is_manual_override || d.is_override);
         const tKm = (d.total_km != null && parseFloat(d.total_km) > 0) ? parseFloat(d.total_km) : diff;
+        const manKm = d.manual_total_km != null && d.manual_total_km !== ''
+          ? String(d.manual_total_km)
+          : (isMan && tKm > 0 ? String(tKm) : '');
         return {
           day: d.day || idx + 1,
           date: d.date || '',
           morning_km: d.morning_km ?? d.initial_reading ?? '',
           evening_km: d.evening_km ?? d.final_reading ?? '',
-          total_km: tKm,
+          total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
+          manual_total_km: manKm,
           visited_names: d.visited_names ?? d.to_location ?? '',
           purpose: d.purpose ?? d.remarks ?? '',
-          is_manual_override: !!(d.is_manual_override || d.is_override),
+          is_manual_override: isMan,
           admin_remarks: d.admin_remarks ?? '',
         };
       });
@@ -134,16 +142,21 @@ export default function TravelAllowanceModal({
         const m = parseFloat(v.morning_km ?? v.initial_reading ?? 0) || 0;
         const e = parseFloat(v.evening_km ?? v.final_reading ?? 0) || 0;
         const diff = Math.max(0, e - m);
+        const isMan = !!(v.is_manual_override || v.is_override);
         const tKm = (v.total_km != null && parseFloat(v.total_km) > 0) ? parseFloat(v.total_km) : diff;
+        const manKm = v.manual_total_km != null && v.manual_total_km !== ''
+          ? String(v.manual_total_km)
+          : (isMan && tKm > 0 ? String(tKm) : '');
         return {
           day: v.day || idx + 1,
           date: v.date || k,
           morning_km: v.morning_km ?? v.initial_reading ?? '',
           evening_km: v.evening_km ?? v.final_reading ?? '',
-          total_km: tKm,
+          total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
+          manual_total_km: manKm,
           visited_names: v.visited_names ?? v.to_location ?? '',
           purpose: v.purpose ?? v.remarks ?? '',
-          is_manual_override: !!(v.is_manual_override || v.is_override),
+          is_manual_override: isMan,
           admin_remarks: v.admin_remarks ?? '',
         };
       });
@@ -171,8 +184,6 @@ export default function TravelAllowanceModal({
     setDrilldownLog((prev) => {
       const updated = [...prev];
       const currentDay = updated[dayIndex] || {};
-      const isOverrideField = ['morning_km', 'evening_km', 'visited_names', 'purpose'].includes(field);
-      const isManual = field === 'is_manual_override' ? Boolean(value) : (isOverrideField ? true : Boolean(currentDay.is_manual_override));
 
       const newMorning = field === 'morning_km' ? value : currentDay.morning_km;
       const newEvening = field === 'evening_km' ? value : currentDay.evening_km;
@@ -180,11 +191,43 @@ export default function TravelAllowanceModal({
       const eKm = parseFloat(newEvening) || 0;
       const calculatedTotalKm = Math.max(0, eKm - mKm);
 
+      let isManual = Boolean(currentDay.is_manual_override);
+      let manualTotal = currentDay.manual_total_km;
+      let finalTotalKm = calculatedTotalKm;
+
+      if (field === 'is_manual_override') {
+        isManual = Boolean(value);
+        if (isManual) {
+          if (manualTotal == null || String(manualTotal).trim() === '') {
+            manualTotal = currentDay.total_km && parseFloat(currentDay.total_km) > 0
+              ? String(currentDay.total_km)
+              : (calculatedTotalKm > 0 ? String(calculatedTotalKm) : '');
+          }
+          const parsed = parseFloat(manualTotal);
+          finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
+        } else {
+          finalTotalKm = calculatedTotalKm;
+        }
+      } else if (field === 'manual_total_km') {
+        isManual = true;
+        manualTotal = value;
+        const parsed = parseFloat(value);
+        finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
+      } else {
+        if (isManual && manualTotal != null && String(manualTotal).trim() !== '') {
+          const parsed = parseFloat(manualTotal);
+          finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
+        } else {
+          finalTotalKm = calculatedTotalKm;
+        }
+      }
+
       updated[dayIndex] = {
         ...currentDay,
         [field]: value,
         is_manual_override: isManual,
-        total_km: calculatedTotalKm,
+        manual_total_km: manualTotal,
+        total_km: finalTotalKm,
       };
       return updated;
     });
@@ -736,7 +779,9 @@ export default function TravelAllowanceModal({
               {drilldownLog.map((row, idx) => {
                 const dayKm = (row.is_manual_override && row.manual_total_km != null && row.manual_total_km !== '')
                   ? (parseFloat(row.manual_total_km) || 0)
-                  : Math.max(0, (parseFloat(row.evening_km) || 0) - (parseFloat(row.morning_km) || 0));
+                  : (row.is_manual_override && row.total_km != null && parseFloat(row.total_km) > 0)
+                    ? (parseFloat(row.total_km) || 0)
+                    : Math.max(0, (parseFloat(row.evening_km) || 0) - (parseFloat(row.morning_km) || 0));
 
                 return (
                   <tr key={row.day || idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
@@ -762,7 +807,26 @@ export default function TravelAllowanceModal({
                         placeholder="0"
                       />
                     </td>
-                    <td className="px-3 py-2 font-bold text-blue-700">{dayKm.toFixed(1)}</td>
+                    <td className="px-3 py-2">
+                      {row.is_manual_override ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.1"
+                            value={row.manual_total_km ?? row.total_km ?? ''}
+                            onChange={(e) => handleDrilldownFieldChange(idx, 'manual_total_km', e.target.value)}
+                            disabled={!canEdit || isLocked}
+                            className="w-20 border border-amber-300 bg-amber-50 rounded-lg px-2 py-1 text-xs font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:bg-slate-50 disabled:text-slate-400"
+                            placeholder="0.0"
+                            title="Manual KM reading"
+                          />
+                          <span className="text-[10px] font-black text-amber-600 bg-amber-100 px-1 py-0.5 rounded">MAN</span>
+                        </div>
+                      ) : (
+                        <span className="font-bold text-blue-700 tabular-nums">{dayKm.toFixed(1)}</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <input
                         type="text"
