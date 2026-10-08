@@ -117,18 +117,45 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     }
   }, [taMonth, taDistrict, authFetch, API_BASE_URL, showToast]);
 
-  const handlePrefill = useCallback(async () => {
+  const handlePrefill = useCallback(async (staffNameOrObj, staffKeyParam) => {
+    let targetStaffName = '';
+    let targetStaffKey = '';
+
+    if (typeof staffNameOrObj === 'object' && staffNameOrObj !== null) {
+      targetStaffName = staffNameOrObj.staff_name || staffNameOrObj.name || '';
+      targetStaffKey = staffNameOrObj.staff_key || staffNameOrObj.key || staffNameOrObj.id || staffNameOrObj.staff_id || '';
+    } else {
+      targetStaffName = staffNameOrObj || '';
+      targetStaffKey = staffKeyParam || '';
+    }
+
+    if (!targetStaffName && !targetStaffKey && selectedOfficer) {
+      targetStaffName = selectedOfficer.staff_name || selectedOfficer.name || '';
+      targetStaffKey = selectedOfficer.staff_key || selectedOfficer.key || selectedOfficer.id || selectedOfficer.staff_id || '';
+    }
+
     if (!isSubAdmin) return;
     if (!taMonth || !taDistrict) {
       if (showToast) showToast('Select month and district before pre-filling.', 'warning');
       return;
     }
+    if (!targetStaffName && !targetStaffKey) {
+      if (showToast) showToast('Staff member must be specified for pre-fill.', 'warning');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
+      const payload = {
+        month: taMonth,
+        district: taDistrict,
+        staff_name: targetStaffName || undefined,
+        staff_key: targetStaffKey || undefined,
+      };
       const res = await authFetch(`${API_BASE_URL}/admin/ta/prefill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: taMonth, district: taDistrict }),
+        body: JSON.stringify(payload),
       });
       if (res.status === 403) {
         const data = await res.json().catch(() => ({}));
@@ -137,9 +164,46 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
         return;
       }
       if (res.ok) {
-        if (showToast) showToast('✅ Pre-fill complete! Roster updated from field reports.', 'success');
+        const resData = await res.json();
+        const payloadData = resData.data || resData;
+        const days = Array.isArray(payloadData.days) ? payloadData.days : [];
+
+        const normalizedDays = days.map((d, idx) => {
+          const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
+          const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
+          const diff = Math.max(0, e - m);
+          const isMan = !!(d.is_manual_override || d.is_override);
+          const tKm = (d.total_km != null && parseFloat(d.total_km) > 0) ? parseFloat(d.total_km) : diff;
+          const manKm = d.manual_total_km != null && d.manual_total_km !== ''
+            ? String(d.manual_total_km)
+            : (isMan && tKm > 0 ? String(tKm) : '');
+          const hasReading = (m > 0 || e > 0 || (d.morning_km != null && String(d.morning_km) !== '' && String(d.morning_km) !== '0' && String(d.morning_km) !== '0.0'));
+          return {
+            day: d.day || idx + 1,
+            date: d.date || '',
+            morning_km: hasReading ? (d.morning_km ?? m) : '',
+            evening_km: hasReading ? (d.evening_km ?? e) : '',
+            total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
+            manual_total_km: manKm,
+            visited_names: d.visited_names ?? d.to_location ?? '',
+            purpose: d.purpose ?? d.remarks ?? '',
+            is_manual_override: isMan,
+            admin_remarks: d.admin_remarks ?? '',
+          };
+        });
+
+        setDrilldownLog(normalizedDays);
+        setSelectedOfficer((prev) => (prev ? { ...prev, days: normalizedDays } : prev));
+        if (payloadData.deduction_amount != null) {
+          setDeductionAmount(payloadData.deduction_amount);
+        }
+        if (payloadData.deduction_reason) {
+          setDeductionReason(payloadData.deduction_reason);
+        }
+
+        if (showToast) showToast(`✅ Pre-filled KM readings for ${targetStaffName || 'staff'}! Review and click Save Log.`, 'success');
         setCanPrefill(true);
-        await fetchRoster();
+        return normalizedDays;
       } else {
         const data = await res.json().catch(() => ({}));
         if (showToast) showToast(`Pre-fill failed: ${data.detail || 'Unknown error'}`, 'error');
@@ -150,7 +214,7 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     } finally {
       setIsSubmitting(false);
     }
-  }, [isSubAdmin, taMonth, taDistrict, authFetch, API_BASE_URL, showToast, fetchRoster]);
+  }, [isSubAdmin, taMonth, taDistrict, selectedOfficer, authFetch, API_BASE_URL, showToast]);
 
   const handleSaveLog = useCallback(async (staffKey, days, deduction, deductionReasonText, officer) => {
     if (isSubmitting) return;

@@ -1238,6 +1238,11 @@ def prefill_district_ta_from_reports(
     canon_dist = check_district_access(current_user, req.district)
     current_rate = get_current_ta_rate_value()
 
+    staff_name = (req.staff_name or "").strip()
+    staff_key = (req.staff_key or "").strip()
+    if not staff_name and not staff_key:
+        raise HTTPException(status_code=400, detail="staff_name or staff_key is required for prefill")
+
     try:
         year_str, month_str = req.month.split("-")
         year = int(year_str)
@@ -1246,9 +1251,6 @@ def prefill_district_ta_from_reports(
     except Exception as e:
         logger.debug(f"invalid month format: {e}")
         raise HTTPException(status_code=400, detail="Invalid month format. Expected YYYY-MM.")
-
-    staff_name = (req.staff_name or "").strip()
-    staff_key = (req.staff_key or "").strip()
 
     # Read existing doc to preserve overrides
     existing_days_map = {}

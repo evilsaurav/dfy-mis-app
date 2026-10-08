@@ -294,28 +294,67 @@ export default function TravelAllowanceModal({
                 {showContextMenu && (
                   <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 min-w-[240px] overflow-hidden dropdown">
                     {isSubAdmin && (
-                      <button
-                        onClick={() => {
-                          if (!effectiveCanPrefill) return;
-                          setShowContextMenu(false);
-                          handlePrefill?.();
-                        }}
-                        disabled={!effectiveCanPrefill}
-                        title={!effectiveCanPrefill ? "Prefill permission restricted to authorized admins. Contact Super Admin." : "Pre-fill District from Reports"}
-                        className={`w-full flex items-center justify-between px-4 py-3 text-xs font-bold transition-all text-left ${
-                          !effectiveCanPrefill
-                            ? "opacity-50 cursor-not-allowed text-slate-400 bg-slate-50"
-                            : "text-slate-700 hover:bg-blue-50 hover:text-blue-700"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span>⚡</span>
-                          <span>Pre-fill District from Reports</span>
+                      <div className="border-b border-slate-100 p-3 bg-slate-50/50">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                            <span>⚡</span>
+                            <span>Pre-fill from Field Reports</span>
+                          </div>
+                          {!effectiveCanPrefill && (
+                            <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-bold">
+                              🔒 Restricted
+                            </span>
+                          )}
                         </div>
-                        {!effectiveCanPrefill && (
-                          <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">🔒 Restricted</span>
+
+                        {!effectiveCanPrefill ? (
+                          <p className="text-[11px] text-slate-400 italic">
+                            Prefill permission restricted to authorized admins. Contact Super Admin.
+                          </p>
+                        ) : roster.length === 0 ? (
+                          <p className="text-[11px] text-slate-400 italic">
+                            Load roster first to select an officer.
+                          </p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            <label className="block text-[11px] font-bold text-slate-600">
+                              Select Officer to Pre-fill:
+                            </label>
+                            <select
+                              defaultValue=""
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (!val) return;
+                                const staff = roster.find(
+                                  (s) => String(s.staff_key || s.staff_id || s.doc_id || s.staff_name) === String(val)
+                                );
+                                if (staff) {
+                                  setShowContextMenu(false);
+                                  handleInspect(staff);
+                                  handlePrefill?.(
+                                    staff.staff_name,
+                                    staff.staff_key || staff.doc_id || staff.staff_id
+                                  );
+                                }
+                              }}
+                              className="w-full text-xs border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                            >
+                              <option value="" disabled>— Choose Officer —</option>
+                              {roster.map((s, idx) => {
+                                const optKey = s.staff_key || s.staff_id || s.doc_id || s.staff_name || idx;
+                                return (
+                                  <option key={optKey} value={optKey}>
+                                    {s.staff_name} ({s.designation || 'Field Officer'})
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <p className="text-[10px] text-slate-400">
+                              Opens drilldown &amp; populates KM readings from daily reports.
+                            </p>
+                          </div>
                         )}
-                      </button>
+                      </div>
                     )}
 
                     {isSuperAdmin && (
@@ -754,6 +793,37 @@ export default function TravelAllowanceModal({
                 <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
                   Rate: ₹{ratePerKm}/KM
                 </span>
+
+                {isSubAdmin && (
+                  <button
+                    onClick={() => {
+                      if (!effectiveCanPrefill || isLocked) return;
+                      handlePrefill?.(
+                        selectedOfficer?.staff_name,
+                        selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id
+                      );
+                    }}
+                    disabled={isSubmitting || !effectiveCanPrefill || isLocked}
+                    title={
+                      isLocked
+                        ? "Record is locked"
+                        : !effectiveCanPrefill
+                          ? "Prefill permission restricted to authorized admins. Contact Super Admin."
+                          : "Pre-fill KM readings from Field Reports"
+                    }
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
+                      isLocked || !effectiveCanPrefill
+                        ? "opacity-50 cursor-not-allowed text-slate-400 bg-slate-100 border border-slate-200"
+                        : "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 active:scale-95"
+                    }`}
+                  >
+                    <span>⚡</span>
+                    <span>{isSubmitting ? 'Pre-filling…' : 'Pre-fill from Field Reports'}</span>
+                    {!effectiveCanPrefill && !isLocked && (
+                      <span className="text-[10px] bg-slate-200 text-slate-600 px-1 py-0.2 rounded ml-1">🔒</span>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           </div>
