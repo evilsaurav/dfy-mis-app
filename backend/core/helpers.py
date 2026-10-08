@@ -557,25 +557,21 @@ def resolve_staff_and_district_ids(
                 d_first = pg_execute_raw("SELECT id FROM districts ORDER BY id ASC LIMIT 1", fetch=True)
                 district_id = int(d_first[0]["id"]) if d_first else 1
 
-        # 2. Resolve Staff ID within district
+        # 2. Resolve Staff ID within district using strict Tiered Resolution:
         clean_fo_alpha = re.sub(r'[^a-z0-9]', '', clean_fo.lower())
         tokens = [p.strip() for p in clean_fo.split() if len(p.strip()) >= 3]
-        
+
+        # Tier 1: Exact case-insensitive match, district-scoped
         s_rows = pg_execute_raw(
             """
             SELECT id, district_id, name, pin FROM staff_directory
             WHERE (district_id = %s OR LOWER(TRIM(district)) = ANY(%s))
-              AND (
-                  LOWER(TRIM(name)) = LOWER(TRIM(%s))
-                  OR LOWER(TRIM(name)) ILIKE %s
-                  OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = %s
-                  OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
-              )
+              AND LOWER(TRIM(name)) = LOWER(TRIM(%s))
               AND deleted_at IS NULL
             ORDER BY is_active DESC, id ASC
             LIMIT 1
             """,
-            [district_id, district_variants, clean_fo, f"%{clean_fo}%", clean_fo_alpha, clean_fo],
+            [district_id, district_variants, clean_fo],
             fetch=True
         )
         if s_rows:
@@ -583,46 +579,103 @@ def resolve_staff_and_district_ids(
             if s_rows[0].get("district_id"):
                 district_id = int(s_rows[0]["district_id"])
 
-        if not staff_id and tokens:
-            for tok in tokens:
-                s_tok = pg_execute_raw(
-                    """
-                    SELECT id, district_id FROM staff_directory
-                    WHERE (district_id = %s OR LOWER(TRIM(district)) = ANY(%s))
-                      AND name ILIKE %s
-                      AND deleted_at IS NULL
-                    ORDER BY is_active DESC, id ASC
-                    LIMIT 1
-                    """,
-                    [district_id, district_variants, f"%{tok}%"],
-                    fetch=True
-                )
-                if s_tok:
-                    staff_id = int(s_tok[0]["id"])
-                    if s_tok[0].get("district_id"):
-                        district_id = int(s_tok[0]["district_id"])
-                    break
-
+        # Tier 2: Normalized-alphanumeric exact match (spaces/punctuation stripped), district-scoped
         if not staff_id:
-            s_state = pg_execute_raw(
+            s_rows_t2 = pg_execute_raw(
+                """
+                SELECT id, district_id, name, pin FROM staff_directory
+                WHERE (district_id = %s OR LOWER(TRIM(district)) = ANY(%s))
+                  AND (
+                      REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = %s
+                      OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
+                  )
+                  AND deleted_at IS NULL
+                ORDER BY is_active DESC, id ASC
+                LIMIT 1
+                """,
+                [district_id, district_variants, clean_fo_alpha, clean_fo],
+                fetch=True
+            )
+            if s_rows_t2:
+                staff_id = int(s_rows_t2[0]["id"])
+                if s_rows_t2[0].get("district_id"):
+                    district_id = int(s_rows_t2[0]["district_id"])
+
+        # Tier 3: Substring / Token ILIKE fallback (ONLY if Tier 1 and Tier 2 both found 0 matches)
+        if not staff_id:
+            s_rows_t3 = pg_execute_raw(
+                """
+                SELECT id, district_id, name, pin FROM staff_directory
+                WHERE (district_id = %s OR LOWER(TRIM(district)) = ANY(%s))
+                  AND LOWER(TRIM(name)) ILIKE %s
+                  AND deleted_at IS NULL
+                ORDER BY is_active DESC, id ASC
+                LIMIT 1
+                """,
+                [district_id, district_variants, f"%{clean_fo}%"],
+                fetch=True
+            )
+            if s_rows_t3:
+                staff_id = int(s_rows_t3[0]["id"])
+                if s_rows_t3[0].get("district_id"):
+                    district_id = int(s_rows_t3[0]["district_id"])
+
+            if not staff_id and tokens:
+                for tok in tokens:
+                    s_tok = pg_execute_raw(
+                        """
+                        SELECT id, district_id FROM staff_directory
+                        WHERE (district_id = %s OR LOWER(TRIM(district)) = ANY(%s))
+                          AND name ILIKE %s
+                          AND deleted_at IS NULL
+                        ORDER BY is_active DESC, id ASC
+                        LIMIT 1
+                        """,
+                        [district_id, district_variants, f"%{tok}%"],
+                        fetch=True
+                    )
+                    if s_tok:
+                        staff_id = int(s_tok[0]["id"])
+                        if s_tok[0].get("district_id"):
+                            district_id = int(s_tok[0]["district_id"])
+                        break
+
+        # Tier 4: Statewide fallback (no district filter, ONLY if district-scoped tiers 1-3 all failed)
+        if not staff_id:
+            s_state_exact = pg_execute_raw(
                 """
                 SELECT id, district_id FROM staff_directory
                 WHERE (
                     LOWER(TRIM(name)) = LOWER(TRIM(%s))
-                    OR LOWER(TRIM(name)) ILIKE %s
                     OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = %s
                 )
                 AND deleted_at IS NULL
                 ORDER BY is_active DESC, id ASC
                 LIMIT 1
                 """,
-                [clean_fo, f"%{clean_fo}%", clean_fo_alpha],
+                [clean_fo, clean_fo_alpha],
                 fetch=True
             )
-            if s_state:
-                staff_id = int(s_state[0]["id"])
-                if s_state[0].get("district_id"):
-                    district_id = int(s_state[0]["district_id"])
+            if s_state_exact:
+                staff_id = int(s_state_exact[0]["id"])
+                if s_state_exact[0].get("district_id"):
+                    district_id = int(s_state_exact[0]["district_id"])
+            else:
+                s_state_sub = pg_execute_raw(
+                    """
+                    SELECT id, district_id FROM staff_directory
+                    WHERE LOWER(TRIM(name)) ILIKE %s
+                      AND deleted_at IS NULL
+                    ORDER BY is_active DESC, id ASC
+                    LIMIT 1
+                    """,
+                    [f"%{clean_fo}%"],
+                    fetch=True
+                )
+                if s_state_sub:
+                    staff_id = int(s_state_sub[0]["id"])
+                    if s_state_sub[0].get("district_id"):
+                        district_id = int(s_state_sub[0]["district_id"])
 
         if not staff_id and district_id:
             clean_slug = re.sub(r'[^a-z0-9_]', '', clean_fo.lower().replace(" ", "_")) or "fo"
