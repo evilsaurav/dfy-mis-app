@@ -1124,47 +1124,6 @@ async def submit_daily_report(report: DailyActivityReport):
                 logger.error(f"[submit_daily_report report_visited_names Write Error] Failed to save visited names for report_id={int_report_id}: {names_err}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Failed to save visited names to report_visited_names: {str(names_err)}")
 
-        # Update daily_district_rollups in PostgreSQL
-        try:
-            clean_wp = report.working_place.strip()
-            clean_date = report.date_of_reporting
-            rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-            existing_rollup = pg_fetch_one("daily_district_rollups", filters={"id": rollup_id})
-            submitted_fos = []
-            if existing_rollup:
-                raw_fos = existing_rollup.get("submitted_fos")
-                if isinstance(raw_fos, list):
-                    submitted_fos = raw_fos
-                elif isinstance(raw_fos, str):
-                    try:
-                        submitted_fos = _json.loads(raw_fos)
-                    except Exception:
-                        pass
-            if report.fo_name not in submitted_fos:
-                submitted_fos.append(report.fo_name)
-
-            sub_count = (existing_rollup.get("submission_count") or 0) + (1 if is_new_submission else 0) if existing_rollup else (1 if is_new_submission else 0)
-
-            rollup_update = {
-                "id": rollup_id,
-                "date": clean_date,
-                "district": clean_wp,
-                "submitted_fos": _json.dumps(submitted_fos),
-                "submission_count": sub_count,
-                "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            for metric_k, delta_v in delta_counts.items():
-                old_val = (existing_rollup.get(metric_k) or 0) if existing_rollup else 0
-                rollup_update[metric_k] = old_val + max(0, delta_v)
-
-            if active_db and hasattr(active_db, "collection"):
-                try:
-                    rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
-                    rollup_ref.set(rollup_update, merge=True)
-                except Exception:
-                    pass
-        except Exception as rollup_err:
-            print(f"[Rollup Notice] Non-fatal rollup error: {rollup_err}")
 
 
         cached_payload = dict(payload)

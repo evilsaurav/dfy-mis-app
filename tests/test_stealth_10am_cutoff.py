@@ -177,10 +177,6 @@ async def test_submit_daily_report_stealth_cutoff_integration():
             assert saved.get("is_next_day_submission") is True
             assert saved.get("submitted_morning_time") == "08:30 AM"
             assert saved.get("morning_submission_label") == "Next day morning 08:30 AM"
-
-            # Rollup should also be mapped to yesterday
-            rollup_id = "2026-09-24_muzaffarpur"
-            assert rollup_id in mock_db.rollups
     finally:
         main.db = original_db
 

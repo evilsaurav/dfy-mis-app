@@ -1361,53 +1361,6 @@ async def admin_feed_officer_data(
                 logger.error(f"[Admin Feed report_visited_names Write Error] {names_err}", exc_info=True)
                 raise HTTPException(status_code=500, detail=f"Failed to save visited names to report_visited_names: {str(names_err)}")
 
-        # 5. Update Daily District Rollups in PostgreSQL & mock store
-        try:
-            rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-            existing_rollup = pg_fetch_one("daily_district_rollups", filters={"id": rollup_id})
-            submitted_fos = []
-            if existing_rollup:
-                raw_fos = existing_rollup.get("submitted_fos")
-                if isinstance(raw_fos, list):
-                    submitted_fos = raw_fos
-                elif isinstance(raw_fos, str):
-                    try:
-                        submitted_fos = json.loads(raw_fos)
-                    except Exception:
-                        pass
-            if clean_fo not in submitted_fos:
-                submitted_fos.append(clean_fo)
-
-            metric_map = {
-                "notification_ids": "notifications",
-                "sample_tested_ids": "tests",
-                "hiv_dm_ids": "hiv_dm",
-                "dbt_ids": "dbt",
-                "contact_tracing_ids": "contact_tracing",
-                "differentiated_tb_ids": "diff_tb"
-            }
-            sub_count = (existing_rollup.get("submission_count") or 0) + (1 if new_report_created else 0) if existing_rollup else (1 if new_report_created else 0)
-            rollup_update = {
-                "id": rollup_id,
-                "date": clean_date,
-                "district": clean_wp,
-                "submitted_fos": json.dumps(submitted_fos),
-                "submission_count": sub_count,
-                "last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")
-            }
-            for cat_k, rollup_k in metric_map.items():
-                old_v = (existing_rollup.get(rollup_k) or 0) if existing_rollup else 0
-                d_cnt = delta_counts.get(cat_k, 0)
-                rollup_update[rollup_k] = old_v + max(0, d_cnt)
-
-            active_db = get_active_db()
-            if active_db and hasattr(active_db, "collection") and type(active_db).__name__ != "_DatabaseProxy":
-                rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
-                mock_rollup_update = dict(rollup_update)
-                mock_rollup_update["submitted_fos"] = submitted_fos
-                await asyncio.to_thread(lambda: rollup_ref.set(mock_rollup_update, merge=True))
-        except Exception as rollup_err:
-            print(f"[Admin Feed Rollup Notice] Non-fatal error: {rollup_err}")
 
         # 6. Immutable Audit Trail
         summary_items = [f"{cat.replace('_ids', '')}: {len(cleaned_payload[cat])}" for cat in categories if cleaned_payload[cat]]
@@ -2157,30 +2110,6 @@ async def admin_edit_day_report(
         if doc_ref and hasattr(doc_ref, "update"):
             await asyncio.to_thread(lambda: doc_ref.update(doc_update))
 
-        # 5. Adjustments in daily_district_rollups
-        if metric_deltas:
-            try:
-                rollup_id = f"{clean_date}_{clean_wp}".replace(" ", "_").lower()
-                set_clauses = ["last_updated = %s"]
-                vals = [get_ist_now().replace(microsecond=0).isoformat()]
-                for mk, dv in metric_deltas.items():
-                    set_clauses.append(f"{mk} = GREATEST(0, COALESCE({mk}, 0) + %s)")
-                    vals.append(dv)
-                vals.append(rollup_id)
-                pg_execute_raw(f"UPDATE daily_district_rollups SET {', '.join(set_clauses)} WHERE id = %s", vals)
-
-                active_db = get_active_db()
-                if active_db and hasattr(active_db, "collection"):
-                    rollup_ref = active_db.collection("daily_district_rollups").document(rollup_id)
-                    r_snap = await asyncio.to_thread(rollup_ref.get)
-                    if r_snap and getattr(r_snap, "exists", False):
-                        r_dict = r_snap.to_dict() if callable(getattr(r_snap, "to_dict", None)) else {}
-                        r_update = {"last_updated": get_ist_now().strftime("%Y-%m-%d %H:%M:%S")}
-                        for mk, dv in metric_deltas.items():
-                            r_update[mk] = max(0, (r_dict.get(mk) or 0) + dv)
-                        await asyncio.to_thread(lambda: rollup_ref.update(r_update))
-            except Exception as r_err:
-                print(f"[Edit Day Rollup Notice] {r_err}")
 
         # 6. Invalidate caches and record tombstones (Scoped)
         old_wp = canonicalize_district(old_data.get("working_place", ""))

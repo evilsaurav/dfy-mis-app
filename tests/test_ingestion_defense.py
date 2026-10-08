@@ -175,14 +175,6 @@ async def test_submit_daily_report_auto_prunes_duplicate_notifications():
             assert saved["sample_tested_ids"] == ["444555666"]
             assert saved["remark"] == "Field testing auto-prune"
 
-            # Rollup increment check
-            rollup_id = "2026-09-20_aurangabad"
-            assert rollup_id in mock_store.saved_rollups
-            rollup = mock_store.saved_rollups[rollup_id]
-            # notifications increment must be 1 (for 987654321), not 2
-            notif_inc = rollup.get("notifications")
-            assert getattr(notif_inc, "value", None) == 1 or notif_inc == 1
-
 @pytest.mark.asyncio
 async def test_submit_daily_report_allows_same_doc_update_without_false_pruning():
     # Setup: Today's document already exists with ID '111222333'
@@ -217,13 +209,6 @@ async def test_submit_daily_report_allows_same_doc_update_without_false_pruning(
             # None of today's own IDs should be pruned
             assert data["pruned_duplicate_notifications"] == []
             assert data["pruned_count"] == 0
-
-            # Rollup increment should only count delta (+1 for 444555666)
-            rollup_id = "2026-09-20_aurangabad"
-            assert rollup_id in mock_store.saved_rollups
-            rollup = mock_store.saved_rollups[rollup_id]
-            notif_inc = rollup.get("notifications")
-            assert getattr(notif_inc, "value", None) == 1 or notif_inc == 1
 
 
 # =========================================================================
