@@ -3,6 +3,7 @@ import io
 import re
 import math
 import json
+import gzip
 import asyncio
 import calendar
 import logging
@@ -12,6 +13,8 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Q
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from backend.core.backup_storage import get_storage_provider, BackupStorageError
+from backend.routers.backup import postgres_json_serializer
 from backend.core.database import db
 from backend.core.cache import cache
 from backend.core.security import get_current_admin, require_super_admin
@@ -105,33 +108,35 @@ def sync_nikshay_cumulative_ledger_sync(
         existing_docs = {}
         try:
             pg_existing = pg_execute_raw(
-                "SELECT * FROM nikshay_verified_patients WHERE id = ANY(%s)",
-                [doc_ids_list],
+                "SELECT * FROM nikshay_verified_patients WHERE patient_id = ANY(%s)",
+                [chunk_pids],
                 fetch=True
             )
             if pg_existing:
                 for row in pg_existing:
-                    existing_docs[row.get("id")] = dict(row)
+                    existing_docs[str(row.get("patient_id"))] = dict(row)
         except Exception as err:
-            print(f"[Ledger Sync] PG select warning: {err}")
+            logger.warning(f"[Ledger Sync] PG select warning: {err}")
             existing_docs = {}
 
-        if not existing_docs:
+        if not existing_docs and active_db:
             try:
                 snapshots = active_db.get_all(chunk_refs) if hasattr(active_db, "get_all") else [r.get() for r in chunk_refs]
                 for snap in snapshots:
                     if getattr(snap, "exists", False):
-                        existing_docs[snap.id] = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+                        snap_data = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
+                        pt_key = str(snap_data.get("patient_id") or getattr(snap, "id", ""))
+                        existing_docs[pt_key] = snap_data
             except Exception as err:
-                print(f"[Ledger Sync] Batch get_all warning: {err}")
+                logger.warning(f"[Ledger Sync] Batch get_all warning: {err}")
 
-        batch = active_db.batch() if hasattr(active_db, "batch") else None
+        batch = active_db.batch() if (active_db and hasattr(active_db, "batch")) else None
         batch_count = 0
 
         for pid in chunk_pids:
             doc_id = chunk_doc_map[pid]
             current = patients_to_sync[pid]
-            existing = existing_docs.get(doc_id, {})
+            existing = existing_docs.get(str(pid), {}) or existing_docs.get(pid, {}) or existing_docs.get(doc_id, {})
 
             is_new = not bool(existing)
 
@@ -172,7 +177,6 @@ def sync_nikshay_cumulative_ledger_sync(
                 continue
 
             merged_record = {
-                "id": doc_id,
                 "patient_id": str(pid),
                 "patient_name": final_name,
                 "phone": final_phone,
@@ -180,7 +184,6 @@ def sync_nikshay_cumulative_ledger_sync(
                 "notification_verified": notif_val,
                 "hiv_tested": hiv_val,
                 "dm_tested": dm_val,
-                "hiv_dm_tested": hiv_dm_val,
                 "bank_validated": bank_val,
                 "udst_done": udst_val,
                 "contact_tracing_done": contact_val,
@@ -190,33 +193,52 @@ def sync_nikshay_cumulative_ledger_sync(
                 "reconciled_by": admin_user
             }
 
-            if notif_val and not existing.get("notification_verified_date"):
-                merged_record["notification_verified_date"] = now_date
-            if hiv_val and not existing.get("hiv_verified_date"):
-                merged_record["hiv_verified_date"] = now_date
-            if dm_val and not existing.get("dm_verified_date"):
-                merged_record["dm_verified_date"] = now_date
-            if bank_val and not existing.get("bank_verified_date"):
-                merged_record["bank_verified_date"] = now_date
-            if udst_val and not existing.get("udst_verified_date"):
-                merged_record["udst_verified_date"] = now_date
-            if contact_val and not existing.get("contact_verified_date"):
-                merged_record["contact_verified_date"] = now_date
+            if notif_val:
+                merged_record["notification_verified_date"] = existing.get("notification_verified_date") or now_date
+            if hiv_val:
+                merged_record["hiv_verified_date"] = existing.get("hiv_verified_date") or now_date
+            if dm_val:
+                merged_record["dm_verified_date"] = existing.get("dm_verified_date") or now_date
+            if bank_val:
+                merged_record["bank_verified_date"] = existing.get("bank_verified_date") or now_date
+            if udst_val:
+                merged_record["udst_verified_date"] = existing.get("udst_verified_date") or now_date
+            if contact_val:
+                merged_record["contact_verified_date"] = existing.get("contact_verified_date") or now_date
 
-            pg_upsert_row("nikshay_verified_patients", merged_record, conflict_columns=["id"])
-            if batch is not None and hasattr(batch, "set"):
+            success = pg_upsert_row(
+                "nikshay_verified_patients",
+                merged_record,
+                conflict_columns=["patient_id"],
+                update_columns=[
+                    "notification_verified",
+                    "hiv_tested",
+                    "dm_tested",
+                    "bank_validated",
+                    "udst_done",
+                    "contact_tracing_done",
+                    "treatment_outcome",
+                    "last_reconciled_at",
+                    "reconciled_by",
+                ]
+            )
+            if success:
+                total_written += 1
+            else:
+                logger.error(f"[Ledger Sync] Failed to upsert patient_id={pid}")
+
+            if batch is not None and hasattr(batch, "set") and active_db:
                 try:
                     batch.set(active_db.collection("nikshay_verified_patients").document(doc_id), merged_record, merge=True)
                     batch_count += 1
-                except Exception:
-                    pass
-            total_written += 1
+                except Exception as b_err:
+                    logger.warning(f"[Ledger Sync] active_db batch set warning for {doc_id}: {b_err}")
 
         if batch is not None and batch_count > 0 and hasattr(batch, "commit"):
             try:
                 batch.commit()
-            except Exception:
-                pass
+            except Exception as b_commit_err:
+                logger.warning(f"[Ledger Sync] active_db batch commit warning: {b_commit_err}")
 
     if total_written > 0:
         cache.delete_prefix("ledger_")
@@ -401,7 +423,7 @@ async def reconcile_nikshay(
             
             for cat_key, service_label in categories_map.items():
                 for pid in d.get(cat_key, []):
-                    clean_pid = str(pid).strip()
+                    clean_pid = str(pid).strip().split(".")[0]
                     dfy_reported_ids.add(clean_pid)
                     if clean_pid not in dfy_details:
                         dfy_details[clean_pid] = {
@@ -1434,4 +1456,167 @@ async def get_patient_journey(patient_id: Optional[str] = None):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =========================================================================
+# --- 6-Month Retention Google Drive Backup & Manual Purge ---
+# =========================================================================
+@router.post("/admin/nikshay/purge-old-records")
+async def purge_old_nikshay_records(
+    dry_run: bool = Query(True, description="When true, only report what would be backed up and deleted without executing"),
+    admin: dict = Depends(require_super_admin)
+):
+    """
+    6-Month Retention Purge for nikshay_verified_patients:
+    1. Identifies rows older than 6 months (last_reconciled_at < NOW() - INTERVAL '6 months').
+    2. In dry_run mode, returns count and sample IDs without modifying data.
+    3. In live mode (dry_run=False):
+       - Exports those exact rows to a compressed JSON archive.
+       - Uploads to Google Drive using existing BackupStorageProvider.
+       - Confirms successful Google Drive write.
+       - Purges exact patient_ids from database (using captured list to avoid race conditions).
+       - Returns summary with Google Drive file link and verified matching counts.
+    Manual-trigger only (no cron/auto-triggers).
+    """
+    try:
+        # Step 1: Query rows older than 6 months
+        rows = pg_execute_raw(
+            """
+            SELECT * FROM nikshay_verified_patients
+            WHERE last_reconciled_at < NOW() - INTERVAL '6 months'
+            ORDER BY last_reconciled_at ASC;
+            """,
+            fetch=True
+        ) or []
+
+        matched_count = len(rows)
+
+        # Preview-first design: dry_run=True returns preview only
+        if dry_run:
+            sample_pids = [r.get("patient_id") for r in rows[:10]]
+            oldest_ts = None
+            newest_ts = None
+            if rows:
+                o_val = rows[0].get("last_reconciled_at")
+                n_val = rows[-1].get("last_reconciled_at")
+                oldest_ts = o_val.isoformat() if hasattr(o_val, "isoformat") else str(o_val)
+                newest_ts = n_val.isoformat() if hasattr(n_val, "isoformat") else str(n_val)
+
+            return {
+                "dry_run": True,
+                "status": "preview",
+                "message": f"Dry-run preview: {matched_count} records older than 6 months identified. No data was backed up or deleted.",
+                "matched_count": matched_count,
+                "sample_patient_ids": sample_pids,
+                "oldest_timestamp": oldest_ts,
+                "newest_timestamp": newest_ts,
+            }
+
+        # Live execution (dry_run=False)
+        if matched_count == 0:
+            return {
+                "dry_run": False,
+                "status": "noop",
+                "message": "No records older than 6 months found to purge.",
+                "records_backed_up": 0,
+                "records_deleted": 0,
+                "counts_match": True,
+                "drive_file_id": None,
+                "drive_file_link": None,
+                "backup_filename": None,
+            }
+
+        # Step 2: Export exact rows to compressed JSON archive
+        ist_now = get_ist_now()
+        ts_compact = ist_now.strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"nikshay_patients_purge_6m_{ts_compact}.json.gz"
+
+        backup_payload = {
+            "purge_type": "nikshay_verified_patients_6_month_retention",
+            "retention_cutoff_ist": ist_now.strftime("%Y-%m-%d %I:%M:%S %p"),
+            "initiated_by": admin.get("username", "admin"),
+            "total_records": matched_count,
+            "records": [dict(r) for r in rows],
+        }
+
+        compressed_bytes = gzip.compress(
+            json.dumps(backup_payload, default=postgres_json_serializer, ensure_ascii=False).encode("utf-8")
+        )
+
+        # Upload to Google Drive using existing GoogleDriveProvider
+        provider = get_storage_provider()
+        remote_id = await provider.upload(
+            compressed_bytes,
+            backup_filename,
+            metadata={
+                "retention": "nikshay_purge_6m",
+                "records": str(matched_count),
+                "initiated_by": str(admin.get("username", "admin")),
+            }
+        )
+
+        if not remote_id:
+            raise HTTPException(
+                status_code=502,
+                detail="Google Drive upload returned empty remote ID. Aborting deletion to prevent data loss."
+            )
+
+        drive_file_link = f"https://drive.google.com/file/d/{remote_id}/view"
+
+        # Step 3: Delete exact patient_ids from backup step (chunked)
+        patient_ids_to_delete = [r.get("patient_id") for r in rows if r.get("patient_id")]
+        total_deleted = 0
+        chunk_size = 500
+        for i in range(0, len(patient_ids_to_delete), chunk_size):
+            chunk_pids = patient_ids_to_delete[i:i + chunk_size]
+            del_res = pg_execute_raw(
+                "DELETE FROM nikshay_verified_patients WHERE patient_id = ANY(%s) RETURNING id;",
+                [chunk_pids],
+                fetch=True
+            )
+            if del_res:
+                total_deleted += len(del_res)
+
+        # Sync test mock / active_db if applicable
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            for pid in patient_ids_to_delete:
+                try:
+                    active_db.collection("nikshay_verified_patients").document(str(pid)).delete()
+                except Exception:
+                    pass
+
+        # Invalidate caches & audit log
+        cache.delete_prefix("ledger_")
+        cache.delete_prefix("journey_")
+        await log_admin_activity(
+            action_type="NIKSHAY_PURGE_6M",
+            details=f"Purged {total_deleted} Nikshay records older than 6 months. Archive: {backup_filename} ({remote_id})",
+            user_name=admin.get("username", "admin"),
+            user_id=admin.get("user_id", "admin"),
+            role=admin.get("role", "SUPER_ADMIN")
+        )
+
+        counts_match = bool(matched_count == total_deleted)
+
+        return {
+            "dry_run": False,
+            "status": "success",
+            "message": f"Successfully backed up {matched_count} records to Google Drive and purged {total_deleted} records from database.",
+            "records_backed_up": matched_count,
+            "records_deleted": total_deleted,
+            "counts_match": counts_match,
+            "drive_file_id": remote_id,
+            "drive_file_link": drive_file_link,
+            "backup_filename": backup_filename,
+        }
+
+    except HTTPException:
+        raise
+    except BackupStorageError as bse:
+        logger.error(f"[Nikshay Purge] Storage failure: {bse}")
+        raise HTTPException(status_code=502, detail=f"Google Drive backup failed: {bse.message}. No records were deleted.")
+    except Exception as exc:
+        logger.exception("[Nikshay Purge] Unexpected failure:")
+        raise HTTPException(status_code=500, detail=str(exc))
 

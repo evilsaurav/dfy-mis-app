@@ -593,32 +593,78 @@ def pg_upsert_row(
     table: str,
     data: Dict[str, Any],
     conflict_columns: Optional[List[str]] = None,
+    update_columns: Optional[List[str]] = None,
 ) -> bool:
     """
     INSERT or UPDATE (upsert) a row. Returns True on success, False on failure.
     conflict_columns: columns used for ON CONFLICT resolution (Supabase upsert).
+    update_columns: optional whitelist of columns to update on conflict (DO UPDATE SET).
     """
     if not data:
         return False
 
+    # Defense-in-depth: Strip GENERATED ALWAYS columns for nikshay_verified_patients
+    if table == "nikshay_verified_patients":
+        data = {k: v for k, v in data.items() if k not in ("id", "hiv_dm_tested")}
+
     success = False
     db_attempted = False
 
-    # 1. Supabase REST
-    sb = get_supabase_client()
-    if sb:
-        db_attempted = True
-        try:
-            if conflict_columns:
-                sb.table(table).upsert(data, on_conflict=",".join(conflict_columns)).execute()
-            else:
-                sb.table(table).upsert(data).execute()
-            success = True
-        except Exception as e:
-            logger.error(f"[pg_upsert_row:{table}] Supabase REST error: {e}")
+    # 1. psycopg2 path (used directly if update_columns is specified to enforce exact update whitelist)
+    if update_columns is not None:
+        conn = get_postgres_connection()
+        if conn:
+            db_attempted = True
+            try:
+                import psycopg2.extras
+                cols = list(data.keys())
+                vals = []
+                for c in cols:
+                    v = data[c]
+                    if isinstance(v, (dict, list)):
+                        vals.append(psycopg2.extras.Json(v))
+                    else:
+                        vals.append(v)
+                col_str = ", ".join(cols)
+                placeholder_str = ", ".join(["%s"] * len(cols))
+                conflict_str = ""
+                if conflict_columns:
+                    target_cols = [c for c in update_columns if c in cols and c not in conflict_columns]
+                    updates = ", ".join(f"{c} = EXCLUDED.{c}" for c in target_cols)
+                    conflict_str = f" ON CONFLICT ({', '.join(conflict_columns)}) DO UPDATE SET {updates}" if updates else f" ON CONFLICT ({', '.join(conflict_columns)}) DO NOTHING"
+                sql = f"INSERT INTO {table} ({col_str}) VALUES ({placeholder_str}){conflict_str}"
+                with conn.cursor() as cur:
+                    cur.execute(sql, vals)
+                    rc = cur.rowcount
+                conn.commit()
+                if updates:
+                    success = rc > 0
+                else:
+                    success = True
+            except Exception as e:
+                logger.error(f"[pg_upsert_row:{table}] psycopg2 error: {e}")
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
-    # 2. psycopg2 (fallback if REST not used or failed)
-    if not success:
+    # 2. Supabase REST (standard path if update_columns not specified)
+    if not success and update_columns is None:
+        sb = get_supabase_client()
+        if sb:
+            db_attempted = True
+            try:
+                if conflict_columns:
+                    sb.table(table).upsert(data, on_conflict=",".join(conflict_columns)).execute()
+                else:
+                    sb.table(table).upsert(data).execute()
+                success = True
+            except Exception as e:
+                logger.error(f"[pg_upsert_row:{table}] Supabase REST error: {e}")
+
+    # 3. psycopg2 fallback (if REST not used or failed, and update_columns not specified)
+    if not success and update_columns is None:
         conn = get_postgres_connection()
         if conn:
             db_attempted = True
@@ -656,13 +702,14 @@ def pg_upsert_row(
                 except Exception:
                     pass
 
-    # 3. Mirror to active_db for test harness & mock resilience
+    # 4. Mirror to active_db for test harness & mock resilience
     try:
         active_db = get_active_db()
         if active_db:
             doc_id = (
                 data.get("id")
                 or data.get("doc_id")
+                or data.get("patient_id")
                 or (f"{data.get('date')}_{data.get('district')}_{data.get('fo_name')}".replace(" ", "_").lower() if data.get("district") and data.get("date") and data.get("fo_name") else None)
             )
             mirror_data = dict(data)
