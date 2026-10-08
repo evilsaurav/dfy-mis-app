@@ -25,7 +25,8 @@ from backend.core.helpers import (
     format_to_ist_time,
     normalize_date_to_iso,
     resolve_staff_and_district_ids,
-    check_patient_id_90day_notification_duplicate
+    check_patient_id_90day_notification_duplicate,
+    build_report_candidate_doc_ids
 )
 from backend.core.master_ledger import (
     get_cached_staff_directory_raw,
@@ -249,25 +250,15 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             district_variants.extend(["bhojpur", "arrah", "ara"])
         district_variants = [d for d in district_variants if d]
 
-        candidate_doc_ids = [
-            f"{clean_wp}_{fo_trimmed}_{clean_date}".replace(" ", "_").lower(),
-            f"{req.working_place.strip()}_{fo_trimmed}_{clean_date}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo_alpha}_{clean_date}".lower(),
-            f"{req.working_place.strip()}_{clean_fo_alpha}_{clean_date}".lower(),
-            f"{clean_wp}_{fo_trimmed}_{raw_date_clean}".replace(" ", "_").lower(),
-            f"{req.working_place.strip()}_{fo_trimmed}_{raw_date_clean}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo_alpha}_{raw_date_clean}".lower(),
-            f"{req.working_place.strip()}_{clean_fo_alpha}_{raw_date_clean}".lower(),
-        ]
+        candidate_doc_ids = build_report_candidate_doc_ids(
+            req.working_place, fo_trimmed, clean_date, raw_date_clean
+        )
         if matched_staff_name:
             m_clean = matched_staff_name.strip()
-            candidate_doc_ids.extend([
-                f"{clean_wp}_{m_clean}_{clean_date}".replace(" ", "_").lower(),
-                f"{req.working_place.strip()}_{m_clean}_{clean_date}".replace(" ", "_").lower(),
-                f"{clean_wp}_{m_clean}_{raw_date_clean}".replace(" ", "_").lower(),
-                f"{req.working_place.strip()}_{m_clean}_{raw_date_clean}".replace(" ", "_").lower(),
-            ])
-        candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
+            candidate_doc_ids.extend(build_report_candidate_doc_ids(
+                req.working_place, m_clean, clean_date, raw_date_clean
+            ))
+            candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
 
         # --- Resilient 3-Tier Parameterized PostgreSQL Lookup ---
         pg_rep = None
@@ -676,7 +667,11 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                             [req.edited_by, int_report_id]
                         )
             except Exception as kpi_err:
-                print(f"[/edit-patient-id PG report_kpi_entries mutation notice]: {kpi_err}")
+                logger.error(f"[/edit-patient-id PG report_kpi_entries mutation error]: {kpi_err}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to update patient ID in database: {str(kpi_err)}"
+                )
 
         # 2. Mirror to mock store / active_db if in test environment
         if is_mock_env:
@@ -915,13 +910,9 @@ async def admin_feed_officer_data(
 
         # 4. Target Report Document with PostgreSQL lookup and alias candidate search
         clean_date_iso = normalize_date_to_iso(clean_date) or clean_date
-        candidate_doc_ids = [
-            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
-            f"{req.district.strip()}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
-        ]
-        candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
+        candidate_doc_ids = build_report_candidate_doc_ids(
+            req.district, clean_fo, clean_date, clean_date_iso
+        )
 
         doc_ref = None
         doc_snap = None
@@ -1289,7 +1280,8 @@ async def admin_feed_officer_data(
                             except Exception:
                                 pass
             except Exception as kpi_err:
-                print(f"[Admin Feed report_kpi_entries Write Notice] {kpi_err}")
+                logger.error(f"[Admin Feed report_kpi_entries Write Error] {kpi_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save patient IDs to report_kpi_entries: {str(kpi_err)}")
 
             try:
                 pg_execute_raw("DELETE FROM report_fdc_details WHERE report_id = %s", [pg_rep_id])
@@ -1339,7 +1331,8 @@ async def admin_feed_officer_data(
                             except Exception:
                                 pass
             except Exception as fdc_err:
-                print(f"[Admin Feed report_fdc_details Write Notice] {fdc_err}")
+                logger.error(f"[Admin Feed report_fdc_details Write Error] {fdc_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save FDC details to report_fdc_details: {str(fdc_err)}")
 
             try:
                 pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [pg_rep_id])
@@ -1365,7 +1358,8 @@ async def admin_feed_officer_data(
                             except Exception:
                                 pass
             except Exception as names_err:
-                print(f"[Admin Feed report_visited_names Write Notice] {names_err}")
+                logger.error(f"[Admin Feed report_visited_names Write Error] {names_err}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Failed to save visited names to report_visited_names: {str(names_err)}")
 
         # 5. Update Daily District Rollups in PostgreSQL & mock store
         try:
@@ -1499,11 +1493,9 @@ async def admin_delete_day_report(
                     detail=f"Permission denied: You cannot delete reports for {req.district} district."
                 )
 
-        candidate_doc_ids = [
-            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
-        ]
+        candidate_doc_ids = build_report_candidate_doc_ids(
+            req.district, clean_fo, clean_date
+        )
         if req.report_id:
             candidate_doc_ids.append(str(req.report_id).strip().lower())
 
@@ -1682,13 +1674,22 @@ async def admin_delete_day_report(
                 pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = ANY(%s)", [int_ids])
                 pg_execute_raw("DELETE FROM daily_field_reports WHERE id = ANY(%s)", [int_ids])
             except Exception as pg_cascade_err:
-                print(f"[Delete Day PG Cascade Notice] {pg_cascade_err}")
+                logger.error(f"[Delete Day PG Cascade Error] Failed deleting report IDs {int_ids}: {pg_cascade_err}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Database cascade deletion failed for report IDs {int_ids}: {str(pg_cascade_err)}"
+                )
+
 
         if legacy_ids:
             try:
                 pg_execute_raw("DELETE FROM daily_field_reports WHERE legacy_doc_id = ANY(%s)", [legacy_ids])
-            except Exception:
-                pass
+            except Exception as pg_legacy_err:
+                logger.error(f"[Delete Day PG Legacy Delete Error] Failed deleting legacy IDs {legacy_ids}: {pg_legacy_err}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Database legacy deletion failed for {legacy_ids}: {str(pg_legacy_err)}"
+                )
 
         # Also delete in mock / Firestore mode to keep mock store synced
         for doc_item in matching_docs:
@@ -1826,15 +1827,9 @@ async def admin_edit_day_report(
 
         # 2. Locate all matching documents in PostgreSQL
         clean_date_iso = normalize_date_to_iso(clean_date)
-        candidate_doc_ids = [
-            f"{clean_wp}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
-            f"{req.district.strip()}_{clean_fo}_{clean_date_iso}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo}__{clean_date_iso}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{req.district.strip()}_{clean_fo}_{clean_date}".replace(" ", "_").lower(),
-            f"{clean_wp}_{clean_fo}__{clean_date}".replace(" ", "_").lower()
-        ]
-        candidate_doc_ids = list(dict.fromkeys(candidate_doc_ids))
+        candidate_doc_ids = build_report_candidate_doc_ids(
+            req.district, clean_fo, clean_date, clean_date_iso
+        )
 
         matching_docs = []
         seen_doc_ids = set()
@@ -2136,7 +2131,11 @@ async def admin_edit_day_report(
                                     [int_report_id, cat_key, cid]
                                 )
                         except Exception as kpi_rec_err:
-                            print(f"[edit-day PG report_kpi_entries reconcile notice]: {kpi_rec_err}")
+                            logger.error(f"[edit-day PG report_kpi_entries reconcile error]: {kpi_rec_err}", exc_info=True)
+                            raise HTTPException(
+                                status_code=500,
+                                detail=f"Failed to reconcile patient IDs in report_kpi_entries: {str(kpi_rec_err)}"
+                            )
 
             # Reconcile report_visited_names
             if req.visited_names is not None:
@@ -2149,7 +2148,11 @@ async def admin_edit_day_report(
                                 [int_report_id, name, idx]
                             )
                 except Exception as vis_err:
-                    print(f"[edit-day PG report_visited_names reconcile notice]: {vis_err}")
+                    logger.error(f"[edit-day PG report_visited_names reconcile error]: {vis_err}", exc_info=True)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Failed to reconcile visited names in report_visited_names: {str(vis_err)}"
+                    )
 
         if doc_ref and hasattr(doc_ref, "update"):
             await asyncio.to_thread(lambda: doc_ref.update(doc_update))
