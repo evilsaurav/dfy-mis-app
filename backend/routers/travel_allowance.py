@@ -296,24 +296,50 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
     for day in range(1, num_days + 1):
         date_str = f"{year:04d}-{month_num:02d}-{day:02d}"
         d = day_map.get(day, {})
-        m_km = float(d.get("morning_km") if d.get("morning_km") is not None else (d.get("initial_reading") or 0.0))
-        e_km = float(d.get("evening_km") if d.get("evening_km") is not None else (d.get("final_reading") or 0.0))
-        calc_diff = max(0.0, e_km - m_km)
+        raw_m = d.get("morning_km") if d.get("morning_km") is not None else d.get("initial_reading")
+        raw_e = d.get("evening_km") if d.get("evening_km") is not None else d.get("final_reading")
+
         override = bool(d.get("is_manual_override") or d.get("is_override") or False)
         manual_t = d.get("manual_total_km")
 
+        m_km = None
+        e_km = None
+
+        vm = None
+        ve = None
+        if raw_m is not None and str(raw_m).strip() != "":
+            try:
+                vm = float(raw_m)
+            except (ValueError, TypeError):
+                vm = None
+        if raw_e is not None and str(raw_e).strip() != "":
+            try:
+                ve = float(raw_e)
+            except (ValueError, TypeError):
+                ve = None
+
+        if vm is not None and (vm > 0 or (ve is not None and ve > 0)):
+            m_km = round(vm, 2)
+        if ve is not None and (ve > 0 or (vm is not None and vm > 0)):
+            e_km = round(ve, 2)
+
         if override and manual_t is not None and str(manual_t).strip() != "":
             try:
-                t_km = max(0.0, float(manual_t))
+                t_km = round(max(0.0, float(manual_t)), 2)
             except (ValueError, TypeError):
-                t_km = calc_diff
+                t_km = None
+        elif override and d.get("total_km") is not None and float(d.get("total_km") or 0.0) > 0:
+            t_km = round(float(d.get("total_km")), 2)
+        elif m_km is not None and e_km is not None:
+            t_km = round(max(0.0, e_km - m_km), 2)
         elif d.get("total_km") is not None and float(d.get("total_km") or 0.0) > 0:
             try:
-                t_km = float(d.get("total_km"))
+                t_km = round(float(d.get("total_km")), 2)
             except (ValueError, TypeError):
-                t_km = calc_diff
+                t_km = None
         else:
-            t_km = calc_diff
+            t_km = None
+
         visited = str(d.get("visited_names") or d.get("to_location") or d.get("places_visited") or "")
         purpose = str(d.get("purpose") or d.get("remarks") or "")
         admin_remarks = str(d.get("admin_remarks") or "")
@@ -321,9 +347,9 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
         normalized.append({
             "day": day,
             "date": str(d.get("date") or date_str),
-            "morning_km": round(m_km, 2),
-            "evening_km": round(e_km, 2),
-            "total_km": round(t_km, 2),
+            "morning_km": m_km,
+            "evening_km": e_km,
+            "total_km": t_km,
             "visited_names": visited,
             "purpose": purpose,
             "is_manual_override": override,

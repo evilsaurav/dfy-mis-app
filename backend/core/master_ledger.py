@@ -682,6 +682,8 @@ def format_dashboard_record(data: dict, allowed_dist_set: Optional[set] = None) 
         
         # Big 5
         "total_km": data.get("total_km", 0) or 0,
+        "morning_km": data.get("morning_km"),
+        "evening_km": data.get("evening_km"),
         "notifications": len(data.get("notification_ids", [])),
         "tests": len(data.get("sample_tested_ids", [])),
         "presumptive": len(data.get("presumptive_ids", [])),
@@ -859,6 +861,8 @@ async def compute_profile_response(
                 "categories": day_categories,
                 "visited_names": data.get("visited_names", []),
                 "total_km": data.get("total_km", 0),
+                "morning_km": data.get("morning_km"),
+                "evening_km": data.get("evening_km"),
                 "remark": data.get("remark", ""),
                 "fdc_details": data.get("fdc_details", []),
                 "admin_remark": data.get("admin_remark") or "",

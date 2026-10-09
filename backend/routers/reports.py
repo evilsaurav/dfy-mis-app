@@ -1217,6 +1217,8 @@ async def compute_profile_response(
                 "categories": day_categories,
                 "visited_names": data.get("visited_names") or [],
                 "total_km": int(data.get("total_km") or 0),
+                "morning_km": data.get("morning_km"),
+                "evening_km": data.get("evening_km"),
                 "remark": data.get("remark") or "",
                 "fdc_details": data.get("fdc_details") or [],
                 "admin_remark": data.get("admin_remark") or "",

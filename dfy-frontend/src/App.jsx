@@ -676,6 +676,20 @@ const MyProfileDashboard = ({
     if (dayData.remark && dayData.remark.trim() !== '') {
       text += `\n*Remarks:*\n` + dayData.remark.trim() + '\n';
     }
+
+    const hasMorning = dayData.morning_km !== undefined && dayData.morning_km !== null && dayData.morning_km !== "";
+    const hasEvening = dayData.evening_km !== undefined && dayData.evening_km !== null && dayData.evening_km !== "";
+    const hasTotal = dayData.total_km !== undefined && dayData.total_km !== null && Number(dayData.total_km) > 0;
+
+    if (hasMorning || hasEvening) {
+      const calcKm = (hasMorning && hasEvening)
+        ? Math.max(0, Math.round(Number(dayData.evening_km) - Number(dayData.morning_km)))
+        : (hasTotal ? Number(dayData.total_km) : null);
+      text += `\n*Bike KM Log:*\nMorning: ${hasMorning ? dayData.morning_km : '—'}, Evening: ${hasEvening ? dayData.evening_km : '—'}${calcKm !== null ? ` (Total: ${calcKm} km)` : ''}\n`;
+    } else if (hasTotal) {
+      text += `\n*Bike KM Log:*\nTotal: ${dayData.total_km} km\n`;
+    }
+
     return text.trim();
   };
 
