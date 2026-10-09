@@ -110,8 +110,8 @@ class TaDayReading(BaseModel):
 
 
 class TaLogSaveReq(BaseModel):
-    month: str
-    district: str
+    month: Optional[str] = None
+    district: Optional[str] = None
     staff_name: str
     staff_key: Optional[str] = ""
     designation: Optional[str] = "Field Officer"
@@ -119,6 +119,12 @@ class TaLogSaveReq(BaseModel):
     deduction_reason: Optional[str] = ""
     admin_remarks: Optional[str] = ""
     days: List[Dict[str, Any]] = []
+
+
+class TaLogSaveBulkReq(BaseModel):
+    month: str
+    district: str
+    entries: List[TaLogSaveReq]
 
 
 class TaPrefillReq(BaseModel):
@@ -1751,6 +1757,360 @@ def save_travel_allowance_log(
             "final_payable_amount": totals["final_payable_amount"],
             "status": existing_status
         }
+    }
+
+
+@router.post("/admin/ta/save-log-bulk")
+def save_travel_allowance_log_bulk(
+    req: TaLogSaveBulkReq,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Atomically bulk-saves meter readings, remarks, and deductions for multiple officers.
+    All-or-nothing validation: validates district, permissions, and locks for all entries upfront.
+    If ANY entry fails validation, the entire batch is rejected with no database mutations.
+    Writes all roster upserts and daily log replacements in a single transaction.
+    """
+    canon_dist = check_district_access(current_user, req.district)
+    if not req.entries:
+        return {"success": True, "saved_count": 0, "results": []}
+
+    # 1. Resolve district_id once for the entire batch
+    district_id = None
+    try:
+        d_rows = pg_execute_raw(
+            "SELECT id FROM districts WHERE LOWER(TRIM(name)) = LOWER(TRIM(%s)) LIMIT 1",
+            [canon_dist],
+            fetch=True
+        )
+        if d_rows:
+            district_id = d_rows[0]["id"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Postgres district lookup error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify district, please retry.")
+
+    if district_id is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"District '{canon_dist}' not found in districts table."
+        )
+
+    current_rate = get_current_ta_rate_value()
+    prepared_entries = []
+
+    # 2. Validation pass: validate ALL entries upfront
+    for entry in req.entries:
+        entry_month = entry.month or req.month
+        entry_staff_name = (entry.staff_name or "").strip()
+        entry_staff_key = entry.staff_key or normalize_staff_slug(entry_staff_name)
+
+        if not entry_staff_name and not entry_staff_key:
+            raise HTTPException(status_code=400, detail="Staff name or key is required for all entries.")
+
+        # Resolve staff_id
+        staff_id = None
+        try:
+            s_rows = pg_execute_raw(
+                """SELECT id, district_id FROM staff_directory 
+                   WHERE (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
+                     AND deleted_at IS NULL LIMIT 1""",
+                [entry_staff_name, entry_staff_key],
+                fetch=True
+            )
+            if s_rows:
+                staff_id = s_rows[0].get("id")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Postgres staff directory lookup error: {e}")
+            raise HTTPException(status_code=500, detail="Failed to verify record lock status, please retry.")
+
+        if staff_id is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{entry_staff_name or entry_staff_key}: Staff not found in staff_directory."
+            )
+
+        # Check existing record for lock/permission constraints
+        existing_status = "DRAFT"
+        existing_id = None
+        try:
+            ex_rows = pg_execute_raw(
+                """SELECT id, status, is_locked FROM travel_allowance_rosters
+                   WHERE month = %s 
+                     AND (staff_id = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)) OR staff_key = %s)
+                   LIMIT 1""",
+                [entry_month, staff_id, entry_staff_name, entry_staff_key],
+                fetch=True
+            )
+            if ex_rows:
+                ex = ex_rows[0]
+                existing_id = ex.get("id")
+                existing_status = ex.get("status", "DRAFT")
+                allowed, err = validate_edit_permission(ex, current_user.get("role", ""))
+                if not allowed:
+                    raise HTTPException(
+                        status_code=423 if "locked" in err.lower() else 403,
+                        detail=f"{entry_staff_name}: {err}"
+                    )
+            else:
+                # Check mock store if active
+                active_db = get_active_db()
+                mock_locked = False
+                if active_db and hasattr(active_db, "collection"):
+                    try:
+                        m_id = f"{entry_month}_{canon_dist.lower()}_{clean_alphanumeric(entry_staff_key or entry_staff_name)}"
+                        doc = active_db.collection("travel_allowance_logs").document(m_id).get()
+                        if hasattr(doc, "exists") and doc.exists:
+                            d = doc.to_dict() if callable(doc.to_dict) else dict(doc)
+                            existing_status = d.get("status", "DRAFT")
+                            allowed, err = validate_edit_permission(d, current_user.get("role", ""))
+                            if not allowed:
+                                raise HTTPException(
+                                    status_code=423 if "locked" in err.lower() else 403,
+                                    detail=f"{entry_staff_name}: {err}"
+                                )
+                            mock_locked = True
+                    except HTTPException:
+                        raise
+                    except Exception as e:
+                        logger.debug(f"mock lock check skipped: {e}")
+
+                if not mock_locked:
+                    allowed, err = validate_edit_permission({"status": "DRAFT", "is_locked": False}, current_user.get("role", ""))
+                    if not allowed:
+                        raise HTTPException(status_code=403, detail=f"{entry_staff_name}: {err}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Postgres lock check error: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to verify record lock status, please retry."
+            )
+
+        totals = calculate_log_totals(
+            entry.days,
+            rate_per_km=current_rate,
+            deduction_amount=entry.deduction_amount or 0.0
+        )
+
+        prepared_entries.append({
+            "entry": entry,
+            "staff_id": staff_id,
+            "staff_name": entry_staff_name,
+            "staff_key": entry_staff_key,
+            "month": entry_month,
+            "existing_id": existing_id,
+            "existing_status": existing_status,
+            "is_locked": True if existing_status == "APPROVED" else False,
+            "totals": totals,
+        })
+
+    # 3. Atomic Database Writes in a single transaction
+    actor_name = current_user.get("name") or current_user.get("username") or "Admin"
+    results = []
+
+    try:
+        with get_db_connection() as conn:
+            if conn:
+                import psycopg2.extras
+                with conn:
+                    with conn.cursor() as cur:
+                        for item in prepared_entries:
+                            ent = item["entry"]
+                            t = item["totals"]
+                            cur.execute(
+                                """INSERT INTO travel_allowance_rosters (
+                                       month, district_id, district, staff_id, staff_name, staff_key, designation,
+                                       rate_per_km, total_km, gross_amount, deduction_amount, deduction_reason,
+                                       final_payable_amount, admin_remarks, status, is_locked, updated_at, updated_by
+                                   ) VALUES (
+                                       %s, %s, %s, %s, %s, %s, %s,
+                                       %s, %s, %s, %s, %s,
+                                       %s, %s, %s, %s, NOW(), %s
+                                   )
+                                   ON CONFLICT (staff_id, month)
+                                   DO UPDATE SET
+                                       district_id = EXCLUDED.district_id,
+                                       district = EXCLUDED.district,
+                                       staff_name = EXCLUDED.staff_name,
+                                       staff_key = EXCLUDED.staff_key,
+                                       designation = EXCLUDED.designation,
+                                       rate_per_km = EXCLUDED.rate_per_km,
+                                       total_km = EXCLUDED.total_km,
+                                       gross_amount = EXCLUDED.gross_amount,
+                                       deduction_amount = EXCLUDED.deduction_amount,
+                                       deduction_reason = EXCLUDED.deduction_reason,
+                                       final_payable_amount = EXCLUDED.final_payable_amount,
+                                       admin_remarks = EXCLUDED.admin_remarks,
+                                       updated_at = NOW(),
+                                       updated_by = EXCLUDED.updated_by
+                                   RETURNING id""",
+                                [
+                                    item["month"], district_id, canon_dist, item["staff_id"], item["staff_name"], item["staff_key"],
+                                    ent.designation or "Field Officer", current_rate, t["total_km"],
+                                    t["gross_amount"], t["deduction_amount"], ent.deduction_reason or "",
+                                    t["final_payable_amount"], ent.admin_remarks or "", item["existing_status"],
+                                    item["is_locked"], actor_name
+                                ]
+                            )
+                            row = cur.fetchone()
+                            roster_pk = row[0] if row else item["existing_id"]
+
+                            if roster_pk:
+                                cur.execute("DELETE FROM travel_allowance_daily_logs WHERE roster_id = %s", [roster_pk])
+                                daily_logs_batch = []
+                                for d in ent.days:
+                                    d_day = int(d.get("day", 1))
+                                    d_date = str(d.get("date", f"{item['month']}-{d_day:02d}"))
+                                    m_km = float(d.get("morning_km") or 0.0)
+                                    e_km = float(d.get("evening_km") or 0.0)
+                                    calc_diff = max(0.0, e_km - m_km)
+                                    is_over = bool(d.get("is_manual_override", False) or d.get("is_override", False))
+                                    manual_t = d.get("manual_total_km")
+
+                                    if is_over and manual_t is not None and str(manual_t).strip() != "":
+                                        try:
+                                            t_km = max(0.0, float(manual_t))
+                                        except (ValueError, TypeError):
+                                            t_km = calc_diff
+                                    elif d.get("total_km") is not None and float(d.get("total_km") or 0.0) > 0:
+                                        try:
+                                            t_km = float(d.get("total_km"))
+                                        except (ValueError, TypeError):
+                                            t_km = calc_diff
+                                    else:
+                                        t_km = calc_diff
+
+                                    v_names = str(d.get("visited_names") or "")
+                                    purp = str(d.get("purpose") or "")
+                                    rem = str(d.get("admin_remarks") or "")
+
+                                    daily_logs_batch.append((
+                                        roster_pk, d_day, d_date, m_km, e_km, t_km, v_names, purp, is_over, rem
+                                    ))
+
+                                if daily_logs_batch:
+                                    psycopg2.extras.execute_values(
+                                        cur,
+                                        """INSERT INTO travel_allowance_daily_logs (
+                                               roster_id, day, date, morning_km, evening_km, total_km,
+                                               visited_names, purpose, is_manual_override, admin_remarks, updated_at
+                                           ) VALUES %s""",
+                                        daily_logs_batch,
+                                        template="(%s, %s, %s::date, %s, %s, %s, %s, %s, %s, %s, NOW())"
+                                    )
+
+                            results.append({
+                                "staff_key": item["staff_key"],
+                                "staff_name": item["staff_name"],
+                                "total_km": t["total_km"],
+                                "gross_amount": t["gross_amount"],
+                                "deduction_amount": t["deduction_amount"],
+                                "final_payable_amount": t["final_payable_amount"],
+                                "status": item["existing_status"],
+                            })
+            else:
+                # Test harness fallback (when get_db_connection() returns None in mock tests)
+                for item in prepared_entries:
+                    ent = item["entry"]
+                    t = item["totals"]
+                    res = pg_execute_raw(
+                        """INSERT INTO travel_allowance_rosters (
+                               month, district_id, district, staff_id, staff_name, staff_key, designation,
+                               rate_per_km, total_km, gross_amount, deduction_amount, deduction_reason,
+                               final_payable_amount, admin_remarks, status, is_locked, updated_at, updated_by
+                           ) VALUES (
+                               %s, %s, %s, %s, %s, %s, %s,
+                               %s, %s, %s, %s, %s,
+                               %s, %s, %s, %s, NOW(), %s
+                           )
+                           ON CONFLICT (staff_id, month)
+                           DO UPDATE SET
+                               district_id = EXCLUDED.district_id,
+                               district = EXCLUDED.district,
+                               staff_name = EXCLUDED.staff_name,
+                               staff_key = EXCLUDED.staff_key,
+                               designation = EXCLUDED.designation,
+                               rate_per_km = EXCLUDED.rate_per_km,
+                               total_km = EXCLUDED.total_km,
+                               gross_amount = EXCLUDED.gross_amount,
+                               deduction_amount = EXCLUDED.deduction_amount,
+                               deduction_reason = EXCLUDED.deduction_reason,
+                               final_payable_amount = EXCLUDED.final_payable_amount,
+                               admin_remarks = EXCLUDED.admin_remarks,
+                               updated_at = NOW(),
+                               updated_by = EXCLUDED.updated_by
+                           RETURNING id""",
+                        [
+                            item["month"], district_id, canon_dist, item["staff_id"], item["staff_name"], item["staff_key"],
+                            ent.designation or "Field Officer", current_rate, t["total_km"],
+                            t["gross_amount"], t["deduction_amount"], ent.deduction_reason or "",
+                            t["final_payable_amount"], ent.admin_remarks or "", item["existing_status"],
+                            item["is_locked"], actor_name
+                        ],
+                        fetch=True
+                    )
+                    roster_pk = res[0].get("id") if res else item["existing_id"]
+                    if roster_pk:
+                        pg_execute_raw("DELETE FROM travel_allowance_daily_logs WHERE roster_id = %s", [roster_pk])
+                    results.append({
+                        "staff_key": item["staff_key"],
+                        "staff_name": item["staff_name"],
+                        "total_km": t["total_km"],
+                        "gross_amount": t["gross_amount"],
+                        "deduction_amount": t["deduction_amount"],
+                        "final_payable_amount": t["final_payable_amount"],
+                        "status": item["existing_status"],
+                    })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Postgres bulk save transaction error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to bulk-save travel allowance logs: {e}")
+
+    # Mirror to active_db mock if present
+    active_db = get_active_db()
+    if active_db and hasattr(active_db, "collection"):
+        try:
+            for item in prepared_entries:
+                ent = item["entry"]
+                t = item["totals"]
+                m_id = f"{item['month']}_{canon_dist.lower()}_{item['staff_key']}"
+                mock_doc = {
+                    "doc_id": m_id,
+                    "month": item["month"],
+                    "district": canon_dist,
+                    "staff_name": item["staff_name"],
+                    "staff_key": item["staff_key"],
+                    "designation": ent.designation or "Field Officer",
+                    "rate_per_km": current_rate,
+                    "total_km": t["total_km"],
+                    "gross_amount": t["gross_amount"],
+                    "deduction_amount": t["deduction_amount"],
+                    "deduction_reason": ent.deduction_reason or "",
+                    "final_payable_amount": t["final_payable_amount"],
+                    "admin_remarks": ent.admin_remarks or "",
+                    "status": item["existing_status"],
+                    "is_locked": item["is_locked"],
+                    "days": ent.days,
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "updated_by": actor_name
+                }
+                active_db.collection("travel_allowance_logs").document(m_id).set(mock_doc, merge=True)
+        except Exception as e:
+            logger.debug(f"mock sync skipped in bulk save: {e}")
+
+    cache.delete_prefix(f"ta_roster_{req.month}")
+    cache.delete_prefix(f"ta_statewide_summary_{req.month[:7]}")
+
+    return {
+        "success": True,
+        "saved_count": len(results),
+        "results": results
     }
 
 

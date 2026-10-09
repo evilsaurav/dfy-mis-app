@@ -536,6 +536,7 @@ export default function AdminModals(props) {
           taDistrict={props.taDistrict}
           setTaDistrict={props.setTaDistrict}
           roster={props.roster}
+          setRoster={props.setRoster}
           selectedOfficer={props.selectedOfficer}
           setSelectedOfficer={props.setSelectedOfficer}
           viewMode={props.viewMode}
@@ -574,6 +575,7 @@ export default function AdminModals(props) {
           fetchRate={props.fetchRate}
           handlePrefill={props.handlePrefill}
           handleSaveLog={props.handleSaveLog}
+          handleSaveLogBulk={props.handleSaveLogBulk}
           handleSubmitRoster={props.handleSubmitRoster}
           handlePassStaff={props.handlePassStaff}
           handleRevertStaff={props.handleRevertStaff}

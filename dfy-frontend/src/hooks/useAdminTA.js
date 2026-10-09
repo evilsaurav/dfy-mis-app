@@ -269,6 +269,64 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     }
   }, [isSubmitting, taMonth, taDistrict, authFetch, API_BASE_URL, showToast, fetchRoster]);
 
+  const handleSaveLogBulk = useCallback(async (entries) => {
+    if (isSubmitting) return { success: false, detail: 'Operation already in progress' };
+    setIsSubmitting(true);
+    try {
+      const res = await authFetch(`${API_BASE_URL}/admin/ta/save-log-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          month: taMonth,
+          district: taDistrict,
+          entries: (entries || []).map((e) => ({
+            month: e.month || taMonth,
+            district: e.district || taDistrict,
+            staff_name: e.staff_name || '',
+            designation: e.designation || 'Field Officer',
+            staff_key: e.staff_key || '',
+            days: e.days || [],
+            deduction_amount: parseFloat(e.deduction_amount) || 0,
+            deduction_reason: e.deduction_reason || '',
+            admin_remarks: e.admin_remarks || '',
+          })),
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 423) {
+        if (showToast) {
+          showToast(`Locked record: ${data.detail || 'Record is locked — unlock it first.'}`, 'error');
+        }
+        return { success: false, status: 423, detail: data.detail || 'Record is locked — unlock it first.' };
+      }
+
+      if (res.ok) {
+        const count = data.saved_count != null ? data.saved_count : (entries?.length || 0);
+        if (showToast) {
+          showToast(`✅ Successfully saved TA logs for ${count} staff.`, 'success');
+        }
+        await fetchRoster();
+        return { success: true, ...data };
+      } else {
+        const errorDetail = data.detail || 'Bulk save failed';
+        if (showToast) {
+          showToast(`Bulk save failed: ${errorDetail}`, 'error');
+        }
+        return { success: false, status: res.status, detail: errorDetail };
+      }
+    } catch (err) {
+      console.error('handleSaveLogBulk error', err);
+      if (showToast) {
+        showToast('Bulk save request failed.', 'error');
+      }
+      return { success: false, detail: err.message || 'Bulk save request failed.' };
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [isSubmitting, taMonth, taDistrict, authFetch, API_BASE_URL, showToast, fetchRoster]);
+
   const handleSubmitRoster = useCallback(async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -478,7 +536,7 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     fetchStatewideSummary,
     isSuperAdmin, isSubAdmin, isIncharge, canEdit,
     fetchRoster, fetchRate,
-    handlePrefill, handleSaveLog,
+    handlePrefill, handleSaveLog, handleSaveLogBulk,
     handleSubmitRoster, handlePassStaff,
     handleRevertStaff, handleUnlockStaff,
     handleUpdateRate, handleExportExcel,

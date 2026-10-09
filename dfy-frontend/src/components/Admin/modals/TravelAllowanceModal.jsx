@@ -89,7 +89,7 @@ export default function TravelAllowanceModal({
   // state from useAdminTA
   taMonth = '', setTaMonth,
   taDistrict = '', setTaDistrict,
-  roster = [],
+  roster = [], setRoster,
   selectedOfficer, setSelectedOfficer,
   viewMode = 'ROSTER', setViewMode,
   ratePerKm = 4.0,
@@ -117,6 +117,7 @@ export default function TravelAllowanceModal({
   fetchRate,
   handlePrefill,
   handleSaveLog,
+  handleSaveLogBulk,
   handleSubmitRoster,
   handlePassStaff,
   handleRevertStaff,
@@ -129,7 +130,19 @@ export default function TravelAllowanceModal({
   const contextMenuRef = useRef(null);
   const [showConfirmSubmitModal, setShowConfirmSubmitModal] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
+  const [editedDrafts, setEditedDrafts] = useState({});
   const isDirtyRef = useRef(isDirty);
+
+  const getOfficerKey = (off) => off?.staff_key || off?.doc_id || off?.staff_id;
+
+  const pendingBulkCount = useMemo(() => {
+    const keys = new Set(Object.keys(editedDrafts));
+    if (isDirty && selectedOfficer) {
+      const curKey = getOfficerKey(selectedOfficer);
+      if (curKey) keys.add(curKey);
+    }
+    return keys.size;
+  }, [editedDrafts, isDirty, selectedOfficer]);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -151,9 +164,19 @@ export default function TravelAllowanceModal({
 
   const saveCurrentDrilldown = async (opts = {}) => {
     if (!selectedOfficer) return true;
-    const key = selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id;
+    const key = getOfficerKey(selectedOfficer);
     const ok = await handleSaveLog?.(key, drilldownLog, deductionAmount, deductionReason, selectedOfficer, opts);
-    if (ok) setIsDirty(false);
+    if (ok) {
+      setIsDirty(false);
+      if (key) {
+        setEditedDrafts((prev) => {
+          if (!prev || !prev[key]) return prev;
+          const copy = { ...prev };
+          delete copy[key];
+          return copy;
+        });
+      }
+    }
     return ok;
   };
 
@@ -204,10 +227,19 @@ export default function TravelAllowanceModal({
   // ── Handle officer drilldown loader & inspect ────────────────────────────
   const loadOfficerIntoDrilldown = (officer) => {
     setSelectedOfficer(officer);
-    setDrilldownLog(buildDrilldownDaysFromOfficer(officer));
-    setDeductionAmount(officer?.deduction_amount || 0);
-    setDeductionReason(officer?.deduction_reason || '');
-    setIsDirty(false);
+    const key = getOfficerKey(officer);
+    const draft = editedDrafts[key];
+    if (draft) {
+      setDrilldownLog(draft.days || buildDrilldownDaysFromOfficer(officer));
+      setDeductionAmount(draft.deduction_amount ?? officer?.deduction_amount ?? 0);
+      setDeductionReason(draft.deduction_reason ?? officer?.deduction_reason ?? '');
+      setIsDirty(true);
+    } else {
+      setDrilldownLog(buildDrilldownDaysFromOfficer(officer));
+      setDeductionAmount(officer?.deduction_amount || 0);
+      setDeductionReason(officer?.deduction_reason || '');
+      setIsDirty(false);
+    }
   };
 
   const handleInspect = (officer) => {
@@ -216,8 +248,8 @@ export default function TravelAllowanceModal({
   };
 
   const switchToOfficer = async (targetOfficer) => {
-    const targetKey = targetOfficer?.staff_key || targetOfficer?.doc_id || targetOfficer?.staff_id;
-    const currentKey = selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id;
+    const targetKey = getOfficerKey(targetOfficer);
+    const currentKey = getOfficerKey(selectedOfficer);
     if (!targetOfficer || targetKey === currentKey) return;
     if (isDirty) {
       await saveCurrentDrilldown({ silent: true });
@@ -275,8 +307,84 @@ export default function TravelAllowanceModal({
         total_km: finalTotalKm,
       };
       setIsDirty(true);
+      const currentKey = getOfficerKey(selectedOfficer);
+      if (currentKey) {
+        setEditedDrafts((prev) => ({
+          ...prev,
+          [currentKey]: {
+            officer: selectedOfficer,
+            days: updated,
+            deduction_amount: deductionAmount,
+            deduction_reason: deductionReason,
+          },
+        }));
+      }
       return updated;
     });
+  };
+
+  const handleBulkSaveClick = async () => {
+    if (isSubmitting || !canEdit) return;
+
+    // 1. Sync live active tab into drafts if dirty
+    const currentKey = getOfficerKey(selectedOfficer);
+    let latestDrafts = { ...editedDrafts };
+    if (isDirty && currentKey && selectedOfficer) {
+      latestDrafts[currentKey] = {
+        officer: selectedOfficer,
+        days: drilldownLog,
+        deduction_amount: deductionAmount,
+        deduction_reason: deductionReason,
+      };
+      setEditedDrafts(latestDrafts);
+    }
+
+    const draftKeys = Object.keys(latestDrafts);
+    if (draftKeys.length === 0) return;
+
+    // 2. Build entries array matching save-log shape
+    const entries = draftKeys.map((k) => {
+      const draft = latestDrafts[k];
+      const off = draft?.officer || {};
+      return {
+        month: taMonth,
+        district: taDistrict,
+        staff_name: off?.staff_name || off?.name || k || '',
+        designation: off?.designation || 'Field Officer',
+        staff_key: k,
+        days: draft?.days || [],
+        deduction_amount: parseFloat(draft?.deduction_amount) || 0,
+        deduction_reason: draft?.deduction_reason || '',
+      };
+    });
+
+    const res = await handleSaveLogBulk?.(entries);
+    if (res?.success) {
+      setEditedDrafts({});
+      if (currentKey && latestDrafts[currentKey]) {
+        setIsDirty(false);
+      }
+      if (Array.isArray(res.results) && setRoster) {
+        setRoster((prevRoster) => {
+          if (!Array.isArray(prevRoster)) return prevRoster;
+          const resultMap = new Map(res.results.map((r) => [r.staff_key, r]));
+          return prevRoster.map((item) => {
+            const itemKey = getOfficerKey(item);
+            const updated = resultMap.get(itemKey);
+            if (updated) {
+              return {
+                ...item,
+                total_km: updated.total_km,
+                gross_amount: updated.gross_amount,
+                deduction_amount: updated.deduction_amount,
+                final_payable_amount: updated.final_payable_amount,
+              };
+            }
+            return item;
+          });
+        });
+      }
+    }
   };
 
   const effectiveCanPrefill = isSuperAdmin || canPrefill;
@@ -1025,8 +1133,21 @@ export default function TravelAllowanceModal({
                 type="number"
                 value={deductionAmount}
                 onChange={(e) => {
-                  setDeductionAmount(e.target.value);
+                  const val = e.target.value;
+                  setDeductionAmount(val);
                   setIsDirty(true);
+                  const currentKey = getOfficerKey(selectedOfficer);
+                  if (currentKey) {
+                    setEditedDrafts((prev) => ({
+                      ...prev,
+                      [currentKey]: {
+                        officer: selectedOfficer,
+                        days: drilldownLog,
+                        deduction_amount: val,
+                        deduction_reason: deductionReason,
+                      },
+                    }));
+                  }
                 }}
                 disabled={!canEdit || isLocked}
                 min="0"
@@ -1047,8 +1168,21 @@ export default function TravelAllowanceModal({
                 type="text"
                 value={deductionReason}
                 onChange={(e) => {
-                  setDeductionReason(e.target.value);
+                  const val = e.target.value;
+                  setDeductionReason(val);
                   setIsDirty(true);
+                  const currentKey = getOfficerKey(selectedOfficer);
+                  if (currentKey) {
+                    setEditedDrafts((prev) => ({
+                      ...prev,
+                      [currentKey]: {
+                        officer: selectedOfficer,
+                        days: drilldownLog,
+                        deduction_amount: deductionAmount,
+                        deduction_reason: val,
+                      },
+                    }));
+                  }
                 }}
                 disabled={!canEdit || isLocked}
                 placeholder="Reason for deduction…"
@@ -1062,6 +1196,15 @@ export default function TravelAllowanceModal({
             >
               <span>💾</span>
               <span>{isSubmitting ? 'Saving…' : 'Save Log'}</span>
+            </button>
+            <button
+              onClick={handleBulkSaveClick}
+              disabled={pendingBulkCount === 0 || isSubmitting || !canEdit}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              title={pendingBulkCount === 0 ? "No unsaved edits across staff tabs" : `Save all changes for ${pendingBulkCount} staff`}
+            >
+              <span>💾</span>
+              <span>{isSubmitting ? 'Saving All…' : `Save All Staff (${pendingBulkCount})`}</span>
             </button>
             {isLocked && (
               <span className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold">
