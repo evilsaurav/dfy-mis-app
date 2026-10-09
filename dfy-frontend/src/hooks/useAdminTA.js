@@ -216,8 +216,9 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
     }
   }, [isSubAdmin, taMonth, taDistrict, selectedOfficer, authFetch, API_BASE_URL, showToast]);
 
-  const handleSaveLog = useCallback(async (staffKey, days, deduction, deductionReasonText, officer) => {
-    if (isSubmitting) return;
+  const handleSaveLog = useCallback(async (staffKey, days, deduction, deductionReasonText, officer, opts = {}) => {
+    const { silent = false, skipRosterRefresh = false } = opts;
+    if (isSubmitting) return false;
     setIsSubmitting(true);
     try {
       const res = await authFetch(`${API_BASE_URL}/admin/ta/save-log`, {
@@ -235,19 +236,34 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
         }),
       });
       if (res.status === 423) {
-        if (showToast) showToast('Record is locked — unlock it first.', 'error');
-        return;
+        if (silent) {
+          console.warn('[TA autosave] record locked, skipped');
+        } else if (showToast) {
+          showToast('Record is locked — unlock it first.', 'error');
+        }
+        return false;
       }
       if (res.ok) {
-        if (showToast) showToast('✅ Log saved successfully.', 'success');
-        await fetchRoster();
+        if (!silent && showToast) {
+          showToast('✅ Log saved successfully.', 'success');
+        }
+        if (!skipRosterRefresh) await fetchRoster();
+        return true;
       } else {
         const data = await res.json().catch(() => ({}));
-        if (showToast) showToast(`Save failed: ${data.detail || 'Unknown error'}`, 'error');
+        if (silent) {
+          console.warn('[TA autosave] save failed', data);
+        } else if (showToast) {
+          showToast(`Save failed: ${data.detail || 'Unknown error'}`, 'error');
+        }
+        return false;
       }
     } catch (err) {
       console.error('handleSaveLog error', err);
-      if (showToast) showToast('Save request failed.', 'error');
+      if (!silent && showToast) {
+        showToast('Save request failed.', 'error');
+      }
+      return false;
     } finally {
       setIsSubmitting(false);
     }

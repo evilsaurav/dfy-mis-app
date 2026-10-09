@@ -18,6 +18,71 @@ function StatusBadge({ status }) {
   );
 }
 
+const buildDrilldownDaysFromOfficer = (officer) => {
+  let days = [];
+  if (Array.isArray(officer?.days) && officer.days.length > 0) {
+    days = officer.days.map((d, idx) => {
+      const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
+      const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
+      const diff = Math.max(0, e - m);
+      const isMan = !!(d.is_manual_override || d.is_override);
+      const tKm = (d.total_km != null && parseFloat(d.total_km) > 0) ? parseFloat(d.total_km) : diff;
+      const manKm = d.manual_total_km != null && d.manual_total_km !== ''
+        ? String(d.manual_total_km)
+        : (isMan && tKm > 0 ? String(tKm) : '');
+      return {
+        day: d.day || idx + 1,
+        date: d.date || '',
+        morning_km: d.morning_km ?? d.initial_reading ?? '',
+        evening_km: d.evening_km ?? d.final_reading ?? '',
+        total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
+        manual_total_km: manKm,
+        visited_names: d.visited_names ?? d.to_location ?? '',
+        purpose: d.purpose ?? d.remarks ?? '',
+        is_manual_override: isMan,
+        admin_remarks: d.admin_remarks ?? '',
+      };
+    });
+  } else if (officer?.days && typeof officer.days === 'object') {
+    days = Object.entries(officer.days).map(([k, v], idx) => {
+      const m = parseFloat(v.morning_km ?? v.initial_reading ?? 0) || 0;
+      const e = parseFloat(v.evening_km ?? v.final_reading ?? 0) || 0;
+      const diff = Math.max(0, e - m);
+      const isMan = !!(v.is_manual_override || v.is_override);
+      const tKm = (v.total_km != null && parseFloat(v.total_km) > 0) ? parseFloat(v.total_km) : diff;
+      const manKm = v.manual_total_km != null && v.manual_total_km !== ''
+        ? String(v.manual_total_km)
+        : (isMan && tKm > 0 ? String(tKm) : '');
+      return {
+        day: v.day || idx + 1,
+        date: v.date || k,
+        morning_km: v.morning_km ?? v.initial_reading ?? '',
+        evening_km: v.evening_km ?? v.final_reading ?? '',
+        total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
+        manual_total_km: manKm,
+        visited_names: v.visited_names ?? v.to_location ?? '',
+        purpose: v.purpose ?? v.remarks ?? '',
+        is_manual_override: isMan,
+        admin_remarks: v.admin_remarks ?? '',
+      };
+    });
+  } else {
+    days = Array.from({ length: 31 }, (_, i) => ({
+      day: i + 1,
+      date: '',
+      morning_km: '',
+      evening_km: '',
+      total_km: 0,
+      manual_total_km: '',
+      is_manual_override: false,
+      visited_names: '',
+      purpose: '',
+      admin_remarks: '',
+    }));
+  }
+  return days;
+};
+
 export default function TravelAllowanceModal({
   isOpen,
   onClose,
@@ -63,6 +128,12 @@ export default function TravelAllowanceModal({
 }) {
   const contextMenuRef = useRef(null);
   const [showConfirmSubmitModal, setShowConfirmSubmitModal] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const isDirtyRef = useRef(isDirty);
+
+  useEffect(() => {
+    isDirtyRef.current = isDirty;
+  }, [isDirty]);
 
   // Close context menu when clicking outside
   useEffect(() => {
@@ -75,6 +146,27 @@ export default function TravelAllowanceModal({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showContextMenu, setShowContextMenu]);
+
+  const isLocked = Boolean(selectedOfficer?.is_locked || selectedOfficer?.status === 'SUBMITTED' || selectedOfficer?.status === 'APPROVED');
+
+  const saveCurrentDrilldown = async (opts = {}) => {
+    if (!selectedOfficer) return true;
+    const key = selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id;
+    const ok = await handleSaveLog?.(key, drilldownLog, deductionAmount, deductionReason, selectedOfficer, opts);
+    if (ok) setIsDirty(false);
+    return ok;
+  };
+
+  useEffect(() => {
+    if (!isOpen || viewMode !== 'DRILLDOWN') return;
+    if (!canEdit || isLocked) return;
+    const interval = setInterval(() => {
+      if (isDirtyRef.current) {
+        saveCurrentDrilldown({ silent: true, skipRosterRefresh: true });
+      }
+    }, 45000);
+    return () => clearInterval(interval);
+  }, [isOpen, viewMode, canEdit, isLocked, selectedOfficer, drilldownLog, deductionAmount, deductionReason]);
 
   if (!isOpen) return null;
 
@@ -109,75 +201,28 @@ export default function TravelAllowanceModal({
   const drilldownGross = drilldownTotalKm * ratePerKm;
   const drilldownNet = Math.max(0, drilldownGross - (parseFloat(deductionAmount) || 0));
 
-  // ── Handle officer inspect (load 31-day log) ──────────────────────────────
-  const handleInspect = (officer) => {
+  // ── Handle officer drilldown loader & inspect ────────────────────────────
+  const loadOfficerIntoDrilldown = (officer) => {
     setSelectedOfficer(officer);
-    // Populate drilldown log from officer days, normalizing array or dictionary
-    let days = [];
-    if (Array.isArray(officer?.days) && officer.days.length > 0) {
-      days = officer.days.map((d, idx) => {
-        const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
-        const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
-        const diff = Math.max(0, e - m);
-        const isMan = !!(d.is_manual_override || d.is_override);
-        const tKm = (d.total_km != null && parseFloat(d.total_km) > 0) ? parseFloat(d.total_km) : diff;
-        const manKm = d.manual_total_km != null && d.manual_total_km !== ''
-          ? String(d.manual_total_km)
-          : (isMan && tKm > 0 ? String(tKm) : '');
-        return {
-          day: d.day || idx + 1,
-          date: d.date || '',
-          morning_km: d.morning_km ?? d.initial_reading ?? '',
-          evening_km: d.evening_km ?? d.final_reading ?? '',
-          total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
-          manual_total_km: manKm,
-          visited_names: d.visited_names ?? d.to_location ?? '',
-          purpose: d.purpose ?? d.remarks ?? '',
-          is_manual_override: isMan,
-          admin_remarks: d.admin_remarks ?? '',
-        };
-      });
-    } else if (officer?.days && typeof officer.days === 'object') {
-      days = Object.entries(officer.days).map(([k, v], idx) => {
-        const m = parseFloat(v.morning_km ?? v.initial_reading ?? 0) || 0;
-        const e = parseFloat(v.evening_km ?? v.final_reading ?? 0) || 0;
-        const diff = Math.max(0, e - m);
-        const isMan = !!(v.is_manual_override || v.is_override);
-        const tKm = (v.total_km != null && parseFloat(v.total_km) > 0) ? parseFloat(v.total_km) : diff;
-        const manKm = v.manual_total_km != null && v.manual_total_km !== ''
-          ? String(v.manual_total_km)
-          : (isMan && tKm > 0 ? String(tKm) : '');
-        return {
-          day: v.day || idx + 1,
-          date: v.date || k,
-          morning_km: v.morning_km ?? v.initial_reading ?? '',
-          evening_km: v.evening_km ?? v.final_reading ?? '',
-          total_km: isMan ? (parseFloat(manKm) || tKm) : diff,
-          manual_total_km: manKm,
-          visited_names: v.visited_names ?? v.to_location ?? '',
-          purpose: v.purpose ?? v.remarks ?? '',
-          is_manual_override: isMan,
-          admin_remarks: v.admin_remarks ?? '',
-        };
-      });
-    } else {
-      days = Array.from({ length: 31 }, (_, i) => ({
-        day: i + 1,
-        date: '',
-        morning_km: '',
-        evening_km: '',
-        total_km: 0,
-        manual_total_km: '',
-        is_manual_override: false,
-        visited_names: '',
-        purpose: '',
-        admin_remarks: '',
-      }));
-    }
-    setDrilldownLog(days);
+    setDrilldownLog(buildDrilldownDaysFromOfficer(officer));
     setDeductionAmount(officer?.deduction_amount || 0);
     setDeductionReason(officer?.deduction_reason || '');
+    setIsDirty(false);
+  };
+
+  const handleInspect = (officer) => {
+    loadOfficerIntoDrilldown(officer);
     setViewMode('DRILLDOWN');
+  };
+
+  const switchToOfficer = async (targetOfficer) => {
+    const targetKey = targetOfficer?.staff_key || targetOfficer?.doc_id || targetOfficer?.staff_id;
+    const currentKey = selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id;
+    if (!targetOfficer || targetKey === currentKey) return;
+    if (isDirty) {
+      await saveCurrentDrilldown({ silent: true });
+    }
+    loadOfficerIntoDrilldown(targetOfficer);
   };
 
   const handleDrilldownFieldChange = (dayIndex, field, value) => {
@@ -229,6 +274,7 @@ export default function TravelAllowanceModal({
         manual_total_km: manualTotal,
         total_km: finalTotalKm,
       };
+      setIsDirty(true);
       return updated;
     });
   };
@@ -750,8 +796,6 @@ export default function TravelAllowanceModal({
   }
 
   // ── DRILLDOWN VIEW ────────────────────────────────────────────────────────
-  const isLocked = selectedOfficer?.is_locked || selectedOfficer?.status === 'SUBMITTED' || selectedOfficer?.status === 'APPROVED';
-
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex flex-col overflow-hidden">
       <div className="bg-white w-full h-full flex flex-col overflow-hidden">
@@ -760,7 +804,11 @@ export default function TravelAllowanceModal({
         <div className="flex flex-wrap gap-3 items-center justify-between p-5 border-b border-slate-100">
           <div className="flex items-center gap-3">
             <button
-              onClick={() => { setViewMode('ROSTER'); setSelectedOfficer(null); }}
+              onClick={async () => {
+                if (isDirty) await saveCurrentDrilldown({ silent: true });
+                setViewMode('ROSTER');
+                setSelectedOfficer(null);
+              }}
               className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-800 transition-all"
             >
               ← Back to District Roster
@@ -828,11 +876,37 @@ export default function TravelAllowanceModal({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={async () => {
+              if (isDirty) await saveCurrentDrilldown({ silent: true });
+              onClose();
+            }}
             className="text-slate-400 hover:text-slate-600 text-2xl font-bold leading-none px-1"
           >
             ×
           </button>
+        </div>
+
+        {/* Tab strip */}
+        <div className="flex items-center gap-1 overflow-x-auto px-4 pt-2 border-b border-slate-100 bg-slate-50/60">
+          {roster.map((staff) => {
+            const key = staff.staff_key || staff.doc_id || staff.staff_id;
+            const selKey = selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id;
+            const isActive = key === selKey;
+            return (
+              <button
+                key={key}
+                onClick={() => switchToOfficer(staff)}
+                title={staff.staff_name}
+                className={`shrink-0 px-3 py-1.5 rounded-t-lg text-xs font-bold border-b-2 whitespace-nowrap transition-all ${
+                  isActive
+                    ? 'border-blue-600 text-blue-700 bg-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {staff.staff_name}
+              </button>
+            );
+          })}
         </div>
 
         {/* 31-day table */}
@@ -950,7 +1024,10 @@ export default function TravelAllowanceModal({
               <input
                 type="number"
                 value={deductionAmount}
-                onChange={(e) => setDeductionAmount(e.target.value)}
+                onChange={(e) => {
+                  setDeductionAmount(e.target.value);
+                  setIsDirty(true);
+                }}
                 disabled={!canEdit || isLocked}
                 min="0"
                 className="w-full text-center text-sm font-black text-orange-800 bg-transparent border-none focus:outline-none disabled:opacity-70"
@@ -969,14 +1046,17 @@ export default function TravelAllowanceModal({
               <input
                 type="text"
                 value={deductionReason}
-                onChange={(e) => setDeductionReason(e.target.value)}
+                onChange={(e) => {
+                  setDeductionReason(e.target.value);
+                  setIsDirty(true);
+                }}
                 disabled={!canEdit || isLocked}
                 placeholder="Reason for deduction…"
                 className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:bg-slate-50 disabled:text-slate-400"
               />
             </div>
             <button
-              onClick={() => handleSaveLog?.(selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id, drilldownLog, deductionAmount, deductionReason, selectedOfficer)}
+              onClick={() => saveCurrentDrilldown()}
               disabled={isSubmitting || isLocked || !canEdit}
               className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
