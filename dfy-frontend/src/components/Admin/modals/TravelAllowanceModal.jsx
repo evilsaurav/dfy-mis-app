@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 const STATUS_STYLES = {
   DRAFT: 'bg-slate-100 text-slate-600',
