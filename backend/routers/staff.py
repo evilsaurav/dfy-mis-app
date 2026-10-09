@@ -54,6 +54,8 @@ async def get_staff_directory():
             records = await get_cached_staff_directory_raw()
             directory = {d: [] for d in DEFAULT_BIHAR_DISTRICTS}
             for data in records:
+                if data.get("deleted_at"):
+                    continue
                 if data.get("is_active") is False or data.get("status") == "inactive":
                     continue
                 district = canonicalize_district(data.get("district"))
@@ -143,6 +145,8 @@ async def get_staff_full_list(
         records = await get_cached_staff_directory_raw()
         staff = []
         for d in records:
+            if d.get("deleted_at"):
+                continue
             is_active = d.get("is_active") is not False and d.get("status") != "inactive"
             if norm_status == "active" and not is_active:
                 continue

@@ -1520,14 +1520,12 @@ export function useAdminModals({
       });
       if (res.ok) {
         Promise.all([
-          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
-          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
           typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
           typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
         ]).catch(e => console.warn("Background staff delete refresh error:", e));
       } else {
-        const data = await res.json();
-        if (showToast) showToast(data.detail || "Failed to delete on server.", "error");
+        const data = await res.json().catch(() => ({}));
+        if (showToast) showToast(data?.detail || "Failed to delete on server.", "error");
         if (typeof fetchStaffList === 'function') fetchStaffList();
         if (typeof fetchDirectory === 'function') fetchDirectory();
       }
@@ -1573,17 +1571,19 @@ export function useAdminModals({
       });
       if (res.ok) {
         Promise.all([
-          typeof fetchStaffList === 'function' ? fetchStaffList() : Promise.resolve(),
-          typeof fetchDirectory === 'function' ? fetchDirectory() : Promise.resolve(),
           typeof loadTargets === 'function' ? loadTargets(selectedDistrict || 'All', month) : Promise.resolve(),
           typeof fetchAttendance === 'function' ? fetchAttendance(true) : Promise.resolve()
         ]).catch(e => console.warn("Background toggle refresh error:", e));
       } else {
+        const data = await res.json().catch(() => ({}));
+        if (showToast) showToast(data?.detail || "Failed to update status on server. Reverted.", "error");
         if (typeof fetchStaffList === 'function') fetchStaffList();
+        if (typeof fetchDirectory === 'function') fetchDirectory();
       }
     } catch (err) {
       if (showToast) showToast("Error toggling staff status", "error");
       if (typeof fetchStaffList === 'function') fetchStaffList();
+      if (typeof fetchDirectory === 'function') fetchDirectory();
     } finally {
       setIsTogglingStaff(false);
     }

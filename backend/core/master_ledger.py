@@ -153,7 +153,7 @@ async def get_cached_staff_targets_for_month(month: str) -> List[dict]:
         join_sql = """
             SELECT st.id, st.month, st.target, s.name as fo_name, s.district, s.pin, st.legacy_doc_id
             FROM staff_targets st
-            LEFT JOIN staff_directory s ON st.staff_id = s.id
+            LEFT JOIN staff_directory s ON st.staff_id = s.id AND s.deleted_at IS NULL
             WHERE st.month::text = ANY(%s)
         """
         combined_pg = []

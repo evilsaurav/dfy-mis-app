@@ -309,7 +309,7 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
         staff_id = None
         try:
             staff_rows = pg_execute_raw(
-                "SELECT id, name, district FROM staff_directory WHERE name ILIKE %s",
+                "SELECT id, name, district FROM staff_directory WHERE name ILIKE %s AND deleted_at IS NULL",
                 [clean_name],
                 fetch=True
             ) or []
@@ -374,7 +374,7 @@ async def update_target(data: TargetUpdate, admin: dict = Depends(get_current_ad
                 if alias.lower() != clean_name.lower():
                     try:
                         alias_rows = pg_execute_raw(
-                            "SELECT id FROM staff_directory WHERE LOWER(district) = 'muzaffarpur' AND LOWER(TRIM(name)) = LOWER(%s) LIMIT 1",
+                            "SELECT id FROM staff_directory WHERE LOWER(district) = 'muzaffarpur' AND LOWER(TRIM(name)) = LOWER(%s) AND deleted_at IS NULL LIMIT 1",
                             [alias],
                             fetch=True
                         )

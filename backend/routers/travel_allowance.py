@@ -1048,6 +1048,21 @@ async def get_district_ta_roster(
     except Exception as e:
         logger.warning(f"Notice querying staff_directory from postgres: {e}")
 
+    deleted_staff_ids = set()
+    try:
+        del_rows = pg_execute_raw(
+            """SELECT id FROM staff_directory 
+               WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                 AND deleted_at IS NOT NULL""",
+            [canon_dist, district],
+            fetch=True
+        )
+        for dr in (del_rows or []):
+            if dr.get("id"):
+                deleted_staff_ids.add(str(dr["id"]))
+    except Exception:
+        pass
+
     # Fallback to cached directory helper or mock
     if not district_staff:
         try:
@@ -1055,7 +1070,7 @@ async def get_district_ta_roster(
             for s in (staff_records or []):
                 if not isinstance(s, dict):
                     continue
-                if s.get("is_active") is False or s.get("status") == "inactive":
+                if s.get("deleted_at") or s.get("is_active") is False or s.get("status") == "inactive":
                     continue
                 s_dist = canonicalize_district(s.get("district") or "")
                 if s_dist == canon_dist and s.get("name"):
@@ -1218,6 +1233,20 @@ async def get_district_ta_roster(
             entry["gross_amount"] = recalc["gross_amount"]
             entry["deduction_amount"] = recalc["deduction_amount"]
             entry["final_payable_amount"] = recalc["final_payable_amount"]
+
+            # Suppress soft-deleted staff if they have no active days or travel activity
+            has_activity = (
+                entry["active_days"] > 0
+                or float(entry["total_km"] or 0.0) > 0.0
+                or float(entry["gross_amount"] or 0.0) > 0.0
+                or float(entry.get("deduction_amount") or 0.0) > 0.0
+            )
+            sl_staff_id_str = str(sl.get("staff_id") or "")
+            is_soft_deleted = sl_staff_id_str in deleted_staff_ids
+            if is_soft_deleted and not has_activity:
+                consumed_ids.add(sl["_doc_id"])
+                continue
+
             roster.append(entry)
             consumed_ids.add(sl["_doc_id"])
 
