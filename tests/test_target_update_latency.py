@@ -1,11 +1,19 @@
+import os
+import sys
 import time
 import pytest
 from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, ".")
 from fastapi.testclient import TestClient
 from main import app, create_access_token
 
 client = TestClient(app)
 
+@pytest.mark.skipif(
+    os.getenv("RUN_LIVE_DB_LATENCY_TEST") != "1",
+    reason="Live DB latency benchmark skipped to prevent mutating production database"
+)
 def test_target_endpoints_latency_sub_500ms():
     """
     Benchmarks single and bulk target update operations to mathematically
