@@ -318,9 +318,9 @@ def normalize_days_to_list(raw_days_or_logs: Any, month: str = "") -> List[Dict[
             except (ValueError, TypeError):
                 ve = None
 
-        if vm is not None and (vm > 0 or (ve is not None and ve > 0)):
+        if vm is not None and vm > 0:
             m_km = round(vm, 2)
-        if ve is not None and (ve > 0 or (vm is not None and vm > 0)):
+        if ve is not None and ve > 0:
             e_km = round(ve, 2)
 
         if override and manual_t is not None and str(manual_t).strip() != "":
