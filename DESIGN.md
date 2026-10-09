@@ -5,7 +5,7 @@
 > *Design Framework:* Tailwind CSS v4 + React 19 + Lucide Icons  
 > *Typography:* Plus Jakarta Sans  
 > *Target Form Factors:* Mobile PWA (Field Staff) & Responsive Desktop Studio (Administrators)  
-> *Version:* 3.5.0 (v2.8.3 - Bento Visual Flowcharts, Next-Day Radar Badging, Cohort Notation & Direct Dialing)  
+> *Version:* 3.6.0 (v2.9.1 - Multi-Staff Drilldown Tab Strip, Save All Staff Bulk Engine & Bento TA Verification SOP)  
 > *Status:* Production Active
 
 ---
@@ -231,3 +231,57 @@ The system transitions all operational guidelines and standard operating procedu
   - Every visual diagram strictly illustrates the **7:00 PM evening reporting cutoff**.
   - Visual timeline tracks: `Morning 9:00 AM (Duty Start) ➔ Afternoon 2:00 PM (Visits & Testing) ➔ Evening 7:00 PM (Submit Report)`.
   - The 10:00 AM administrative grace cutoff is completely excluded from FO UI diagrams to preserve programmatic reporting discipline.
+
+---
+
+### 6.4 Administrative Travel Allowance Multi-Staff SOP (Bento Flowchart)
+
+The Travel Allowance verification workflow guides state coordinators and district supervisors through auditing odometer readings, reconciling deductions, and committing approvals with zero data loss.
+
+```mermaid
+flowchart LR
+    Step1["1️⃣ Open District Roster<br/>(Audit Status & Totals)"] --> Step2["2️⃣ Select Staff Tab<br/>(Inspect KM & Photos)"]
+    Step2 --> Step3["3️⃣ Switch Staff Tab<br/>(⚡ Silent Auto-Save)"]
+    Step3 --> Step4["4️⃣ Close / Back Nav<br/>(⚡ Exit Auto-Save)"]
+    Step4 --> Step5["5️⃣ Manual 'Save Log'<br/>(Single-Staff Confirmation)"]
+    Step5 --> Step6["6️⃣ 'Save All Staff (N)'<br/>(🛡️ Atomic All-or-Nothing Batch)"]
+    Step6 --> Step7["7️⃣ Soft-Delete Audit Rule<br/>(Retained if KM > 0)"]
+```
+
+#### 7-Step Bento Operational Flow
+
+1. **Step 1: Open District TA Drilldown (`Slate Structural Theme`)**
+   - **Sequence Badge**: `1 ➔ Open District Roster`
+   - **Action**: Launch the Travel Allowance module from the Admin Header or Reports Studio. Select the operational month and target district to view the complete district roster summary matrix and status badges (`Draft`, `Submitted`, `Approved`).
+   - **💡 Tip**: Check the header status pill to ensure the district roster is in `DRAFT` or `REVERTED` before editing readings.
+
+2. **Step 2: Select Staff Member Tab (`Indigo Pipeline Theme`)**
+   - **Sequence Badge**: `2 ➔ Select Staff Tab`
+   - **Action**: Click any staff member's tab in the horizontal tab strip at the top of the drilldown modal. The view renders their day-by-day odometer entries, morning/evening meter photos, travel expenses, deductions, and supervisor remarks.
+   - **💡 Tip**: Tapping photo icons opens high-resolution odometer audit overlays with timestamp verification.
+
+3. **Step 3: Tab-Switch Silent Auto-Save (`Emerald Success Theme`)**
+   - **Sequence Badge**: `3 ➔ Tab-Switch Auto-Save`
+   - **Action**: Seamlessly click on any other staff member's tab to continue auditing. The system automatically and silently persists the previous officer's changes to the server in the background—no manual save required between tabs.
+   - **💡 Tip**: An in-memory draft manager (`editedDrafts`) tracks all unsaved changes across visited tabs simultaneously.
+
+4. **Step 4: Drilldown Exit Auto-Save (`Amber Grace Theme`)**
+   - **Sequence Badge**: `4 ➔ Modal Exit Auto-Save`
+   - **Action**: Clicking "Back to Roster" or pressing the modal close button automatically triggers a background save of the currently open staff tab, guaranteeing zero work is lost upon exiting.
+   - **💡 Tip**: A 45-second periodic debounce timer also auto-saves in-progress typing during continuous reviews.
+
+5. **Step 5: Manual Single-Staff "Save Log" (`Indigo Pipeline Theme`)**
+   - **Sequence Badge**: `5 ➔ Manual Single Save`
+   - **Action**: Click the `"💾 Save Log"` button at any time to immediately commit and confirm edits for the currently active staff member. The system recalculates total KM and net payable amounts in real time.
+   - **💡 Tip**: Use this when finalizing an individual officer's adjustments before moving to other tasks.
+
+6. **Step 6: "Save All Staff (N)" Atomic Bulk-Save (`Emerald / Rose Security Theme`)**
+   - **Sequence Badge**: `6 ➔ Atomic Bulk Flush`
+   - **Action**: When multiple staff members have been edited across different tabs, click the `"💾 Save All Staff (N)"` button. The system flushes all in-progress changes across all edited tabs simultaneously in a single, secure all-or-nothing transaction.
+   - **Security Gate**: If *any* staff record in the batch is locked (`APPROVED`) or unauthorized, the entire batch is rejected (HTTP 423/403) and zero rows are written, preventing partial data corruption.
+   - **💡 Tip**: The button dynamically shows the count $N$ of unpersisted tabs and is automatically disabled when $N = 0$.
+
+7. **Step 7: Soft-Deleted Staff Visibility Rules (`Slate Audit Theme`)**
+   - **Sequence Badge**: `7 ➔ Payroll Audit Rule`
+   - **Action**: Deactivated or soft-deleted field officers are automatically hidden from active rosters unless they have recorded travel readings or travel allowance for that specific calendar month.
+   - **Audit Integrity**: Staff who recorded travel activity (`total_km > 0` or non-zero payable amounts) prior to leaving the organization remain visible in that month's roster to ensure financial reconciliation, payroll settlement, and expense audits remain 100% verifiable.

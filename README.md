@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.8.6-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.1-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -204,6 +204,15 @@ flowchart TD
 - **Hardened Inactive PIN Verification Lockout**:
   - `/verify-pin` rejects inactive staff with HTTP 403: *"Aapka account inactive hai. Kripya State Coordinator se sampark karein."*
   - Completely blocks inactive or relieved personnel from submitting reports or logging into the PWA.
+- **Soft-Delete Directory & Picker Leakage Elimination (`deleted_at IS NULL`)**:
+  - Soft-deleted staff records (`deleted_at IS NOT NULL`) are strictly filtered out from the active Staff Directory (`GET /staff-directory`), Staff Full List (`GET /admin/staff/list`), Staff Target selectors, and Master Ledger calculation JOINs.
+  - Permanently eliminates "ghost staff" leakage into officer pickers, target assignment grids, and admin dropdowns.
+- **Optimistic State Authority & Deactivation Race Prevention**:
+  - Resolved multi-click race conditions where post-mutation background refetches (`fetchStaffList`, `fetchDirectory`) raced with server cache invalidation and clobbered optimistic local state back to stale pre-update values.
+  - Optimistic client state is held authoritative upon HTTP 200 confirmation, retaining refetches strictly for failure-path state reconciliation.
+  - Features immediate user-facing error toast alerts if any toggle action fails, ensuring no silent failures.
+- **Payroll & Financial Audit Integrity Exception**:
+  - In Travel Allowance district rosters (`GET /admin/ta/roster`), soft-deleted personnel are dynamically evaluated: if the staff member recorded odometer readings or financial activity (`total_km > 0` or non-zero payable amounts) in that calendar month prior to departure, they are retained in that month's roster to preserve payroll auditability and reimbursement settlement. If zero travel activity was recorded, they are completely excluded from the roster.
 - **Admin Staff Management Suite**:
   - Staff management directory features fast filter tabs: `All`, `Active`, and `Inactive`.
   - Color-coded action buttons: Red "Deactivate" / Emerald "Reactivate" with high-stakes confirmation dialogs (`StaffStatusToggleModal`).
@@ -329,7 +338,15 @@ flowchart TD
   - 10 visual chapters covering App Registration, Daily Attendance, Reporting Formats, Clinical Cascade, WhatsApp Broadcasts, Offline Sync, Patient Calling, Calendar Codes, Emergency Duty, and FO Profile Honors & Badges.
   - Strict compliance with the Zero-Leakage Privacy Rule (7:00 PM evening deadline strictly enforced in all visual diagrams).
 - **Centralized Admin SOP (`AdminDashboard.jsx`)**:
-  - 11 comprehensive operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, Security Governance, and Statewide Top Performers Analytics.
+  - 12 comprehensive operational modules covering Master Table Operations, Pacing & Velocity Radar, Attendance & Leave Management, Excel Studio Exports, Nikshay Reconciler & Direct Dialing, Staff Lifecycle & PIN Directory, Automated Cloud Backups, Security Governance, Statewide Top Performers Analytics, and Travel Allowance Verification.
+- **Administrative Travel Allowance SOP (7-Step Workflow)**:
+  1. **Open District TA Drilldown**: Coordinator launches the district Travel Allowance module and selects the operational month to inspect the district roster matrix and overall status pills (`Draft`, `Submitted`, `Approved`).
+  2. **Select Staff Tab**: Click on any staff member's tab from the top tab strip to inspect daily odometer readings, morning/evening meter photos, deductions, and supervisor notes.
+  3. **Tab-Switch Silent Auto-Save**: Seamlessly click any other staff member's tab to continue editing. The system automatically and silently saves the previous staff member's changes to the server in the background—no manual saving needed between tabs.
+  4. **Drilldown Exit Auto-Save**: Navigating back to the roster list or closing the drilldown modal automatically saves any unsaved changes in the currently open staff tab.
+  5. **Manual Single-Staff "Save Log"**: Use the `"💾 Save Log"` button at any time to immediately save and confirm edits for the currently active staff member.
+  6. **"Save All Staff (N)" Atomic Bulk-Save**: When multiple staff members have been edited across different tabs, click the `"💾 Save All Staff (N)"` button. The system flushes all in-progress changes across all edited tabs simultaneously in a single, secure all-or-nothing transaction. If any record is locked or unauthorized, the entire batch is protected and zero rows are written.
+  7. **Soft-Deleted Staff Visibility Rules**: Field officers who have been removed or soft-deleted are automatically hidden from active rosters unless they have recorded travel readings or travel allowance for that specific month, preserving accurate audit trails and financial expense reconciliation.
 
 ---
 
@@ -427,6 +444,21 @@ flowchart TD
 ### 25. 🏍️ Relational Travel Allowance & Bike Log Engine (PostgreSQL), Dynamic Rate Controls & Multi-Sheet Excel Studio
 - **Normalized PostgreSQL Relational Schema**:
   - Engineered an enterprise-grade Travel Allowance subsystem running on Supabase PostgreSQL with 4 normalized relational tables: `travel_allowance_settings` (dynamic reimbursement rate & policy), `travel_allowance_rosters` (district & month roster summary, status, total KM, gross & net payable), `travel_allowance_daily_logs` (per-staff day-by-day odometer readings, morning/evening photos, and supervisor remarks), and `travel_allowance_permissions` (Super-Admin granted pre-fill access).
+- **Multi-Staff Drilldown Tab Strip & Zero-Loss Background Auto-Save**:
+  - Drilldown modal (`TravelAllowanceModal.jsx`) introduces a responsive top tab strip allowing supervisors to switch instantly between all field officers in a district roster without losing context.
+  - Automatic silent background saves trigger seamlessly on:
+    1. **Tab Switch**: Moving from Staff A to Staff B immediately flushes Staff A's changes to the server in the background.
+    2. **Modal Close / Back to Roster**: Exiting the drilldown view or returning to the roster matrix automatically persists the open staff draft.
+    3. **Periodic 45s Debounce**: Automatically syncs in-progress changes after 45 seconds of continuous typing or editing.
+- **1-Click "Save All Staff" Bulk-Save Engine (`POST /admin/ta/save-log-bulk`)**:
+  - Features a dedicated **"💾 Save All Staff (N)"** button positioned alongside the single-staff "Save Log" control.
+  - Dynamically tracks all edited/dirty staff tabs in memory (`editedDrafts`). The button displays the exact count $N$ of unpersisted staff tabs and is automatically disabled when $N = 0$.
+  - 1-click flushes the currently focused tab and transmits the entire multi-staff payload in a single network request.
+- **All-or-Nothing Transactional Semantics & Permission Validation**:
+  - Before writing any database records, the backend validates every entry in the batch (resolves staff directory identities, verifies Sub-Admin district access, and validates lock status via `validate_edit_permission`).
+  - If *any* staff record in the batch is locked (`APPROVED`), submitted, or unauthorized, the entire batch is rejected (HTTP 423/403/404) with the specific staff name and reason, writing zero database mutations.
+  - Database writes run inside an atomic PostgreSQL transaction context (`conn.cursor()` context manager), executing roster upserts and daily log replacements in a single transaction with automatic rollback on any failure.
+  - Recalculates `total_km`, `gross_amount`, and `final_payable_amount` per staff using `calculate_log_totals`, returning updated roster totals directly to the frontend.
 - **Dynamic Rate Management (₹4.00/KM Default)**:
   - Empowered Super Admins and Main Incharges to update statewide reimbursement rates dynamically from a dedicated modal control without server restarts or redeployments. Rate updates atomically invalidate memory caches and apply to subsequent roster calculations.
 - **Granular Per-Staff Approval Lifecycle & Security Locking**:
@@ -435,6 +467,9 @@ flowchart TD
   - Frontline Field Officers enjoy a transparent 24-hour dispute window (`POST /fo/ta/dispute`) upon roster approval directly on their mobile profile card. While rosters are in `DRAFT`, `SUBMITTED`, or `REVERTED` states, a strict privacy guard hides unapproved calculation figures, presenting an informative "Verification in Progress" status.
 - **Multi-Sheet Openpyxl Excel Export Studio**:
   - Integrated high-density Excel export (`GET /admin/ta/export-excel`) generating `TA_<district>_<month>.xlsx`. Sheet 1 features an Executive District Summary with native dynamic `=SUM(...)` formulas for Total KM, Gross Amount, Deductions, and Net Payable, while Sheets 2..N contain individual staff daily travel logs with odometer audit trails.
+- **Statewide Travel Allowance Executive Studio (`TravelAllowanceTab.jsx`)**:
+  - Centralized executive overview tab in Admin Dashboard providing real-time aggregation across all 22 project districts (`GET /admin/ta/statewide-summary`).
+  - Features KPI bento summary cards (Total Statewide KM, Gross Claims, Approved Payouts, Open Disputes), multi-district status matrix, and 1-click drilldowns into district rosters.
 - **Attendance Radar District Normalization**:
   - Hardened district lookup keys across the real-time Attendance Radar, resolving defaulter collisions in multi-word district names (e.g. Purba Champaran / East Champaran) without losing streak history.
 
@@ -554,8 +589,8 @@ Mis field report/
 |---|---|---|
 | `GET` | `/get-targets` | Fetch monthly targets (filtered by permitted districts) |
 | `POST` | `/set-targets` | Update monthly targets with audit trail logging |
-| `GET` | `/staff-directory` | Fetch normalized master staff directory |
-| `GET` | `/admin/staff/list` | Fetch active/inactive staff list with PINs, designations, and status badges |
+| `GET` | `/staff-directory` | Fetch normalized master staff directory (strictly filters `deleted_at IS NULL`) |
+| `GET` | `/admin/staff/list` | Fetch active/inactive staff list with PINs, designations, and status badges (strictly filters `deleted_at IS NULL`) |
 | `POST` | `/admin/staff/update-pin` | Reset staff member PIN |
 | `GET` | `/admin/staff/export-pins` | Export master PIN directory to Excel (`.xlsx`) |
 
@@ -599,13 +634,15 @@ Mis field report/
 | `POST` | `/admin/ta/rate` | Super Admin & Incharge: Update dynamic reimbursement rate (₹/KM) |
 | `GET` | `/admin/ta/roster` | Fetch district monthly TA roster with staff records and daily logs |
 | `POST` | `/admin/ta/prefill` | Pre-fill monthly TA roster from daily field reports (permission-gated) |
-| `POST` | `/admin/ta/save-log` | Save/update staff daily travel log entries and deductions |
+| `POST` | `/admin/ta/save-log` | Save/update individual staff daily travel log entries and deductions |
+| `POST` | `/admin/ta/save-log-bulk` | Bulk-save daily travel log entries and deductions for multiple staff atomically (all-or-nothing transaction, permission-gated) |
 | `POST` | `/admin/ta/submit-roster` | Submit district monthly TA roster to Incharge for approval |
 | `POST` | `/admin/ta/pass-staff` | Incharge: Pass/approve individual staff travel claim and lock record |
 | `POST` | `/admin/ta/revert-staff` | Incharge: Revert individual staff claim to Sub-Admin with reason |
 | `POST` | `/admin/ta/unlock-staff` | Incharge & Super Admin: Unlock approved staff claim for corrections |
 | `POST` | `/admin/ta/resolve-dispute` | Incharge & Super Admin: Resolve an open FO travel dispute |
 | `GET` | `/admin/ta/export-excel` | Download multi-sheet Travel Allowance workbook (`.xlsx`) |
+| `GET` | `/admin/ta/statewide-summary` | Fetch statewide executive TA summary aggregated across all districts (cached) |
 | `GET` | `/fo/ta/monthly-summary` | Field Officer: View personal monthly TA status, payable amount, and dispute timer |
 | `POST` | `/fo/ta/dispute` | Field Officer: Raise a formal travel allowance dispute within the 24h window |
 

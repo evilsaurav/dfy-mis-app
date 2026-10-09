@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.6.0 (v2.8.5 - Relational Supabase PostgreSQL, Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet & Native Bento SOPs)  
+> *Version:* 3.7.0 (v2.9.1 - Relational Travel Allowance Bulk-Save, All-or-Nothing ACID Transactions, Soft-Delete Directory Isolation & Multi-Staff Tab Strip)  
 > *Status:* Production Active
 
 ---
@@ -225,6 +225,17 @@ flowchart LR
   - When inspecting historical dates prior to `inactive_since`, staff correctly appear in historical attendance rosters, maintaining full historical auditing accuracy.
 - **Hardened Inactive PIN Verification Lockout**:
   - `/verify-pin` queries the staff directory and immediately halts if `is_active == False` or `status == "inactive"`, returning HTTP 403 and preventing any unauthorized daily reports.
+- **Soft-Delete Directory Isolation (`deleted_at IS NULL`)**:
+  - Soft-deleted staff records are marked via `deleted_at = NOW()` rather than physical row destruction to preserve relational integrity.
+  - All active staff lookup pathways—including `get_staff_directory` (`GET /staff-directory`), `get_staff_full_list` (`GET /admin/staff/list`), `targets.py` target assignment queries, and `master_ledger.py` target JOINs—strictly filter by `deleted_at IS NULL`.
+  - Permanently eliminates ghost staff leakage into administrative drop-downs, officer pickers, and active target grids.
+- **Optimistic State Authority & Deactivation Race Prevention**:
+  - Resolved a client-server race condition where post-mutation background refetches (`fetchStaffList`, `fetchDirectory`) raced with asynchronous cache invalidation on the server, inadvertently clobbering the optimistic UI state back to pre-update values.
+  - The client holds its optimistic update authoritative upon receiving HTTP 200 confirmation, retaining background refetch strictly as a fallback reconciliation mechanism upon network failure.
+  - Immediate user-facing error toasts alert administrators if an operation encounters permission or network errors.
+- **Payroll & Financial Audit Integrity Exception**:
+  - In `travel_allowance.py` (`get_ta_roster`), soft-deleted personnel (`deleted_at IS NOT NULL`) are evaluated with financial discretion: if the staff member recorded odometer readings or travel allowance activity (`total_km > 0` or non-zero payable amounts) in that specific calendar month prior to departure, they are retained in that month's roster.
+  - This guarantees that historical travel expense settlements, audit trails, and financial reimbursements remain 100% verifiable without disappearing from state reporting, while completely omitting soft-deleted staff who recorded zero activity.
 - **Zero Historical Data Corruption**:
   - Past daily reports in `daily_field_reports` and historical KPI child records are completely preserved, preventing retrospective KPI corruption.
 
@@ -354,6 +365,77 @@ flowchart TD
   - Upon `APPROVED` transition, a 24-hour dispute window opens on the FO's mobile profile, allowing formal dispute submission (`POST /fo/ta/dispute`) with dual real-time broadcast alerts dispatched to supervisors.
 - **High-Density Multi-Sheet Excel Engine**:
   - Generates `TA_<district>_<month>.xlsx` with openpyxl. Sheet 1 produces an Executive District Summary utilizing native Excel `=SUM(...)` formulas for dynamic recalculation. Sheets 2..N provide individual officer travel logs with complete odometer verification trails.
+
+#### 6.14.1 Single-Save vs. Multi-Tab Bulk-Save Architecture
+The system supports two complementary mutation pathways designed for high efficiency and data integrity:
+
+```mermaid
+flowchart TD
+    subgraph Client_Drilldown [TravelAllowanceModal.jsx & useAdminTA.js]
+        Tabs["Multi-Staff Tab Strip<br/>(Staff A, Staff B, Staff C...)"]
+        AutoTrigger{"Silent Auto-Save Trigger?<br/>• Tab Switch<br/>• Modal Close / Back<br/>• 45s Periodic Debounce"}
+        ManualSingle["'💾 Save Log' Click<br/>Single Staff Draft"]
+        ManualBulk["'💾 Save All Staff (N)' Click<br/>All Dirty Tabs in editedDrafts"]
+    end
+
+    subgraph Single_Path [Single-Save Pathway - POST /admin/ta/save-log]
+        AutoTrigger -->|Single Staff Draft| SingleEndpoint["POST /admin/ta/save-log<br/>Payload: TaLogSaveReq"]
+        ManualSingle --> SingleEndpoint
+        SingleEndpoint --> ValidateSingle["validate_edit_permission(district, staff, month)"]
+        ValidateSingle --> CalcSingle["calculate_log_totals(days, rate, deduction)"]
+        CalcSingle --> AtomicSingle["Atomic Roster Upsert & Daily Log Replace"]
+    end
+
+    subgraph Bulk_Path [Bulk-Save Pathway - POST /admin/ta/save-log-bulk]
+        ManualBulk --> FlushActive["Flush live inputs into editedDrafts"]
+        FlushActive --> BulkEndpoint["POST /admin/ta/save-log-bulk<br/>Payload: TaLogSaveBulkReq (N entries)"]
+        BulkEndpoint --> BatchValidate{"Phase 1: Upfront Batch Validation<br/>For EVERY entry:<br/>• Resolve staff directory ID<br/>• Validate Sub-Admin district access<br/>• validate_edit_permission (Lock Check)"}
+        BatchValidate -->|ANY Entry Fails| BatchAbort["🛑 Immediate Atomic Rejection<br/>HTTP 423 / 403 / 404<br/>ZERO Rows Written"]
+        BatchValidate -->|ALL Entries Valid| BatchTrans["Phase 2: Atomic PostgreSQL Transaction<br/>with get_db_connection() as conn:<br/>  with conn:<br/>    with conn.cursor() as cur:"]
+        BatchTrans --> UpsertRosters["Bulk Upsert Roster Records & Totals"]
+        UpsertRosters --> DeleteOldLogs["Delete Existing Logs for Target Staff"]
+        DeleteOldLogs --> InsertNewLogs["execute_values Batch Insert New Daily Logs"]
+        InsertNewLogs --> CommitBatch["Commit Transaction & Return Recalculated Totals"]
+    end
+```
+
+#### 6.14.2 All-or-Nothing Transactional Protection & Upfront Validation Gate
+1. **Phase 1: Zero-Side-Effect Upfront Validation**:
+   - The endpoint iterates through every entry in the incoming batch before acquiring a write transaction.
+   - For each entry:
+     - Resolves the staff directory record; fails fast (HTTP 404) if unknown.
+     - Confirms Sub-Admin caller has RBAC permission for the entry's canonical district; fails fast (HTTP 403) if unauthorized.
+     - Invokes `validate_edit_permission(district, staff_name, month)` to verify approval and lock states. If any staff record is marked `APPROVED` (`is_locked = True`), the entire batch immediately halts with HTTP 423: `"{staff_name} is already locked. Unlock first."`
+   - **Result**: Either 100% of the entries pass validation, or 0 rows are mutated.
+2. **Phase 2: Single ACID Transaction Execution**:
+   - All database modifications execute within a single psycopg2 connection transaction:
+     ```python
+     with get_db_connection() as conn:
+         with conn:
+             with conn.cursor() as cur:
+                 for item in validated_items:
+                     # 1. Upsert travel_allowance_rosters with calculate_log_totals
+                     # 2. DELETE FROM travel_allowance_daily_logs WHERE staff_id = %s AND ...
+                     # 3. execute_values(cur, INSERT INTO travel_allowance_daily_logs ...)
+     ```
+   - If an unhandled database exception occurs midway through processing the batch, PostgreSQL rolls back the entire transaction automatically, preventing partial roster updates.
+3. **Phase 3: State Reconciliation & Cache Eviction**:
+   - Evicts district TA roster cache keys (`ta_roster_{district}_{month}`) to guarantee freshness.
+   - Returns a structured array of updated roster summaries containing newly calculated `total_km`, `gross_amount`, and `final_payable_amount` directly to the client, synchronizing local UI state with zero redundant network round-trips.
+
+#### 6.14.3 Client-Side Multi-Tab State Architecture (`useAdminTA.js` & `TravelAllowanceModal.jsx`)
+- **Top Tab Strip Selector**: Renders pills for all district staff with active status indicators (e.g. `Draft`, `Submitted`, `Approved`).
+- **In-Memory Draft Tracking (`editedDrafts`)**:
+  - Whenever a supervisor modifies odometer readings, deductions, or remarks, changes are recorded in `editedDrafts[currentKey]`.
+  - Switching between tabs does not lose in-progress edits for un-saved tabs.
+- **Dynamic Dirty Badge Counter**:
+  - The `"💾 Save All Staff (N)"` button calculates `Object.keys(editedDrafts).length` dynamically.
+  - The button is disabled (`opacity-50 cursor-not-allowed`) when no tabs have dirty edits ($N = 0$), preventing accidental empty submissions.
+- **Three-Tier Auto-Save vs. Manual Bulk Flush**:
+  - **Tier 1 (Silent Tab Switch)**: Switching from Staff A to Staff B dispatches `saveCurrentDrilldown()` for Staff A silently.
+  - **Tier 2 (Exit Auto-Save)**: Closing the modal or clicking "Back to Roster" automatically flushes the open tab draft.
+  - **Tier 3 (Periodic Debounce)**: An in-flight 45-second timer automatically saves active typing in the background.
+  - **Manual Bulk Flush**: Clicking "Save All Staff" commits all draft tabs across the district simultaneously via `handleSaveLogBulk`.
 
 ---
 

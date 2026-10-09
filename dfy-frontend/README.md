@@ -1,6 +1,6 @@
 # 📱 Doctors For You (DFY) - React 19 Field PWA & Analytics Dashboard
 
-[![Version](https://img.shields.io/badge/Version-v2.8.3-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.1-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![React](https://img.shields.io/badge/React-19.2-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -54,7 +54,7 @@ flowchart TD
 
 ### 6. 📜 In-App Release History & Changelog Modal (`changelogData.js`)
 - Client-side in-app changelog modal with zero database query overhead.
-- Automatically notifies users of new updates with version badges and highlights (v2.8.3).
+- Automatically notifies users of new updates with version badges and highlights (v2.9.1).
 
 ### 7. 📊 Dual-Sheet Staff Attendance Export & Multi-District Queue
 - Download high-density Excel workbooks (`/admin/export-staff-attendance`) featuring Sheet 1 (Monthly Attendance Matrix with Next-Day notes) and Sheet 2 (Detailed Activity Log).
@@ -71,6 +71,12 @@ flowchart TD
 ### 10. 🧩 100% Native Bento Visual Flowcharts in FO Guide & Centralized Admin SOP
 - Replaces legacy text blocks with modern, responsive Bento Flowcharts with sequence badges (`1➔2➔3`), SVG flow connectors, and tactical callouts.
 - FO Guide enforces strict 7:00 PM reporting deadline with zero leakage of the administrative 10:00 AM cutoff.
+
+### 11. 🏍️ Relational Travel Allowance Multi-Staff Drilldown & Bulk-Save Engine
+- Top tab strip for seamless switching between district staff without losing context.
+- 3-tier automatic silent saves: tab switch, drilldown modal close/back, and 45s periodic debounce.
+- 1-click "Save All Staff (N)" bulk-save flushing all dirty tabs in a single all-or-nothing transaction.
+- Dedicated statewide executive dashboard with bento KPI cards and district status matrix.
 
 ---
 

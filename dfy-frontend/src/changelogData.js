@@ -1,16 +1,54 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.0";
-export const LAST_UPDATED_DATE = "07 Oct 2026";
+export const APP_VERSION = "2.9.1";
+export const LAST_UPDATED_DATE = "09 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.1",
+    date: "09 Oct 2026",
+    title: "Travel Allowance Multi-Tab Bulk-Save Engine, All-or-Nothing ACID Transactions & Staff Soft-Delete Lifecycle Hardening",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "💾 Travel Allowance 'Save All Staff' Bulk-Save Engine (Backlog #79): Deployed atomic bulk-save endpoint (POST /admin/ta/save-log-bulk) and 'Save All Staff (N)' button in the multi-tab drilldown modal, allowing coordinators to edit multiple staff tabs and persist all changes across the district in a single operation.",
+      "🛡️ All-or-Nothing ACID Transactional Semantics: Validates permissions, district scope, and lock status for all staff entries upfront before committing any writes. If any entry is locked (HTTP 423) or invalid, the entire batch is rejected with zero database mutations, rolled back atomically via PostgreSQL connection context.",
+      "⚡ Multi-Tab Dirty-State Tracking & Silent Auto-Saves (Backlog #74c & #79): Introduced unified staff tab strip with unpersisted draft tracking (editedDrafts). Retains seamless background auto-saving on tab switches, drilldown modal close/back navigation, and periodic 45-second debounce.",
+      "👥 Staff Deactivate Multi-Click Race Fix (Backlog #78 - Bug A): Resolved race condition where redundant post-mutation refetches raced with server cache invalidation and clobbered optimistic local state back to stale values. Made optimistic state authoritative on success with explicit error toast feedback on failures.",
+      "🧹 Soft-Delete Directory & Picker Leakage Elimination (Backlog #78 - Bug B): Enforced deleted_at IS NULL filtering across staff directory, staff lists, target selectors, and master ledger queries, permanently preventing soft-deleted staff from leaking into active assignment grids and pickers.",
+      "⚖️ Payroll & Financial Audit Integrity Exception: Soft-deleted staff are dynamically retained in the current month's TA roster if and only if they have recorded odometer readings or financial activity (total_km > 0 or non-zero amounts), guaranteeing complete reimbursement auditability while excluding zero-activity accounts.",
+      "🔒 Substring Match Identity Collision Elimination (Backlog #76): Removed ILIKE substring matching across 6 authentication, lookup, and target locations to resolve identity collision vulnerabilities with Roman numeral suffixes and common names."
+    ],
+    details: [
+      {
+        tag: "Travel Allowance Bulk Engine",
+        color: "indigo",
+        text: "Atomic all-or-nothing multi-tab bulk persistence with upfront batch validation and single PostgreSQL transaction rollback."
+      },
+      {
+        tag: "Staff Lifecycle & Soft-Delete",
+        color: "teal",
+        text: "Strict deleted_at IS NULL isolation across directories and targets with authoritative optimistic UI state."
+      },
+      {
+        tag: "Payroll Audit Integrity",
+        color: "emerald",
+        text: "Conditional TA roster retention guarantees historical travel expense reconciliation for departed personnel."
+      },
+      {
+        tag: "Security Hardening",
+        color: "amber",
+        text: "Exact-match identity resolution eliminates substring collision vulnerabilities across authentication gates."
+      }
+    ]
+  },
   {
     version: "v2.9.0",
     date: "07 Oct 2026",
     title: "Relational Travel Allowance & Bike Log Engine (PostgreSQL), Super Admin Dynamic Rate Management, Multi-Sheet Excel Studio & Attendance Radar Normalization",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "🏍️ Relational Travel Allowance (TA) Engine: Deployed an enterprise-grade, PostgreSQL-backed Travel Allowance subsystem with 4 relational tables (travel_allowance_settings, travel_allowance_rosters, travel_allowance_daily_logs, and travel_allowance_permissions) ensuring zero data loss and strict ACID compliance.",
       "⚙️ Dynamic Rate Management (₹4.00/KM Default): Super Admins and Main Incharges can configure and update the statewide reimbursement rate dynamically via a dedicated admin modal control, automatically invalidating caches and applying to subsequent roster calculations.",
