@@ -234,7 +234,6 @@ async def verify_pin(data: PinCheck):
                     WHERE (LOWER(TRIM(district)) = ANY(%s) OR district_id::text = ANY(%s))
                       AND (
                           LOWER(TRIM(name)) = LOWER(TRIM(%s))
-                          OR LOWER(TRIM(name)) ILIKE LOWER(TRIM(%s))
                           OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = %s
                           OR slug = ANY(%s)
                       )
@@ -242,7 +241,7 @@ async def verify_pin(data: PinCheck):
                     ORDER BY is_active DESC, id ASC
                     LIMIT 1
                     """,
-                    [district_variants, district_variants, fo_trimmed, f"%{fo_trimmed}%", clean_fo_alpha, slug_variants],
+                    [district_variants, district_variants, fo_trimmed, clean_fo_alpha, slug_variants],
                     fetch=True
                 )
                 if staff_rows and len(staff_rows) > 0:
