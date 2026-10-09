@@ -119,12 +119,11 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                     SELECT id, name, district, pin FROM staff_directory 
                     WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
                       AND (LOWER(TRIM(name)) = LOWER(TRIM(%s)) 
-                           OR LOWER(TRIM(name)) ILIKE LOWER(TRIM(%s))
                            OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
                       AND deleted_at IS NULL
                     LIMIT 1
                     """,
-                    [c_wp, req.working_place, req.fo_name, f"%{req.fo_name.strip()}%", req.fo_name],
+                    [c_wp, req.working_place, req.fo_name, req.fo_name],
                     fetch=True
                 )
                 if staff_row and isinstance(staff_row, list) and len(staff_row) > 0:
@@ -268,8 +267,8 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
             tier1_params = [
                 clean_date, f"{clean_date}%", f"{raw_date_clean}%", clean_date, raw_date_clean,
                 district_variants,
-                clean_wp, f"%{clean_wp}%", req.working_place.strip(), f"%{req.working_place.strip()}%",
-                fo_trimmed, f"%{fo_trimmed}%", clean_fo_alpha, fo_trimmed
+                clean_wp, req.working_place.strip(),
+                fo_trimmed, clean_fo_alpha, fo_trimmed
             ]
             rows = pg_execute_raw(
                 """
@@ -278,13 +277,10 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                   AND (
                       LOWER(TRIM(working_place)) = ANY(%s)
                       OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) 
-                      OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s))
                       OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) 
-                      OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s))
                   )
                   AND (
                       LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
-                      OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
                       OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = %s
                       OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
                   )
@@ -339,14 +335,13 @@ async def edit_patient_id(req: EditIdRequest, admin: Optional[dict] = Depends(ge
                     WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
                       AND (
                           LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
-                          OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
                           OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = %s
                           OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g')
                       )
                     ORDER BY id DESC
                     LIMIT 1
                     """,
-                    [clean_date, f"{clean_date}%", f"{raw_date_clean}%", clean_date, fo_trimmed, f"%{fo_trimmed}%", clean_fo_alpha, fo_trimmed],
+                    [clean_date, f"{clean_date}%", f"{raw_date_clean}%", clean_date, fo_trimmed, clean_fo_alpha, fo_trimmed],
                     fetch=True
                 )
                 if rows and isinstance(rows, list) and len(rows) > 0:
@@ -925,11 +920,11 @@ async def admin_feed_officer_data(
                 """
                 SELECT * FROM daily_field_reports 
                 WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
-                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                  AND LOWER(TRIM(working_place)) = LOWER(TRIM(%s))
                   AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
                 ORDER BY id DESC LIMIT 1
                 """,
-                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%", clean_fo, clean_fo],
+                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, clean_fo, clean_fo],
                 fetch=True
             ) or []
             if not pg_rows:
@@ -938,10 +933,10 @@ async def admin_feed_officer_data(
                     SELECT * FROM daily_field_reports 
                     WHERE legacy_doc_id = ANY(%s)
                       AND (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
-                      AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                      AND LOWER(TRIM(working_place)) = LOWER(TRIM(%s))
                     ORDER BY id DESC LIMIT 1
                     """,
-                    [candidate_doc_ids, clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%"],
+                    [candidate_doc_ids, clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp],
                     fetch=True
                 ) or []
             if pg_rows:
@@ -1791,11 +1786,11 @@ async def admin_edit_day_report(
                 """
                 SELECT * FROM daily_field_reports 
                 WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s OR date_of_reporting::text = %s)
-                  AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) ILIKE LOWER(TRIM(%s)))
+                  AND LOWER(TRIM(working_place)) = LOWER(TRIM(%s))
                   AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
                 ORDER BY id DESC
                 """,
-                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, f"%{clean_wp}%", clean_fo, clean_fo],
+                [clean_date_iso, f"{clean_date_iso}%", clean_date, clean_wp, clean_fo, clean_fo],
                 fetch=True
             ) or []
             for r in pg_rows:

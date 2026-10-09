@@ -710,11 +710,10 @@ async def submit_daily_report(report: DailyActivityReport):
                     WHERE (date_of_reporting = %s::date OR date_of_reporting::text LIKE %s)
                       AND (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)))
                       AND (LOWER(TRIM(fo_name)) = LOWER(TRIM(%s)) 
-                           OR LOWER(TRIM(fo_name)) ILIKE LOWER(TRIM(%s))
                            OR REGEXP_REPLACE(LOWER(fo_name), '[^a-z0-9]', '', 'g') = REGEXP_REPLACE(LOWER(%s), '[^a-z0-9]', '', 'g'))
                     ORDER BY id DESC LIMIT 1
                     """,
-                    [clean_date, f"{clean_date}%", c_wp, str(report.working_place).strip(), fo_trimmed, f"%{fo_trimmed}%", fo_trimmed],
+                    [clean_date, f"{clean_date}%", c_wp, str(report.working_place).strip(), fo_trimmed, fo_trimmed],
                     fetch=True
                 )
                 if alt_rows:
