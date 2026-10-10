@@ -75,7 +75,8 @@ export const isOfficerNameMatch = (nameA, nameB, dist = '') => {
 };
 
 export const parseTargetVal = (tObj, fallback = 50) => {
-  if (!tObj || tObj.target === undefined || tObj.target === null || tObj.target === '') return fallback;
+  if (!tObj || tObj.target === undefined || tObj.target === null) return fallback;
+  if (tObj.target === '') return '';
   const num = Number(tObj.target);
   return isNaN(num) ? fallback : num;
 };
