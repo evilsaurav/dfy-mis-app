@@ -1167,8 +1167,8 @@ async def get_district_ta_roster(
             log_name = clean_alphanumeric(sl.get("staff_name") or "")
 
             is_match = (
-                (s_id_clean and (s_id_clean == log_id_clean or s_id_clean == log_key or s_id_clean in log_id_clean)) or
-                (s_name_clean and (s_name_clean == log_name or s_name_clean == log_key or s_name_clean in log_key)) or
+                (s_id_clean and (s_id_clean == log_id_clean or s_id_clean == log_key)) or
+                (s_name_clean and (s_name_clean == log_name or s_name_clean == log_key)) or
                 (sl.get("staff_name") and is_officer_name_match(s["name"], sl.get("staff_name"), canon_dist))
             )
             if is_match:
