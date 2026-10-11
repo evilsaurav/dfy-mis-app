@@ -5014,6 +5014,36 @@ const FdcBucket = ({ title, ids, fdcDetails = [], onAddFdc, onUpdateFdc, onRemov
   );
 };
 
+export const getTodayIstDateString = () => {
+  try {
+    return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  } catch (e) {
+    const d = new Date();
+    const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
+    const ist = new Date(utc + (3600000 * 5.5));
+    return ist.toISOString().split('T')[0];
+  }
+};
+
+export const hasMeaningfulFormData = (data) => {
+  if (!data || typeof data !== 'object') return false;
+  const arrayKeys = [
+    'notification_ids', 'hiv_dm_ids', 'dbt_ids', 'sample_collection_ids', 'sample_tested_ids',
+    'outcome_assigned_ids', 'home_visit_ids', 'contact_tracing_ids', 'follow_up_ids',
+    'face_to_face_ids', 'presumptive_ids', 'documents_ids', 'fdc_provided_ids',
+    'kit_consumption_ids', 'differentiated_tb_ids', 'tpt_treatment_start_ids',
+    'tpt_presumptive_ids', 'adhar_face_authentication_ids', 'consent_with_id_ids',
+    'culture_dst_ids', 'fdc_details'
+  ];
+  for (const k of arrayKeys) {
+    if (Array.isArray(data[k]) && data[k].length > 0) return true;
+  }
+  if (Array.isArray(data.visited_names) && data.visited_names.length > 0) return true;
+  if (data.morning_km !== null && data.morning_km !== undefined && String(data.morning_km).trim() !== '') return true;
+  if (data.evening_km !== null && data.evening_km !== undefined && String(data.evening_km).trim() !== '') return true;
+  if (data.remark !== null && data.remark !== undefined && String(data.remark).trim() !== '') return true;
+  return false;
+};
 
 const sanitizeIncomingFormData = (d, base) => {
   const arrayKeys = [
@@ -5025,12 +5055,19 @@ const sanitizeIncomingFormData = (d, base) => {
     'culture_dst_ids', 'fdc_details'
   ];
   const clean = { ...base };
+  const hasMeaningful = hasMeaningfulFormData(d);
   if (d && typeof d === 'object') {
     Object.keys(d).forEach(k => {
       if (arrayKeys.includes(k)) {
         clean[k] = Array.isArray(d[k]) ? d[k] : [];
       } else if (k === 'visited_names') {
         clean[k] = Array.isArray(d[k]) ? d[k] : [];
+      } else if (k === 'date_of_reporting') {
+        if (hasMeaningful && d.date_of_reporting) {
+          clean.date_of_reporting = d.date_of_reporting;
+        } else {
+          clean.date_of_reporting = getTodayIstDateString();
+        }
       } else if (d[k] !== null && d[k] !== undefined) {
         clean[k] = d[k];
       }
@@ -5040,6 +5077,9 @@ const sanitizeIncomingFormData = (d, base) => {
     if (!Array.isArray(clean[k])) clean[k] = [];
   });
   if (!Array.isArray(clean.visited_names)) clean.visited_names = [];
+  if (!clean.date_of_reporting) {
+    clean.date_of_reporting = getTodayIstDateString();
+  }
   return clean;
 };
 
@@ -5703,7 +5743,7 @@ function App() {
   // Persistent Session Auto-Restore on Page Refresh & Morning Offline Auto-Rollover
   useEffect(() => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayIstDateString();
       const savedSession = localStorage.getItem('dfy_user_session');
       if (savedSession) {
         const session = JSON.parse(savedSession);
@@ -5867,6 +5907,37 @@ function App() {
     };
   }, []);
 
+  // Safeguard: Ensure date_of_reporting matches today's IST date when app mounts or gains visibility (if untouched)
+  useEffect(() => {
+    const syncTodayDateIfPristine = () => {
+      const todayIst = getTodayIstDateString();
+      setFormData(prev => {
+        if (prev.date_of_reporting !== todayIst && !hasMeaningfulFormData(prev)) {
+          return { ...prev, date_of_reporting: todayIst };
+        }
+        return prev;
+      });
+    };
+
+    // Run on initial mount
+    syncTodayDateIfPristine();
+
+    // Listen for tab focus / visibilitychange (e.g. mobile browser kept in background overnight)
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        syncTodayDateIfPristine();
+      }
+    };
+
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', syncTodayDateIfPristine);
+
+    return () => {
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', syncTodayDateIfPristine);
+    };
+  }, []);
+
   // Auto-save draft whenever form data changes while logged in
   useEffect(() => {
     if (isLoggedIn && formData.fo_name && formData.working_place) {
@@ -6024,7 +6095,7 @@ function App() {
   const handleLogin = async () => {
     if (pinStatus === 'success') {
       setIsSubmitting(true);
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayIstDateString();
       try {
         // Always ensure credentials saved to local offline PIN vault
         await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
@@ -6568,6 +6639,7 @@ function App() {
         // Reset form inputs to blank for fresh additions
         setFormData(prev => ({
           ...prev,
+          date_of_reporting: getTodayIstDateString(),
           notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
           sample_collection_ids: [], sample_tested_ids: [], 
           outcome_assigned_ids: [], home_visit_ids: [], 
@@ -6626,6 +6698,7 @@ function App() {
         // Reset form inputs to blank for fresh additions
         setFormData(prev => ({
           ...prev,
+          date_of_reporting: getTodayIstDateString(),
           notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
           sample_collection_ids: [], sample_tested_ids: [], 
           outcome_assigned_ids: [], home_visit_ids: [], 

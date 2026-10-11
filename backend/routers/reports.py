@@ -304,7 +304,7 @@ async def resolve_effective_reporting_date(
     if now_ist.hour < cutoff_hour:
         return yesterday_str
 
-    return requested_date or today_str
+    return today_str
 
 class CheckStatusRequest(BaseModel):
     working_place: str
