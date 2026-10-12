@@ -117,6 +117,7 @@ export default function AdminDashboard() {
   const [lastSyncedTime, setLastSyncedTime] = useState('');
   const [syncStatus, setSyncStatus] = useState('LIVE');
   const lastFocusSyncRef = useRef(Date.now());
+  const isRefreshingProfileRef = useRef(false);
 
   // 9. Toast Notification State
   const [toast, setToast] = useState(null);
@@ -368,6 +369,34 @@ export default function AdminDashboard() {
   });
 
   // --- Core Data Fetchers & Handlers ---
+  const refreshCurrentUserProfile = useCallback(async () => {
+    if (isRefreshingProfileRef.current) return;
+    isRefreshingProfileRef.current = true;
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const res = await authFetch(`${API_BASE_URL}/admin/auth/me`);
+      if (res && res.ok) {
+        const data = await res.json();
+        if (data && data.success && data.user) {
+          setCurrentUser(data.user);
+          try {
+            localStorage.setItem('dfy_admin_user', JSON.stringify(data.user));
+          } catch (storageErr) {
+            console.warn("Failed to persist refreshed user to localStorage:", storageErr);
+          }
+        }
+      }
+    } catch (err) {
+      if (err && err.message && err.message.includes("Session expired")) {
+        // authFetch interceptor already handled logout and state cleanup. Let it propagate.
+        throw err;
+      }
+      console.warn("Failed to refresh current user profile:", err);
+    } finally {
+      isRefreshingProfileRef.current = false;
+    }
+  }, [authFetch]);
+
   const fetchDirectory = async () => {
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
@@ -744,6 +773,14 @@ export default function AdminDashboard() {
 
   // Trigger useEffects (Strict TDZ Order)
   useEffect(() => {
+    if (isAuthenticated) {
+      refreshCurrentUserProfile().catch((err) => {
+        console.warn("Profile refresh check on auth:", err?.message || err);
+      });
+    }
+  }, [isAuthenticated, refreshCurrentUserProfile]);
+
+  useEffect(() => {
     if (isAuthenticated) { 
       fetchData(false); 
       fetchAttendance(); 
@@ -784,6 +821,9 @@ export default function AdminDashboard() {
       if (now - lastFocusSyncRef.current > 30000) {
         lastFocusSyncRef.current = now;
         fetchData(false, true);
+        refreshCurrentUserProfile().catch((err) => {
+          console.warn("Profile refresh check on focus:", err?.message || err);
+        });
       }
     };
     window.addEventListener('focus', handleFocus);
@@ -792,7 +832,7 @@ export default function AdminDashboard() {
       clearInterval(intervalId);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [isAuthenticated, month]);
+  }, [isAuthenticated, month, refreshCurrentUserProfile]);
 
   // Render Login View if not Authenticated
   if (!isAuthenticated) {

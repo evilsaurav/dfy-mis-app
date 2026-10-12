@@ -149,6 +149,28 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/admin/auth/me")
+async def get_current_admin_profile(current_user: dict = Depends(get_current_admin)):
+    """
+    Returns fresh profile data and permissions from PostgreSQL for the currently
+    authenticated admin, resolving stale frontend state without re-login.
+    """
+    try:
+        clean_user = (current_user.get("username") or current_user.get("sub") or "").strip().lower()
+        if not clean_user:
+            raise HTTPException(status_code=401, detail="Authentication token invalid. Username missing.")
+
+        user_data = await asyncio.to_thread(lambda: fetch_admin_user(clean_user))
+        if not user_data or user_data.get("status") != "ACTIVE":
+            raise HTTPException(status_code=401, detail="Account not found or disabled. Please log in again.")
+
+        safe_user = {k: v for k, v in user_data.items() if k != "password"}
+        return {"success": True, "user": safe_user}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/admin/users/list")
 async def list_admin_users(admin: dict = Depends(require_super_admin)):
     try:
