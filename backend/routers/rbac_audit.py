@@ -138,8 +138,8 @@ async def admin_user_login(req: AdminUserLoginReq, request: Request):
         # Update last login timestamp and hashed password in Supabase / PostgreSQL
         await asyncio.to_thread(lambda: update_admin_user_login_info(clean_user, now_str, new_hash))
         
-        # Don't return password in payload
-        safe_user = {k: v for k, v in user_data.items() if k != "password"}
+        # Don't return password or password_hash in payload
+        safe_user = {k: v for k, v in user_data.items() if k not in ("password", "password_hash")}
         token = create_access_token(safe_user)
         await log_admin_activity("LOGIN_SUCCESS", f"User {user_data.get('name')} logged in successfully from {client_device}", user_name=user_data.get("name"), user_id=clean_user, role=user_data.get("role", "SUB_ADMIN"), ip_address=client_ip, diff=client_diff, location=client_location)
         
@@ -164,7 +164,7 @@ async def get_current_admin_profile(current_user: dict = Depends(get_current_adm
         if not user_data or user_data.get("status") != "ACTIVE":
             raise HTTPException(status_code=401, detail="Account not found or disabled. Please log in again.")
 
-        safe_user = {k: v for k, v in user_data.items() if k != "password"}
+        safe_user = {k: v for k, v in user_data.items() if k not in ("password", "password_hash")}
         return {"success": True, "user": safe_user}
     except HTTPException:
         raise
@@ -177,7 +177,7 @@ async def list_admin_users(admin: dict = Depends(require_super_admin)):
         users_raw = await asyncio.to_thread(fetch_all_admin_users)
         users = []
         for d in users_raw:
-            safe_d = {k: v for k, v in d.items() if k != "password"}
+            safe_d = {k: v for k, v in d.items() if k not in ("password", "password_hash")}
             users.append(safe_d)
             
         users.sort(key=lambda x: (x.get("role") != "SUPER_ADMIN", x.get("name", "")))

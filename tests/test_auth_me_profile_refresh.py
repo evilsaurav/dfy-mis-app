@@ -42,6 +42,7 @@ def test_auth_me_reflects_post_token_permission_change():
         "allowed_districts": ["Patna", "Gaya"],
         "status": "ACTIVE",
         "password": "hashed_secret_password",
+        "password_hash": "$2b$12$sample_hash_value",
         "can_prefill": True,
         "can_manage_staff": True,
         "can_edit_targets": False,
@@ -59,8 +60,9 @@ def test_auth_me_reflects_post_token_permission_change():
     # Verified: Permission is freshly reflected
     assert data["user"]["can_prefill"] is True
     assert data["user"]["can_manage_staff"] is True
-    # Verified: Password must be stripped
+    # Verified: Both password and password_hash must be stripped
     assert "password" not in data["user"]
+    assert "password_hash" not in data["user"]
     assert data["user"]["username"] == "test_ritik"
 
 
