@@ -198,12 +198,14 @@ def _normalize_admin_user_row(row: dict) -> dict:
                 names = []
         d["allowed_districts"] = [n for n in (names or []) if n]
 
+    d["can_prefill"] = bool(d.get("can_prefill"))
     d["permissions"] = {
         "can_view_dashboard": True,
         "can_edit_targets": bool(d.get("can_edit_targets")),
         "can_manage_staff": bool(d.get("can_manage_staff")),
         "can_edit_patient_ids": bool(d.get("can_edit_patient_ids")),
         "can_export_reports": bool(d.get("can_export_reports")),
+        "can_prefill": bool(d.get("can_prefill")),
         "can_view_audit_logs": d.get("role") == "SUPER_ADMIN"
     }
 
@@ -220,12 +222,14 @@ def get_default_super_admin() -> dict:
         "password": hash_password("dfyadmin2026"),
         "role": "SUPER_ADMIN",
         "allowed_districts": ["All"],
+        "can_prefill": True,
         "permissions": {
             "can_view_dashboard": True,
             "can_edit_targets": True,
             "can_manage_staff": True,
             "can_edit_patient_ids": True,
             "can_export_reports": True,
+            "can_prefill": True,
             "can_view_audit_logs": True
         },
         "status": "ACTIVE",
@@ -243,11 +247,13 @@ def fetch_admin_user(clean_user: str) -> Optional[Dict[str, Any]]:
                COALESCE(bool_or(p.can_export_reports), false) AS can_export_reports,
                COALESCE(bool_or(p.can_edit_patient_ids), false) AS can_edit_patient_ids,
                COALESCE(bool_or(p.can_edit_targets), false) AS can_edit_targets,
-               COALESCE(bool_or(p.can_manage_staff), false) AS can_manage_staff
+               COALESCE(bool_or(p.can_manage_staff), false) AS can_manage_staff,
+               COALESCE(bool_or(ta.can_prefill), false) AS can_prefill
         FROM admin_users u
         LEFT JOIN admin_district_access ada ON ada.admin_id = u.id
         LEFT JOIN districts d ON d.id = ada.district_id
         LEFT JOIN admin_permissions p ON p.admin_id = u.id
+        LEFT JOIN travel_allowance_permissions ta ON ta.admin_id = u.id
         WHERE LOWER(u.username) = %s OR LOWER(u.user_id) = %s
         GROUP BY u.id
         LIMIT 1

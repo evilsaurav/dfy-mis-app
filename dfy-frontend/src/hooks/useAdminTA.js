@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 
 /**
  * useAdminTA — Hook for Travel Allowance state, approvals, prefill permission gate & API calls.
@@ -29,7 +29,9 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
   const [prefillAccessList, setPrefillAccessList] = useState([]);
   const [loadingAccessList, setLoadingAccessList] = useState(false);
   const [showPrefillManageModal, setShowPrefillManageModal] = useState(false);
-  const [canPrefill, setCanPrefill] = useState(currentUser?.role === 'SUPER_ADMIN');
+  const [canPrefill, setCanPrefill] = useState(
+    currentUser?.role === 'SUPER_ADMIN' || Boolean(currentUser?.can_prefill || currentUser?.permissions?.can_prefill)
+  );
 
   // Statewide TA Executive Summary states
   const [statewideSummary, setStatewideSummary] = useState(null);
@@ -41,6 +43,13 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
   const isSubAdmin = currentUser?.role === 'SUB_ADMIN' || isSuperAdmin;
   const isIncharge = currentUser?.role === 'MAIN_INCHARGE' || isSuperAdmin;
   const canEdit = isSubAdmin && !selectedOfficer?.is_locked && selectedOfficer?.status !== 'SUBMITTED' && selectedOfficer?.status !== 'APPROVED';
+
+  // Sync canPrefill whenever currentUser profile updates
+  useEffect(() => {
+    setCanPrefill(
+      currentUser?.role === 'SUPER_ADMIN' || Boolean(currentUser?.can_prefill || currentUser?.permissions?.can_prefill)
+    );
+  }, [currentUser]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
 
