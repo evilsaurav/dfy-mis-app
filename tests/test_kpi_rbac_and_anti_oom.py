@@ -150,7 +150,18 @@ def test_download_all_kpi_workbooks_super_admin_tempfile_stream():
 def test_generate_district_kpi_bytes_try_finally_cleanup():
     """Verify that generate_district_kpi_bytes invokes gc.collect even if an exception occurs."""
     district = "Khagaria"
-    with patch.object(main.db, "collection", side_effect=RuntimeError("Firestore down")), \
+    def mock_pg(sql, params=None, fetch=False):
+        sql_str = str(sql).lower()
+        if "staff_directory" in sql_str:
+            return [{"id": 1, "name": "Rambilash Paswan"}]
+        if "kpi_skeleton_cache" in sql_str:
+            if "select" in sql_str:
+                return []
+            return None
+        return []
+
+    with patch("backend.routers.kpi.pg_execute_raw", side_effect=mock_pg), \
+         patch.object(main.db, "collection", side_effect=RuntimeError("Firestore down")), \
          patch("gc.collect") as mock_gc:
         try:
             main.generate_district_kpi_bytes(district, "2026-09")

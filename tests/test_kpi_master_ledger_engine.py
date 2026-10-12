@@ -31,6 +31,24 @@ def clean_cache_and_watchdog():
     if hasattr(main, "ACTIVE_MONTHLY_CACHE_KEYS"):
         main.ACTIVE_MONTHLY_CACHE_KEYS.clear()
 
+@pytest.fixture(autouse=True)
+def mock_kpi_db():
+    def mock_pg(sql, params=None, fetch=False):
+        sql_str = str(sql).lower()
+        if "staff_directory" in sql_str:
+            dist_str = str(params).lower() if params else ""
+            if "begusarai" in dist_str:
+                return [{"id": 10, "name": "Sample Officer"}]
+            return [{"id": 1, "name": "Rambilash Paswan"}]
+        if "kpi_skeleton_cache" in sql_str:
+            if "select" in sql_str:
+                return []
+            return None
+        return []
+
+    with patch("backend.routers.kpi.pg_execute_raw", side_effect=mock_pg):
+        yield
+
 def make_admin_token(role: str = "SUPER_ADMIN", allowed_districts=None, username="super_admin", user_id="admin_123"):
     return create_access_token({
         "user_id": user_id,

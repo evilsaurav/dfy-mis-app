@@ -47,6 +47,35 @@ def test_excel_kpi_categories_definition():
         assert col_idx == 3 + idx
 
 
+@pytest.fixture(autouse=True)
+def mock_kpi_db():
+    def mock_pg(sql, params=None, fetch=False):
+        sql_str = str(sql).lower()
+        if "staff_directory" in sql_str:
+            return [
+                {"id": 1, "name": "Rambilash Paswan"},
+                {"id": 2, "name": "Ghanshyam kumar"},
+                {"id": 3, "name": "Rajnish Kumar"}
+            ]
+        if "kpi_skeleton_cache" in sql_str:
+            if "select" in sql_str:
+                return []
+            return None
+        if "daily_field_reports" in sql_str:
+            try:
+                coll = main.db.collection("daily_field_reports")
+                docs = [d.to_dict() if hasattr(d, "to_dict") else dict(d) for d in coll.stream()]
+                if docs:
+                    return docs
+            except Exception:
+                pass
+            return []
+        return []
+
+    with patch("backend.routers.kpi.pg_execute_raw", side_effect=mock_pg):
+        yield
+
+
 class MockDocSnap:
     def __init__(self, doc_id: str, data: dict):
         self.id = doc_id

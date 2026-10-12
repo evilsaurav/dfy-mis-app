@@ -164,42 +164,8 @@ async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_
 
 
 
-# 17 Standard KPI Categories Definition (Exact Master Blueprint)
-EXCEL_KPI_CATEGORIES = [
-    ("NOTIFICATION", "notification_ids", 3),
-    ("HIV & DM", "hiv_dm_ids", 4),
-    ("DBT", "dbt_ids", 5),
-    ("SAMPLE COLLECTION", "sample_collection_ids", 6),
-    ("SAMPLE TESTED", "sample_tested_ids", 7),
-    ("Outcome Assigned", "outcome_assigned_ids", 8),
-    ("Home Visit", "home_visit_ids", 9),
-    ("Contact Tracing", "contact_tracing_ids", 10),
-    ("Follow Up", "follow_up_ids", 11),
-    ("Face to Face", "face_to_face_ids", 12),
-    ("Presumptive", "presumptive_ids", 13),
-    ("Documents", "documents_ids", 14),
-    ("FDC Provided", "fdc_provided_ids", 15),
-    ("Kit Consumption", "kit_consumption_ids", 16),
-    ("DIFF TB", "differentiated_tb_ids", 17),
-    ("TPT START", "tpt_treatment_start_ids", 18),
-    ("TPT PRESUMTIVE", "tpt_presumptive_ids", 19)
-]
-
-def get_kpi_tab_name(day: int) -> str:
-    if day == 1:
-        return "1ST"
-    elif day == 2:
-        return "2nd"
-    elif day == 3:
-        return "3rd"
-    elif day in [21, 31]:
-        return f"{day}st"
-    elif day == 22:
-        return "22nd"
-    elif day == 23:
-        return "23rd"
-    else:
-        return f"{day}th"
+from backend.core.kpi_constants import EXCEL_KPI_CATEGORIES, get_kpi_tab_name, normalize_staff_name
+from backend.core.kpi_template_builder import compute_roster_fingerprint, build_district_skeleton_bytes
 
 def generate_district_kpi_bytes(
     district: str, 
@@ -215,30 +181,116 @@ def generate_district_kpi_bytes(
 
     if not month_prefix:
         month_prefix = datetime.now().strftime("%Y-%m")
-        
-    safe_dist = safe_filename(district)
-    template_path = f"templates/template_{safe_dist}.xlsx"
-    if not os.path.exists(template_path):
-        alt_dist = None
-        if district in ["AURANGABAD-BI", "Aurangabad"]:
-            alt_dist = "Aurangabad"
-        elif district in ["Purba Champaran", "East Champaran"]:
-            alt_dist = "East Champaran"
-        elif district in ["BHOJPUR", "Bhojpur"]:
-            alt_dist = "Bhojpur"
-        if alt_dist:
-            alt_path = f"templates/template_{safe_filename(alt_dist)}.xlsx"
-            if os.path.exists(alt_path):
-                template_path = alt_path
 
-    if not os.path.exists(template_path):
-        return None
-        
+    c_dist = canonicalize_district(district)
+    alias_queries = [c_dist, district]
+    if "aurangabad" in c_dist.lower():
+        alias_queries.extend(["AURANGABAD-BI", "Aurangabad"])
+    elif "champaran" in c_dist.lower():
+        alias_queries.extend(["Purba Champaran", "East Champaran"])
+    elif "bhojpur" in c_dist.lower():
+        alias_queries.extend(["BHOJPUR", "Bhojpur"])
+    alias_queries = list(dict.fromkeys(alias_queries))
+    lowers = [d.lower() for d in alias_queries]
+
+    # 1. Fetch active staff ONCE from staff_directory (single source of truth)
+    staff_rows = []
+    try:
+        staff_rows = pg_execute_raw(
+            """SELECT id, name FROM staff_directory 
+               WHERE (LOWER(TRIM(district)) = ANY(%s) OR district = ANY(%s))
+                 AND is_active = true AND deleted_at IS NULL
+               ORDER BY id ASC""",
+            [lowers, alias_queries],
+            fetch=True
+        ) or []
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database query failure fetching staff roster for {district}: {str(e)}"
+        )
+
+    if not staff_rows:
+        raise HTTPException(
+            status_code=500,
+            detail=f"No active staff found in staff directory for district: {district}"
+        )
+
+    staff_ids = [int(r["id"]) for r in staff_rows]
+    staff_names = [str(r["name"]).strip() for r in staff_rows]
+
+    # 2. Compute roster_fingerprint
+    try:
+        roster_fingerprint = compute_roster_fingerprint(staff_ids)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute roster fingerprint for {district}: {str(e)}"
+        )
+
+    # 3. Resolve skeleton bytes (in-memory SimpleTTLCache -> DB table -> fresh build)
+    skeleton_cache_key = f"kpi_skeleton_{district}_{roster_fingerprint}"
+    skeleton_bytes = cache.get(skeleton_cache_key)
+
+    if skeleton_bytes is None:
+        try:
+            db_rows = pg_execute_raw(
+                "SELECT skeleton_bytes FROM kpi_skeleton_cache WHERE district = %s AND roster_fingerprint = %s LIMIT 1",
+                [district, roster_fingerprint],
+                fetch=True
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Database query failure checking kpi_skeleton_cache for {district}: {str(e)}"
+            )
+
+        if db_rows and db_rows[0].get("skeleton_bytes"):
+            raw_b = db_rows[0]["skeleton_bytes"]
+            skeleton_bytes = bytes(raw_b) if isinstance(raw_b, (bytes, memoryview)) else raw_b
+            try:
+                cache.set(skeleton_cache_key, skeleton_bytes, ttl=86400)
+            except Exception as e:
+                logger.warning(f"Notice setting in-memory cache for {skeleton_cache_key}: {e}")
+        else:
+            try:
+                skeleton_bytes = build_district_skeleton_bytes(district, staff_names)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Skeleton generation failure for {district}: {str(e)}"
+                )
+
+            try:
+                import psycopg2
+                pg_execute_raw(
+                    """INSERT INTO kpi_skeleton_cache (district, roster_fingerprint, skeleton_bytes, staff_count)
+                       VALUES (%s, %s, %s, %s)
+                       ON CONFLICT (district, roster_fingerprint) DO NOTHING""",
+                    [district, roster_fingerprint, psycopg2.Binary(skeleton_bytes), len(staff_names)]
+                )
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Database insert failure persisting to kpi_skeleton_cache for {district}: {str(e)}"
+                )
+
+            try:
+                cache.set(skeleton_cache_key, skeleton_bytes, ttl=86400)
+            except Exception as e:
+                logger.warning(f"Notice setting in-memory cache for {skeleton_cache_key}: {e}")
+
+    # 4. Load resolved skeleton bytes into workbook
     wb = None
     try:
-        # Load workbook preserving all formulas
-        wb = openpyxl.load_workbook(template_path, data_only=False)
-        sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
+        try:
+            wb = openpyxl.load_workbook(io.BytesIO(skeleton_bytes), data_only=False)
+            sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load workbook from skeleton bytes for {district}: {str(e)}"
+            )
 
         # Configure auto-recalculation
         try:
@@ -247,10 +299,26 @@ def generate_district_kpi_bytes(
         except Exception:
             pass
 
-        # 1. Fetch Targets (Prioritizing Month-Scoped Target)
-        target_map = {}
+        # 5. Build staff_name_to_idx from live staff_rows with duplicate guardrail (G2)
+        staff_name_to_idx = {}
+        norm_to_id = {}
+        for idx, staff_entry in enumerate(staff_rows):
+            s_id = staff_entry["id"]
+            s_name = staff_entry["name"]
+            norm = normalize_staff_name(s_name)
+            if norm in staff_name_to_idx:
+                prev_id = norm_to_id[norm]
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Duplicate normalized staff name '{norm}' detected in {district} roster (IDs: {prev_id}, {s_id}) -- cannot generate KPI workbook safely."
+                )
+            staff_name_to_idx[norm] = idx
+            norm_to_id[norm] = s_id
 
-        c_dist = canonicalize_district(district)
+        num_staff = len(staff_names)
+
+        # 6. Fetch Targets (Prioritizing Month-Scoped Target)
+        target_map = {}
         # Fetch Official District Target — use pre-fetched map (ZIP path) or 3-fallback Firestore reads
         dt_doc_id = f"{month_prefix}_{c_dist}".replace(" ", "").lower()
         official_target = None
@@ -313,7 +381,7 @@ def generate_district_kpi_bytes(
                 td_dist = canonicalize_district(t_data.get("district", "")).lower()
                 raw_td_dist = str(t_data.get("district", "")).strip().lower()
                 if td_dist in alias_dists or raw_td_dist in alias_dists:
-                    f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name") or t_data.get("name") or "")).strip().lower()
+                    f_name = normalize_staff_name(t_data.get("fo_name") or t_data.get("name") or "")
                     if f_name:
                         t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
                         td_month = t_data.get("month")
@@ -327,7 +395,7 @@ def generate_district_kpi_bytes(
             try:
                 t_rows = pg_query_table("staff_targets", filters={"district": district})
                 for t_data in t_rows:
-                    f_name = re.sub(r'\s+', ' ', str(t_data.get("fo_name", ""))).strip().lower()
+                    f_name = normalize_staff_name(t_data.get("fo_name", ""))
                     if f_name:
                         t_val = int(t_data.get("target", 50)) if str(t_data.get("target", "")).isdigit() else 50
                         if t_data.get("month") == month_prefix:
@@ -372,20 +440,6 @@ def generate_district_kpi_bytes(
 
 
         reports.sort(key=lambda x: str(x.get("date_of_reporting", "")))
-
-        # Map staff names to their index in this template
-        staff_name_to_idx = {}
-        ws_day1 = wb["1ST"] if "1ST" in wb.sheetnames else wb[sheet_map.get("1st")] if "1st" in sheet_map else None
-        if ws_day1:
-            s_idx = 0
-            for r in range(2, ws_day1.max_row + 1, 40):
-                val = ws_day1.cell(row=r, column=1).value
-                if val and str(val).strip():
-                    staff_name_to_idx[re.sub(r'\s+', ' ', str(val)).strip().lower()] = s_idx
-                    s_idx += 1
-
-        # Pre-calculate counts for each FO and each KPI
-        num_staff = len(staff_name_to_idx)
         num_kpis = len(EXCEL_KPI_CATEGORIES)
         staff_counts = { s_idx: { k_idx: 0 for k_idx in range(num_kpis) } for s_idx in range(num_staff) }
         left_clusters = [kpi for kpi in EXCEL_KPI_CATEGORIES if kpi[0] != "Kit Consumption"]
@@ -407,7 +461,7 @@ def generate_district_kpi_bytes(
 
             raw_tab_key = get_kpi_tab_name(day_int).lower()
             actual_tab_name = sheet_map.get(raw_tab_key)
-            fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+            fo_norm = normalize_staff_name(rep.get("fo_name", ""))
 
             if fo_norm in staff_name_to_idx:
                 s_idx = staff_name_to_idx[fo_norm]
@@ -480,7 +534,7 @@ def generate_district_kpi_bytes(
                     ws_cons.cell(row=3, column=staff_base_col + k_idx).value = staff_counts[s_idx][k_idx]
 
             for rep in reports:
-                fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+                fo_norm = normalize_staff_name(rep.get("fo_name", ""))
                 if fo_norm in staff_name_to_idx:
                     s_idx = staff_name_to_idx[fo_norm]
                     staff_base_col = 49 + (s_idx * 17)
@@ -521,7 +575,7 @@ def generate_district_kpi_bytes(
             }
 
             for rep in reports:
-                fo_norm = re.sub(r'\s+', ' ', str(rep.get("fo_name", ""))).strip().lower()
+                fo_norm = normalize_staff_name(rep.get("fo_name", ""))
                 if fo_norm in staff_name_to_idx:
                     s_idx = staff_name_to_idx[fo_norm]
                     for pid in (rep.get("hiv_dm_ids") or []):
@@ -571,7 +625,7 @@ def generate_district_kpi_bytes(
             for r_idx in range(5, 5 + num_staff):
                 cell_name = ws_perf.cell(row=r_idx, column=1).value
                 if cell_name and str(cell_name).strip() not in ["GRAND TOTAL", ""]:
-                    norm_name = re.sub(r'\s+', ' ', str(cell_name)).strip().lower()
+                    norm_name = normalize_staff_name(cell_name)
                     if norm_name in staff_name_to_idx:
                         s_idx = staff_name_to_idx[norm_name]
 

@@ -150,7 +150,18 @@ def test_kpi_excel_engine_uses_official_district_target():
     raw_reports = [{"working_place": "Jamui", "date_of_reporting": "2026-10-05", "fo_name": "Rajiv Kumar", "total_notifications": 10}]
     target_records = [{"district": "Jamui", "fo_name": "Rajiv Kumar", "target": 35}]
     
-    with patch("main.db.collection") as mock_coll:
+    def mock_pg(sql, params=None, fetch=False):
+        sql_str = str(sql).lower()
+        if "staff_directory" in sql_str:
+            return [{"id": 1, "name": "Rajiv Kumar"}]
+        if "kpi_skeleton_cache" in sql_str:
+            if "select" in sql_str:
+                return []
+            return None
+        return []
+
+    with patch("main.db.collection") as mock_coll, \
+         patch("backend.routers.kpi.pg_execute_raw", side_effect=mock_pg):
         dt_doc = MagicMock()
         dt_doc.exists = True
         dt_doc.to_dict.return_value = {"district": "Jamui", "month": "2026-10", "official_target": 100}
