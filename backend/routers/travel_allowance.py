@@ -132,6 +132,7 @@ class TaPrefillReq(BaseModel):
     district: str
     staff_name: Optional[str] = None
     staff_key: Optional[str] = None
+    current_days: Optional[List[Dict[str, Any]]] = None
 
 
 class TaStaffActionReq(BaseModel):
@@ -1285,6 +1286,34 @@ async def get_district_ta_roster(
     return result
 
 
+def is_day_manually_entered(d: Optional[Dict[str, Any]]) -> bool:
+    """
+    Determines if a daily log entry contains intentional manual data entered by an admin/sub-admin.
+    Checks explicit override flags, positive meter readings (morning, evening, total KM),
+    or non-empty custom visited locations / remarks.
+    """
+    if not d or not isinstance(d, dict):
+        return False
+    if bool(d.get("is_manual_override") or d.get("is_override")):
+        return True
+    try:
+        m = float(d.get("morning_km") or 0.0)
+        e = float(d.get("evening_km") or 0.0)
+        t = float(d.get("total_km") or 0.0)
+        man_t = float(d.get("manual_total_km") or 0.0)
+        if m > 0.0 or e > 0.0 or t > 0.0 or man_t > 0.0:
+            return True
+    except (ValueError, TypeError):
+        pass
+    v = str(d.get("visited_names") or "").strip()
+    if v and v != "0":
+        return True
+    p = str(d.get("purpose") or "").strip()
+    if p and p != "0":
+        return True
+    return False
+
+
 @router.post("/admin/ta/prefill")
 def prefill_district_ta_from_reports(
     req: TaPrefillReq,
@@ -1345,6 +1374,19 @@ def prefill_district_ta_from_reports(
                     existing_days_map[int(d_day)] = d
     except Exception as e:
         logger.warning(f"Notice querying existing TA record for prefill: {e}")
+
+    # Overlay in-memory unsaved days from frontend request if provided
+    if req.current_days:
+        for cd in req.current_days:
+            if isinstance(cd, dict):
+                try:
+                    c_day = int(cd.get("day") or 0)
+                    if c_day > 0 and is_day_manually_entered(cd):
+                        cd_copy = dict(cd)
+                        cd_copy["is_manual_override"] = True
+                        existing_days_map[c_day] = cd_copy
+                except (ValueError, TypeError):
+                    pass
 
     # Query daily_field_reports from PostgreSQL
     start_date = f"{req.month}-01"
@@ -1411,8 +1453,13 @@ def prefill_district_ta_from_reports(
         date_str = f"{year:04d}-{month_num:02d}-{day:02d}"
         ex_day = existing_days_map.get(day)
 
-        if ex_day and ex_day.get("is_manual_override"):
-            days.append(ex_day)
+        if is_day_manually_entered(ex_day):
+            # Non-destructive merge: preserve existing manual entry intact
+            preserved_day = dict(ex_day)
+            preserved_day["day"] = day
+            preserved_day["date"] = preserved_day.get("date") or date_str
+            preserved_day["is_manual_override"] = True
+            days.append(preserved_day)
         else:
             rep = reports_by_day.get(day)
             if rep:

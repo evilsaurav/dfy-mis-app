@@ -160,6 +160,7 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
         district: taDistrict,
         staff_name: targetStaffName || undefined,
         staff_key: targetStaffKey || undefined,
+        current_days: Array.isArray(drilldownLog) && drilldownLog.length > 0 ? drilldownLog : undefined,
       };
       const res = await authFetch(`${API_BASE_URL}/admin/ta/prefill`, {
         method: 'POST',
@@ -177,6 +178,14 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
         const payloadData = resData.data || resData;
         const days = Array.isArray(payloadData.days) ? payloadData.days : [];
 
+        const previousDaysMap = new Map();
+        if (Array.isArray(drilldownLog)) {
+          drilldownLog.forEach((pd) => {
+            const dayNum = pd.day;
+            if (dayNum) previousDaysMap.set(dayNum, pd);
+          });
+        }
+
         const normalizedDays = days.map((d, idx) => {
           const m = parseFloat(d.morning_km ?? d.initial_reading ?? 0) || 0;
           const e = parseFloat(d.evening_km ?? d.final_reading ?? 0) || 0;
@@ -187,8 +196,27 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
             ? String(d.manual_total_km)
             : (isMan && tKm > 0 ? String(tKm) : '');
           const hasReading = (m > 0 || e > 0 || (d.morning_km != null && String(d.morning_km) !== '' && String(d.morning_km) !== '0' && String(d.morning_km) !== '0.0'));
+
+          const dayNumber = d.day || idx + 1;
+          const prevDay = previousDaysMap.get(dayNumber);
+          const prevHasManual = prevDay && (
+            prevDay.is_manual_override ||
+            parseFloat(prevDay.total_km || 0) > 0 ||
+            parseFloat(prevDay.manual_total_km || 0) > 0 ||
+            parseFloat(prevDay.morning_km || 0) > 0 ||
+            parseFloat(prevDay.evening_km || 0) > 0 ||
+            (prevDay.visited_names && String(prevDay.visited_names).trim() !== '')
+          );
+
+          if (!isMan && !hasReading && prevHasManual) {
+            return {
+              ...prevDay,
+              is_manual_override: true,
+            };
+          }
+
           return {
-            day: d.day || idx + 1,
+            day: dayNumber,
             date: d.date || '',
             morning_km: hasReading ? (d.morning_km ?? m) : '',
             evening_km: hasReading ? (d.evening_km ?? e) : '',
