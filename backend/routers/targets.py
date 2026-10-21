@@ -39,6 +39,10 @@ def ensure_district_targets_table_exists():
                 updated_at TIMESTAMPTZ DEFAULT NOW(), 
                 updated_by TEXT
             );
+
+            grant select on public.district_targets to anon;
+            grant select, insert, update, delete on public.district_targets to authenticated;
+            grant select, insert, update, delete on public.district_targets to service_role;
             CREATE INDEX IF NOT EXISTS idx_district_targets_dist_month ON district_targets(district, month);
         """)
     except Exception as e:

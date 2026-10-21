@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS travel_allowance_settings (
     updated_by TEXT
 );
 
+grant select on public.travel_allowance_settings to anon;
+grant select, insert, update, delete on public.travel_allowance_settings to authenticated;
+grant select, insert, update, delete on public.travel_allowance_settings to service_role;
+
 -- Seed default global rate if not exists
 INSERT INTO travel_allowance_settings (id, rate_per_km, updated_at, updated_by)
 VALUES ('global', 4.00, NOW(), 'system_init')
@@ -69,6 +73,10 @@ CREATE TABLE IF NOT EXISTS travel_allowance_rosters (
     CONSTRAINT uq_ta_roster_staff_month UNIQUE (staff_id, month)
 );
 
+grant select on public.travel_allowance_rosters to anon;
+grant select, insert, update, delete on public.travel_allowance_rosters to authenticated;
+grant select, insert, update, delete on public.travel_allowance_rosters to service_role;
+
 CREATE INDEX IF NOT EXISTS idx_ta_rosters_month_dist ON travel_allowance_rosters(month, district);
 CREATE INDEX IF NOT EXISTS idx_ta_rosters_staff_month ON travel_allowance_rosters(staff_id, month);
 CREATE INDEX IF NOT EXISTS idx_ta_rosters_status ON travel_allowance_rosters(status);
@@ -92,6 +100,10 @@ CREATE TABLE IF NOT EXISTS travel_allowance_daily_logs (
     CONSTRAINT uq_ta_daily_logs_roster_day UNIQUE (roster_id, day)
 );
 
+grant select on public.travel_allowance_daily_logs to anon;
+grant select, insert, update, delete on public.travel_allowance_daily_logs to authenticated;
+grant select, insert, update, delete on public.travel_allowance_daily_logs to service_role;
+
 CREATE INDEX IF NOT EXISTS idx_ta_daily_logs_roster_id ON travel_allowance_daily_logs(roster_id);
 CREATE INDEX IF NOT EXISTS idx_ta_daily_logs_date ON travel_allowance_daily_logs(date);
 
@@ -102,5 +114,9 @@ CREATE TABLE IF NOT EXISTS travel_allowance_permissions (
     granted_by TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+grant select on public.travel_allowance_permissions to anon;
+grant select, insert, update, delete on public.travel_allowance_permissions to authenticated;
+grant select, insert, update, delete on public.travel_allowance_permissions to service_role;
 
 COMMIT;

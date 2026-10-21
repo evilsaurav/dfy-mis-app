@@ -11,4 +11,8 @@ CREATE TABLE IF NOT EXISTS kpi_skeleton_cache (
     UNIQUE (district, roster_fingerprint)
 );
 
+grant select on public.kpi_skeleton_cache to anon;
+grant select, insert, update, delete on public.kpi_skeleton_cache to authenticated;
+grant select, insert, update, delete on public.kpi_skeleton_cache to service_role;
+
 CREATE INDEX IF NOT EXISTS idx_kpi_skeleton_cache_district ON kpi_skeleton_cache(district);

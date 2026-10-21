@@ -1198,6 +1198,10 @@ def ensure_database_indexes_exist():
                 updated_by TEXT
             );
 
+            grant select on public.pacing_settings to anon;
+            grant select, insert, update, delete on public.pacing_settings to authenticated;
+            grant select, insert, update, delete on public.pacing_settings to service_role;
+
             CREATE INDEX IF NOT EXISTS idx_dfr_staff_date ON daily_field_reports(staff_id, date_of_reporting);
             CREATE INDEX IF NOT EXISTS idx_dfr_district_date ON daily_field_reports(district_id, date_of_reporting);
             CREATE INDEX IF NOT EXISTS idx_dfr_date_of_reporting ON daily_field_reports(date_of_reporting);
