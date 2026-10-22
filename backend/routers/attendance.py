@@ -977,6 +977,10 @@ async def export_staff_attendance(
             from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
             from openpyxl.utils import get_column_letter
             wb = openpyxl.Workbook()
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            wb.properties.title = f"DFY Staff Attendance Matrix - {target_month}"
             ws1 = wb.active
             ws1.title = "Attendance Matrix"
             ws1.freeze_panes = "E2"
@@ -1182,6 +1186,10 @@ async def export_staff_attendance(
                         c.font = Font(name="Calibri", size=10, bold=True)
                     else:
                         c.alignment = Alignment(horizontal="left", vertical="center")
+
+            ws1.append([])
+            f_row = ws1.max_row
+            ws1.cell(row=f_row, column=2, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell").font = Font(name="Calibri", size=9, italic=True, color="64748B")
 
             # Column dimensions for Sheet 1
             ws1.column_dimensions["A"].width = 6

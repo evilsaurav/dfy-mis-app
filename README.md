@@ -722,6 +722,6 @@ Configure `SUPABASE_DB_URL` (PostgreSQL pooled or direct connection string), `SU
 ## 📜 License & Credits
 
 Developed with ❤️ for **Doctors For You (DFY)** Bihar TB Elimination Program.  
-Designed and architected by **Insomniac**.
+Designed and architected by **Saurav Kumar**.
 
 For queries, bug reports, or feature enhancements, please open an issue in the [GitHub repository](https://github.com/evilsaurav/dfy-mis-app).

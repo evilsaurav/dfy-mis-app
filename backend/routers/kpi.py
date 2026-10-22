@@ -132,7 +132,7 @@ async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_
         import pandas as pd  # lazy import
         import openpyxl
         df = pd.DataFrame(consolidated_data)
-        df.loc[len(df)] = pd.Series({'Date': 'Designed by Insomniac'})
+        df.loc[len(df)] = pd.Series({'Date': 'Generated on DFY MIS by Saurav Kumar'})
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Consolidated Report')

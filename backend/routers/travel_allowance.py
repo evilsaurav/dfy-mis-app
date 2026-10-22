@@ -2849,6 +2849,10 @@ def build_ta_excel_workbook(district_data: dict) -> bytes:
     - Sheets 2..N: Individual 31-day bike log registers.
     """
     wb = openpyxl.Workbook()
+    wb.properties.creator = "Saurav Kumar"
+    wb.properties.lastModifiedBy = "Saurav Kumar"
+    wb.properties.company = "Doctors For You"
+    wb.properties.title = f"Travel Allowance Summary - {district_data.get('district', '')} ({district_data.get('month', '')})"
     district = district_data.get("district", "Unknown")
     month = district_data.get("month", "")
     rate_per_km = float(district_data.get("rate_per_km", 4.0))
@@ -2870,7 +2874,7 @@ def build_ta_excel_workbook(district_data: dict) -> bytes:
     ws_dash.merge_cells("A2:I2")
     sub_cell = ws_dash.cell(
         row=2, column=1,
-        value=f"District: {district}  |  Month: {month}  |  Rate: ₹{rate_per_km:.2f}/KM  |  Generated on: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        value=f"District: {district}  |  Month: {month}  |  Rate: ₹{rate_per_km:.2f}/KM  |  Generated on DFY MIS by Saurav Kumar ({datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')})"
     )
     sub_cell.font = Font(name="Calibri", size=10, italic=True, color="475569")
     sub_cell.alignment = Alignment(horizontal="center", vertical="center")

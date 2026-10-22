@@ -1077,7 +1077,7 @@ export default function AdminDashboard() {
         {/* Branding Footer */}
         <footer className="w-full text-center py-8 mt-auto opacity-70">
           <p className="text-sm font-bold text-slate-500 tracking-widest uppercase">
-            Designed by <span className="text-indigo-600 font-black">Insomniac</span>
+            Designed by <span className="text-indigo-600 font-black">Saurav Kumar</span>
           </p>
         </footer>
 

@@ -200,7 +200,7 @@ const PendingInterventionsActionCenter = ({
       msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
       msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
     });
-    msg += `_Kripya in sabhi patients ka priority follow-up karein!_`;
+    msg += `_Kripya in sabhi patients ka priority follow-up karein!_\n\n_Generated on DFY MIS by Saurav Kumar_`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg).then(() => {
@@ -690,6 +690,7 @@ const MyProfileDashboard = ({
       text += `\n*Bike KM Log:*\nTotal: ${dayData.total_km} km\n`;
     }
 
+    text += '\n\n_Generated on DFY MIS by Saurav Kumar_';
     return text.trim();
   };
 
@@ -1323,7 +1324,7 @@ const MyProfileDashboard = ({
     });
 
     text += `\n_“Every notification brings Bihar one step closer to TB Mukt Bharat.”_\n`;
-    text += `_Doctors For You Frontline Healthcare Operations_`;
+    text += `_Doctors For You Frontline Operations • System Managed by Saurav Kumar_`;
 
     const encoded = encodeURIComponent(text);
     window.open(`https://api.whatsapp.com/send?text=${encoded}`, '_blank');
@@ -6565,6 +6566,7 @@ function App() {
       text += `\n*Bike KM Log:*\nMorning: ${formData.morning_km || '—'}, Evening: ${formData.evening_km || '—'}${calcKm !== null ? ` (Total: ${calcKm} km)` : ''}\n`;
     }
 
+    text += '\n\n_Generated on DFY MIS by Saurav Kumar_';
     return text.trim();
   };
 
@@ -8151,7 +8153,7 @@ function App() {
       {/* Branding Footer */}
         <footer className="w-full text-center py-6 mt-auto">
           <p className="text-xs font-bold text-slate-500 tracking-widest uppercase opacity-70">
-            Designed by <span className="text-indigo-600 font-black">Insomniac</span>
+            Designed by <span className="text-indigo-600 font-black">Saurav Kumar</span>
           </p>
           <div className="mt-2.5">
             <button

@@ -579,7 +579,7 @@ export function useAdminAttendance({
       msg += `ℹ️ (${attendance.on_leave_count} staff on approved leave/absent today)\n\n`;
     }
 
-    msg += `Kripya sabhi sadasya turant apni field report submit karein!`;
+    msg += `Kripya sabhi sadasya turant apni field report submit karein!\n\n_Generated via DFY MIS • Managed by Saurav Kumar_`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
@@ -861,7 +861,7 @@ export function useAdminAttendance({
       });
       msg += `\n`;
     }
-    msg += `⚠️ Immediate follow-up required by District Coordinators.`;
+    msg += `⚠️ Immediate follow-up required by District Coordinators.\n\n_Generated via DFY MIS • Managed by Saurav Kumar_`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
@@ -916,7 +916,7 @@ export function useAdminAttendance({
       });
       msg += `\n`;
     }
-    msg += `Kripya pending officers se report submit karwayen!`;
+    msg += `Kripya pending officers se report submit karwayen!\n\n_Generated via DFY MIS • Managed by Saurav Kumar_`;
 
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
@@ -948,6 +948,7 @@ export function useAdminAttendance({
       msg += `\n`;
     }
 
+    msg += "_Generated via DFY MIS • Managed by Saurav Kumar_\n";
     if (navigator.clipboard) {
       navigator.clipboard.writeText(msg);
       setCopiedAttendance(true);

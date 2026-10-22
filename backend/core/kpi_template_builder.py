@@ -62,6 +62,10 @@ def build_district_skeleton_bytes(district: str, staff_list: List[str]) -> bytes
     Returns the raw Excel file bytes (in-memory, no disk writes).
     """
     wb = openpyxl.Workbook()
+    wb.properties.creator = "Saurav Kumar"
+    wb.properties.lastModifiedBy = "Saurav Kumar"
+    wb.properties.company = "Doctors For You"
+    wb.properties.title = f"District KPI Performance Sheet - {district.upper()}"
     default_sheet = wb.active
 
     # -------------------------------------------------------------
@@ -86,7 +90,7 @@ def build_district_skeleton_bytes(district: str, staff_list: List[str]) -> bytes
             ws_perf.cell(row=r, column=c).border = EXCEL_HEADER_BORDER
 
     # Subtitle (Row 3)
-    ws_perf["A3"] = "Monthly Evaluation & Notification Target Achievement Matrix"
+    ws_perf["A3"] = "Monthly Evaluation & Notification Target Achievement Matrix | Generated on DFY MIS by Saurav Kumar"
     ws_perf["A3"].font = Font(name="Calibri", size=10, italic=True, color="6B7280")
 
     # Column Headers (Row 4)
