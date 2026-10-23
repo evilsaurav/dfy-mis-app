@@ -1383,7 +1383,7 @@ def prefill_district_ta_from_reports(
                     c_day = int(cd.get("day") or 0)
                     if c_day > 0 and is_day_manually_entered(cd):
                         cd_copy = dict(cd)
-                        cd_copy["is_manual_override"] = True
+                        cd_copy["is_manual_override"] = bool(cd.get("is_manual_override") or cd.get("is_override"))
                         existing_days_map[c_day] = cd_copy
                 except (ValueError, TypeError):
                     pass
@@ -1458,7 +1458,7 @@ def prefill_district_ta_from_reports(
             preserved_day = dict(ex_day)
             preserved_day["day"] = day
             preserved_day["date"] = preserved_day.get("date") or date_str
-            preserved_day["is_manual_override"] = True
+            preserved_day["is_manual_override"] = bool(ex_day.get("is_manual_override") or ex_day.get("is_override"))
             days.append(preserved_day)
         else:
             rep = reports_by_day.get(day)

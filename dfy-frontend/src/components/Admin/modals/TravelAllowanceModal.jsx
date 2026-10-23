@@ -283,6 +283,7 @@ export default function TravelAllowanceModal({
           const parsed = parseFloat(manualTotal);
           finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
         } else {
+          manualTotal = '';
           finalTotalKm = calculatedTotalKm;
         }
       } else if (field === 'manual_total_km') {
@@ -291,12 +292,17 @@ export default function TravelAllowanceModal({
         const parsed = parseFloat(value);
         finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
       } else if (field === 'morning_km' || field === 'evening_km') {
-        isManual = true;
-        if (manualTotal != null && String(manualTotal).trim() !== '') {
-          const parsed = parseFloat(manualTotal);
-          finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
-        } else {
+        // Entering or correcting meter readings calculates Day KM directly without forcing manual override
+        if (!isManual) {
+          manualTotal = '';
           finalTotalKm = calculatedTotalKm;
+        } else {
+          if (manualTotal != null && String(manualTotal).trim() !== '') {
+            const parsed = parseFloat(manualTotal);
+            finalTotalKm = !isNaN(parsed) ? Math.max(0, parsed) : calculatedTotalKm;
+          } else {
+            finalTotalKm = calculatedTotalKm;
+          }
         }
       } else {
         if (isManual && manualTotal != null && String(manualTotal).trim() !== '') {

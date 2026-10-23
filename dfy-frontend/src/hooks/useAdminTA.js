@@ -205,13 +205,15 @@ export function useAdminTA({ month, currentUser, authFetch, getAdminToken, showT
             parseFloat(prevDay.manual_total_km || 0) > 0 ||
             parseFloat(prevDay.morning_km || 0) > 0 ||
             parseFloat(prevDay.evening_km || 0) > 0 ||
-            (prevDay.visited_names && String(prevDay.visited_names).trim() !== '')
+            (prevDay.visited_names && String(prevDay.visited_names).trim() !== '') ||
+            (prevDay.purpose && String(prevDay.purpose).trim() !== '')
           );
 
-          if (!isMan && !hasReading && prevHasManual) {
+          // Non-destructive Pre-fill: If this day already has saved/verified readings, preserve it intact without forcing override
+          if (prevHasManual) {
             return {
               ...prevDay,
-              is_manual_override: true,
+              is_manual_override: Boolean(prevDay.is_manual_override),
             };
           }
 
