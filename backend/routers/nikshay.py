@@ -1,4 +1,5 @@
 import os
+import gc
 import io
 import re
 import math
@@ -1012,6 +1013,14 @@ async def download_nikshay_review_sheet(
             df_export.to_excel(writer, index=False, sheet_name="Field Review Sheet")
             ws = writer.sheets["Field Review Sheet"]
             style_excel_worksheet(ws, header_fill_color="D97706")
+            wb = writer.book
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            from openpyxl.styles import Font
+            footer_row = ws.max_row + 2
+            f_cell = ws.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+            f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
             
         output.seek(0)
         dist_slug = district.replace(" ", "_") if district else "All"
@@ -1175,6 +1184,14 @@ async def export_cumulative_ledger(
                 df_export.to_excel(writer, index=False, sheet_name="Cumulative Ledger")
                 ws = writer.sheets["Cumulative Ledger"]
                 style_excel_worksheet(ws, header_fill_color="059669")
+                wb = writer.book
+                wb.properties.creator = "Saurav Kumar"
+                wb.properties.lastModifiedBy = "Saurav Kumar"
+                wb.properties.company = "Doctors For You"
+                from openpyxl.styles import Font
+                footer_row = ws.max_row + 2
+                f_cell = ws.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+                f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
 
             del df_export
             gc.collect()

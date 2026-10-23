@@ -1981,6 +1981,17 @@ async def export_state_summary(month: Optional[str] = None, districts: Optional[
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="State Pacing Summary")
+            wb = writer.book
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            wb.properties.title = f"DFY State Pacing Summary - {month}"
+            ws = writer.sheets["State Pacing Summary"]
+            style_excel_worksheet(ws, header_fill_color="1E3A8A")
+            from openpyxl.styles import Font
+            footer_row = ws.max_row + 2
+            f_cell = ws.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+            f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
             
         output.seek(0)
         filename = f"DFY_State_Pacing_Summary_{month}.xlsx"
@@ -2357,6 +2368,14 @@ async def export_cascade_alerts(month: Optional[str] = None, district: Optional[
             df.to_excel(writer, index=False, sheet_name=sheet_title[:31])
             ws = writer.sheets[sheet_title[:31]]
             style_excel_worksheet(ws, header_fill_color="B91C1C")
+            wb = writer.book
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            from openpyxl.styles import Font
+            footer_row = ws.max_row + 2
+            f_cell = ws.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+            f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
                 
         output.seek(0)
         filename = f"DFY_Cascade_Dropout_Alerts_{district}_{month}.xlsx"

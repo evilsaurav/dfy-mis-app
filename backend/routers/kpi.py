@@ -286,6 +286,14 @@ def generate_district_kpi_bytes(
         try:
             wb = openpyxl.load_workbook(io.BytesIO(skeleton_bytes), data_only=False)
             sheet_map = {name.strip().lower(): name for name in wb.sheetnames}
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            wb.properties.title = f"District KPI Performance Sheet - {district.upper()}"
+            if "Performance sheet" in wb.sheetnames:
+                ws_perf_init = wb["Performance sheet"]
+                ws_perf_init["A3"] = "Monthly Evaluation & Notification Target Achievement Matrix | Generated on DFY MIS by Saurav Kumar"
+                ws_perf_init["A3"].font = Font(name="Calibri", size=10, italic=True, color="6B7280")
         except Exception as e:
             raise HTTPException(
                 status_code=500,
@@ -686,6 +694,10 @@ def generate_district_kpi_bytes(
                     gt_c.border = EXCEL_THIN_BORDER
                     gt_c.alignment = Alignment(horizontal="center", vertical="center")
 
+                footer_row = gt_row + 2
+                f_cell = ws_perf.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+                f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
+
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
@@ -831,6 +843,10 @@ async def download_medicine_consumption(
             # Build openpyxl workbook
             import openpyxl  # lazy import
             wb = openpyxl.Workbook()
+            wb.properties.creator = "Saurav Kumar"
+            wb.properties.lastModifiedBy = "Saurav Kumar"
+            wb.properties.company = "Doctors For You"
+            wb.properties.title = f"DFY Medicine Consumption Report - {target_month}"
             
             # Sheet 1: Detailed Patient Consumption
             ws1 = wb.active
@@ -916,6 +932,11 @@ async def download_medicine_consumption(
                 
             style_excel_worksheet(ws1, header_fill_color="0D9488")
             style_excel_worksheet(ws2, header_fill_color="4F46E5")
+
+            from openpyxl.styles import Font
+            footer_row = ws2.max_row + 2
+            f_cell = ws2.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+            f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
             
             buf = io.BytesIO()
             wb.save(buf)

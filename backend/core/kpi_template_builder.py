@@ -178,6 +178,9 @@ def build_district_skeleton_bytes(district: str, staff_list: List[str]) -> bytes
         ws_perf.cell(row=total_r, column=c).border = EXCEL_TOTAL_ROW_BORDER
 
     ws_perf.column_dimensions['A'].width = 24
+    footer_row = total_r + 2
+    f_cell = ws_perf.cell(row=footer_row, column=1, value="Generated on DFY MIS by Saurav Kumar • State Health Monitoring Cell")
+    f_cell.font = Font(name="Calibri", size=9, italic=True, color="6B7280")
     ws_perf.column_dimensions['B'].width = 14
     ws_perf.column_dimensions['C'].width = 12
     ws_perf.column_dimensions['D'].width = 15
