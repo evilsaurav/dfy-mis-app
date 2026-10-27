@@ -542,7 +542,9 @@ async def log_admin_activity(
 def resolve_staff_and_district_ids(
     fo_name: str, 
     district: str, 
-    pin: Optional[str] = None
+    pin: Optional[str] = None,
+    known_staff_id: Optional[int] = None,
+    known_district_id: Optional[int] = None
 ) -> Tuple[int, int]:
     """
     Robustly resolves (staff_id, district_id) from PostgreSQL tables `staff_directory` and `districts`.
@@ -553,6 +555,12 @@ def resolve_staff_and_district_ids(
     clean_fo = canonicalize_fo_name(fo_name, clean_wp) if fo_name else "Field Officer"
 
     cache_key = f"resolved_staff_dist_{clean_wp}_{clean_fo}".lower().replace(" ", "")
+
+    if known_staff_id and known_district_id:
+        res_pair = (int(known_staff_id), int(known_district_id))
+        cache.set(cache_key, res_pair, ttl=7200)
+        return res_pair
+
     cached = cache.get(cache_key)
     if cached and isinstance(cached, (tuple, list)) and len(cached) == 2 and cached[0] and cached[1]:
         return int(cached[0]), int(cached[1])
@@ -739,21 +747,21 @@ def resolve_staff_and_district_ids(
     return res_pair
 
 
-def check_patient_id_90day_notification_duplicate(
-    patient_id: str,
+def check_patient_ids_90day_notification_duplicates_batch(
+    patient_ids: List[str],
     district: str,
     reporting_date: str,
     exclude_report_id: Optional[Any] = None,
     exclude_doc_ids: Optional[List[str]] = None
-) -> Optional[Dict[str, Any]]:
+) -> Dict[str, Dict[str, Any]]:
     """
-    Checks if a patient ID has already been notified in the district within 90 days.
-    Queries `report_kpi_entries` joined with `daily_field_reports`.
-    Returns dict with conflicting report details if duplicate found, else None.
+    Batched check: Returns a dict of {patient_id: conflict_dict} for all patient_ids that
+    have already been notified in the district within 90 days.
+    Executes exactly 1 SQL query with `k.patient_id = ANY(%s)`.
     """
-    clean_pid = str(patient_id).strip()
-    if not clean_pid:
-        return None
+    clean_pids = list(dict.fromkeys([str(p).strip() for p in (patient_ids or []) if str(p).strip()]))
+    if not clean_pids:
+        return {}
         
     clean_wp = canonicalize_district(district.strip()) if district else ""
     clean_date = normalize_date_to_iso(reporting_date) or str(reporting_date)[:10]
@@ -770,6 +778,8 @@ def check_patient_id_90day_notification_duplicate(
     if "bhojpur" in clean_wp.lower():
         district_variants.extend(["bhojpur", "arrah", "ara"])
 
+    duplicates_map = {}
+
     try:
         exclude_int_id = int(exclude_report_id) if (exclude_report_id and str(exclude_report_id).isdigit()) else None
         
@@ -778,34 +788,38 @@ def check_patient_id_90day_notification_duplicate(
         FROM report_kpi_entries k
         JOIN daily_field_reports r ON k.report_id = r.id
         WHERE k.category::text IN ('notification_ids', 'notifications')
-          AND k.patient_id = %s
+          AND k.patient_id = ANY(%s)
           AND (LOWER(TRIM(r.working_place)) = ANY(%s))
           AND r.date_of_reporting >= (%s::date - INTERVAL '90 days')
           AND r.date_of_reporting <= (%s::date + INTERVAL '2 days')
         """
-        params = [clean_pid, district_variants, clean_date, clean_date]
+        params = [clean_pids, district_variants, clean_date, clean_date]
         
         if exclude_int_id:
             sql += " AND r.id != %s"
             params.append(exclude_int_id)
             
-        sql += " ORDER BY r.date_of_reporting DESC LIMIT 1"
+        sql += " ORDER BY r.date_of_reporting DESC"
         
         rows = pg_execute_raw(sql, params, fetch=True)
         if rows:
-            row = dict(rows[0])
-            if exclude_doc_ids and row.get("legacy_doc_id") and row.get("legacy_doc_id") in exclude_doc_ids:
-                return None
-            return {
-                "patient_id": clean_pid,
-                "report_id": row.get("id"),
-                "date_of_reporting": str(row.get("date_of_reporting")),
-                "fo_name": row.get("fo_name"),
-                "working_place": row.get("working_place"),
-                "legacy_doc_id": row.get("legacy_doc_id")
-            }
+            for r in rows:
+                row = dict(r)
+                pid = str(row.get("patient_id", "")).strip()
+                if not pid or pid in duplicates_map:
+                    continue
+                if exclude_doc_ids and row.get("legacy_doc_id") and row.get("legacy_doc_id") in exclude_doc_ids:
+                    continue
+                duplicates_map[pid] = {
+                    "patient_id": pid,
+                    "report_id": row.get("id"),
+                    "date_of_reporting": str(row.get("date_of_reporting")),
+                    "fo_name": row.get("fo_name"),
+                    "working_place": row.get("working_place"),
+                    "legacy_doc_id": row.get("legacy_doc_id")
+                }
 
-        # Fallback to mock store for test environment if PostgreSQL is offline
+        # Fallback to mock store for test environment if mock
         active_db = get_active_db()
         is_mock_env = (
             active_db is not None and (
@@ -835,19 +849,42 @@ def check_patient_id_90day_notification_duplicate(
                 if exclude_int_id and str(r_id) == str(exclude_int_id):
                     continue
                 r_notifs = r_dict.get("notification_ids", []) or []
-                if isinstance(r_notifs, list) and clean_pid in [str(x).strip() for x in r_notifs]:
-                    return {
-                        "patient_id": clean_pid,
-                        "report_id": r_id,
-                        "date_of_reporting": str(r_dict.get("date_of_reporting") or r_dict.get("date", "")),
-                        "fo_name": r_dict.get("fo_name"),
-                        "working_place": r_dict.get("working_place") or r_dict.get("district"),
-                        "legacy_doc_id": r_id
-                    }
+                if isinstance(r_notifs, list):
+                    for clean_pid in clean_pids:
+                        if clean_pid not in duplicates_map and clean_pid in [str(x).strip() for x in r_notifs]:
+                            duplicates_map[clean_pid] = {
+                                "patient_id": clean_pid,
+                                "report_id": r_id,
+                                "date_of_reporting": str(r_dict.get("date_of_reporting") or r_dict.get("date", "")),
+                                "fo_name": r_dict.get("fo_name"),
+                                "working_place": r_dict.get("working_place") or r_dict.get("district"),
+                                "legacy_doc_id": r_id
+                            }
     except Exception as e:
-        print(f"[check_patient_id_90day_notification_duplicate notice]: {e}")
+        print(f"[check_patient_ids_90day_notification_duplicates_batch notice]: {e}")
         
-    return None
+    return duplicates_map
+
+
+def check_patient_id_90day_notification_duplicate(
+    patient_id: str,
+    district: str,
+    reporting_date: str,
+    exclude_report_id: Optional[Any] = None,
+    exclude_doc_ids: Optional[List[str]] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Checks if a patient ID has already been notified in the district within 90 days.
+    Wraps the optimized single-roundtrip batch helper.
+    Returns dict with conflicting report details if duplicate found, else None.
+    """
+    clean_pid = str(patient_id).strip()
+    if not clean_pid:
+        return None
+    res = check_patient_ids_90day_notification_duplicates_batch(
+        [clean_pid], district, reporting_date, exclude_report_id, exclude_doc_ids
+    )
+    return res.get(clean_pid)
 
 
 

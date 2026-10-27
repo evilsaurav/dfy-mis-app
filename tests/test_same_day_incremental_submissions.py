@@ -43,6 +43,7 @@ class MockDB:
     def __init__(self):
         self.reports = {}
         self.rollups = {}
+        self.saved_reports = []
 
     def collection(self, name):
         if name == "daily_field_reports":

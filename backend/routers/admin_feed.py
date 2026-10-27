@@ -26,6 +26,7 @@ from backend.core.helpers import (
     normalize_date_to_iso,
     resolve_staff_and_district_ids,
     check_patient_id_90day_notification_duplicate,
+    check_patient_ids_90day_notification_duplicates_batch,
     build_report_candidate_doc_ids
 )
 from backend.core.master_ledger import (
@@ -1265,7 +1266,7 @@ async def admin_feed_officer_data(
                             with conn.cursor() as cur:
                                 psycopg2.extras.execute_values(
                                     cur,
-                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s",
+                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s ON CONFLICT DO NOTHING",
                                     kpi_entries_batch
                                 )
                             conn.commit()
@@ -1885,8 +1886,23 @@ async def admin_edit_day_report(
         metric_deltas = {}
         all_added_ids = []
         all_deleted_ids = []
+        batch_edit_logs = []
 
         if req.category_ids is not None:
+            # Pre-resolve staff and district IDs once for all category logs
+            log_staff_id = target_snap.get("staff_id") if isinstance(target_snap, dict) else None
+            log_district_id = target_snap.get("district_id") if isinstance(target_snap, dict) else None
+            if not log_staff_id or not log_district_id:
+                try:
+                    res_s, res_d = resolve_staff_and_district_ids(clean_fo, clean_wp)
+                    log_staff_id = log_staff_id or res_s
+                    log_district_id = log_district_id or res_d
+                except Exception:
+                    pass
+            snap_doc_id = (target_snap.get("legacy_doc_id") or str(target_snap.get("id"))) if isinstance(target_snap, dict) else None
+
+            exclude_docs_list = [str(getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else "")) for d in matching_docs]
+
             for cat_key in VALID_CATEGORIES:
                 if cat_key in req.category_ids:
                     raw_ids = req.category_ids[cat_key]
@@ -1902,8 +1918,8 @@ async def admin_edit_day_report(
                         d_id = getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else None)
                         if d_id and str(d_id).isdigit():
                             k_rows = pg_execute_raw(
-                                "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND category = %s",
-                                [int(d_id), cat_key],
+                                "SELECT patient_id FROM report_kpi_entries WHERE report_id = %s AND (category::text = %s OR category::text = %s)",
+                                [int(d_id), cat_key, cat_key[:-4] if cat_key.endswith("_ids") else cat_key],
                                 fetch=True
                             )
                             if k_rows:
@@ -1919,65 +1935,60 @@ async def admin_edit_day_report(
                     added = [x for x in clean_new_ids if x not in old_ids]
                     deleted = [x for x in old_ids if x not in clean_new_ids]
 
+                    # Batched 90-day duplicate checking (single query)
                     if cat_key == "notification_ids" and added:
-                        for aid in added:
-                            d_info = check_patient_id_90day_notification_duplicate(
-                                patient_id=aid,
-                                district=clean_wp,
-                                reporting_date=clean_date,
-                                exclude_doc_ids=[str(getattr(d, "id", None) or (d.get("id") if isinstance(d, dict) else "")) for d in matching_docs]
+                        dupes_map = check_patient_ids_90day_notification_duplicates_batch(
+                            patient_ids=added,
+                            district=clean_wp,
+                            reporting_date=clean_date,
+                            exclude_doc_ids=exclude_docs_list
+                        )
+                        if dupes_map:
+                            first_pid, d_info = next(iter(dupes_map.items()))
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Patient ID {first_pid} is already notified on {d_info.get('date_of_reporting')} by {d_info.get('fo_name')} ({d_info.get('working_place')}) within the last 90 days."
                             )
-                            if d_info:
-                                raise HTTPException(
-                                    status_code=400,
-                                    detail=f"Patient ID {aid} is already notified on {d_info.get('date_of_reporting')} by {d_info.get('fo_name')} ({d_info.get('working_place')}) within the last 90 days."
-                                )
 
                     all_added_ids.extend([{"cat": cat_key, "id": x} for x in added])
                     all_deleted_ids.extend([{"cat": cat_key, "id": x} for x in deleted])
 
-                    # Log each ID addition/deletion to patient_id_edit_logs
-                    log_staff_id = target_snap.get("staff_id") if isinstance(target_snap, dict) else None
-                    log_district_id = target_snap.get("district_id") if isinstance(target_snap, dict) else None
-                    if not log_staff_id or not log_district_id:
-                        try:
-                            res_s, res_d = resolve_staff_and_district_ids(clean_fo, clean_wp)
-                            log_staff_id = log_staff_id or res_s
-                            log_district_id = log_district_id or res_d
-                        except Exception:
-                            pass
-                    snap_doc_id = (target_snap.get("legacy_doc_id") or str(target_snap.get("id"))) if isinstance(target_snap, dict) else None
-
+                    # Queue each ID addition/deletion for atomic execute_values batch insert
                     for aid in added:
-                        try:
-                            pg_execute_raw(
-                                """INSERT INTO patient_id_edit_logs 
-                                   (report_date, category, edited_by, staff_id, fo_name_snapshot, 
-                                    district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
-                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                                [clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
-                                 log_district_id, clean_wp, "add", None, aid, snap_doc_id]
-                            )
-                        except Exception as e:
-                            print(f"[id_edit_logs insert error] {e}")
+                        batch_edit_logs.append((
+                            clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
+                            log_district_id, clean_wp, "add", None, aid, snap_doc_id
+                        ))
 
                     for did in deleted:
-                        try:
-                            pg_execute_raw(
-                                """INSERT INTO patient_id_edit_logs 
-                                   (report_date, category, edited_by, staff_id, fo_name_snapshot, 
-                                    district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
-                                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                                [clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
-                                 log_district_id, clean_wp, "delete", did, None, snap_doc_id]
-                            )
-                        except Exception as e:
-                            print(f"[id_edit_logs insert error] {e}")
+                        batch_edit_logs.append((
+                            clean_date, cat_key, f"{admin_user} ({admin_role})", log_staff_id, clean_fo, 
+                            log_district_id, clean_wp, "delete", did, None, snap_doc_id
+                        ))
 
                     if cat_key in metric_map:
                         diff = len(clean_new_ids) - len(old_ids)
                         if diff != 0:
                             metric_deltas[metric_map[cat_key]] = diff
+
+            # Single atomic batch insert for all patient_id_edit_logs
+            if batch_edit_logs:
+                try:
+                    with get_postgres_connection() as conn:
+                        if conn:
+                            import psycopg2.extras
+                            with conn.cursor() as cur:
+                                psycopg2.extras.execute_values(
+                                    cur,
+                                    """INSERT INTO patient_id_edit_logs 
+                                       (report_date, category, edited_by, staff_id, fo_name_snapshot, 
+                                        district_id, district_name_snapshot, action, old_id, new_id, legacy_doc_id)
+                                       VALUES %s""",
+                                    batch_edit_logs
+                                )
+                            conn.commit()
+                except Exception as log_err:
+                    logger.error(f"[admin_edit_day_report batch patient_id_edit_logs error]: {log_err}")
 
         # 4. Commit document updates to PostgreSQL and mock store
         pg_rep = None
@@ -2064,37 +2075,63 @@ async def admin_edit_day_report(
                 logger.error(f"[edit-day PG parent update error]: {upd_err}")
                 raise HTTPException(status_code=500, detail=f"Database error updating parent report: {upd_err}")
 
-        # Reconcile child relational tables if int_report_id is known
+        # Reconcile child relational tables if int_report_id is known (Batched Atomic Writes)
         if int_report_id:
-            # Reconcile report_kpi_entries
+            # Reconcile report_kpi_entries with single DELETE and single execute_values batch insert
             if req.category_ids is not None:
-                for cat_key in VALID_CATEGORIES:
-                    if cat_key in req.category_ids:
-                        try:
-                            pg_execute_raw("DELETE FROM report_kpi_entries WHERE report_id = %s AND category = %s", [int_report_id, cat_key])
+                modified_cats = [c for c in VALID_CATEGORIES if c in req.category_ids]
+                if modified_cats:
+                    try:
+                        # 1. Single delete for all modified categories
+                        pg_execute_raw(
+                            "DELETE FROM report_kpi_entries WHERE report_id = %s AND category::text = ANY(%s)",
+                            [int_report_id, modified_cats]
+                        )
+                        # 2. Collect all new patient IDs across all modified categories
+                        kpi_batch = []
+                        for cat_key in modified_cats:
                             clean_ids = doc_update.get(cat_key, [])
                             for cid in clean_ids:
-                                pg_execute_raw(
-                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES (%s, %s, %s)",
-                                    [int_report_id, cat_key, cid]
-                                )
-                        except Exception as kpi_rec_err:
-                            logger.error(f"[edit-day PG report_kpi_entries reconcile error]: {kpi_rec_err}", exc_info=True)
-                            raise HTTPException(
-                                status_code=500,
-                                detail=f"Failed to reconcile patient IDs in report_kpi_entries: {str(kpi_rec_err)}"
-                            )
+                                kpi_batch.append((int_report_id, cat_key, cid))
 
-            # Reconcile report_visited_names
+                        # 3. Single execute_values batch insert
+                        if kpi_batch:
+                            with get_postgres_connection() as conn:
+                                if conn:
+                                    import psycopg2.extras
+                                    with conn.cursor() as cur:
+                                        psycopg2.extras.execute_values(
+                                            cur,
+                                            "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s ON CONFLICT DO NOTHING",
+                                            kpi_batch
+                                        )
+                                    conn.commit()
+                    except Exception as kpi_rec_err:
+                        logger.error(f"[edit-day PG report_kpi_entries reconcile error]: {kpi_rec_err}", exc_info=True)
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to reconcile patient IDs in report_kpi_entries: {str(kpi_rec_err)}"
+                        )
+
+            # Reconcile report_visited_names with single execute_values batch insert
             if req.visited_names is not None:
                 try:
                     pg_execute_raw("DELETE FROM report_visited_names WHERE report_id = %s", [int_report_id])
+                    visited_batch = []
                     for idx, name in enumerate(doc_update.get("visited_names", [])):
-                        if name:
-                            pg_execute_raw(
-                                "INSERT INTO report_visited_names (report_id, name, position) VALUES (%s, %s, %s)",
-                                [int_report_id, name, idx]
-                            )
+                        if name and str(name).strip():
+                            visited_batch.append((int_report_id, str(name).strip(), idx))
+                    if visited_batch:
+                        with get_postgres_connection() as conn:
+                            if conn:
+                                import psycopg2.extras
+                                with conn.cursor() as cur:
+                                    psycopg2.extras.execute_values(
+                                        cur,
+                                        "INSERT INTO report_visited_names (report_id, name, position) VALUES %s",
+                                        visited_batch
+                                    )
+                                conn.commit()
                 except Exception as vis_err:
                     logger.error(f"[edit-day PG report_visited_names reconcile error]: {vis_err}", exc_info=True)
                     raise HTTPException(

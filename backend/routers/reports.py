@@ -38,7 +38,8 @@ from backend.core.helpers import (
     log_admin_activity,
     get_month_date_range,
     resolve_staff_and_district_ids,
-    check_patient_id_90day_notification_duplicate
+    check_patient_id_90day_notification_duplicate,
+    check_patient_ids_90day_notification_duplicates_batch
 )
 from backend.core.master_ledger import (
     get_raw_monthly_reports,
@@ -574,6 +575,8 @@ async def submit_daily_report(
 
         # Dual-Authentication Enforcement: Admin Token or Field Officer PIN
         is_admin_auth = isinstance(admin, dict) and bool(admin.get("user_id") or admin.get("username"))
+        matched_staff_id = None
+        matched_district_id = None
         if is_admin_auth:
             if admin.get("role") == "SUB_ADMIN":
                 allowed = admin.get("allowed_districts", []) or []
@@ -592,6 +595,8 @@ async def submit_daily_report(
             clean_fo_alpha = re.sub(r'[^a-z0-9]', '', report.fo_name.lower())
             pin_match = False
             staff_found = False
+            matched_staff_id = None
+            matched_district_id = None
 
             # 1. Check PostgreSQL staff_directory
             try:
@@ -610,6 +615,8 @@ async def submit_daily_report(
                 if staff_rows and isinstance(staff_rows, list) and len(staff_rows) > 0:
                     staff_found = True
                     s_rec = staff_rows[0]
+                    matched_staff_id = s_rec.get("id")
+                    matched_district_id = s_rec.get("district_id")
                     if s_rec.get("is_active") is False or s_rec.get("status") == "inactive":
                         raise HTTPException(status_code=403, detail="Staff account is deactivated. Contact State Admin.")
                     stored_p = str(s_rec.get("pin", "")).strip()
@@ -718,24 +725,21 @@ async def submit_daily_report(
             }
         cache.set(submission_lock_key, True, ttl=10)
 
-        # Ingestion Defense Gate: Auto-prune duplicate notification IDs across last 90 days
+        # Ingestion Defense Gate: Auto-prune duplicate notification IDs across last 90 days (Single Batch DB Trip)
         pruned_duplicates = []
         valid_new_notifs = list(dict.fromkeys(report.notification_ids or []))
         if report.notification_ids:
             try:
-                for pid in list(dict.fromkeys(report.notification_ids)):
-                    clean_p = str(pid).strip()
-                    if not clean_p:
-                        continue
-                    dupe_info = check_patient_id_90day_notification_duplicate(
-                        patient_id=clean_p,
+                clean_candidates = [str(pid).strip() for pid in dict.fromkeys(report.notification_ids) if str(pid).strip()]
+                if clean_candidates:
+                    dupes_map = check_patient_ids_90day_notification_duplicates_batch(
+                        patient_ids=clean_candidates,
                         district=report.working_place,
                         reporting_date=report.date_of_reporting,
                         exclude_doc_ids=[doc_id]
                     )
-                    if dupe_info:
-                        pruned_duplicates.append(clean_p)
-                
+                    pruned_duplicates = list(dupes_map.keys())
+
                 existing_notified_set = await get_district_90day_notified_ids(
                     clean_dist=report.working_place,
                     exclude_doc_id=doc_id,
@@ -1048,7 +1052,9 @@ async def submit_daily_report(
         resolved_staff_id, resolved_district_id = resolve_staff_and_district_ids(
             fo_name=report.fo_name,
             district=report.working_place,
-            pin=getattr(report, "pin", None)
+            pin=getattr(report, "pin", None),
+            known_staff_id=matched_staff_id,
+            known_district_id=matched_district_id
         )
         pg_payload["staff_id"] = resolved_staff_id
         pg_payload["district_id"] = resolved_district_id
@@ -1158,7 +1164,7 @@ async def submit_daily_report(
                             with conn.cursor() as cur:
                                 psycopg2.extras.execute_values(
                                     cur,
-                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s",
+                                    "INSERT INTO report_kpi_entries (report_id, category, patient_id) VALUES %s ON CONFLICT DO NOTHING",
                                     kpi_entries_batch
                                 )
                             conn.commit()
