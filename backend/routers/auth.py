@@ -262,22 +262,10 @@ async def verify_pin(data: PinCheck):
             pin_rate_limiter.record_failure(primary_id)
             return {"valid": False}
 
-        # 3. Baseline directory fallback
-        try:
-            baseline = load_baseline_staff_directory()
-            active_fos = [name.strip().lower() for name in baseline.get(c_wp, [])]
-            if active_fos and data.fo_name.strip().lower() not in active_fos:
-                return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
-        except Exception:
-            pass
-        if str(data.pin).isdigit() and len(str(data.pin)) == 4:
-            return {"valid": True, "fallback": True}
-
+        # 3. Fail-closed security guard: unregistered staff cannot bypass PIN verification
         pin_rate_limiter.record_failure(primary_id)
-        return {"valid": False}
-    except Exception:
+        return {"valid": False, "error": "Staff member not registered or PIN unverified. Please contact your District MIS or State Admin."}
+    except Exception as err:
         if cached_pin == "__DEACTIVATED__":
             return {"valid": False, "error": "Account deactivated. Please contact your District MIS or State Admin."}
-        if str(data.pin).isdigit() and len(str(data.pin)) == 4:
-            return {"valid": True, "fallback": True}
-        return {"valid": False}
+        return {"valid": False, "error": "PIN verification service error. Please try again or contact administrator."}

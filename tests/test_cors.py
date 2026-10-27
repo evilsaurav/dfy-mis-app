@@ -102,3 +102,14 @@ def test_cors_blocked_unauthorized_domain():
     # Actual GET request should NOT have access-control-allow-origin
     res = client.get("/health", headers={"Origin": "https://evil-random-site.com"})
     assert res.headers.get("access-control-allow-origin") is None
+
+def test_cors_blocked_rogue_subdomain():
+    """Verify rogue domains trying to match unanchored regex are blocked."""
+    rogue_origins = [
+        "https://dfy-frontendevil.vercel.app",
+        "https://evil-dfy-frontend.vercel.app",
+        "https://dfy-frontend.vercel.app.attacker.com",
+    ]
+    for origin in rogue_origins:
+        res = client.options("/health", headers={"Origin": origin, "Access-Control-Request-Method": "GET"})
+        assert res.headers.get("access-control-allow-origin") is None, f"Expected {origin} to be blocked!"

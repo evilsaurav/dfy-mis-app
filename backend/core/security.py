@@ -1,12 +1,26 @@
 import os
 import time
+import logging
+import hmac
 import jwt
 import bcrypt
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List
 from fastapi import HTTPException, Header, Query, Depends
 
-JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "dfy-tb-mis-bihar-secret-key-2026-supersecure")
+logger = logging.getLogger("security")
+
+DEFAULT_DEV_JWT_SECRET = "dfy-tb-mis-bihar-secret-key-2026-supersecure-production-vault"
+_env_secret = os.environ.get("JWT_SECRET_KEY")
+is_production_env = bool(os.environ.get("RENDER") or os.environ.get("ENVIRONMENT") == "production")
+
+if is_production_env and (not _env_secret or _env_secret == "dfy-tb-mis-bihar-secret-key-2026-supersecure"):
+    logger.critical(
+        "SECURITY WARNING: Running in production without a custom JWT_SECRET_KEY environment variable. "
+        "Please configure a strong, unique 32+ character JWT_SECRET_KEY in the deployment environment."
+    )
+
+JWT_SECRET_KEY = _env_secret or DEFAULT_DEV_JWT_SECRET
 JWT_SECRET = JWT_SECRET_KEY
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_DAYS = 7
@@ -19,7 +33,10 @@ def hash_password(plain: str) -> str:
     return bcrypt.hashpw(str(plain).encode('utf-8'), salt).decode('utf-8')
 
 def verify_password(plain: str, hashed_or_plain: str) -> bool:
-    """Validates plain credentials against bcrypt hash or backward-compatible plaintext."""
+    """
+    Validates plain credentials against bcrypt hash or backward-compatible plaintext.
+    Uses constant-time comparison (hmac.compare_digest) to prevent timing attacks.
+    """
     if not hashed_or_plain or not plain:
         return False
     str_plain = str(plain).strip()
@@ -29,10 +46,11 @@ def verify_password(plain: str, hashed_or_plain: str) -> bool:
             return bcrypt.checkpw(str_plain.encode('utf-8'), str_stored.encode('utf-8'))
         except Exception:
             return False
-    return str_plain == str_stored
+    return hmac.compare_digest(str_plain, str_stored)
 
 def create_access_token(user_data: dict) -> str:
     """Issues a signed HMAC-SHA256 JWT valid for 7 days."""
+    now_utc = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_data.get("user_id") or user_data.get("username", "admin")),
         "username": user_data.get("username", "admin"),
@@ -40,8 +58,8 @@ def create_access_token(user_data: dict) -> str:
         "role": user_data.get("role", "SUB_ADMIN"),
         "districts": user_data.get("allowed_districts", ["All"]),
         "allowed_districts": user_data.get("allowed_districts", ["All"]),
-        "exp": datetime.utcnow() + timedelta(days=JWT_EXPIRATION_DAYS),
-        "iat": datetime.utcnow()
+        "exp": now_utc + timedelta(days=JWT_EXPIRATION_DAYS),
+        "iat": now_utc
     }
     return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
 
@@ -132,5 +150,12 @@ class SlidingWindowRateLimiter:
         if key in self.history:
             del self.history[key]
 
+    def record_hit(self, key: str):
+        now = time.time()
+        if key not in self.history:
+            self.history[key] = []
+        self.history[key].append(now)
+
 login_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600)
 pin_rate_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=600)
+export_rate_limiter = SlidingWindowRateLimiter(max_attempts=3, window_seconds=15)

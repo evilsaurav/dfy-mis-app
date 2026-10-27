@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse, FileResponse
 
 from backend.core.database import db
 from backend.core.cache import cache
-from backend.core.security import get_current_admin
+from backend.core.security import get_current_admin, export_rate_limiter
 from backend.core.helpers import (
     get_ist_now,
     canonicalize_district,
@@ -157,8 +157,11 @@ async def download_excel(month: Optional[str] = None, admin: dict = Depends(get_
         )
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Unhandled error in KPI export: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process KPI request. Please try again or contact support.")
 
 
 
@@ -785,8 +788,11 @@ async def download_kpi_workbook(district: str, month: Optional[str] = None, admi
             )
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Unhandled error in KPI export: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process KPI request. Please try again or contact support.")
 
 @router.get("/admin/reports/medicine-consumption")
 async def download_medicine_consumption(
@@ -978,12 +984,22 @@ async def download_medicine_consumption(
             )
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Unhandled error in KPI export: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process KPI request. Please try again or contact support.")
 
 @router.get("/download-all-kpi-workbooks")
 async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: Optional[str] = None, districts: Optional[str] = None, admin: dict = Depends(get_current_admin)):
     try:
+        admin_id = admin.get("user_id") or admin.get("username", "admin")
+        if export_rate_limiter.is_rate_limited(admin_id):
+            raise HTTPException(
+                status_code=429,
+                detail="Bulk export is processing. Please wait a few seconds before requesting another download."
+            )
+        export_rate_limiter.record_hit(admin_id)
         admin_role = admin.get("role", "SUB_ADMIN")
         admin_allowed = admin.get("allowed_districts", [])
         allowed_c = [canonicalize_district(a).lower() for a in admin_allowed]
@@ -1089,7 +1105,10 @@ async def download_all_kpi_workbooks(background_tasks: BackgroundTasks, month: O
         )
     except HTTPException:
         raise
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Unhandled error in KPI export: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process KPI request. Please try again or contact support.")
 
 

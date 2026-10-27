@@ -225,7 +225,7 @@ ALLOWED_ORIGINS = [
     "https://dfy-frontend.vercel.app",
 ]
 
-CORS_ORIGIN_REGEX = r"https://dfy-frontend.*\.vercel\.app"
+CORS_ORIGIN_REGEX = r"^https://dfy-frontend(-git-[a-zA-Z0-9_-]+|-[a-zA-Z0-9]+-saurav-kumars-projects-[a-zA-Z0-9]+)?\.vercel\.app$"
 
 app.add_middleware(
     CORSMiddleware,
