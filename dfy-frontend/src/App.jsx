@@ -5480,6 +5480,7 @@ function App() {
   // Current working place and officer name refs to prevent stale closure in listeners
   const workingPlaceRef = useRef(formData.working_place);
   const foNameRef = useRef(formData.fo_name);
+  const pinInputRef = useRef(null);
   useEffect(() => {
     workingPlaceRef.current = formData.working_place;
     foNameRef.current = formData.fo_name;
@@ -6968,17 +6969,48 @@ function App() {
                         <span className="text-[10px] text-amber-600 font-bold">📴 offline mode</span>
                       )}
                     </label>
-                    <input 
-                      type="password"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      autoComplete="off"
-                      placeholder="****" 
-                      maxLength="4" 
-                      value={formData.pin} 
-                      onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} 
-                      className={`w-full bg-slate-50/90 border ${pinStatus === 'success' ? 'border-emerald-500 ring-2 ring-emerald-200' : pinStatus === 'error' ? 'border-rose-500 ring-2 ring-rose-200' : 'border-slate-200/90'} rounded-xl px-4 py-3.5 text-2xl tracking-widest text-slate-800 font-black outline-none text-center transition-all shadow-inner focus:bg-white`} 
-                    />
+                    <div 
+                      onClick={() => pinInputRef.current?.focus()} 
+                      className={`relative cursor-pointer transition-all duration-300 ${pinStatus === 'error' ? 'animate-haptic-shake' : ''}`}
+                    >
+                      <input 
+                        ref={pinInputRef}
+                        type="password"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoComplete="off"
+                        maxLength="4" 
+                        value={formData.pin} 
+                        onChange={(e) => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})} 
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                        aria-label="4-digit Secret PIN"
+                      />
+                      <div className={`flex items-center justify-center gap-4 py-4 px-6 rounded-2xl border transition-all duration-300 ${
+                        pinStatus === 'success' 
+                          ? 'border-emerald-500 bg-emerald-50/60 shadow-sm shadow-emerald-500/20' 
+                          : pinStatus === 'error' 
+                            ? 'border-rose-400 bg-rose-50/50 shadow-sm shadow-rose-500/20' 
+                            : 'border-slate-200/90 bg-slate-50/90 hover:border-teal-400/80 shadow-inner'
+                      }`}>
+                        {[0, 1, 2, 3].map((idx) => {
+                          const isFilled = (formData.pin || '').length > idx;
+                          return (
+                            <div 
+                              key={idx}
+                              className={`w-4 h-4 rounded-full transition-all duration-200 transform ${
+                                isFilled 
+                                  ? pinStatus === 'success'
+                                    ? 'bg-emerald-500 scale-125 shadow-[0_0_10px_#10b981]'
+                                    : pinStatus === 'error'
+                                      ? 'bg-rose-500 scale-110 shadow-[0_0_8px_#f43f5e]'
+                                      : 'bg-teal-700 scale-110 shadow-[0_0_8px_rgba(13,148,136,0.5)]'
+                                  : 'border-2 border-slate-300 bg-white scale-100'
+                              }`}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
                     {pinStatus === 'checking' && (
                       <p className="text-[11px] text-teal-600 font-bold text-center mt-1.5 animate-pulse">
                         Verifying PIN...
@@ -7000,17 +7032,27 @@ function App() {
                 <button 
                   onClick={handleLogin}
                   disabled={pinStatus !== 'success' || isSubmitting}
-                  className={`w-full mt-4 py-3.5 rounded-xl font-black text-xs tracking-wider uppercase shadow-md transition-all cursor-pointer ${pinStatus === 'success' && !isSubmitting ? 'bg-gradient-to-r from-teal-700 to-emerald-700 text-white hover:from-teal-800 hover:to-emerald-800 hover:shadow-teal-700/30 active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
+                  className={`relative overflow-hidden w-full mt-4 py-3.5 rounded-xl font-black text-xs tracking-wider uppercase shadow-md transition-all duration-200 cursor-pointer group ${pinStatus === 'success' && !isSubmitting ? 'bg-gradient-to-r from-teal-700 via-emerald-700 to-teal-800 text-white hover:shadow-teal-700/30 active:scale-[0.98]' : 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'}`}
                 >
+                  {pinStatus === 'success' && !isSubmitting && (
+                    <div className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 -translate-x-full group-hover:animate-btn-shine pointer-events-none" />
+                  )}
                   {isSubmitting ? (
                     <div className="flex items-center justify-center gap-2">
-                      <svg className="animate-spin h-4 w-4 text-teal-400" viewBox="0 0 24 24" fill="none">
+                      <svg className="animate-spin h-4 w-4 text-teal-300" viewBox="0 0 24 24" fill="none">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                       </svg>
                       <span>Checking Status...</span>
                     </div>
-                  ) : 'Continue'}
+                  ) : (
+                    <div className="flex items-center justify-center gap-2">
+                      <span>Continue</span>
+                      <svg className="w-3.5 h-3.5 transition-transform duration-200 group-hover:translate-x-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                      </svg>
+                    </div>
+                  )}
                 </button>
               </div>
             </div>
@@ -7218,7 +7260,7 @@ function App() {
                       <div className="flex items-center gap-1.5">
                         {streak > 0 && (
                           <span className="bg-amber-500/20 text-amber-300 border border-amber-400/30 text-[10px] font-black px-2 py-1 rounded-xl flex items-center gap-1 shadow-2xs">
-                            🔥 {streak}d
+                            <span className="animate-flame-pulse inline-block">🔥</span> {streak}d
                           </span>
                         )}
                         <button
@@ -7968,14 +8010,25 @@ function App() {
               <button 
                 onClick={submitReport}
                 disabled={isSubmitting}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-3 px-6 rounded-xl shadow-md shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-2"
+                className="relative overflow-hidden group bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-500 hover:to-teal-600 text-white font-extrabold text-xs py-3 px-6 rounded-xl shadow-lg shadow-emerald-600/25 active:scale-[0.98] transition-all duration-200 flex items-center gap-2 cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
               >
+                {!isSubmitting && (
+                  <div className="absolute inset-0 w-1/2 h-full bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12 -translate-x-full group-hover:animate-btn-shine pointer-events-none" />
+                )}
                 {isSubmitting ? (
                   <>
-                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    <span>Submitting...</span>
+                    <svg className="animate-spin h-4 w-4 text-emerald-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Submitting to Database...</span>
                   </>
-                ) : '✓ Confirm & Submit'}
+                ) : (
+                  <>
+                    <span className="text-sm font-black">✓</span>
+                    <span>Confirm & Submit</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

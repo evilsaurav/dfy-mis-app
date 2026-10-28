@@ -258,12 +258,12 @@ export default function AdminHeader({
                     if (ok) showToast("✓ Live database refresh complete.", "success");
                   }}
                   disabled={isLoading}
-                  className={`bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
+                  className={`group/refresh bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-50 text-white px-3 py-2 rounded-xl text-xs font-black transition-all shadow-xs shadow-teal-700/20 flex items-center gap-1.5 active:scale-95 cursor-pointer ${
                     isLoading ? 'cursor-wait animate-pulse' : ''
                   }`}
                   title="Click for guaranteed live database refresh."
                 >
-                  <svg className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg className={`w-3.5 h-3.5 transition-transform duration-500 group-hover/refresh:rotate-180 ${isLoading ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="23 4 23 10 17 10"></polyline>
                     <polyline points="1 20 1 14 7 14"></polyline>
                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>

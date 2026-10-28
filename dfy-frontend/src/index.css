@@ -159,3 +159,29 @@ input[type=number]::-webkit-outer-spin-button {
 }
 
 
+
+/* Micro-Interactions & Hardware-Accelerated Dynamic Effects */
+@keyframes btnShine {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+.animate-btn-shine {
+  animation: btnShine 3.5s infinite linear;
+}
+
+@keyframes flamePulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 3px rgba(245, 158, 11, 0.4)); }
+  50% { transform: scale(1.15); filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.7)); }
+}
+.animate-flame-pulse {
+  animation: flamePulse 2s infinite ease-in-out;
+}
+
+@keyframes hapticShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-5px); }
+  40%, 80% { transform: translateX(5px); }
+}
+.animate-haptic-shake {
+  animation: hapticShake 0.4s ease-in-out;
+}
