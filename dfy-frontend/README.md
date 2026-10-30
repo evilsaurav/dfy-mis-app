@@ -1,6 +1,6 @@
 # 📱 Doctors For You (DFY) - React 19 Field PWA & Analytics Dashboard
 
-[![Version](https://img.shields.io/badge/Version-v2.9.1-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.5-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![React](https://img.shields.io/badge/React-19.2-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://react.dev/)
 [![Vite](https://img.shields.io/badge/Vite-8.2-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3-38B2AC?style=for-the-badge&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
@@ -54,7 +54,7 @@ flowchart TD
 
 ### 6. 📜 In-App Release History & Changelog Modal (`changelogData.js`)
 - Client-side in-app changelog modal with zero database query overhead.
-- Automatically notifies users of new updates with version badges and highlights (v2.9.1).
+- Automatically notifies users of new updates with version badges and highlights (v2.9.5).
 
 ### 7. 📊 Dual-Sheet Staff Attendance Export & Multi-District Queue
 - Download high-density Excel workbooks (`/admin/export-staff-attendance`) featuring Sheet 1 (Monthly Attendance Matrix with Next-Day notes) and Sheet 2 (Detailed Activity Log).
@@ -77,6 +77,16 @@ flowchart TD
 - 3-tier automatic silent saves: tab switch, drilldown modal close/back, and 45s periodic debounce.
 - 1-click "Save All Staff (N)" bulk-save flushing all dirty tabs in a single all-or-nothing transaction.
 - Dedicated statewide executive dashboard with bento KPI cards and district status matrix.
+
+### 12. 🗓️ Sunday Roll-Forward Month-End Grace Period Engine (`operationalMonth.js`)
+- Automatic Sunday roll-forward resolver detects when Day 1 of a month falls on a Sunday.
+- Extends the previous month's operational reporting context through all of Sunday and until Monday 12:00 PM Noon.
+- Frontline mobile banner remains visible to guide field staff, and auto-dismisses at Monday 12:00 PM.
+
+### 13. 🎨 TA Visual Prefill Highlighting & 1-Click Snapshot Undo Revert
+- Illuminates newly prefilled data rows and calculations with distinct amber badges (`bg-amber-500/20 text-amber-300`).
+- Deep in-memory snapshot (`taPrefillSnapshotRef`) enables 1-click instant revert with zero database round-trips.
+- Keeps "Save All Staff" accessible anytime valid staff logs exist in the modal.
 
 ---
 

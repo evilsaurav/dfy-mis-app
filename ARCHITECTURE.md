@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.7.0 (v2.9.1 - Relational Travel Allowance Bulk-Save, All-or-Nothing ACID Transactions, Soft-Delete Directory Isolation & Multi-Staff Tab Strip)  
+> *Version:* 3.8.0 (v2.9.5 - Sunday Roll-Forward Grace Period Engine, TA Prefill Visual Highlighting & Snapshot Undo, Dynamic Live-Roster KPI Generation & Batch Deduplication)  
 > *Status:* Production Active
 
 ---

@@ -1,16 +1,133 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.1";
-export const LAST_UPDATED_DATE = "09 Oct 2026";
+export const APP_VERSION = "2.9.5";
+export const LAST_UPDATED_DATE = "30 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.5",
+    date: "30 Oct 2026",
+    title: "Sunday Roll-Forward Month-End Grace Period Engine, TA Prefill Visual Highlighting & 1-Click Snapshot Undo Revert",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🗓️ Sunday Roll-Forward Month-End Grace Period: When Day 1 of a month falls on a Sunday (official field weekly off), the month-end grace period automatically rolls forward to cover all of Sunday (Day 1) and Monday (Day 2) until 12:00 PM (Noon). Field officers can submit month-end Saturday reports on Monday morning without disruption.",
+      "🎨 Travel Allowance Visual Prefill Highlighting: When coordinators trigger 'Prefill District from MIS', auto-calculated rows and amounts are immediately illuminated with distinct amber visual badges, giving coordinators 100% clarity on newly calculated versus previously saved entries before committing.",
+      "↩️ 1-Click Snapshot Undo Revert Engine: Captured a pre-fill memory snapshot before applying calculations. If coordinators notice discrepancies, a dedicated 'Undo' button restores all staff logs to their exact pre-fill state with zero database pollution.",
+      "💾 Unlocked 'Save All Staff' Persistence: The 'Save All Staff' action remains interactable whenever valid staff logs exist in the modal, allowing coordinators to persist district-wide logs whenever they choose.",
+      "🏍️ Non-Destructive Meter Entry & Verified Lock Protection: Entering start/end odometer readings automatically calculates total KM without overwriting verified days, preserving locked audit records during district-wide prefetching."
+    ],
+    details: [
+      {
+        tag: "Grace Period Automation",
+        color: "indigo",
+        text: "Sunday roll-forward logic prevents reporting lockouts when the 1st of the month lands on an official weekly off."
+      },
+      {
+        tag: "TA Visual Feedback",
+        color: "teal",
+        text: "Amber prefill badges and 1-click snapshot restore provide total transparency and control during monthly log compilation."
+      },
+      {
+        tag: "Operational Reliability",
+        color: "emerald",
+        text: "Always-available Save All Staff persistence ensures district data can be saved at any step of the review process."
+      }
+    ]
+  },
+  {
+    version: "v2.9.4",
+    date: "27 Oct 2026",
+    title: "High-Throughput PostgreSQL Batch Deduplication, Frontline PIN Vault Dots & Morphing Submission Micro-Interactions",
+    badge: "Previous Stable",
+    badgeColor: "slate",
+    highlights: [
+      "⚡ High-Throughput PostgreSQL Batch Deduplication: Consolidated 90-day duplicate checking into a single bulk query and optimized child table writes with executemany bulk insertions, slashing database overhead during high-concurrency evening reporting spikes.",
+      "✨ Frontline PIN Vault Typing Dots: Added animated visual indicator dots to the 4-digit PIN verification input on mobile, providing immediate tactile typing feedback to field workers in low-signal environments.",
+      "🔘 Morphing Submission State Machine: Converted the final report submission button into a morphing state machine that displays loading spinners and disabled states, eliminating duplicate report submissions caused by rapid double-tapping.",
+      "📱 Mobile Viewport & CSS Resiliency: Hardened mobile layouts against 100vh scrolling anomalies and notch safe-areas on budget Android smartphones used in rural operations."
+    ],
+    details: [
+      {
+        tag: "Database Performance",
+        color: "indigo",
+        text: "Single-query 90-day deduplication and executemany batch writes reduce database connection round-trips."
+      },
+      {
+        tag: "Mobile Micro-Interactions",
+        color: "teal",
+        text: "Dynamic PIN indicator dots and morphing buttons deliver immediate visual response and prevent duplicate clicks."
+      }
+    ]
+  },
+  {
+    version: "v2.9.3",
+    date: "24 Oct 2026",
+    title: "Enterprise Security Governance, Fail-Closed PIN Verification, Supabase Data API Role Grants & Executive Attribution Metadata",
+    badge: "Previous Stable",
+    badgeColor: "slate",
+    highlights: [
+      "🛡️ Admin Password Hash Sanitization: Stripped sensitive password_hash fields from all admin user serialization endpoints and API responses, enforcing strict principle-of-least-privilege data hygiene.",
+      "🔒 Fail-Closed Offline PIN Verification: Hardened the frontline offline authentication pipeline to fail-closed on corrupted or missing vault entries, ensuring zero unauthorized access.",
+      "🌐 Strict CORS & Environment Boundary Hardening: Restricted CORS origins exclusively to verified production and local development origins, rejecting arbitrary cross-origin requests.",
+      "⚙️ Supabase Oct 30 Data API Policy Alignment: Configured explicit schema permissions and role grants across all tables in schema public to ensure full compatibility with Supabase's infrastructure upgrades.",
+      "📑 Official Executive Attribution & Metadata Stamping: Dynamically stamped official author attribution metadata ('Designed & Developed by Saurav Kumar, State Data & Documentation Consultant, DFY Bihar') across all Report Studio and system Excel workbooks."
+    ],
+    details: [
+      {
+        tag: "Security Governance",
+        color: "rose",
+        text: "Complete sanitization of credentials and fail-closed authentication hardening across all API gates."
+      },
+      {
+        tag: "Infrastructure Compatibility",
+        color: "amber",
+        text: "Explicit role grants ensure uninterrupted database connectivity across Supabase API policy updates."
+      },
+      {
+        tag: "Executive Attribution",
+        color: "emerald",
+        text: "Subtle official stamps and document properties dynamically embedded into executive Excel exports."
+      }
+    ]
+  },
+  {
+    version: "v2.9.2",
+    date: "18 Oct 2026",
+    title: "Live-Roster Dynamic 33-Sheet KPI Workbooks (Backlog #88), Sub-Admin TA Prefill Delegated Permissions (Backlog #89) & Strict IST Date Guard",
+    badge: "Previous Stable",
+    badgeColor: "slate",
+    highlights: [
+      "📊 Dynamic Live-Roster KPI Generation (Backlog #88): Upgraded the 33-sheet District KPI Excel generator to synthesize workbooks dynamically from the live staff_directory roster instead of static templates, guaranteeing 100% staff name and designation synchronization across all sheets.",
+      "🔑 Sub-Admin TA Prefill Delegated Permissions (Backlog #89): Super Admins can delegate district prefill permissions to specific Sub-Admins via a new toggle in the admin suite, with immediate real-time permission sync via /admin/auth/me.",
+      "🕒 Strict Today's IST Submission Date Guard (Backlog #87): Enforced backend validation requiring daily field reports to match the active IST calendar date, permanently eliminating back-dated or future-dated submission anomalies.",
+      "🎯 Staff Target Synchronization & Freeze Fix: Fixed input freezing in the Staff Details modal and unified target persistence between the Set Targets matrix and Staff & PINs admin tool."
+    ],
+    details: [
+      {
+        tag: "Dynamic Excel Architecture",
+        color: "indigo",
+        text: "Live roster synthesis replaces fragile static templates, ensuring 33-sheet KPI workbooks match current field staff."
+      },
+      {
+        tag: "Delegated RBAC",
+        color: "teal",
+        text: "Granular sub-admin permission management allows controlled delegation of district-wide prefill operations."
+      },
+      {
+        tag: "Date Integrity",
+        color: "emerald",
+        text: "Server-side IST calendar validation ensures strict daily submission compliance without date tampering."
+      }
+    ]
+  },
   {
     version: "v2.9.1",
     date: "09 Oct 2026",
     title: "Travel Allowance Multi-Tab Bulk-Save Engine, All-or-Nothing ACID Transactions & Staff Soft-Delete Lifecycle Hardening",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous Stable",
+    badgeColor: "slate",
     highlights: [
       "💾 Travel Allowance 'Save All Staff' Bulk-Save Engine (Backlog #79): Deployed atomic bulk-save endpoint (POST /admin/ta/save-log-bulk) and 'Save All Staff (N)' button in the multi-tab drilldown modal, allowing coordinators to edit multiple staff tabs and persist all changes across the district in a single operation.",
       "🛡️ All-or-Nothing ACID Transactional Semantics: Validates permissions, district scope, and lock status for all staff entries upfront before committing any writes. If any entry is locked (HTTP 423) or invalid, the entire batch is rejected with zero database mutations, rolled back atomically via PostgreSQL connection context.",

@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.1-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.5-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -52,6 +52,13 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [23. 17-Indicator 33-Sheet District KPI Excel Engine, Render Anti-OOM Spooling & RBAC Security](#23--17-indicator-33-sheet-district-kpi-excel-engine-render-anti-oom-spooling--rbac-security)
   - [24. Staff Target Synchronization Across Admin Tools, Resilient Master Matching & 12 PM Cutoff](#24--staff-target-synchronization-across-admin-tools-resilient-master-matching--12-pm-cutoff)
   - [25. Relational Travel Allowance & Bike Log Engine (PostgreSQL), Dynamic Rate Controls & Multi-Sheet Excel Studio](#25--relational-travel-allowance--bike-log-engine-postgresql-dynamic-rate-controls--multi-sheet-excel-studio)
+  - [26. Sunday Roll-Forward Month-End Grace Period Engine & Reporting Cutoff](#26--sunday-roll-forward-month-end-grace-period-engine--reporting-cutoff)
+  - [27. Travel Allowance Prefill Visual Highlighting & 1-Click Snapshot Undo Engine](#27--travel-allowance-prefill-visual-highlighting--1-click-snapshot-undo-engine)
+  - [28. Live-Roster Dynamic 33-Sheet District KPI Workbooks (Backlog #88)](#28--live-roster-dynamic-33-sheet-district-kpi-workbooks-backlog-88)
+  - [29. Sub-Admin TA Prefill Delegated Security & Permissions (Backlog #89)](#29--sub-admin-ta-prefill-delegated-security--permissions-backlog-89)
+  - [30. High-Throughput PostgreSQL Batch Deduplication & Bulk Ingestion](#30--high-throughput-postgresql-batch-deduplication--bulk-ingestion)
+  - [31. Frontline Micro-Interactions: Morphing Buttons, Vault Indicators & Fail-Closed Security](#31--frontline-micro-interactions-morphing-buttons-vault-indicators--fail-closed-security)
+  - [32. Official Author Attribution & Executive Excel Metadata Stamping](#32--official-author-attribution--executive-excel-metadata-stamping)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -472,6 +479,72 @@ flowchart TD
   - Features KPI bento summary cards (Total Statewide KM, Gross Claims, Approved Payouts, Open Disputes), multi-district status matrix, and 1-click drilldowns into district rosters.
 - **Attendance Radar District Normalization**:
   - Hardened district lookup keys across the real-time Attendance Radar, resolving defaulter collisions in multi-word district names (e.g. Purba Champaran / East Champaran) without losing streak history.
+
+---
+
+### 26. 🗓️ Sunday Roll-Forward Month-End Grace Period Engine & Reporting Cutoff
+- **Automated Sunday Roll-Forward Logic**:
+  - Solves the operational challenge where Day 1 of a new month falls on a Sunday (e.g. November 1, 2026), which is the official weekly off for frontline field staff.
+  - In `operationalMonth.js` and `backend/core/helpers.py`, when `day_1_is_sunday` evaluates to true (`first_of_month.weekday() == 6`), the month-end grace period automatically rolls forward:
+    - **Sunday (Day 1)** remains in active grace period all day (24 hours).
+    - **Monday (Day 2)** morning remains in active grace period until **12:00 PM (Noon)**.
+  - Frontline Field Officers returning to duty on Monday morning can safely submit their Saturday/month-end field reports without penalty or disruption.
+- **Dynamic 12:00 PM Extended Reporting Cutoff**:
+  - `get_reporting_cutoff_hour` returns `12:00 PM` on both Sunday and Monday (instead of the standard 11:00 AM weekday cutoff), allowing seamless late reconciliation.
+  - At exactly 12:00 PM Noon on Monday, the system seamlessly transitions to the new operational month, auto-dismisses the mobile banner, and updates administrative pacing counters.
+
+---
+
+### 27. 🎨 Travel Allowance Prefill Visual Highlighting & 1-Click Snapshot Undo Engine
+- **Visual Amber Prefill Badging**:
+  - When coordinators trigger "Prefill District from MIS", newly populated odometer readings, travel details, and computed reimbursement rows are instantly illuminated with an amber highlight (`bg-amber-500/20 text-amber-300`).
+  - Gives coordinators 100% immediate clarity on which fields were auto-populated by the system versus previously verified manually entered rows.
+- **1-Click Deep Snapshot Undo Engine**:
+  - The frontend captures an in-memory deep snapshot (`taPrefillSnapshotRef`) immediately before applying auto-calculations.
+  - If a coordinator realizes they triggered pre-fill by mistake or wish to revert, an immediate **"↩️ Undo"** action button restores all staff logs to their exact pre-fill state with zero database round-trips or pollution.
+- **Always-Active "Save All Staff" Persistence**:
+  - The bulk persistence action remains fully interactable whenever valid staff logs exist in the modal, giving coordinators the freedom to persist district-wide logs whenever they choose.
+- **Non-Destructive Meter Entry & Lock Protection**:
+  - Entering odometer start and end readings dynamically calculates Day KM (`end_km - start_km`) without forcing unprompted overrides on existing manual numbers, preserving locked audit records during district-wide prefetching.
+
+---
+
+### 28. 📊 Live-Roster Dynamic 33-Sheet District KPI Workbooks (Backlog #88)
+- **Roster-Driven Dynamic Generation**:
+  - Completely replaced legacy static Excel templates with a dynamic synthesis engine driven by the live `staff_directory` roster in PostgreSQL.
+  - Automatically adapts to staff transfers, new additions, and designation changes across all 33 sheets (Performance Sheet, Consolidated Sheet, and Daily Sheets 1st–31st), guaranteeing zero name or designation desynchronization.
+
+---
+
+### 29. 🔑 Sub-Admin TA Prefill Delegated Security & Permissions (Backlog #89)
+- **Granular RBAC Delegation**:
+  - Super Admins can delegate district prefill permissions to specific Sub-Admins via a new toggle in the admin suite, with immediate real-time permission sync via `/admin/auth/me`.
+  - Sub-Admins without delegated permissions are strictly restricted from triggering automated log pre-fills, preserving audit integrity.
+
+---
+
+### 30. ⚡ High-Throughput PostgreSQL Batch Deduplication & Bulk Ingestion
+- **Single-Query 90-Day Deduplication**:
+  - Batched 90-day duplicate checking into a single SQL query with array/tuple lookups, slashing database query volume during evening submission spikes.
+  - Optimized child table insertions (presumptive cases, TB contacts, lab samples) using bulk `executemany` operations within single transactional connections.
+
+---
+
+### 31. ✨ Frontline Micro-Interactions: Morphing Buttons, Vault Indicators & Fail-Closed Security
+- **Dynamic PIN Vault Typing Dots**:
+  - Animated typing indicator dots provide tactile visual feedback for 4-digit PIN verification on mobile in low-connectivity rural environments.
+- **Morphing Submission State Machine**:
+  - Form submission buttons morph into reactive loading spinners, preventing duplicate report submissions caused by rapid double-tapping.
+- **Fail-Closed Security & Strict CORS**:
+  - Hardened mobile PIN verification pipeline to fail-closed on corrupted or missing offline vault entries, preventing unauthorized duty access.
+  - Stripped sensitive `password_hash` fields from all admin user serialization endpoints and restricted CORS origins exclusively to verified production and development environments.
+
+---
+
+### 32. 📑 Official Author Attribution & Executive Excel Metadata Stamping
+- **Dynamic Metadata Stamping**:
+  - Dynamically stamps official author attribution metadata ("Designed & Developed by Saurav Kumar, State Data & Documentation Consultant, DFY Bihar") across all Report Studio workbooks, 33-sheet KPI Excel sheets, and attendance exports.
+  - Embedded author metadata into OpenPyXL core document properties (`workbook.properties.creator`, `workbook.properties.title`).
 
 ---
 

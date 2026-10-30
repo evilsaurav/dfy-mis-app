@@ -5,7 +5,7 @@
 > *Design Framework:* Tailwind CSS v4 + React 19 + Lucide Icons  
 > *Typography:* Plus Jakarta Sans  
 > *Target Form Factors:* Mobile PWA (Field Staff) & Responsive Desktop Studio (Administrators)  
-> *Version:* 3.6.0 (v2.9.1 - Multi-Staff Drilldown Tab Strip, Save All Staff Bulk Engine & Bento TA Verification SOP)  
+> *Version:* 3.7.0 (v2.9.5 - Amber Prefill Badges, Snapshot Revert Controls, PIN Vault Typing Dots & Morphing Submission Buttons)  
 > *Status:* Production Active
 
 ---
