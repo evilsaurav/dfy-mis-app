@@ -42,6 +42,14 @@ def test_reporting_cutoff_hour_day_1_vs_other_days():
     dt_day15 = datetime(2026, 10, 15, 9, 30)
     assert get_reporting_cutoff_hour(dt_day15) == 11
 
+    # Sunday Day 1 roll-forward: Nov 1 (Sun) and Nov 2 (Mon) yield 12, Nov 3 yields 11
+    dt_nov1 = datetime(2026, 11, 1, 10, 0)
+    assert get_reporting_cutoff_hour(dt_nov1) == 12
+    dt_nov2 = datetime(2026, 11, 2, 10, 0)
+    assert get_reporting_cutoff_hour(dt_nov2) == 12
+    dt_nov3 = datetime(2026, 11, 3, 10, 0)
+    assert get_reporting_cutoff_hour(dt_nov3) == 11
+
 def test_get_active_operational_month():
     # Oct 1 at 09:00 AM -> September (grace window)
     dt_morning = datetime(2026, 10, 1, 9, 0)
@@ -62,6 +70,22 @@ def test_get_active_operational_month():
     # None defaults to get_ist_now()
     with patch("main.get_ist_now", return_value=datetime(2026, 10, 1, 8, 30)):
         assert get_active_operational_month() == "2026-09"
+
+    # Sunday Day 1 roll-forward tests (Nov 1, 2026 is Sunday)
+    dt_nov1_morning = datetime(2026, 11, 1, 10, 0)
+    assert get_active_operational_month(dt_nov1_morning) == "2026-10"
+    dt_nov1_night = datetime(2026, 11, 1, 20, 0)
+    assert get_active_operational_month(dt_nov1_night) == "2026-10"
+
+    # Monday morning Nov 2 before 12:00 PM remains October
+    dt_nov2_morning = datetime(2026, 11, 2, 9, 30)
+    assert get_active_operational_month(dt_nov2_morning) == "2026-10"
+
+    # Monday noon Nov 2 switches to November
+    dt_nov2_noon = datetime(2026, 11, 2, 12, 0)
+    assert get_active_operational_month(dt_nov2_noon) == "2026-11"
+    dt_nov2_afternoon = datetime(2026, 11, 2, 14, 0)
+    assert get_active_operational_month(dt_nov2_afternoon) == "2026-11"
 
 def test_check_today_status_at_10_30_am_on_day_1():
     # On Oct 1 at 10:30 AM (between 10 AM and 12 PM), check_today_status should look up yesterday's doc

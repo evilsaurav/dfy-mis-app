@@ -56,7 +56,39 @@ assert.equal(res6.isMonthEndGracePeriod, true);
 assert.equal(res6.graceClosingMonth, '2025-12');
 assert.equal(res6.activeCalendarMonth, '2026-01');
 
-console.log('✓ getOperationalMonth passes all boundary and grace period tests');
+// Test 1.7: Sunday Day 1 Morning (Nov 1, 2026 at 10:00 AM) -> Oct 2026 grace period
+const nov1Morning = new Date(2026, 10, 1, 10, 0);
+const resNov1M = getOperationalMonth(nov1Morning);
+assert.equal(resNov1M.operationalMonth, '2026-10');
+assert.equal(resNov1M.isMonthEndGracePeriod, true);
+assert.equal(resNov1M.graceClosingMonth, '2026-10');
+assert.equal(resNov1M.activeCalendarMonth, '2026-11');
+
+// Test 1.8: Sunday Day 1 Evening (Nov 1, 2026 at 20:00) -> Oct 2026 grace period (full Sunday covered)
+const nov1Evening = new Date(2026, 10, 1, 20, 0);
+const resNov1E = getOperationalMonth(nov1Evening);
+assert.equal(resNov1E.operationalMonth, '2026-10');
+assert.equal(resNov1E.isMonthEndGracePeriod, true);
+
+// Test 1.9: Monday Day 2 Morning (Nov 2, 2026 at 09:30 AM) -> Oct 2026 grace period
+const nov2Morning = new Date(2026, 10, 2, 9, 30);
+const resNov2M = getOperationalMonth(nov2Morning);
+assert.equal(resNov2M.operationalMonth, '2026-10');
+assert.equal(resNov2M.isMonthEndGracePeriod, true);
+
+// Test 1.10: Monday Day 2 at 12:00 PM Noon -> Nov 2026 active (grace closed)
+const nov2Noon = new Date(2026, 10, 2, 12, 0);
+const resNov2Noon = getOperationalMonth(nov2Noon);
+assert.equal(resNov2Noon.operationalMonth, '2026-11');
+assert.equal(resNov2Noon.isMonthEndGracePeriod, false);
+
+// Test 1.11: Monday Day 2 Afternoon (Nov 2, 2026 at 14:00) -> Nov 2026 active
+const nov2Afternoon = new Date(2026, 10, 2, 14, 0);
+const resNov2A = getOperationalMonth(nov2Afternoon);
+assert.equal(resNov2A.operationalMonth, '2026-11');
+assert.equal(resNov2A.isMonthEndGracePeriod, false);
+
+console.log('✓ getOperationalMonth passes all boundary, grace period, and Sunday roll-forward tests');
 
 // -------------------------------------------------------------
 // 2. Test calculateOverviewPacing()

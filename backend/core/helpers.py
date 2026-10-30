@@ -340,12 +340,20 @@ def get_reporting_cutoff_hour(now_ist: Optional[datetime] = None) -> int:
     Returns the reporting cutoff hour in IST.
     On Day 1 of any month, grace period extends until 12:00 PM (hour 12)
     to allow completion of previous month's final reports.
+    If Day 1 is Sunday (Weekly Off), grace period extends through Sunday (Day 1)
+    and until 12:00 PM on Monday (Day 2).
     On all other days, standard technical cutoff is 11:00 AM (hour 11).
     """
     if now_ist is None:
         now_ist = get_ist_now()
-    if now_ist.day == 1:
-        return 12
+    first_of_month = now_ist.replace(day=1)
+    day_1_is_sunday = (first_of_month.weekday() == 6)
+    if day_1_is_sunday:
+        if now_ist.day in (1, 2):
+            return 12
+    else:
+        if now_ist.day == 1:
+            return 12
     return 11
 
 def get_active_operational_month(now_ist: Optional[datetime] = None) -> str:
@@ -353,11 +361,22 @@ def get_active_operational_month(now_ist: Optional[datetime] = None) -> str:
     Returns the active operational month string (YYYY-MM).
     On Day 1 of any month before 12:00 PM Noon IST, the operational context
     is the previous calendar month (month-end grace period).
+    If Day 1 is Sunday, the grace period covers all of Sunday (Day 1)
+    and extends until 12:00 PM Noon on Monday (Day 2).
     Otherwise, returns the current calendar month.
     """
     if now_ist is None:
         now_ist = get_ist_now()
-    if now_ist.day == 1 and now_ist.hour < 12:
+    first_of_month = now_ist.replace(day=1)
+    day_1_is_sunday = (first_of_month.weekday() == 6)
+    is_grace = False
+    if day_1_is_sunday:
+        if now_ist.day == 1 or (now_ist.day == 2 and now_ist.hour < 12):
+            is_grace = True
+    else:
+        if now_ist.day == 1 and now_ist.hour < 12:
+            is_grace = True
+    if is_grace:
         return get_previous_month(now_ist.strftime("%Y-%m"))
     return now_ist.strftime("%Y-%m")
 

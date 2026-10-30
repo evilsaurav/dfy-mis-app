@@ -2,31 +2,53 @@
  * Operational Month and Day 1 Month-End Grace Period Resolver
  *
  * Requirements:
- * - On the 1st of any month before 12:00 PM Noon:
+ * - Standard: On the 1st of any month before 12:00 PM Noon:
  *   operationalMonth = previous month (YYYY-MM), isMonthEndGracePeriod = true.
+ * - Sunday Roll-Forward: When the 1st of the month falls on a Sunday (Weekly Off):
+ *   Sunday (Day 1) remains in grace period all day, and Monday (Day 2) before 12:00 PM Noon
+ *   remains in grace period so field staff can log Saturday/month-end reports on Monday morning.
  * - Otherwise:
  *   operationalMonth = current calendar month (YYYY-MM), isMonthEndGracePeriod = false.
  */
 
 export const getOperationalMonth = (customDate = new Date()) => {
   const d = new Date(customDate);
+  const year = d.getFullYear();
+  const month = d.getMonth();
   const day = d.getDate();
   const hours = d.getHours();
 
-  if (day === 1 && hours < 12) {
-    const prevMonthDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  // Day 1 day-of-week: 0 = Sunday
+  const day1OfWeek = new Date(year, month, 1).getDay();
+
+  let isGrace = false;
+  if (day1OfWeek === 0) {
+    // When Day 1 is Sunday:
+    // Sunday (Day 1) is full-day grace period, and Monday (Day 2) is grace period until 12:00 PM Noon
+    if (day === 1 || (day === 2 && hours < 12)) {
+      isGrace = true;
+    }
+  } else {
+    // Standard: Day 1 before 12:00 PM Noon
+    if (day === 1 && hours < 12) {
+      isGrace = true;
+    }
+  }
+
+  if (isGrace) {
+    const prevMonthDate = new Date(year, month - 1, 1);
     const yyyy = prevMonthDate.getFullYear();
     const mm = String(prevMonthDate.getMonth() + 1).padStart(2, '0');
     return {
       operationalMonth: `${yyyy}-${mm}`,
       isMonthEndGracePeriod: true,
       graceClosingMonth: `${yyyy}-${mm}`,
-      activeCalendarMonth: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      activeCalendarMonth: `${year}-${String(month + 1).padStart(2, '0')}`
     };
   }
 
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = year;
+  const mm = String(month + 1).padStart(2, '0');
   return {
     operationalMonth: `${yyyy}-${mm}`,
     isMonthEndGracePeriod: false,
