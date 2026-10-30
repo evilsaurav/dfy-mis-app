@@ -126,14 +126,23 @@ export default function TravelAllowanceModal({
   handleExportExcel,
   districts = [],
   currentUser,
+  showToast,
 }) {
   const contextMenuRef = useRef(null);
   const [showConfirmSubmitModal, setShowConfirmSubmitModal] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [editedDrafts, setEditedDrafts] = useState({});
+  const [prefillSnapshots, setPrefillSnapshots] = useState({});
   const isDirtyRef = useRef(isDirty);
 
   const getOfficerKey = (off) => off?.staff_key || off?.doc_id || off?.staff_id;
+
+  const currentOfficerKey = getOfficerKey(selectedOfficer);
+  const currentPrefillSnapshot = prefillSnapshots[currentOfficerKey];
+  const prefilledIndices = useMemo(
+    () => new Set(currentPrefillSnapshot?.prefilledIndices || []),
+    [currentPrefillSnapshot]
+  );
 
   const pendingBulkCount = useMemo(() => {
     const keys = new Set(Object.keys(editedDrafts));
@@ -168,6 +177,14 @@ export default function TravelAllowanceModal({
     const ok = await handleSaveLog?.(key, drilldownLog, deductionAmount, deductionReason, selectedOfficer, opts);
     if (ok) {
       setIsDirty(false);
+      if (key) {
+        setPrefillSnapshots((prev) => {
+          if (!prev || !prev[key]) return prev;
+          const copy = { ...prev };
+          delete copy[key];
+          return copy;
+        });
+      }
       if (key) {
         setEditedDrafts((prev) => {
           if (!prev || !prev[key]) return prev;
@@ -239,6 +256,14 @@ export default function TravelAllowanceModal({
       setDeductionAmount(officer?.deduction_amount || 0);
       setDeductionReason(officer?.deduction_reason || '');
       setIsDirty(false);
+      if (key) {
+        setPrefillSnapshots((prev) => {
+          if (!prev || !prev[key]) return prev;
+          const copy = { ...prev };
+          delete copy[key];
+          return copy;
+        });
+      }
     }
   };
 
@@ -375,6 +400,7 @@ export default function TravelAllowanceModal({
     const res = await handleSaveLogBulk?.(entries);
     if (res?.success) {
       setEditedDrafts({});
+      setPrefillSnapshots({});
       if (currentKey && latestDrafts[currentKey]) {
         setIsDirty(false);
       }
@@ -401,7 +427,103 @@ export default function TravelAllowanceModal({
     }
   };
 
-  const effectiveCanPrefill = isSuperAdmin || canPrefill;
+    const effectiveCanPrefill = isSuperAdmin || canPrefill;
+
+  const executePrefillWithTracking = async (targetOfficer) => {
+    const off = targetOfficer || selectedOfficer;
+    if (!off || !effectiveCanPrefill || isLocked) return;
+    const currentKey = getOfficerKey(off);
+    if (!currentKey) return;
+
+    // 1. Take snapshot of current state before prefill for Undo
+    const beforeDays = JSON.parse(JSON.stringify(drilldownLog && drilldownLog.length > 0 ? drilldownLog : buildDrilldownDaysFromOfficer(off)));
+    const beforeDeduction = deductionAmount;
+    const beforeReason = deductionReason;
+
+    // 2. Call prefill API via hook
+    const resDays = await handlePrefill?.(
+      off.staff_name,
+      currentKey
+    );
+
+    const newDays = Array.isArray(resDays) && resDays.length > 0 ? resDays : (drilldownLog || []);
+
+    if (Array.isArray(newDays) && newDays.length > 0) {
+      // 3. Compute diff indices
+      const changedIndices = [];
+      newDays.forEach((nd, i) => {
+        const bd = beforeDays[i] || {};
+        const bdM = String(bd.morning_km ?? '').trim();
+        const bdE = String(bd.evening_km ?? '').trim();
+        const ndM = String(nd.morning_km ?? '').trim();
+        const ndE = String(nd.evening_km ?? '').trim();
+        const bdTotal = parseFloat(bd.total_km || 0);
+        const ndTotal = parseFloat(nd.total_km || 0);
+
+        const hasReading = (ndM !== '' && ndM !== '0' && ndM !== '0.0') || (ndE !== '' && ndE !== '0' && ndE !== '0.0') || ndTotal > 0;
+        const valuesDiffer = (ndM !== bdM) || (ndE !== bdE) || (Math.abs(ndTotal - bdTotal) > 0.01);
+
+        if (hasReading && valuesDiffer) {
+          changedIndices.push(i);
+        }
+      });
+
+      // 4. Save snapshot
+      setPrefillSnapshots((prev) => ({
+        ...prev,
+        [currentKey]: {
+          snapshotDays: beforeDays,
+          snapshotDeduction: beforeDeduction,
+          snapshotReason: beforeReason,
+          prefilledIndices: changedIndices,
+        },
+      }));
+
+      // 5. Mark dirty & register in editedDrafts so Save All Staff is immediately active!
+      setIsDirty(true);
+      setEditedDrafts((prev) => ({
+        ...prev,
+        [currentKey]: {
+          officer: off,
+          days: newDays,
+          deduction_amount: deductionAmount,
+          deduction_reason: deductionReason,
+        },
+      }));
+    }
+  };
+
+  const handleUndoPrefill = () => {
+    if (!selectedOfficer) return;
+    const currentKey = getOfficerKey(selectedOfficer);
+    const snap = prefillSnapshots[currentKey];
+    if (!snap) return;
+
+    // Restore days and deductions
+    setDrilldownLog(snap.snapshotDays);
+    setDeductionAmount(snap.snapshotDeduction);
+    setDeductionReason(snap.snapshotReason);
+    setSelectedOfficer((prev) => (prev ? { ...prev, days: snap.snapshotDays } : prev));
+
+    // Remove from editedDrafts and clear dirty flag
+    setEditedDrafts((prev) => {
+      const copy = { ...prev };
+      delete copy[currentKey];
+      return copy;
+    });
+    setIsDirty(false);
+
+    // Clear this officer's prefill snapshot
+    setPrefillSnapshots((prev) => {
+      const copy = { ...prev };
+      delete copy[currentKey];
+      return copy;
+    });
+
+    if (showToast) {
+      showToast('↩️ Prefill undone. Restored previous values.', 'info');
+    }
+  };
 
   // ── ROSTER VIEW ───────────────────────────────────────────────────────────
   if (viewMode === 'ROSTER') {
@@ -499,10 +621,7 @@ export default function TravelAllowanceModal({
                                 if (staff) {
                                   setShowContextMenu(false);
                                   handleInspect(staff);
-                                  handlePrefill?.(
-                                    staff.staff_name,
-                                    staff.staff_key || staff.doc_id || staff.staff_id
-                                  );
+                                  executePrefillWithTracking(staff);
                                 }
                               }}
                               className="w-full text-xs border border-slate-200 rounded-xl px-2.5 py-2 font-medium text-slate-700 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
@@ -964,35 +1083,45 @@ export default function TravelAllowanceModal({
                   Rate: ₹{ratePerKm}/KM
                 </span>
 
-                {isSubAdmin && (
-                  <button
-                    onClick={() => {
-                      if (!effectiveCanPrefill || isLocked) return;
-                      handlePrefill?.(
-                        selectedOfficer?.staff_name,
-                        selectedOfficer?.staff_key || selectedOfficer?.doc_id || selectedOfficer?.staff_id
-                      );
-                    }}
-                    disabled={isSubmitting || !effectiveCanPrefill || isLocked}
-                    title={
-                      isLocked
-                        ? "Record is locked"
-                        : !effectiveCanPrefill
-                          ? "Prefill permission restricted to authorized admins. Contact Super Admin."
-                          : "Pre-fill KM readings from Field Reports"
-                    }
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
-                      isLocked || !effectiveCanPrefill
-                        ? "opacity-50 cursor-not-allowed text-slate-400 bg-slate-100 border border-slate-200"
-                        : "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 active:scale-95"
-                    }`}
-                  >
-                    <span>⚡</span>
-                    <span>{isSubmitting ? 'Pre-filling…' : 'Pre-fill from Field Reports'}</span>
-                    {!effectiveCanPrefill && !isLocked && (
-                      <span className="text-[10px] bg-slate-200 text-slate-600 px-1 py-0.2 rounded ml-1">🔒</span>
+                {(isSubAdmin || isSuperAdmin || effectiveCanPrefill) && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        if (!effectiveCanPrefill || isLocked) return;
+                        executePrefillWithTracking(selectedOfficer);
+                      }}
+                      disabled={isSubmitting || !effectiveCanPrefill || isLocked}
+                      title={
+                        isLocked
+                          ? "Record is locked"
+                          : !effectiveCanPrefill
+                            ? "Prefill permission restricted to authorized admins. Contact Super Admin."
+                            : "Pre-fill KM readings from Field Reports"
+                      }
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold transition-all shadow-sm ${
+                        isLocked || !effectiveCanPrefill
+                          ? "opacity-50 cursor-not-allowed text-slate-400 bg-slate-100 border border-slate-200"
+                          : "bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 active:scale-95"
+                      }`}
+                    >
+                      <span>⚡</span>
+                      <span>{isSubmitting ? 'Pre-filling…' : 'Pre-fill from Field Reports'}</span>
+                      {!effectiveCanPrefill && !isLocked && (
+                        <span className="text-[10px] bg-slate-200 text-slate-600 px-1 py-0.2 rounded ml-1">🔒</span>
+                      )}
+                    </button>
+                    {prefilledIndices.size > 0 && (
+                      <button
+                        onClick={handleUndoPrefill}
+                        disabled={isSubmitting}
+                        title="Undo prefill and restore previous values"
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all shadow-xs bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 active:scale-95"
+                      >
+                        <span>↩️</span>
+                        <span>Undo</span>
+                      </button>
                     )}
-                  </button>
+                  </div>
                 )}
               </div>
             </div>
@@ -1031,6 +1160,30 @@ export default function TravelAllowanceModal({
           })}
         </div>
 
+        {/* Prefill Notice & Undo Banner */}
+        {prefilledIndices.size > 0 && (
+          <div className="mx-4 mt-3 mb-1 px-4 py-2.5 bg-gradient-to-r from-cyan-50 via-blue-50 to-indigo-50 border border-cyan-200 rounded-2xl flex items-center justify-between shadow-2xs">
+            <div className="flex items-center gap-2 text-xs font-bold text-cyan-950">
+              <span className="text-base">⚡</span>
+              <span>
+                <strong>{prefilledIndices.size} days</strong> prefilled from Field Reports. Review highlighted rows below.
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleUndoPrefill}
+                disabled={isSubmitting}
+                className="flex items-center gap-1 px-3 py-1 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold shadow-2xs transition-all active:scale-95"
+                title="Undo prefill and restore previous values"
+              >
+                <span>↩️</span>
+                <span>Undo Prefill</span>
+              </button>
+              <span className="text-[11px] text-slate-500 font-medium hidden sm:inline">Click Save Log when ready.</span>
+            </div>
+          </div>
+        )}
+
         {/* 31-day table */}
         <div className="flex-1 overflow-x-auto p-4">
           <table className="w-full text-xs border-collapse">
@@ -1048,10 +1201,30 @@ export default function TravelAllowanceModal({
                   : (row.is_manual_override && row.total_km != null && parseFloat(row.total_km) > 0)
                     ? (parseFloat(row.total_km) || 0)
                     : Math.max(0, (parseFloat(row.evening_km) || 0) - (parseFloat(row.morning_km) || 0));
+                const isPrefilled = prefilledIndices.has(idx);
 
                 return (
-                  <tr key={row.day || idx} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                    <td className="px-3 py-2 font-bold text-slate-500 w-10">{row.day}</td>
+                  <tr 
+                    key={row.day || idx} 
+                    className={`border-b transition-colors duration-150 ${
+                      isPrefilled 
+                        ? 'bg-cyan-50/70 border-cyan-200 hover:bg-cyan-100/60' 
+                        : 'border-slate-100 hover:bg-slate-50'
+                    }`}
+                  >
+                    <td className="px-3 py-2 font-bold text-slate-500 w-12 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <span>{row.day}</span>
+                        {isPrefilled && (
+                          <span 
+                            className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-cyan-600 text-white shadow-2xs" 
+                            title="Prefilled from Daily Field Report (unsaved)"
+                          >
+                            ⚡ Prefill
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.date || '—'}</td>
                     <td className="px-3 py-2">
                       <input
@@ -1059,7 +1232,11 @@ export default function TravelAllowanceModal({
                         value={row.morning_km ?? ''}
                         onChange={(e) => handleDrilldownFieldChange(idx, 'morning_km', e.target.value)}
                         disabled={!canEdit || isLocked}
-                        className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        className={`w-24 border rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 ${
+                          isPrefilled
+                            ? 'border-cyan-400 bg-white font-semibold text-cyan-950 focus:ring-cyan-500 shadow-2xs'
+                            : 'border-slate-200 focus:ring-blue-300'
+                        }`}
                         placeholder="0"
                       />
                     </td>
@@ -1069,7 +1246,11 @@ export default function TravelAllowanceModal({
                         value={row.evening_km ?? ''}
                         onChange={(e) => handleDrilldownFieldChange(idx, 'evening_km', e.target.value)}
                         disabled={!canEdit || isLocked}
-                        className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                        className={`w-24 border rounded-lg px-2 py-1 text-xs disabled:bg-slate-50 disabled:text-slate-400 focus:outline-none focus:ring-1 ${
+                          isPrefilled
+                            ? 'border-cyan-400 bg-white font-semibold text-cyan-950 focus:ring-cyan-500 shadow-2xs'
+                            : 'border-slate-200 focus:ring-blue-300'
+                        }`}
                         placeholder="0"
                       />
                     </td>
@@ -1083,14 +1264,18 @@ export default function TravelAllowanceModal({
                             value={row.manual_total_km ?? row.total_km ?? ''}
                             onChange={(e) => handleDrilldownFieldChange(idx, 'manual_total_km', e.target.value)}
                             disabled={!canEdit || isLocked}
-                            className="w-20 border border-amber-300 bg-amber-50 rounded-lg px-2 py-1 text-xs font-bold text-amber-900 focus:outline-none focus:ring-1 focus:ring-amber-400 disabled:bg-slate-50 disabled:text-slate-400"
+                            className={`w-20 border rounded-lg px-2 py-1 text-xs font-bold focus:outline-none focus:ring-1 disabled:bg-slate-50 disabled:text-slate-400 ${
+                              isPrefilled
+                                ? 'border-cyan-400 bg-cyan-50 text-cyan-950 focus:ring-cyan-500 shadow-2xs'
+                                : 'border-amber-300 bg-amber-50 text-amber-900 focus:ring-amber-400'
+                            }`}
                             placeholder="0.0"
                             title="Manual KM reading"
                           />
                           <span className="text-[10px] font-black text-amber-600 bg-amber-100 px-1 py-0.5 rounded">MAN</span>
                         </div>
                       ) : (
-                        <span className="font-bold text-blue-700 tabular-nums">{dayKm.toFixed(1)}</span>
+                        <span className={`tabular-nums ${isPrefilled ? 'text-cyan-800 font-black' : 'font-bold text-blue-700'}`}>{dayKm.toFixed(1)}</span>
                       )}
                     </td>
                     <td className="px-3 py-2">
@@ -1213,12 +1398,12 @@ export default function TravelAllowanceModal({
             </button>
             <button
               onClick={handleBulkSaveClick}
-              disabled={pendingBulkCount === 0 || isSubmitting || !canEdit}
-              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              title={pendingBulkCount === 0 ? "No unsaved edits across staff tabs" : `Save all changes for ${pendingBulkCount} staff`}
+              disabled={isSubmitting || !canEdit || isLocked}
+              className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm active:scale-95"
+              title={pendingBulkCount === 0 ? "Save current staff log across district" : `Save all changes for ${pendingBulkCount} staff`}
             >
               <span>💾</span>
-              <span>{isSubmitting ? 'Saving All…' : `Save All Staff (${pendingBulkCount})`}</span>
+              <span>{isSubmitting ? 'Saving All…' : pendingBulkCount > 0 ? `Save All Staff (${pendingBulkCount})` : 'Save All Staff'}</span>
             </button>
             {isLocked && (
               <span className="text-xs text-amber-800 bg-amber-50 border border-amber-200 px-3 py-2 rounded-xl flex items-center gap-1.5 font-bold">

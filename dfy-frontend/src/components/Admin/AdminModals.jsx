@@ -584,6 +584,7 @@ export default function AdminModals(props) {
           handleExportExcel={props.handleExportExcel}
           districts={props.districts || []}
           currentUser={props.currentUser}
+          showToast={props.showToast}
         />
       )}
     </>

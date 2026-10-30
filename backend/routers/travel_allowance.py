@@ -1458,7 +1458,7 @@ def prefill_district_ta_from_reports(
             preserved_day = dict(ex_day)
             preserved_day["day"] = day
             preserved_day["date"] = preserved_day.get("date") or date_str
-            preserved_day["is_manual_override"] = bool(ex_day.get("is_manual_override") or ex_day.get("is_override"))
+            preserved_day["is_manual_override"] = True
             days.append(preserved_day)
         else:
             rep = reports_by_day.get(day)
