@@ -274,6 +274,18 @@ export default function AdminModals(props) {
         selectedDistrict={props.selectedDistrict || props.nikshayDistrict || 'All'}
         reviewExporting={props.reviewExporting}
         getAdminToken={props.getAdminToken || (() => '')}
+        nikshayElapsedSeconds={props.nikshayElapsedSeconds}
+        showPruneModal={props.showPruneModal}
+        setShowPruneModal={props.setShowPruneModal}
+        pruneRetentionMonths={props.pruneRetentionMonths}
+        setPruneRetentionMonths={props.setPruneRetentionMonths}
+        pruneLoading={props.pruneLoading}
+        prunePreviewData={props.prunePreviewData}
+        pruneError={props.pruneError}
+        pruneSuccess={props.pruneSuccess}
+        setPruneSuccess={props.setPruneSuccess}
+        handlePreviewPruneLedger={props.handlePreviewPruneLedger}
+        handleExecutePruneLedger={props.handleExecutePruneLedger}
       />
 
       {/* 15. Admin Backdated Feeding Studio */}

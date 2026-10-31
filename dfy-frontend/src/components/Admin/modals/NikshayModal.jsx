@@ -39,7 +39,19 @@ export default function NikshayModal({
   handleFetchJourney,
   selectedDistrict = 'All',
   reviewExporting = false,
-  getAdminToken = () => ''
+  getAdminToken = () => '',
+  nikshayElapsedSeconds = 0,
+  showPruneModal = false,
+  setShowPruneModal,
+  pruneRetentionMonths = 3,
+  setPruneRetentionMonths,
+  pruneLoading = false,
+  prunePreviewData = null,
+  pruneError = '',
+  pruneSuccess = null,
+  setPruneSuccess,
+  handlePreviewPruneLedger,
+  handleExecutePruneLedger
 }) {
   if (!show) return null;
 
@@ -50,7 +62,14 @@ export default function NikshayModal({
     if (setNikshayError) setNikshayError('');
   };
 
+  const formatElapsed = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}s`;
+  };
+
   return (
+    <>
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="bg-white border border-slate-200 rounded-3xl max-w-4xl w-full p-6 shadow-2xl space-y-5 animate-scale-up max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-4">
@@ -258,6 +277,32 @@ export default function NikshayModal({
                       {nikshayLoading ? 'Processing Nikshay Data...' : '⚡ Run Reconciliation Match'}
                     </button>
                   </div>
+                  {/* Low-Memory Processing Active Timer Feedback */}
+                  {nikshayLoading && (
+                    <div className="p-4 bg-emerald-50/90 border border-emerald-300 rounded-2xl space-y-2.5 mt-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                        <div className="flex items-center gap-2 font-bold text-emerald-900">
+                          <span className="inline-block animate-spin text-base">⚙️</span>
+                          <span>Low-Memory Processing Active (~512MB dyno guard)</span>
+                        </div>
+                        <div className="font-mono font-black text-xs text-emerald-900 bg-white px-2.5 py-1 rounded-lg border border-emerald-300 shadow-xs self-start sm:self-auto">
+                          ⏱️ Elapsed Time: {formatElapsed(nikshayElapsedSeconds)}
+                        </div>
+                      </div>
+                      
+                      {/* Pulsing Progress Bar */}
+                      <div className="w-full bg-emerald-200/70 rounded-full h-2.5 overflow-hidden">
+                        <div 
+                          className="bg-gradient-to-r from-emerald-500 to-teal-500 h-2.5 rounded-full transition-all duration-300 animate-pulse" 
+                          style={{ width: `${Math.min(96, Math.max(12, (nikshayElapsedSeconds / 35) * 100))}%` }}
+                        />
+                      </div>
+
+                      <p className="text-[11px] text-emerald-800 font-medium leading-relaxed">
+                        ⏳ Low-Memory Processing Active (~512MB dyno guard). Estimated Duration: ~25-45s for quarterly dump (~16,000 records). Please do not close this window.
+                      </p>
+                    </div>
+                  )}
                 </form>
                 )}
 
@@ -870,6 +915,18 @@ export default function NikshayModal({
                         <span>📥</span>
                         <span>{ledgerExporting ? 'Exporting...' : 'Export Excel'}</span>
                       </button>
+                      {!isSubAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewPruneLedger && handlePreviewPruneLedger(pruneRetentionMonths || 3)}
+                          disabled={pruneLoading || ledgerLoading}
+                          className="bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-xs active:scale-95 cursor-pointer flex items-center gap-1.5 whitespace-nowrap"
+                          title="Prune and back up records older than 3 months to prevent RAM and database bloat"
+                        >
+                          <span>🧹</span>
+                          <span>{pruneLoading ? 'Checking...' : 'Prune Old (>3M)'}</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1020,5 +1077,216 @@ export default function NikshayModal({
             )}
           </div>
         </div>
+      {/* 3-Month Retention Prune Confirmation Modal */}
+      {showPruneModal && (
+        <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 animate-scale-up">
+            {/* Header */}
+            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl p-2 bg-amber-50 rounded-2xl border border-amber-200">🧹</span>
+                <div>
+                  <h4 className="text-base font-black text-slate-800">3-Month Retention Prune</h4>
+                  <p className="text-xs text-slate-500 font-medium">Safe Google Drive archive & database cleanup</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (setShowPruneModal) setShowPruneModal(false);
+                  if (setPruneSuccess) setPruneSuccess(null);
+                }}
+                disabled={pruneLoading}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 font-bold flex items-center justify-center transition-all cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Error Banner */}
+            {pruneError && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 font-medium flex items-center gap-2">
+                <span>⚠️</span>
+                <span>{pruneError}</span>
+              </div>
+            )}
+
+            {/* Success State */}
+            {pruneSuccess ? (
+              <div className="space-y-4 py-2">
+                <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl space-y-2 text-center">
+                  <div className="text-3xl">🎉</div>
+                  <h5 className="text-sm font-black text-emerald-900">Purge & Backup Completed!</h5>
+                  <p className="text-xs text-emerald-800 font-medium leading-relaxed">
+                    {pruneSuccess.message}
+                  </p>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2 text-xs">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-bold">Records Backed Up:</span>
+                    <span className="font-mono font-bold text-slate-800">{pruneSuccess.records_backed_up ?? pruneSuccess.matched_count ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-bold">Records Purged:</span>
+                    <span className="font-mono font-bold text-emerald-700">{pruneSuccess.records_deleted ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-bold">Cutoff Date:</span>
+                    <span className="font-mono text-slate-700 font-bold">{pruneSuccess.cutoff_date || 'N/A'}</span>
+                  </div>
+                  {pruneSuccess.backup_filename && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-bold">Archive File:</span>
+                      <span className="font-mono text-[11px] text-slate-600 truncate max-w-[220px]" title={pruneSuccess.backup_filename}>
+                        {pruneSuccess.backup_filename}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {pruneSuccess.drive_file_link && (
+                  <a
+                    href={pruneSuccess.drive_file_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <span>📁</span>
+                    <span>View Backup Archive on Google Drive</span>
+                  </a>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (setShowPruneModal) setShowPruneModal(false);
+                      if (setPruneSuccess) setPruneSuccess(null);
+                    }}
+                    className="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-5 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Confirmation / Preview State */
+              <div className="space-y-4">
+                {/* Retention Setting Control */}
+                <div className="flex items-center justify-between bg-slate-50 border border-slate-200 p-3 rounded-2xl text-xs">
+                  <div>
+                    <span className="font-bold text-slate-800 block">Retention Window</span>
+                    <span className="text-[11px] text-slate-500">Only records older than this will be pruned</span>
+                  </div>
+                  <select
+                    value={pruneRetentionMonths}
+                    onChange={(e) => {
+                      const m = parseInt(e.target.value, 10) || 3;
+                      if (setPruneRetentionMonths) setPruneRetentionMonths(m);
+                      if (handlePreviewPruneLedger) handlePreviewPruneLedger(m);
+                    }}
+                    disabled={pruneLoading}
+                    className="bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-500"
+                  >
+                    <option value={3}>3 Months (Default)</option>
+                    <option value={6}>6 Months</option>
+                    <option value={12}>12 Months</option>
+                  </select>
+                </div>
+
+                {/* Preview Metrics Card */}
+                {prunePreviewData && (
+                  <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 space-y-2.5 text-xs">
+                    <div className="grid grid-cols-2 gap-2 text-center">
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-amber-100">
+                        <span className="text-[10px] uppercase font-black text-amber-700 block">Identified Records</span>
+                        <span className="text-xl font-black text-amber-950 font-mono">
+                          {prunePreviewData.matched_count}
+                        </span>
+                        <span className="text-[10px] text-amber-700 block font-medium">To be pruned</span>
+                      </div>
+                      <div className="bg-white/80 p-2.5 rounded-xl border border-amber-100">
+                        <span className="text-[10px] uppercase font-black text-amber-700 block">Cutoff Date</span>
+                        <span className="text-base font-black text-amber-950 font-mono mt-1 block">
+                          {prunePreviewData.cutoff_date}
+                        </span>
+                        <span className="text-[10px] text-amber-700 block font-medium">Older than {pruneRetentionMonths}M</span>
+                      </div>
+                    </div>
+
+                    {prunePreviewData.sample_patient_ids && prunePreviewData.sample_patient_ids.length > 0 && (
+                      <div className="pt-1">
+                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
+                          Sample Patient IDs:
+                        </span>
+                        <div className="flex flex-wrap gap-1 font-mono text-[10px] text-slate-700 bg-white/70 p-2 rounded-lg border border-amber-100">
+                          {prunePreviewData.sample_patient_ids.slice(0, 6).map((pid) => (
+                            <span key={pid} className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                              {pid}
+                            </span>
+                          ))}
+                          {prunePreviewData.sample_patient_ids.length > 6 && (
+                            <span className="text-slate-400 font-sans self-center">
+                              +{prunePreviewData.sample_patient_ids.length - 6} more...
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Google Drive Auto-backup Guarantee Notice */}
+                <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-2xl flex items-start gap-2.5 text-xs text-blue-900 leading-relaxed">
+                  <span className="text-lg leading-none">🛡️</span>
+                  <div>
+                    <strong className="font-bold block text-blue-950">Zero Data Loss Guarantee:</strong>
+                    <span>
+                      Before any records are deleted from active database storage, an automated compressed archive (<code className="font-mono bg-blue-100/70 px-1 rounded text-blue-950">.json.gz</code>) will be permanently uploaded to Google Drive.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Modal Action Buttons */}
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (setShowPruneModal) setShowPruneModal(false);
+                      if (setPruneSuccess) setPruneSuccess(null);
+                    }}
+                    disabled={pruneLoading}
+                    className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 border border-slate-200 transition-all cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExecutePruneLedger && handleExecutePruneLedger(pruneRetentionMonths)}
+                    disabled={pruneLoading || (prunePreviewData && prunePreviewData.matched_count === 0)}
+                    className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                  >
+                    {pruneLoading ? (
+                      <>
+                        <span className="inline-block animate-spin text-sm">⚙️</span>
+                        <span>Backing up & Pruning...</span>
+                      </>
+                    ) : prunePreviewData?.matched_count === 0 ? (
+                      <span>No Old Records to Prune</span>
+                    ) : (
+                      <>
+                        <span>🧹</span>
+                        <span>Proceed Backup & Prune ({prunePreviewData?.matched_count || 0})</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

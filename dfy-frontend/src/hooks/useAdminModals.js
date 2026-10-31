@@ -204,6 +204,15 @@ export function useAdminModals({
   const [ledgerExporting, setLedgerExporting] = useState(false);
   const [reviewExporting, setReviewExporting] = useState(false);
   const [nikshaySyncStatus, setNikshaySyncStatus] = useState(null);
+  const [nikshayElapsedSeconds, setNikshayElapsedSeconds] = useState(0);
+
+  // 13.1 Nikshay 3-Month Retention Prune States
+  const [showPruneModal, setShowPruneModal] = useState(false);
+  const [pruneRetentionMonths, setPruneRetentionMonths] = useState(3);
+  const [pruneLoading, setPruneLoading] = useState(false);
+  const [prunePreviewData, setPrunePreviewData] = useState(null);
+  const [pruneError, setPruneError] = useState('');
+  const [pruneSuccess, setPruneSuccess] = useState(null);
 
   // 14. Admin Backdated Feeding
   const [showAdminFeedModal, setShowAdminFeedModal] = useState(false);
@@ -990,6 +999,63 @@ export function useAdminModals({
       setLedgerExporting(false);
     }
   };
+
+  // 13.1 Nikshay 3-Month Retention Prune Handlers
+  const handlePreviewPruneLedger = useCallback(async (months = pruneRetentionMonths) => {
+    setPruneLoading(true);
+    setPruneError('');
+    setPruneSuccess(null);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = authFetch
+        ? await authFetch(`${API_BASE_URL}/admin/nikshay/purge-old-records?dry_run=true&retention_months=${months}`, { method: 'POST' })
+        : await fetch(`${API_BASE_URL}/admin/nikshay/purge-old-records?dry_run=true&retention_months=${months}`, { method: 'POST', headers });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to preview retention purge');
+      }
+      setPrunePreviewData(data);
+      setShowPruneModal(true);
+    } catch (err) {
+      console.error("Prune preview error", err);
+      setPruneError(err.message || 'Error previewing prune operation');
+      if (showToast) showToast(err.message || 'Error previewing prune operation', 'error');
+    } finally {
+      setPruneLoading(false);
+    }
+  }, [pruneRetentionMonths, authFetch, getAdminToken, showToast]);
+
+  const handleExecutePruneLedger = useCallback(async (months = pruneRetentionMonths) => {
+    setPruneLoading(true);
+    setPruneError('');
+    setPruneSuccess(null);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      const res = authFetch
+        ? await authFetch(`${API_BASE_URL}/admin/nikshay/purge-old-records?dry_run=false&retention_months=${months}`, { method: 'POST' })
+        : await fetch(`${API_BASE_URL}/admin/nikshay/purge-old-records?dry_run=false&retention_months=${months}`, { method: 'POST', headers });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || 'Failed to execute retention purge');
+      }
+      setPruneSuccess(data);
+      if (showToast) showToast(`Successfully backed up & purged ${data.records_deleted || 0} records!`, 'success');
+      // Refresh cumulative ledger
+      fetchCumulativeLedger(1, '', ledgerDistrict);
+    } catch (err) {
+      console.error("Prune execute error", err);
+      setPruneError(err.message || 'Error executing prune operation');
+      if (showToast) showToast(err.message || 'Error executing prune operation', 'error');
+    } finally {
+      setPruneLoading(false);
+    }
+  }, [pruneRetentionMonths, authFetch, getAdminToken, showToast, fetchCumulativeLedger, ledgerDistrict]);
 
   // 14. Admin Backdated Feeding Handler
   const handleAdminFeedSubmit = async (e) => {
@@ -2244,6 +2310,22 @@ export function useAdminModals({
     }
   }, [showNikshayModal, fetchNikshaySyncStatus]);
 
+  // Live Stopwatch for Nikshay Reconciler
+  useEffect(() => {
+    let interval = null;
+    if (nikshayLoading) {
+      setNikshayElapsedSeconds(0);
+      interval = setInterval(() => {
+        setNikshayElapsedSeconds(prev => prev + 1);
+      }, 1000);
+    } else {
+      setNikshayElapsedSeconds(0);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [nikshayLoading]);
+
   return {
     // 1. Security
     showSecurityModal, setShowSecurityModal,
@@ -2357,6 +2439,12 @@ export function useAdminModals({
     handleDownloadReviewSheet, handleExportCumulativeLedger,
     fetchCumulativeLedger,
     isSubAdmin: currentUser?.role === 'SUB_ADMIN',
+    nikshayElapsedSeconds,
+    showPruneModal, setShowPruneModal,
+    pruneRetentionMonths, setPruneRetentionMonths,
+    pruneLoading, prunePreviewData,
+    pruneError, pruneSuccess, setPruneSuccess,
+    handlePreviewPruneLedger, handleExecutePruneLedger,
 
     // 14. Admin Backdated Feeding
     showAdminFeedModal, setShowAdminFeedModal,
