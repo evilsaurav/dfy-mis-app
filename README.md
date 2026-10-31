@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.8-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.9-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -60,6 +60,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [31. Frontline Micro-Interactions: Morphing Buttons, Vault Indicators & Fail-Closed Security](#31--frontline-micro-interactions-morphing-buttons-vault-indicators--fail-closed-security)
   - [32. Official Author Attribution & Executive Excel Metadata Stamping](#32--official-author-attribution--executive-excel-metadata-stamping)
   - [33. Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth](#33--frontline-monthly-impact-digest-30-performance-indicators-engine--fo-travel-allowance-pin-auth)
+  - [34. Nikshay Reconciler Quarterly Ingestion, Monotonic Smart Merge & 3-Month Rolling Retention Prune](#34--nikshay-reconciler-quarterly-ingestion-monotonic-smart-merge--3-month-rolling-retention-prune)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -574,6 +575,31 @@ flowchart TD
 - **Retrospective Multi-Month Selector & 1-Click WhatsApp Bulletin**:
   - Field staff can switch across the active month and past 5 operational months with sub-millisecond responses served from Redis micro-caches (TTL 300s).
   - 1-click WhatsApp performance bulletin generates emoji-bulleted monthly summaries ready for sharing in district coordination groups.
+
+---
+
+### 34. ⚖️ Nikshay Reconciler Quarterly Ingestion, Monotonic Smart Merge & 3-Month Rolling Retention Prune
+- **Quarterly Dump Ingestion & Multi-Month Detection (`extract_months_from_date_series`)**:
+  - Upgraded the official Nikshay reconciler (`/admin/reconcile-nikshay`) to parse multi-month and quarterly dumps based on `Spectrum_Diagnosis_Date`.
+  - Dynamically extracts sorted unique operational months (`YYYY-MM`) across ISO, Indian (`DD/MM/YYYY`), and datetime formats, cleanly cross-matching patient IDs against DFY MIS monthly submissions across the entire quarter.
+- **High-Speed Batch Monotonic Delta Upsert Engine (`psycopg2.extras.execute_values`)**:
+  - Replaced legacy row-by-row synchronization with chunked PostgreSQL batch upserts (1,000 items/chunk).
+  - Enforced monotonic retention: clinical indicators (`hiv_tested`, `dm_tested`, `bank_validated`, `udst_done`, `contact_tracing_done`) use boolean `OR` (`nikshay_verified_patients.col OR EXCLUDED.col`).
+  - Previously confirmed services (such as HIV testing in a previous dump) are permanently retained even when a subsequent dump only provides newer milestones (such as UDST or Bank validation), eliminating data wipe risks.
+  - Zero duplicate records guaranteed via `ON CONFLICT (patient_id) DO UPDATE SET ...`.
+- **3-Month Rolling Retention Pruning with Google Drive Backup**:
+  - Introduced `POST /admin/nikshay/purge-old-records` with customizable `retention_months: int = Query(3)`.
+  - Evaluates records using `COALESCE(diagnosis_date, last_reconciled_at, first_verified_at) < cutoff_date`.
+  - **Dry-Run Preview**: Returns matched record counts, cutoff dates, and sample IDs without deleting data.
+  - **Live Execution**: Compresses matching records into `.json.gz`, verifies successful upload to Google Drive via `BackupStorageProvider`, deletes in batches of 500, flushes Redis caches, and writes an immutable audit log (`NIKSHAY_PURGE_3M`).
+- **Low-Memory Dyno Safeguards (< 65 MB RAM on Render 512 MB Dynos)**:
+  - Samples column schemas using zero-row header inspection (`nrows=0`), loading only target clinical columns via `usecols` lambda projection.
+  - Endpoint wrapped in `async with NIKSHAY_EXPORT_SEMAPHORE:` ensuring single-flight processing during heavy quarterly file uploads.
+  - Immediate explicit garbage collection (`del df; del content; gc.collect()`) releases memory buffers before ledger upserts.
+- **Frontend Real-Time Stopwatch & Processing ETA Notice**:
+  - Displays a live stopwatch (`⏱️ Elapsed Time: MM:SSs`) and low-memory guidance notice during reconciliation, preventing accidental double-clicks and page refreshes.
+  - Replaces "Pending / No Dump Yet" in the modal header with a persistent, pulsing IST timestamp badge linked directly to the PostgreSQL `nikshay_sync_runs` table.
+  - Integrated a dedicated Prune Old Records modal in the Permanent Cumulative Ledger toolbar for Super Admins.
 
 ---
 

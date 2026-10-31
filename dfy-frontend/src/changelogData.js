@@ -1,16 +1,48 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.8";
-export const LAST_UPDATED_DATE = "31 Oct 2026";
+export const APP_VERSION = "2.9.9";
+export const LAST_UPDATED_DATE = "01 Nov 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.9",
+    date: "01 Nov 2026",
+    title: "Nikshay Reconciler Quarterly Ingestion, High-Speed Monotonic Smart Merge & 3-Month Rolling Retention Prune",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "⚡ Multi-Month & Quarterly Dump Ingestion: Upgraded the Nikshay Reconciler to seamlessly ingest full quarterly reports spanning multiple months based on Spectrum_Diagnosis_Date, routing records into the cumulative ledger without duplication.",
+      "🔒 High-Speed Batch Monotonic Smart Merge Engine: Replaced slow row-by-row updates with atomic PostgreSQL batch upserts (execute_values in 1,000 chunks). Verified indicators (HIV, DM, Bank DBT, UDST, Contact Tracing) now accumulate monotonically using boolean OR logic—never erasing previously validated clinical care.",
+      "🧹 3-Month Rolling Retention Pruning with Google Drive Backup: Added a one-click pruning studio with dry-run preview and automated compressed Google Drive backup (.json.gz), keeping the PostgreSQL ledger and Render memory lean.",
+      "🛡️ Low-Memory Projection & Concurrency Guard: Enforced 0-row header sniffing (nrows=0) and selective column projections (usecols), capped by an asyncio.Semaphore(1) guard that guarantees peak Python RAM remains strictly under 65 MB on 512 MB Render dynos.",
+      "⏱️ Live Stopwatch & Dyno Processing Feedback: Introduced a real-time elapsed timer (⏱️ 00:15s...) and advisory ETA progress banner, providing field officers and admins clear reassurance during heavy 16,000-row file processing.",
+      "🕒 Permanent Last Synced Status: Connected the modal header directly to the PostgreSQL nikshay_sync_runs audit table, permanently displaying the accurate IST timestamp and uploader."
+    ],
+    details: [
+      {
+        tag: "Data Integrity",
+        color: "emerald",
+        text: "Monotonic boolean OR updates ensure clinical indicators once verified on Nikshay are permanently preserved across dumps."
+      },
+      {
+        tag: "Memory Hardening",
+        color: "indigo",
+        text: "Streaming projection and garbage collection keep RAM spikes virtually non-existent on constrained Render dynos."
+      },
+      {
+        tag: "Database Hygiene",
+        color: "teal",
+        text: "3-month rolling retention prune automatically archives older records to Google Drive before batch deletion."
+      }
+    ]
+  },
   {
     version: "v2.9.8",
     date: "31 Oct 2026",
     title: "Frontline Digest Child-Table Data Parity Engine, 3D Atmospheric Fusion & Work Metrics Deduplication",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous",
+    badgeColor: "slate",
     highlights: [
       "🛡️ Child-Table Resilient Aggregation Engine: Upgraded /fo/monthly-recap to prioritize verified patient IDs from report_kpi_entries over parent legacy counts, guaranteeing 100% exact parity with Profile Work Breakdown across past, present, and future months.",
       "💎 3D Atmospheric Corner Fade: Integrated an outer ambient glow halo (-inset-1.5 blur-xl) and multi-layered depth shadows, seamlessly fading the dark scorecard into the surrounding page canvas without harsh rectangular cutouts.",

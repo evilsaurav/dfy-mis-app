@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.9] - 2026-11-01
+
+### Added & Optimized
+- **Nikshay Reconciler Quarterly Multi-Month Ingestion Engine**:
+  - Implemented `extract_months_from_date_series()` robustly parsing ISO (`YYYY-MM-DD`), Indian (`DD/MM/YYYY`), `pd.Timestamp`, and mixed date formats into unique sorted operational months.
+  - Added support for quarterly dumps spanning multi-months based on `Spectrum_Diagnosis_Date`, automatically detecting reporting periods and cross-matching against cumulative DFY MIS records without row loss.
+- **High-Speed Batch Monotonic Smart Merge Engine**:
+  - Replaced slow row-by-row updates with PostgreSQL batch upserts via `psycopg2.extras.execute_values` (1,000 records/chunk).
+  - Implemented monotonic boolean OR resolution: when re-uploading an existing patient ID with new services (e.g. UDST), previously confirmed services (e.g. HIV) remain `True` and are never wiped.
+  - Zero duplicate IDs guaranteed by `ON CONFLICT (patient_id) DO UPDATE SET ...`.
+- **3-Month Rolling Retention Pruning with Google Drive Backup**:
+  - Added `POST /admin/nikshay/purge-old-records` accepting `retention_months: int = Query(3)`.
+  - Computes rolling cutoff date (`COALESCE(diagnosis_date, last_reconciled_at, first_verified_at) < cutoff_date`).
+  - Implemented pre-flight dry-run preview (`dry_run=true`) providing exact match counts, cutoff dates, and sample IDs without deleting data.
+  - Live execution mode (`dry_run=false`) compresses matching records into `.json.gz`, validates successful Google Drive upload via `BackupStorageProvider`, and deletes in batches of 500 with zero data loss guarantee.
+- **Low-Memory Dyno Protection & RAM Safeguards**:
+  - Enforced 0-row header sniffing (`pd.read_excel(ef, nrows=0)`) and selective column projections (`usecols`), filtering 70+ column dumps down to essential clinical columns.
+  - Enforced single-flight concurrency with `async with NIKSHAY_EXPORT_SEMAPHORE:` and immediate explicit garbage collection (`del df; del content; gc.collect()`), keeping peak Python RAM strictly under 65 MB on 512 MB Render dynos.
+- **Frontend Live Stopwatch & Processing ETA Feedback**:
+  - Added real-time elapsed timer (`⏱️ Elapsed Time: MM:SSs`) and low-memory dyno advisory message during upload processing.
+  - Prevents accidental staff double-taps and tab closures during heavy 16,000-row file processing.
+- **Permanent Last Synced Telemetry Status**:
+  - Redirected `get_nikshay_sync_status` to query PostgreSQL `nikshay_sync_runs` table (`ORDER BY id DESC LIMIT 1`).
+  - Permanently displays accurate IST timestamp, match rate, and uploader in the reconciler modal header.
+
+---
+
 ## [2.9.8] - 2026-10-31
 
 ### Fixed & Hardened
