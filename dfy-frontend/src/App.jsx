@@ -197,7 +197,8 @@ const PendingInterventionsActionCenter = ({
     msg += `Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
 
     cascadeAlerts.forEach((a, idx) => {
-      msg += `${idx + 1}. Patient ID: *${a.id}*\n`;
+      msg += `${idx + 1}. Patient: *${a.patient_name || 'Patient'}* (ID: *${a.id}*)\n`;
+      if (a.phone) msg += `   📞 Phone: *${a.phone}*\n`;
       msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
       msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
     });
@@ -399,6 +400,43 @@ const PendingInterventionsActionCenter = ({
                   📋
                 </button>
               </div>
+
+              {/* Patient Name & Direct Dialer Bar for Field Officers */}
+              {(alt.patient_name || alt.phone) && (
+                <div className="flex flex-wrap items-center justify-between gap-1.5 py-1 px-2.5 bg-slate-50 border border-slate-100 rounded-xl text-xs">
+                  {alt.patient_name && (
+                    <span className="font-bold text-slate-800 flex items-center gap-1 truncate max-w-[200px]" title={alt.patient_name}>
+                      <span>👤</span>
+                      <span className="truncate">{alt.patient_name}</span>
+                    </span>
+                  )}
+                  {alt.phone && (
+                    <div className="flex items-center gap-1.5 ml-auto">
+                      <a
+                        href={`tel:${alt.phone}`}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs active:scale-95 transition-all cursor-pointer"
+                        title={`Call ${alt.phone}`}
+                      >
+                        <span>📞 Call</span>
+                        <span className="font-mono">{alt.phone}</span>
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (navigator.clipboard) {
+                            navigator.clipboard.writeText(alt.phone);
+                            showToast(`Phone ${alt.phone} copied!`, "info");
+                          }
+                        }}
+                        className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer transition-colors"
+                        title="Copy Phone"
+                      >
+                        📋
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* 1-Tap Action Autofill Buttons */}
               <div className="flex flex-wrap gap-1.5 items-center">

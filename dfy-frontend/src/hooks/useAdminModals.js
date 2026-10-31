@@ -928,8 +928,8 @@ export function useAdminModals({
     try {
       const formData = new FormData();
       formData.append('file', nikshayFile);
-      formData.append('month', nikshayMonth || month);
-      formData.append('district', nikshayDistrict);
+      formData.append('month', nikshayMonth || 'All');
+      formData.append('district', nikshayDistrict || 'All');
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const token = getAdminToken ? getAdminToken() : (localStorage.getItem('dfy_admin_token') || '');
       const res = await fetch(`${API_BASE_URL}/admin/reconcile-nikshay`, {
@@ -943,7 +943,7 @@ export function useAdminModals({
       }
       const data = await res.json();
       setNikshayResult(data);
-      fetchCumulativeLedger(1, '', nikshayDistrict);
+      fetchCumulativeLedger(1, '', 'All');
       fetchNikshaySyncStatus();
     } catch (err) {
       setNikshayError(err.message || 'Error running reconciliation');

@@ -1075,6 +1075,8 @@ async def reconcile_nikshay(
             except Exception as audit_err:
                 logger.warning(f"Error logging sync telemetry to nikshay_sync_runs: {audit_err}")
             cache.delete("nikshay_sync_meta_light")
+            cache.delete_prefix("ledger_")
+            cache.delete_prefix("journey_")
 
             sync_meta_doc = {
                 "synced_at": now_utc.isoformat(),
@@ -1444,15 +1446,15 @@ async def get_cumulative_ledger(
             return cached
 
         # Fast Path: Exact Episode ID Search (Direct row get)
-        s_clean = search.strip() if search else None
-        if s_clean and (" " not in s_clean) and (len(s_clean) >= 4):
-            doc_id = s_clean.replace("/", "_").replace(".", "_")
-            doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"id": doc_id})
+        s_clean = search.strip() if search and isinstance(search, str) else None
+        if s_clean and (" " not in s_clean) and (len(s_clean) >= 4) and s_clean.isdigit():
+            doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": s_clean})
             if not doc_dict:
-                doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": s_clean})
+                doc_dict = pg_fetch_one("nikshay_verified_patients", filters={"id": s_clean})
             if doc_dict:
                 p_dist = canonicalize_district(doc_dict.get("district", ""))
-                if not district or district == "All" or p_dist.lower() == canonicalize_district(district).lower():
+                clean_req_dist = str(district).strip() if district and isinstance(district, str) else "All"
+                if not clean_req_dist or clean_req_dist.lower() == "all" or p_dist.lower() == canonicalize_district(clean_req_dist).lower():
                     exact_res = {
                         "success": True,
                         "total_records": 1,
@@ -1472,39 +1474,122 @@ async def get_cumulative_ledger(
                     cache.set(cache_key, exact_res, ttl=300)
                     return exact_res
 
-        # Paginated Bounded Query with District Filtering from PostgreSQL
-        filters = {}
-        if district and district != "All":
-            filters["district"] = canonicalize_district(district)
+        # Build query filters for SQL execution
+        where_parts = []
+        params = []
+        clean_dist = str(district).strip() if district and isinstance(district, str) else "All"
+        if clean_dist and clean_dist.lower() != "all":
+            where_parts.append("LOWER(TRIM(district)) = LOWER(TRIM(%s))")
+            params.append(canonicalize_district(clean_dist))
+        if s_clean:
+            s_pat = f"%{s_clean}%"
+            where_parts.append("(patient_id ILIKE %s OR patient_name ILIKE %s OR phone ILIKE %s)")
+            params.extend([s_pat, s_pat, s_pat])
 
-        paginated = pg_query_table(
-            "nikshay_verified_patients",
-            filters=filters if filters else None,
-            order_by="first_verified_at",
-            order_desc=True,
-            limit=limit,
-            offset=(page - 1) * limit
-        )
+        where_sql = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
 
-        # Calculate metrics from the current bounded page
-        total_hiv_dm = sum(1 for d in paginated if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"))
-        total_bank = sum(1 for d in paginated if d.get("bank_validated"))
-        total_udst = sum(1 for d in paginated if d.get("udst_done"))
-        total_contact = sum(1 for d in paginated if d.get("contact_tracing_done"))
+        # Micro-cache aggregate metrics per (clean_dist, s_clean) with 300s TTL
+        metrics_cache_key = f"ledger_metrics_{clean_dist}_{s_clean}"
+        cached_metrics = cache.get(metrics_cache_key)
+        if not cached_metrics:
+            metrics_sql = f"""
+                SELECT 
+                    COUNT(*) as total_count,
+                    COUNT(*) FILTER (WHERE hiv_tested OR dm_tested OR hiv_dm_tested) as total_hiv_dm,
+                    COUNT(*) FILTER (WHERE bank_validated) as total_bank,
+                    COUNT(*) FILTER (WHERE udst_done) as total_udst,
+                    COUNT(*) FILTER (WHERE contact_tracing_done) as total_contact
+                FROM nikshay_verified_patients
+                {where_sql};
+            """
+            try:
+                m_rows = pg_execute_raw(metrics_sql, params, fetch=True)
+                if m_rows and len(m_rows) > 0 and m_rows[0].get("total_count") is not None:
+                    row = m_rows[0]
+                    cached_metrics = {
+                        "total_count": int(row.get("total_count") or 0),
+                        "total_hiv_dm": int(row.get("total_hiv_dm") or 0),
+                        "total_bank": int(row.get("total_bank") or 0),
+                        "total_udst": int(row.get("total_udst") or 0),
+                        "total_contact": int(row.get("total_contact") or 0),
+                    }
+            except Exception as m_err:
+                logger.warning(f"[Ledger Metrics] SQL aggregate notice: {m_err}")
+                cached_metrics = None
+
+            if cached_metrics:
+                cache.set(metrics_cache_key, cached_metrics, ttl=300)
+
+        offset = (page - 1) * limit
+
+        # Paginated Bounded Query with Index Optimization
+        data_sql = f"""
+            SELECT id, patient_id, patient_name, phone, district, diagnosis_date,
+                   notification_verified, notification_verified_date,
+                   hiv_tested, dm_tested, hiv_dm_tested, bank_validated, udst_done,
+                   contact_tracing_done, treatment_outcome, first_verified_at, last_reconciled_at
+            FROM nikshay_verified_patients
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT %s OFFSET %s;
+        """
+        data_params = params + [limit, offset]
+        paginated = None
+        try:
+            paginated = pg_execute_raw(data_sql, data_params, fetch=True)
+        except Exception as d_err:
+            logger.warning(f"[Ledger Query] SQL fetch notice: {d_err}")
+
+        if not paginated:
+            # Fallback to pg_query_table if raw query returned empty / failed / mock test environment
+            filters = {}
+            if clean_dist and clean_dist.lower() != "all":
+                filters["district"] = canonicalize_district(clean_dist)
+            fallback_rows = pg_query_table(
+                "nikshay_verified_patients",
+                filters=filters if filters else None,
+                order_by="id",
+                order_desc=True,
+                limit=limit,
+                offset=offset
+            ) or []
+            if fallback_rows:
+                paginated = fallback_rows
+            elif paginated is None:
+                paginated = []
+
+        # If metrics could not be fetched via SQL aggregate (e.g. test mock), compute from paginated slice
+        if not cached_metrics:
+            total_hiv_dm = sum(1 for d in paginated if d.get("hiv_dm_tested") or d.get("hiv_tested") or d.get("dm_tested"))
+            total_bank = sum(1 for d in paginated if d.get("bank_validated"))
+            total_udst = sum(1 for d in paginated if d.get("udst_done"))
+            total_contact = sum(1 for d in paginated if d.get("contact_tracing_done"))
+            total_count = len(paginated)
+            cached_metrics = {
+                "total_count": total_count,
+                "total_hiv_dm": total_hiv_dm,
+                "total_bank": total_bank,
+                "total_udst": total_udst,
+                "total_contact": total_contact,
+            }
+
+        total_count = cached_metrics["total_count"]
+        import math
+        total_pages = max(1, math.ceil(total_count / limit)) if total_count > 0 else 1
 
         res = {
             "success": True,
-            "total_records": len(paginated) if len(paginated) < limit else (page * limit + 1),
-            "total_in_collection": len(paginated),
+            "total_records": total_count,
+            "total_in_collection": total_count,
             "page": page,
             "limit": limit,
-            "total_pages": page + 1 if len(paginated) == limit else page,
+            "total_pages": total_pages,
             "metrics": {
-                "total_verified": len(paginated),
-                "hiv_dm_verified": total_hiv_dm,
-                "bank_validated": total_bank,
-                "udst_done": total_udst,
-                "contact_tracing_done": total_contact
+                "total_verified": total_count,
+                "hiv_dm_verified": cached_metrics["total_hiv_dm"],
+                "bank_validated": cached_metrics["total_bank"],
+                "udst_done": cached_metrics["total_udst"],
+                "contact_tracing_done": cached_metrics["total_contact"]
             },
             "patients": paginated
         }
@@ -1600,14 +1685,19 @@ async def get_patient_journey(patient_id: Optional[str] = None):
         if cached is not None:
             return cached
 
-        # Step 1: Check Permanent Nikshay Cumulative Ledger first to discover district
+        # Step 1: Check Permanent Nikshay Cumulative Ledger first to discover district & demographics
         ledger_doc_id = clean_id.replace("/", "_").replace(".", "_")
         known_district = ""
         ledger_data = None
         try:
-            ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"id": ledger_doc_id})
+            ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": clean_id})
             if not ledger_data:
-                ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"patient_id": clean_id})
+                ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"legacy_doc_id": ledger_doc_id})
+            if not ledger_data and clean_id.isdigit() and len(clean_id) <= 8:
+                try:
+                    ledger_data = pg_fetch_one("nikshay_verified_patients", filters={"id": int(clean_id)})
+                except Exception:
+                    pass
             if ledger_data:
                 known_district = canonicalize_district(ledger_data.get("district", ""))
         except Exception:
@@ -1828,6 +1918,41 @@ async def get_patient_journey(patient_id: Optional[str] = None):
             })
             patient_meta["nikshay_verified"] = True
             patient_meta["nikshay_indicators"] = active_nikshay_indicators
+
+        # Step 4: Demographics Fallback from sync grace, flagged, or FDC details
+        if not patient_meta.get("patient_name") or not patient_meta.get("phone"):
+            try:
+                g_row = pg_fetch_one("nikshay_sync_grace_records", filters={"patient_id": clean_id})
+                if g_row:
+                    if not patient_meta.get("patient_name") and g_row.get("patient_name") and "Unregistered" not in str(g_row.get("patient_name")):
+                        patient_meta["patient_name"] = g_row.get("patient_name")
+                    if not patient_meta.get("phone") and g_row.get("phone"):
+                        patient_meta["phone"] = g_row.get("phone")
+                    if not patient_meta.get("district") and g_row.get("district"):
+                        patient_meta["district"] = g_row.get("district")
+            except Exception:
+                pass
+
+        if not patient_meta.get("patient_name") or not patient_meta.get("phone"):
+            try:
+                fl_row = pg_fetch_one("nikshay_sync_flagged_records", filters={"patient_id": clean_id})
+                if fl_row:
+                    if not patient_meta.get("patient_name") and fl_row.get("patient_name") and "Unregistered" not in str(fl_row.get("patient_name")):
+                        patient_meta["patient_name"] = fl_row.get("patient_name")
+                    if not patient_meta.get("phone") and fl_row.get("phone"):
+                        patient_meta["phone"] = fl_row.get("phone")
+                    if not patient_meta.get("district") and fl_row.get("district"):
+                        patient_meta["district"] = fl_row.get("district")
+            except Exception:
+                pass
+
+        if not patient_meta.get("patient_name"):
+            try:
+                fdc_row = pg_fetch_one("report_fdc_details", filters={"patient_id": clean_id})
+                if fdc_row and fdc_row.get("patient_name") and "Patient #" not in str(fdc_row.get("patient_name")):
+                    patient_meta["patient_name"] = fdc_row.get("patient_name")
+            except Exception:
+                pass
                     
         milestones.sort(key=lambda m: (m["date"], m["order"]))
         

@@ -2419,6 +2419,41 @@ def compute_cascade_alerts(month: str, district: Optional[str] = "All", fo_name:
                 "has_outcome": p["outcome"]
             })
                 
+    # Bulk enrich alert_list with patient_name and phone for 1-Tap dialing by Field Officers
+    alert_pids = [str(a["id"]).strip() for a in alert_list if a.get("id")]
+    if alert_pids:
+        demographics_map = {}
+        try:
+            v_sql = "SELECT patient_id, patient_name, phone FROM nikshay_verified_patients WHERE patient_id = ANY(%s);"
+            v_rows = pg_execute_raw(v_sql, [alert_pids], fetch=True) or []
+            for r in v_rows:
+                pid = str(r.get("patient_id", "")).strip()
+                if pid:
+                    demographics_map[pid] = {
+                        "name": r.get("patient_name") or "",
+                        "phone": r.get("phone") or ""
+                    }
+            
+            missing_pids = [p for p in alert_pids if not demographics_map.get(p, {}).get("name") or not demographics_map.get(p, {}).get("phone")]
+            if missing_pids:
+                g_sql = "SELECT patient_id, patient_name, phone FROM nikshay_sync_grace_records WHERE patient_id = ANY(%s);"
+                g_rows = pg_execute_raw(g_sql, [missing_pids], fetch=True) or []
+                for r in g_rows:
+                    pid = str(r.get("patient_id", "")).strip()
+                    if pid:
+                        cur = demographics_map.setdefault(pid, {})
+                        if not cur.get("name") and r.get("patient_name") and "Unregistered" not in r.get("patient_name"):
+                            cur["name"] = r.get("patient_name")
+                        if not cur.get("phone") and r.get("phone"):
+                            cur["phone"] = r.get("phone")
+        except Exception as demo_err:
+            print(f"[Cascade Alerts Demographics Notice] {demo_err}")
+
+        for a in alert_list:
+            demo_info = demographics_map.get(str(a.get("id", "")).strip(), {})
+            a["patient_name"] = demo_info.get("name") or ""
+            a["phone"] = demo_info.get("phone") or ""
+
     risk_weight = {"HIGH": 3, "MEDIUM": 2, "LOW": 1}
     alert_list.sort(key=lambda x: (risk_weight.get(x["risk_level"], 0), x["days_elapsed"]), reverse=True)
     

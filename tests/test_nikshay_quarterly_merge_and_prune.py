@@ -360,6 +360,38 @@ async def test_3_month_retention_live_purge(monkeypatch):
         pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN (%s, %s);", [old_pid, recent_pid])
 
 
+@pytest.mark.asyncio
+async def test_cumulative_ledger_accurate_aggregates_and_pagination(monkeypatch):
+    """Verify get_cumulative_ledger returns accurate collection counts and district aggregates, not clamped to 50."""
+    monkeypatch.setenv("TEST_LIVE_DB", "1")
+    from backend.core.cache import cache
+    from backend.routers.nikshay import get_cumulative_ledger
+
+    cache.clear()
+    res = await get_cumulative_ledger(
+        district="Bhojpur",
+        search=None,
+        page=1,
+        limit=50,
+        admin={"username": "superadmin", "role": "SUPER_ADMIN"}
+    )
+
+    assert res["success"] is True
+    # Verify not clamped to 50
+    assert res["total_in_collection"] >= 1000, f"Expected total_in_collection >= 1000 for Bhojpur, got {res.get('total_in_collection')}"
+    assert res["total_records"] >= 1000
+    assert res["total_pages"] >= 20
+    assert len(res["patients"]) <= 50
+
+    metrics = res["metrics"]
+    assert metrics["total_verified"] == res["total_in_collection"]
+    assert metrics["hiv_dm_verified"] >= 500
+    assert metrics["bank_validated"] >= 300
+    assert metrics["udst_done"] >= 300
+    assert metrics["contact_tracing_done"] >= 300
+
+
+
 
 
 

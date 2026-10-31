@@ -175,7 +175,7 @@ export default function NikshayModal({
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-400 font-medium mt-1">
-                            Updated by <strong className="text-slate-200">{nikshaySyncStatus.synced_by}</strong> • Target Month: <strong className="text-slate-200 font-mono">{nikshaySyncStatus.month || 'Current'}</strong> {nikshaySyncStatus.filename && (<span className="text-slate-500">• File: <span className="font-mono text-slate-400">{nikshaySyncStatus.filename}</span></span>)}
+                            Updated by <strong className="text-slate-200">{nikshaySyncStatus.synced_by}</strong> • Scope: <strong className="text-slate-200 font-mono">{nikshaySyncStatus.month === 'All' ? 'Multi-Month / Auto' : (nikshaySyncStatus.month || 'Auto-Detected')}</strong> {nikshaySyncStatus.filename && (<span className="text-slate-500">• File: <span className="font-mono text-slate-400">{nikshaySyncStatus.filename}</span></span>)}
                           </p>
                         </div>
                       </div>
@@ -235,44 +235,38 @@ export default function NikshayModal({
                     </button>
                   </div>
                 ) : (
-                /* Upload & Filter Form (Super Admin) */
-                <form onSubmit={handleReconcileNikshay} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                /* Upload Form (Super Admin) - Auto-detects Months and Districts */
+                <form onSubmit={handleReconcileNikshay} className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 sm:p-5 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-1 border-b border-slate-200/60">
                     <div>
-                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Target Month</label>
-                      <input 
-                        type="month" 
-                        value={nikshayMonth} 
-                        onChange={(e) => setNikshayMonth(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
+                      <div className="flex items-center gap-2">
+                        <span className="text-base">📁</span>
+                        <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                          Upload Nikshay Registry Dump (.xlsx / .csv)
+                        </h4>
+                        <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          ⚡ Auto-Detection Active
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500 font-medium mt-1">
+                        Supports <strong>1-month or multi-month dumps (e.g. Last 3 Months)</strong>. Diagnosis date aur district excel se automatically detect ho jate hain, manual filter lagane ki zaroorat nahi hai.
+                      </p>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">District Filter</label>
-                      <select 
-                        value={nikshayDistrict} 
-                        onChange={(e) => setNikshayDistrict(e.target.value)}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500"
-                      >
-                        {districts.map(d => <option key={d} value={d}>{d === 'All' ? 'All Districts' : d}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Nikshay File (.xlsx / .csv)</label>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="flex-1 bg-white border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-emerald-500">
                       <input 
                         type="file" 
                         accept=".xlsx,.xls,.csv" 
                         onChange={(e) => setNikshayFile(e.target.files[0] || null)}
-                        className="w-full text-xs file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"
+                        className="w-full text-xs file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-600 file:text-white hover:file:bg-emerald-700 cursor-pointer"
                       />
                     </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-1">
                     <button
                       type="submit"
                       disabled={nikshayLoading || !nikshayFile}
-                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                      className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-6 py-3 rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer whitespace-nowrap"
                     >
                       {nikshayLoading ? 'Processing Nikshay Data...' : '⚡ Run Reconciliation Match'}
                     </button>
