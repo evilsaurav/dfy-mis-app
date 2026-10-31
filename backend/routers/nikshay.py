@@ -35,6 +35,7 @@ from backend.core.supabase import (
     pg_update_row,
     pg_delete_rows,
     pg_execute_raw,
+    get_db_connection,
     get_active_db,
 )
 from backend.core.styles import (
@@ -94,6 +95,60 @@ def is_phone_header(c: Any) -> bool:
     return any(k in h for k in ["primaryphone", "phone", "mobile", "contact", "cell"])
 
 
+def _parse_diag_date(val: Any) -> Optional[str]:
+    """Helper to cleanly parse and sanitize a diagnosis date into 'YYYY-MM-DD' or None."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "nan", "nat", "null", ""):
+        return None
+    if len(s) >= 10 and s[4] == "-" and s[7] == "-":
+        return s[:10]
+    try:
+        import pandas as pd
+        dt = pd.to_datetime(val, errors="coerce")
+        if pd.notna(dt):
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return None
+
+
+UPSERT_LEDGER_SQL = """
+INSERT INTO nikshay_verified_patients (
+    patient_id, patient_name, phone, district, diagnosis_date,
+    notification_verified, notification_verified_date,
+    hiv_tested, hiv_verified_date,
+    dm_tested, dm_verified_date,
+    bank_validated, bank_verified_date,
+    udst_done, udst_verified_date,
+    contact_tracing_done, contact_verified_date,
+    treatment_outcome,
+    first_verified_at, last_reconciled_at, reconciled_by
+) VALUES %s
+ON CONFLICT (patient_id) DO UPDATE SET
+    diagnosis_date = COALESCE(EXCLUDED.diagnosis_date, nikshay_verified_patients.diagnosis_date),
+    patient_name = COALESCE(NULLIF(EXCLUDED.patient_name, ''), nikshay_verified_patients.patient_name),
+    phone = COALESCE(NULLIF(EXCLUDED.phone, ''), nikshay_verified_patients.phone),
+    district = COALESCE(NULLIF(EXCLUDED.district, ''), nikshay_verified_patients.district),
+    notification_verified = nikshay_verified_patients.notification_verified OR EXCLUDED.notification_verified,
+    notification_verified_date = COALESCE(nikshay_verified_patients.notification_verified_date, EXCLUDED.notification_verified_date),
+    hiv_tested = nikshay_verified_patients.hiv_tested OR EXCLUDED.hiv_tested,
+    hiv_verified_date = COALESCE(nikshay_verified_patients.hiv_verified_date, EXCLUDED.hiv_verified_date),
+    dm_tested = nikshay_verified_patients.dm_tested OR EXCLUDED.dm_tested,
+    dm_verified_date = COALESCE(nikshay_verified_patients.dm_verified_date, EXCLUDED.dm_verified_date),
+    bank_validated = nikshay_verified_patients.bank_validated OR EXCLUDED.bank_validated,
+    bank_verified_date = COALESCE(nikshay_verified_patients.bank_verified_date, EXCLUDED.bank_verified_date),
+    udst_done = nikshay_verified_patients.udst_done OR EXCLUDED.udst_done,
+    udst_verified_date = COALESCE(nikshay_verified_patients.udst_verified_date, EXCLUDED.udst_verified_date),
+    contact_tracing_done = nikshay_verified_patients.contact_tracing_done OR EXCLUDED.contact_tracing_done,
+    contact_verified_date = COALESCE(nikshay_verified_patients.contact_verified_date, EXCLUDED.contact_verified_date),
+    treatment_outcome = COALESCE(NULLIF(EXCLUDED.treatment_outcome, ''), nikshay_verified_patients.treatment_outcome),
+    last_reconciled_at = EXCLUDED.last_reconciled_at,
+    reconciled_by = EXCLUDED.reconciled_by;
+"""
+
+
 # --- Nikshay Cumulative Verification Ledger Helper ---
 # =========================================================================
 def sync_nikshay_cumulative_ledger_sync(
@@ -101,167 +156,238 @@ def sync_nikshay_cumulative_ledger_sync(
     admin_user: str
 ) -> Dict[str, int]:
     """
-    Safely merges patient indicators into 'nikshay_verified_patients' in Firestore.
+    Safely merges patient indicators into 'nikshay_verified_patients' using high-speed batch upsert.
     Ensures MONOTONIC RETENTION: once True, an indicator is NEVER reverted to False or deleted.
-    Uses batch reads (db.get_all) and batch writes (db.batch) in chunks of 300.
-    Only writes documents that have changes or new indicators to preserve Firestore quotas.
+    Uses PostgreSQL execute_values in chunks of 1,000 rows with atomic ON CONFLICT DO UPDATE.
     """
     total_processed = len(patients_to_sync)
     if total_processed == 0:
         return {"total_processed": 0, "written": 0, "unchanged": 0}
 
-    pids = list(patients_to_sync.keys())
-    chunk_size = 300
+    chunk_size = 1000
     total_written = 0
-    total_unchanged = 0
-    now_iso = datetime.utcnow().isoformat()
-    now_date = datetime.utcnow().strftime("%Y-%m-%d")
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    now_date = now_dt.strftime("%Y-%m-%d")
     active_db = get_active_db()
+
+    # Deduplicate and normalize by cleaned patient_id
+    clean_patients: Dict[str, Dict[str, Any]] = {}
+    for pid, pdata in patients_to_sync.items():
+        s_pid = str(pid).strip()
+        if not s_pid:
+            continue
+        if s_pid not in clean_patients:
+            clean_patients[s_pid] = dict(pdata)
+        else:
+            clean_patients[s_pid].update({k: v for k, v in pdata.items() if v is not None and v != ""})
+
+    pids = list(clean_patients.keys())
+
     for i in range(0, len(pids), chunk_size):
         chunk_pids = pids[i:i + chunk_size]
-        chunk_doc_map = {pid: str(pid).strip().replace("/", "_").replace(".", "_") for pid in chunk_pids}
-        chunk_refs = [active_db.collection("nikshay_verified_patients").document(chunk_doc_map[pid]) for pid in chunk_pids]
-        doc_ids_list = list(chunk_doc_map.values())
-
-        existing_docs = {}
-        try:
-            pg_existing = pg_execute_raw(
-                "SELECT * FROM nikshay_verified_patients WHERE patient_id = ANY(%s)",
-                [chunk_pids],
-                fetch=True
-            )
-            if pg_existing:
-                for row in pg_existing:
-                    existing_docs[str(row.get("patient_id"))] = dict(row)
-        except Exception as err:
-            logger.warning(f"[Ledger Sync] PG select warning: {err}")
-            existing_docs = {}
-
-        if not existing_docs and active_db:
-            try:
-                snapshots = active_db.get_all(chunk_refs) if hasattr(active_db, "get_all") else [r.get() for r in chunk_refs]
-                for snap in snapshots:
-                    if getattr(snap, "exists", False):
-                        snap_data = snap.to_dict() if hasattr(snap, "to_dict") and callable(snap.to_dict) else dict(snap)
-                        pt_key = str(snap_data.get("patient_id") or getattr(snap, "id", ""))
-                        existing_docs[pt_key] = snap_data
-            except Exception as err:
-                logger.warning(f"[Ledger Sync] Batch get_all warning: {err}")
-
-        batch = active_db.batch() if (active_db and hasattr(active_db, "batch")) else None
-        batch_count = 0
+        batch_rows = []
 
         for pid in chunk_pids:
-            doc_id = chunk_doc_map[pid]
-            current = patients_to_sync[pid]
-            existing = existing_docs.get(str(pid), {}) or existing_docs.get(pid, {}) or existing_docs.get(doc_id, {})
+            pdata = clean_patients[pid]
+            p_name = str(pdata.get("name") or pdata.get("patient_name") or "").strip()
+            p_phone = str(pdata.get("phone") or "").strip()
+            p_dist = str(pdata.get("district") or "").strip()
+            diag_date = _parse_diag_date(pdata.get("diagnosis_date"))
 
-            is_new = not bool(existing)
+            notif_val = bool(pdata.get("notification_verified", False))
+            hiv_val = bool(pdata.get("hiv_tested", False))
+            dm_val = bool(pdata.get("dm_tested", False))
+            if pdata.get("hiv_dm_tested") and not hiv_val and not dm_val:
+                hiv_val = True
+            bank_val = bool(pdata.get("bank_validated", False))
+            udst_val = bool(pdata.get("udst_done", False))
+            contact_val = bool(pdata.get("contact_tracing_done", False))
+            outcome = str(pdata.get("outcome") or pdata.get("treatment_outcome") or "").strip()
 
-            notif_val = bool(existing.get("notification_verified", False) or current.get("notification_verified", False))
-            hiv_val = bool(existing.get("hiv_tested", False) or current.get("hiv_tested", False))
-            dm_val = bool(existing.get("dm_tested", False) or current.get("dm_tested", False))
-            hiv_dm_val = bool(existing.get("hiv_dm_tested", False) or current.get("hiv_dm_tested", False) or hiv_val or dm_val)
-            bank_val = bool(existing.get("bank_validated", False) or current.get("bank_validated", False))
-            udst_val = bool(existing.get("udst_done", False) or current.get("udst_done", False))
-            contact_val = bool(existing.get("contact_tracing_done", False) or current.get("contact_tracing_done", False))
+            batch_rows.append((
+                pid,
+                p_name,
+                p_phone,
+                p_dist,
+                diag_date,
+                notif_val,
+                now_date if notif_val else None,
+                hiv_val,
+                now_date if hiv_val else None,
+                dm_val,
+                now_date if dm_val else None,
+                bank_val,
+                now_date if bank_val else None,
+                udst_val,
+                now_date if udst_val else None,
+                contact_val,
+                now_date if contact_val else None,
+                outcome,
+                now_iso,
+                now_iso,
+                admin_user
+            ))
 
-            existing_name = str(existing.get("patient_name") or "").strip()
-            existing_phone = str(existing.get("phone") or "").strip()
-            curr_name = str(current.get("name") or current.get("patient_name") or "").strip()
-            curr_phone = str(current.get("phone") or "").strip()
+        # 1. High-speed PostgreSQL Batch Upsert
+        pg_synced = False
+        try:
+            with get_db_connection() as conn:
+                if conn:
+                    import psycopg2.extras
+                    with conn.cursor() as cur:
+                        psycopg2.extras.execute_values(
+                            cur,
+                            UPSERT_LEDGER_SQL,
+                            batch_rows,
+                            page_size=1000
+                        )
+                    conn.commit()
+                    total_written += len(batch_rows)
+                    pg_synced = True
+        except Exception as pg_err:
+            logger.error(f"[Ledger Sync] PostgreSQL batch upsert error: {pg_err}", exc_info=True)
 
-            final_name = curr_name if curr_name else existing_name
-            final_phone = curr_phone if curr_phone else existing_phone
-
-            name_changed = bool(curr_name and curr_name != existing_name)
-            phone_changed = bool(curr_phone and curr_phone != existing_phone)
-
-            has_changes = (
-                is_new or
-                (not existing.get("notification_verified") and notif_val) or
-                (not existing.get("hiv_tested") and hiv_val) or
-                (not existing.get("dm_tested") and dm_val) or
-                (not existing.get("hiv_dm_tested") and hiv_dm_val) or
-                (not existing.get("bank_validated") and bank_val) or
-                (not existing.get("udst_done") and udst_val) or
-                (not existing.get("contact_tracing_done") and contact_val) or
-                name_changed or
-                phone_changed
-            )
-
-            if not has_changes:
-                total_unchanged += 1
-                continue
-
-            merged_record = {
-                "patient_id": str(pid),
-                "patient_name": final_name,
-                "phone": final_phone,
-                "district": current.get("district") or existing.get("district", ""),
-                "notification_verified": notif_val,
-                "hiv_tested": hiv_val,
-                "dm_tested": dm_val,
-                "bank_validated": bank_val,
-                "udst_done": udst_val,
-                "contact_tracing_done": contact_val,
-                "treatment_outcome": current.get("outcome") or existing.get("treatment_outcome", ""),
-                "first_verified_at": existing.get("first_verified_at", now_iso),
-                "last_reconciled_at": now_iso,
-                "reconciled_by": admin_user
-            }
-
-            if notif_val:
-                merged_record["notification_verified_date"] = existing.get("notification_verified_date") or now_date
-            if hiv_val:
-                merged_record["hiv_verified_date"] = existing.get("hiv_verified_date") or now_date
-            if dm_val:
-                merged_record["dm_verified_date"] = existing.get("dm_verified_date") or now_date
-            if bank_val:
-                merged_record["bank_verified_date"] = existing.get("bank_verified_date") or now_date
-            if udst_val:
-                merged_record["udst_verified_date"] = existing.get("udst_verified_date") or now_date
-            if contact_val:
-                merged_record["contact_verified_date"] = existing.get("contact_verified_date") or now_date
-
-            success = pg_upsert_row(
-                "nikshay_verified_patients",
-                merged_record,
-                conflict_columns=["patient_id"],
-                update_columns=[
-                    "notification_verified",
-                    "hiv_tested",
-                    "dm_tested",
-                    "bank_validated",
-                    "udst_done",
-                    "contact_tracing_done",
-                    "treatment_outcome",
-                    "last_reconciled_at",
-                    "reconciled_by",
-                ]
-            )
-            if success:
-                total_written += 1
-            else:
-                logger.error(f"[Ledger Sync] Failed to upsert patient_id={pid}")
-
-            if batch is not None and hasattr(batch, "set") and active_db:
-                try:
-                    batch.set(active_db.collection("nikshay_verified_patients").document(doc_id), merged_record, merge=True)
-                    batch_count += 1
-                except Exception as b_err:
-                    logger.warning(f"[Ledger Sync] active_db batch set warning for {doc_id}: {b_err}")
-
-        if batch is not None and batch_count > 0 and hasattr(batch, "commit"):
+        # Fallback for unit tests mocking pg_upsert_row / pg_execute_raw when direct conn is not available
+        if not pg_synced:
+            existing_docs = {}
             try:
-                batch.commit()
-            except Exception as b_commit_err:
-                logger.warning(f"[Ledger Sync] active_db batch commit warning: {b_commit_err}")
+                pg_existing = pg_execute_raw(
+                    "SELECT * FROM nikshay_verified_patients WHERE patient_id = ANY(%s)",
+                    [chunk_pids],
+                    fetch=True
+                )
+                if pg_existing:
+                    for r in pg_existing:
+                        existing_docs[str(r.get("patient_id"))] = dict(r)
+            except Exception as err:
+                logger.warning(f"[Ledger Sync] Fallback PG select warning: {err}")
+
+            fallback_written = 0
+            for pid in chunk_pids:
+                pdata = clean_patients[pid]
+                existing = existing_docs.get(str(pid), {})
+                notif_val = bool(existing.get("notification_verified") or pdata.get("notification_verified"))
+                hiv_val = bool(existing.get("hiv_tested") or pdata.get("hiv_tested"))
+                dm_val = bool(existing.get("dm_tested") or pdata.get("dm_tested"))
+                if pdata.get("hiv_dm_tested") and not hiv_val and not dm_val:
+                    hiv_val = True
+                bank_val = bool(existing.get("bank_validated") or pdata.get("bank_validated"))
+                udst_val = bool(existing.get("udst_done") or pdata.get("udst_done"))
+                contact_val = bool(existing.get("contact_tracing_done") or pdata.get("contact_tracing_done"))
+
+                existing_name = str(existing.get("patient_name") or "").strip()
+                existing_phone = str(existing.get("phone") or "").strip()
+                curr_name = str(pdata.get("name") or pdata.get("patient_name") or "").strip()
+                curr_phone = str(pdata.get("phone") or "").strip()
+                final_name = curr_name if curr_name else existing_name
+                final_phone = curr_phone if curr_phone else existing_phone
+
+                merged_record = {
+                    "patient_id": str(pid),
+                    "patient_name": final_name,
+                    "phone": final_phone,
+                    "district": pdata.get("district") or existing.get("district", ""),
+                    "diagnosis_date": _parse_diag_date(pdata.get("diagnosis_date")) or existing.get("diagnosis_date"),
+                    "notification_verified": notif_val,
+                    "hiv_tested": hiv_val,
+                    "dm_tested": dm_val,
+                    "bank_validated": bank_val,
+                    "udst_done": udst_val,
+                    "contact_tracing_done": contact_val,
+                    "treatment_outcome": pdata.get("outcome") or pdata.get("treatment_outcome") or existing.get("treatment_outcome", ""),
+                    "first_verified_at": existing.get("first_verified_at", now_iso),
+                    "last_reconciled_at": now_iso,
+                    "reconciled_by": admin_user
+                }
+                if notif_val:
+                    merged_record["notification_verified_date"] = existing.get("notification_verified_date") or now_date
+                if hiv_val:
+                    merged_record["hiv_verified_date"] = existing.get("hiv_verified_date") or now_date
+                if dm_val:
+                    merged_record["dm_verified_date"] = existing.get("dm_verified_date") or now_date
+                if bank_val:
+                    merged_record["bank_verified_date"] = existing.get("bank_verified_date") or now_date
+                if udst_val:
+                    merged_record["udst_verified_date"] = existing.get("udst_verified_date") or now_date
+                if contact_val:
+                    merged_record["contact_verified_date"] = existing.get("contact_verified_date") or now_date
+
+                success = pg_upsert_row(
+                    "nikshay_verified_patients",
+                    merged_record,
+                    conflict_columns=["patient_id"],
+                    update_columns=[
+                        "notification_verified",
+                        "hiv_tested",
+                        "dm_tested",
+                        "bank_validated",
+                        "udst_done",
+                        "contact_tracing_done",
+                        "treatment_outcome",
+                        "last_reconciled_at",
+                        "reconciled_by",
+                    ]
+                )
+                if success:
+                    fallback_written += 1
+            if fallback_written > 0:
+                total_written += fallback_written
+
+        # 2. Mock / Firestore fallback sync (if active_db exists with collection support)
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                fs_existing = {}
+                if hasattr(active_db, "get_all"):
+                    try:
+                        chunk_refs = [active_db.collection("nikshay_verified_patients").document(str(p).strip().replace("/", "_").replace(".", "_")) for p in chunk_pids]
+                        snaps = active_db.get_all(chunk_refs)
+                        for s in snaps:
+                            if getattr(s, "exists", False):
+                                s_data = s.to_dict() if hasattr(s, "to_dict") and callable(s.to_dict) else dict(s)
+                                fs_existing[str(s_data.get("patient_id") or getattr(s, "id", ""))] = s_data
+                    except Exception:
+                        pass
+
+                batch = active_db.batch() if hasattr(active_db, "batch") else None
+                b_count = 0
+                for pid in chunk_pids:
+                    pdata = clean_patients[pid]
+                    doc_id = str(pid).strip().replace("/", "_").replace(".", "_")
+                    old_s = fs_existing.get(str(pid), {}) or fs_existing.get(doc_id, {})
+                    f_name = (pdata.get("name") or pdata.get("patient_name") or "").strip() or old_s.get("patient_name") or ""
+                    f_phone = (pdata.get("phone") or "").strip() or old_s.get("phone") or ""
+                    fs_record = {
+                        "patient_id": str(pid),
+                        "patient_name": f_name,
+                        "phone": f_phone,
+                        "district": pdata.get("district") or old_s.get("district", ""),
+                        "diagnosis_date": _parse_diag_date(pdata.get("diagnosis_date")) or old_s.get("diagnosis_date"),
+                        "notification_verified": bool(pdata.get("notification_verified") or old_s.get("notification_verified")),
+                        "hiv_tested": bool(pdata.get("hiv_tested") or old_s.get("hiv_tested")),
+                        "dm_tested": bool(pdata.get("dm_tested") or old_s.get("dm_tested")),
+                        "hiv_dm_tested": bool(pdata.get("hiv_dm_tested") or pdata.get("hiv_tested") or pdata.get("dm_tested") or old_s.get("hiv_dm_tested")),
+                        "bank_validated": bool(pdata.get("bank_validated") or old_s.get("bank_validated")),
+                        "udst_done": bool(pdata.get("udst_done") or old_s.get("udst_done")),
+                        "contact_tracing_done": bool(pdata.get("contact_tracing_done") or old_s.get("contact_tracing_done")),
+                        "treatment_outcome": pdata.get("outcome") or pdata.get("treatment_outcome") or old_s.get("treatment_outcome", ""),
+                        "first_verified_at": old_s.get("first_verified_at", now_iso),
+                        "last_reconciled_at": now_iso,
+                        "reconciled_by": admin_user
+                    }
+                    if batch is not None and hasattr(batch, "set"):
+                        batch.set(active_db.collection("nikshay_verified_patients").document(doc_id), fs_record, merge=True)
+                        b_count += 1
+                if batch is not None and b_count > 0 and hasattr(batch, "commit"):
+                    batch.commit()
+            except Exception as fb_err:
+                logger.warning(f"[Ledger Sync] Firestore fallback sync warning: {fb_err}")
 
     if total_written > 0:
         cache.delete_prefix("ledger_")
         cache.delete_prefix("journey_")
 
+    total_unchanged = max(0, total_processed - total_written)
     return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
 
 
