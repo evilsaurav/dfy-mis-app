@@ -1182,7 +1182,12 @@ async def get_district_ta_roster(
             if clean_alphanumeric(entry.get("staff_name")) in (s_id_clean, s_name_clean):
                 entry["staff_name"] = s["name"]
             entry["doc_id"] = str(matched_log["_doc_id"])
-            entry["staff_key"] = matched_log.get("staff_key") or s["id"]
+            entry["staff_key"] = str(s["id"])
+            if s.get("id"):
+                try:
+                    entry["staff_id"] = int(s["id"])
+                except Exception:
+                    pass
             days_list = normalize_days_to_list(entry.get("days") or entry.get("daily_logs"), month=month)
             entry["days"] = days_list
             entry["active_days"] = sum(1 for d in days_list if float(d.get("total_km") or 0.0) > 0)
@@ -1333,6 +1338,34 @@ def prefill_district_ta_from_reports(
     if not staff_name and not staff_key:
         raise HTTPException(status_code=400, detail="staff_name or staff_key is required for prefill")
 
+    # Resolve staff_id strictly within target district to prevent cross-district collisions
+    resolved_staff_id = None
+    try:
+        s_rows = pg_execute_raw(
+            """SELECT id, name FROM staff_directory 
+               WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                 AND (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
+                 AND deleted_at IS NULL LIMIT 1""",
+            [canon_dist, req.district, staff_name, staff_key],
+            fetch=True
+        )
+        if not s_rows and staff_name:
+            s_rows = pg_execute_raw(
+                """SELECT id, name FROM staff_directory 
+                   WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                     AND LOWER(TRIM(name)) = LOWER(TRIM(%s))
+                     AND deleted_at IS NULL LIMIT 1""",
+                [canon_dist, req.district, staff_name],
+                fetch=True
+            )
+        if s_rows:
+            resolved_staff_id = s_rows[0].get("id")
+            if s_rows[0].get("name"):
+                staff_name = s_rows[0]["name"]
+            staff_key = str(resolved_staff_id)
+    except Exception as e:
+        logger.warning(f"Notice resolving staff for prefill: {e}")
+
     try:
         year_str, month_str = req.month.split("-")
         year = int(year_str)
@@ -1349,19 +1382,21 @@ def prefill_district_ta_from_reports(
     existing_admin_remarks = ""
 
     try:
-        ex_rows = pg_execute_raw(
-            """SELECT r.*,
+        ex_query = """SELECT r.*,
                       (SELECT json_agg(dl.* ORDER BY dl.day)
                        FROM travel_allowance_daily_logs dl
                        WHERE dl.roster_id = r.id) as daily_logs
                FROM travel_allowance_rosters r
                WHERE r.month = %s 
-                 AND (LOWER(TRIM(r.district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(r.district)) = LOWER(TRIM(%s)))
-                 AND (LOWER(TRIM(r.staff_name)) = LOWER(TRIM(%s)) OR r.staff_key = %s OR r.staff_id::text = %s)
-               LIMIT 1""",
-            [req.month, canon_dist, req.district, staff_name, staff_key, staff_key],
-            fetch=True
-        )
+                 AND (LOWER(TRIM(r.district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(r.district)) = LOWER(TRIM(%s)))"""
+        ex_params = [req.month, canon_dist, req.district]
+        if resolved_staff_id:
+            ex_query += " AND (r.staff_id = %s OR (LOWER(TRIM(r.staff_name)) = LOWER(TRIM(%s)) AND r.staff_key = %s)) LIMIT 1"
+            ex_params.extend([resolved_staff_id, staff_name, str(resolved_staff_id)])
+        else:
+            ex_query += " AND (LOWER(TRIM(r.staff_name)) = LOWER(TRIM(%s)) OR r.staff_key = %s OR r.staff_id::text = %s) LIMIT 1"
+            ex_params.extend([staff_name, staff_key, staff_key])
+        ex_rows = pg_execute_raw(ex_query, ex_params, fetch=True)
         if ex_rows:
             ex_data = ex_rows[0]
             existing_deduction = float(ex_data.get("deduction_amount") or 0.0)
@@ -1505,6 +1540,7 @@ def prefill_district_ta_from_reports(
             "district": canon_dist,
             "staff_name": staff_name,
             "staff_key": staff_key,
+            "staff_id": resolved_staff_id,
             "rate_per_km": current_rate,
             "total_km": totals["total_km"],
             "gross_amount": totals["gross_amount"],
@@ -1537,14 +1573,25 @@ def save_travel_allowance_log(
     try:
         s_rows = pg_execute_raw(
             """SELECT id, district_id FROM staff_directory 
-               WHERE (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
+               WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                 AND (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
                  AND deleted_at IS NULL LIMIT 1""",
-            [req.staff_name, staff_key],
+            [canon_dist, req.district, req.staff_name, str(staff_key)],
             fetch=True
         )
+        if not s_rows and req.staff_name:
+            s_rows = pg_execute_raw(
+                """SELECT id, district_id FROM staff_directory 
+                   WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                     AND LOWER(TRIM(name)) = LOWER(TRIM(%s))
+                     AND deleted_at IS NULL LIMIT 1""",
+                [canon_dist, req.district, req.staff_name],
+                fetch=True
+            )
         if s_rows:
             staff_id = s_rows[0].get("id")
             district_id = s_rows[0].get("district_id")
+            staff_key = str(staff_id)
     except HTTPException:
         raise
     except Exception as e:
@@ -1585,9 +1632,10 @@ def save_travel_allowance_log(
         ex_rows = pg_execute_raw(
             """SELECT id, status, is_locked FROM travel_allowance_rosters
                WHERE month = %s 
+                 AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
                  AND (staff_id = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)) OR staff_key = %s)
                LIMIT 1""",
-            [req.month, staff_id, req.staff_name, staff_key],
+            [req.month, canon_dist, req.district, staff_id, req.staff_name, staff_key],
             fetch=True
         )
         if ex_rows:
@@ -1797,7 +1845,8 @@ def save_travel_allowance_log(
             "month": req.month,
             "district": canon_dist,
             "staff_name": final_staff_name,
-            "staff_key": staff_key,
+            "staff_key": str(staff_id),
+            "staff_id": staff_id,
             "total_km": totals["total_km"],
             "gross_amount": totals["gross_amount"],
             "deduction_amount": totals["deduction_amount"],
@@ -1861,13 +1910,24 @@ def save_travel_allowance_log_bulk(
         try:
             s_rows = pg_execute_raw(
                 """SELECT id, district_id FROM staff_directory 
-                   WHERE (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
+                   WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                     AND (LOWER(TRIM(name)) = LOWER(TRIM(%s)) OR id::text = %s)
                      AND deleted_at IS NULL LIMIT 1""",
-                [entry_staff_name, entry_staff_key],
+                [canon_dist, req.district, entry_staff_name, str(entry_staff_key)],
                 fetch=True
             )
+            if not s_rows and entry_staff_name:
+                s_rows = pg_execute_raw(
+                    """SELECT id, district_id FROM staff_directory 
+                       WHERE (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
+                         AND LOWER(TRIM(name)) = LOWER(TRIM(%s))
+                         AND deleted_at IS NULL LIMIT 1""",
+                    [canon_dist, req.district, entry_staff_name],
+                    fetch=True
+                )
             if s_rows:
                 staff_id = s_rows[0].get("id")
+                entry_staff_key = str(staff_id)
         except HTTPException:
             raise
         except Exception as e:
@@ -1887,9 +1947,10 @@ def save_travel_allowance_log_bulk(
             ex_rows = pg_execute_raw(
                 """SELECT id, status, is_locked FROM travel_allowance_rosters
                    WHERE month = %s 
+                     AND (LOWER(TRIM(district)) = LOWER(TRIM(%s)) OR LOWER(TRIM(district)) = LOWER(TRIM(%s)))
                      AND (staff_id = %s OR LOWER(TRIM(staff_name)) = LOWER(TRIM(%s)) OR staff_key = %s)
                    LIMIT 1""",
-                [entry_month, staff_id, entry_staff_name, entry_staff_key],
+                [entry_month, canon_dist, req.district, staff_id, entry_staff_name, entry_staff_key],
                 fetch=True
             )
             if ex_rows:
