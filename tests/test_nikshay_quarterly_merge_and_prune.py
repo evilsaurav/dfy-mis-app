@@ -254,5 +254,112 @@ def test_sync_status_reads_from_sync_runs(monkeypatch):
         cache.delete("nikshay_sync_meta_light")
 
 
+@pytest.mark.asyncio
+async def test_3_month_retention_purge_dry_run(monkeypatch):
+    """Verify purge_old_nikshay_records dry_run preview returns retention_months, cutoff_date, and matched_count."""
+    monkeypatch.setenv("TEST_LIVE_DB", "1")
+    from backend.routers.nikshay import purge_old_nikshay_records
+
+    res = await purge_old_nikshay_records(
+        dry_run=True,
+        retention_months=3,
+        admin={"username": "superadmin", "role": "SUPER_ADMIN", "user_id": "test_admin"}
+    )
+
+    assert res["dry_run"] is True
+    assert res["status"] == "preview"
+    assert res["retention_months"] == 3
+    assert "cutoff_date" in res
+    assert "matched_count" in res
+
+
+@pytest.mark.asyncio
+async def test_3_month_retention_live_purge(monkeypatch):
+    """Verify live purge removes records older than retention window and preserves newer records."""
+    monkeypatch.setenv("TEST_LIVE_DB", "1")
+    from datetime import datetime, timezone, timedelta
+    from unittest.mock import patch, AsyncMock
+    from backend.routers.nikshay import purge_old_nikshay_records
+    from backend.core.supabase import pg_execute_raw
+
+    old_pid = "TEST_PURGE_OLD_99901"
+    recent_pid = "TEST_PURGE_RECENT_99902"
+
+    # Pre-cleanup
+    pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN (%s, %s);", [old_pid, recent_pid])
+
+    # Insert old record (diagnosis_date 2025-01-01 > 90 days ago)
+    pg_execute_raw(
+        """
+        INSERT INTO nikshay_verified_patients (
+            patient_id, patient_name, district, diagnosis_date,
+            notification_verified, hiv_tested, dm_tested, bank_validated,
+            udst_done, contact_tracing_done, last_reconciled_at
+        ) VALUES (
+            %s, %s, %s, %s,
+            false, false, false, false,
+            false, false, '2025-01-01 00:00:00+00'
+        );
+        """,
+        [old_pid, "Old Patient", "Patna", "2025-01-01"]
+    )
+
+    # Insert recent record (diagnosis_date from this month)
+    today = datetime.now(timezone.utc).date()
+    yesterday_str = (today - timedelta(days=1)).strftime("%Y-%m-%d")
+    pg_execute_raw(
+        """
+        INSERT INTO nikshay_verified_patients (
+            patient_id, patient_name, district, diagnosis_date,
+            notification_verified, hiv_tested, dm_tested, bank_validated,
+            udst_done, contact_tracing_done, last_reconciled_at
+        ) VALUES (
+            %s, %s, %s, %s,
+            false, false, false, false,
+            false, false, NOW()
+        );
+        """,
+        [recent_pid, "Recent Patient", "Patna", yesterday_str]
+    )
+
+    mock_provider = AsyncMock()
+    mock_provider.upload.return_value = "drive_file_test_prune_123"
+
+    try:
+        with patch("backend.routers.nikshay.get_storage_provider", return_value=mock_provider), \
+             patch("backend.routers.nikshay.log_admin_activity", new_callable=AsyncMock):
+
+            res = await purge_old_nikshay_records(
+                dry_run=False,
+                retention_months=3,
+                admin={"username": "superadmin", "role": "SUPER_ADMIN", "user_id": "test_admin"}
+            )
+
+            assert res["dry_run"] is False
+            assert res["status"] == "success"
+            assert res["retention_months"] == 3
+            assert res["records_deleted"] >= 1
+
+            # Verify only the old record was purged
+            old_rows = pg_execute_raw(
+                "SELECT patient_id FROM nikshay_verified_patients WHERE patient_id = %s;",
+                [old_pid],
+                fetch=True
+            )
+            assert len(old_rows) == 0, f"Old record {old_pid} should have been purged"
+
+            # Verify recent record is preserved
+            recent_rows = pg_execute_raw(
+                "SELECT patient_id FROM nikshay_verified_patients WHERE patient_id = %s;",
+                [recent_pid],
+                fetch=True
+            )
+            assert len(recent_rows) == 1, f"Recent record {recent_pid} should be preserved"
+    finally:
+        # Cleanup
+        pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN (%s, %s);", [old_pid, recent_pid])
+
+
+
 
 

@@ -386,6 +386,6 @@ async def test_purge_partial_failure_logs_audit_and_returns_actionable_error(sup
             # Verify partial failure audit log was recorded
             assert mock_audit.called
             audit_kwargs = mock_audit.call_args[1]
-            assert audit_kwargs["action_type"] == "NIKSHAY_PURGE_6M_PARTIAL_FAILURE"
+            assert audit_kwargs["action_type"] in ("NIKSHAY_PURGE_3M_PARTIAL_FAILURE", "NIKSHAY_PURGE_6M_PARTIAL_FAILURE")
             assert "Successfully deleted 500/501 records before failure" in audit_kwargs["details"]
             assert "drive_partial_abc" in audit_kwargs["details"]

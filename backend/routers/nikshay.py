@@ -1849,33 +1849,40 @@ async def get_patient_journey(patient_id: Optional[str] = None):
 
 
 # =========================================================================
-# --- 6-Month Retention Google Drive Backup & Manual Purge ---
+# --- Rolling Retention Google Drive Backup & Manual Purge ---
 # =========================================================================
 @router.post("/admin/nikshay/purge-old-records")
 async def purge_old_nikshay_records(
     dry_run: bool = Query(True, description="When true, only report what would be backed up and deleted without executing"),
+    retention_months: int = Query(3, description="Retention window in months, default 3 months"),
     admin: dict = Depends(require_super_admin)
 ):
     """
-    6-Month Retention Purge for nikshay_verified_patients:
-    1. Identifies rows older than 6 months (last_reconciled_at < NOW() - INTERVAL '6 months').
-    2. In dry_run mode, returns count and sample IDs without modifying data.
+    Rolling Retention Purge for nikshay_verified_patients (default 3 months):
+    1. Identifies rows older than retention_months (prioritizing diagnosis_date, falling back to last_reconciled_at or first_verified_at).
+    2. In dry_run mode, returns count, cutoff date, and sample IDs without modifying data.
     3. In live mode (dry_run=False):
        - Exports those exact rows to a compressed JSON archive.
        - Uploads to Google Drive using existing BackupStorageProvider.
        - Confirms successful Google Drive write.
        - Purges exact patient_ids from database (using captured list to avoid race conditions).
-       - Returns summary with Google Drive file link and verified matching counts.
+       - Invalidates caches: ledger_, journey_, nikshay_cumulative_ledger_summary.
+       - Returns summary with Google Drive file link, cutoff date, and verified matching counts.
     Manual-trigger only (no cron/auto-triggers).
     """
     try:
-        # Step 1: Query rows older than 6 months
+        ist_now = get_ist_now()
+        cutoff_dt = ist_now - timedelta(days=retention_months * 30)
+        cutoff_str = cutoff_dt.strftime("%Y-%m-%d")
+
+        # Step 1: Query matching records using diagnosis_date prioritized, falling back to last_reconciled_at or first_verified_at
         rows = pg_execute_raw(
             """
             SELECT * FROM nikshay_verified_patients
-            WHERE last_reconciled_at < NOW() - INTERVAL '6 months'
-            ORDER BY last_reconciled_at ASC;
+            WHERE COALESCE(diagnosis_date, (last_reconciled_at AT TIME ZONE 'UTC')::date, (first_verified_at AT TIME ZONE 'UTC')::date) < %s::date
+            ORDER BY COALESCE(diagnosis_date, (last_reconciled_at AT TIME ZONE 'UTC')::date, (first_verified_at AT TIME ZONE 'UTC')::date) ASC;
             """,
+            [cutoff_str],
             fetch=True
         ) or []
 
@@ -1887,15 +1894,17 @@ async def purge_old_nikshay_records(
             oldest_ts = None
             newest_ts = None
             if rows:
-                o_val = rows[0].get("last_reconciled_at")
-                n_val = rows[-1].get("last_reconciled_at")
-                oldest_ts = o_val.isoformat() if hasattr(o_val, "isoformat") else str(o_val)
-                newest_ts = n_val.isoformat() if hasattr(n_val, "isoformat") else str(n_val)
+                o_val = rows[0].get("diagnosis_date") or rows[0].get("last_reconciled_at") or rows[0].get("first_verified_at")
+                n_val = rows[-1].get("diagnosis_date") or rows[-1].get("last_reconciled_at") or rows[-1].get("first_verified_at")
+                oldest_ts = o_val.isoformat() if hasattr(o_val, "isoformat") else str(o_val) if o_val is not None else None
+                newest_ts = n_val.isoformat() if hasattr(n_val, "isoformat") else str(n_val) if n_val is not None else None
 
             return {
                 "dry_run": True,
                 "status": "preview",
-                "message": f"Dry-run preview: {matched_count} records older than 6 months identified. No data was backed up or deleted.",
+                "retention_months": retention_months,
+                "cutoff_date": cutoff_str,
+                "message": f"Dry-run preview: {matched_count} records older than {retention_months} months (before {cutoff_str}) identified. No data was backed up or deleted.",
                 "matched_count": matched_count,
                 "sample_patient_ids": sample_pids,
                 "oldest_timestamp": oldest_ts,
@@ -1907,7 +1916,9 @@ async def purge_old_nikshay_records(
             return {
                 "dry_run": False,
                 "status": "noop",
-                "message": "No records older than 6 months found to purge.",
+                "retention_months": retention_months,
+                "cutoff_date": cutoff_str,
+                "message": f"No records older than {retention_months} months (before {cutoff_str}) found to purge.",
                 "records_backed_up": 0,
                 "records_deleted": 0,
                 "counts_match": True,
@@ -1917,12 +1928,13 @@ async def purge_old_nikshay_records(
             }
 
         # Step 2: Export exact rows to compressed JSON archive
-        ist_now = get_ist_now()
         ts_compact = ist_now.strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"nikshay_patients_purge_6m_{ts_compact}.json.gz"
+        backup_filename = f"nikshay_patients_purge_{retention_months}m_{ts_compact}.json.gz"
 
         backup_payload = {
-            "purge_type": "nikshay_verified_patients_6_month_retention",
+            "purge_type": f"nikshay_verified_patients_{retention_months}_month_retention",
+            "retention_months": retention_months,
+            "retention_cutoff_date": cutoff_str,
             "retention_cutoff_ist": ist_now.strftime("%Y-%m-%d %I:%M:%S %p"),
             "initiated_by": admin.get("username", "admin"),
             "total_records": matched_count,
@@ -1939,7 +1951,9 @@ async def purge_old_nikshay_records(
             compressed_bytes,
             backup_filename,
             metadata={
-                "retention": "nikshay_purge_6m",
+                "retention": f"nikshay_purge_{retention_months}m",
+                "retention_months": str(retention_months),
+                "cutoff_date": cutoff_str,
                 "records": str(matched_count),
                 "initiated_by": str(admin.get("username", "admin")),
             }
@@ -1993,9 +2007,10 @@ async def purge_old_nikshay_records(
             if total_deleted > 0:
                 cache.delete_prefix("ledger_")
                 cache.delete_prefix("journey_")
+                cache.delete("nikshay_cumulative_ledger_summary")
 
             await log_admin_activity(
-                action_type="NIKSHAY_PURGE_6M_PARTIAL_FAILURE",
+                action_type=f"NIKSHAY_PURGE_{retention_months}M_PARTIAL_FAILURE",
                 details=(
                     f"PARTIAL PURGE FAILURE at chunk {failed_chunk_number}/{total_chunks}. "
                     f"Successfully deleted {total_deleted}/{matched_count} records before failure. "
@@ -2028,9 +2043,11 @@ async def purge_old_nikshay_records(
         # Invalidate caches & audit log
         cache.delete_prefix("ledger_")
         cache.delete_prefix("journey_")
+        cache.delete("nikshay_cumulative_ledger_summary")
+
         await log_admin_activity(
-            action_type="NIKSHAY_PURGE_6M",
-            details=f"Purged {total_deleted} Nikshay records older than 6 months. Archive: {backup_filename} ({remote_id})",
+            action_type=f"NIKSHAY_PURGE_{retention_months}M",
+            details=f"Purged {total_deleted} Nikshay records older than {retention_months} months (before {cutoff_str}). Archive: {backup_filename} ({remote_id})",
             user_name=admin.get("username", "admin"),
             user_id=admin.get("user_id", "admin"),
             role=admin.get("role", "SUPER_ADMIN")
@@ -2041,6 +2058,8 @@ async def purge_old_nikshay_records(
         return {
             "dry_run": False,
             "status": "success",
+            "retention_months": retention_months,
+            "cutoff_date": cutoff_str,
             "message": f"Successfully backed up {matched_count} records to Google Drive and purged {total_deleted} records from database.",
             "records_backed_up": matched_count,
             "records_deleted": total_deleted,
