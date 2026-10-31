@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.6] - 2026-10-31
+
+### Fixed & Hardened
+- **Statewide Multi-District Staff Isolation & TA Prefill Cross-Contamination Guard**:
+  - Enforced strict canonical district filtering across all Travel Allowance endpoints (`get_district_ta_roster`, `prefill_district_ta_from_reports`, `save_travel_allowance_log`, and `save_travel_allowance_log_bulk`).
+  - Completely resolved cross-district contamination where field staff sharing identical names across Bihar (e.g., Suraj Kumar in Jehanabad vs Nawada) could have their meter readings, remarks, or prefill rosters intermixed.
+  - Normalized staff identity using canonical staff directory primary keys (`staff_id`) rather than statewide name matching.
+  - Repaired legacy mismatched roster records and cleaned foreign daily log remarks in PostgreSQL with zero downtime.
+
+---
+
 ## [2.9.5] - 2026-10-30
 
 ### Added

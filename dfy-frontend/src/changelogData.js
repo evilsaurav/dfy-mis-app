@@ -1,16 +1,40 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.5";
-export const LAST_UPDATED_DATE = "30 Oct 2026";
+export const APP_VERSION = "2.9.6";
+export const LAST_UPDATED_DATE = "31 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.6",
+    date: "31 Oct 2026",
+    title: "Statewide Multi-District Staff Isolation & TA Prefill Cross-Contamination Guard",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🛡️ Strict Multi-District Staff Isolation: Enforced canonical district filtering across all Travel Allowance endpoints (roster retrieval, prefill, single log save, and bulk log save). Staff sharing duplicate names across different districts in Bihar (e.g., Suraj Kumar in Jehanabad vs Nawada) are strictly isolated with zero cross-contamination.",
+      "⚡ Canonical ID Normalization: Resolved staff identity using canonical staff directory primary keys instead of statewide name matching, ensuring prefill lookups and saved logs always bind to the officer's true district ledger.",
+      "🧹 Database Audit & Self-Healing: Repaired mismatched roster records in PostgreSQL, cleared foreign contaminated remarks on daily field logs, and invalidated stale Redis cache keys."
+    ],
+    details: [
+      {
+        tag: "Cross-District Isolation",
+        color: "emerald",
+        text: "Ensures staff lookups in one district can never accidentally overwrite or prefill logs from another district."
+      },
+      {
+        tag: "Data Integrity",
+        color: "teal",
+        text: "Automated identity resolution normalizes staff keys to canonical database IDs across single and bulk persistence paths."
+      }
+    ]
+  },
   {
     version: "v2.9.5",
     date: "30 Oct 2026",
     title: "Sunday Roll-Forward Month-End Grace Period Engine, TA Prefill Visual Highlighting & 1-Click Snapshot Undo Revert",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Maintenance",
+    badgeColor: "indigo",
     highlights: [
       "🗓️ Sunday Roll-Forward Month-End Grace Period: When Day 1 of a month falls on a Sunday (official field weekly off), the month-end grace period automatically rolls forward to cover all of Sunday (Day 1) and Monday (Day 2) until 12:00 PM (Noon). Field officers can submit month-end Saturday reports on Monday morning without disruption.",
       "🎨 Travel Allowance Visual Prefill Highlighting: When coordinators trigger 'Prefill District from MIS', auto-calculated rows and amounts are immediately illuminated with distinct amber visual badges, giving coordinators 100% clarity on newly calculated versus previously saved entries before committing.",
