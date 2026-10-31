@@ -10,6 +10,18 @@ if str(BASE_DIR) not in sys.path:
 from backend.core.supabase import pg_execute_raw
 
 
+@pytest.fixture(autouse=True)
+def cleanup_postgres_pool():
+    yield
+    from backend.core import supabase
+    if getattr(supabase, "_postgres_pool", None) is not None:
+        try:
+            supabase._postgres_pool.closeall()
+        except Exception:
+            pass
+        supabase._postgres_pool = None
+
+
 def test_diagnosis_date_column_exists(monkeypatch):
     """Verify that column 'diagnosis_date' (data type: date) exists on table 'nikshay_verified_patients'."""
     monkeypatch.setenv("TEST_LIVE_DB", "1")
@@ -90,4 +102,113 @@ def test_monotonic_smart_merge_logic(monkeypatch):
 
     # Clean up test row
     pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id = %s;", [test_pid])
+
+
+def test_quarterly_multi_month_detection():
+    """Verify that extract_months_from_date_series parses dates spanning July, August, September
+    (handling None, NaT, formatted strings, timestamps) and returns sorted ['2026-07', '2026-08', '2026-09']."""
+    import pandas as pd
+    from datetime import datetime
+    from backend.routers.nikshay import extract_months_from_date_series
+
+    dates = pd.Series([
+        "2026-07-01",
+        "2026-07-15",
+        "15/08/2026",
+        "2026-09-30 10:00:00",
+        None,
+        pd.NaT,
+        "invalid_date",
+        datetime(2026, 8, 20),
+        pd.Timestamp("2026-07-25"),
+    ])
+
+    months = extract_months_from_date_series(dates)
+    assert months == ["2026-07", "2026-08", "2026-09"], f"Expected ['2026-07', '2026-08', '2026-09'], got {months}"
+
+
+def test_target_reconcile_column_filter():
+    """Verify that is_target_reconcile_column accepts target reconciliation columns and rejects unrelated ones."""
+    from backend.routers.nikshay import is_target_reconcile_column
+
+    assert is_target_reconcile_column("Episode ID") is True
+    assert is_target_reconcile_column("Spectrum_Diagnosis_Date") is True
+    assert is_target_reconcile_column("Patient Name") is True
+    assert is_target_reconcile_column("PrimaryPhone") is True
+    assert is_target_reconcile_column("District") is True
+    assert is_target_reconcile_column("HIV_Tested") is True
+    assert is_target_reconcile_column("Bank_Validated") is True
+    assert is_target_reconcile_column("UDST_Done") is True
+    assert is_target_reconcile_column("Contact_Tracing_Done") is True
+    assert is_target_reconcile_column("Treatment_Outcome") is True
+
+    # Irrelevant / heavy metadata columns should be filtered out to save RAM
+    assert is_target_reconcile_column("Random_Comments_Column") is False
+    assert is_target_reconcile_column("Blood_Pressure_Reading") is False
+    assert is_target_reconcile_column("Internal_Facility_Hierarchy_Code") is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_nikshay_multi_month_and_telemetry(monkeypatch):
+    """Verify reconcile_nikshay handles multi-month detection, passes diagnosis_date, and logs telemetry to nikshay_sync_runs."""
+    monkeypatch.setenv("TEST_LIVE_DB", "1")
+    import io
+    from unittest.mock import patch, AsyncMock
+    from fastapi import UploadFile
+    from backend.routers.nikshay import reconcile_nikshay
+    from backend.core.supabase import pg_execute_raw
+
+    csv_content = (
+        "Episode ID,Patient Name,PrimaryPhone,District,Spectrum_Diagnosis_Date,HIV_Tested\n"
+        "9998881,Patient One,9876543210,Patna,2026-07-15,Yes\n"
+        "9998882,Patient Two,9876543211,Patna,2026-08-20,No\n"
+    ).encode("utf-8")
+
+    upload_file = UploadFile(filename="nikshay_q3_test.csv", file=io.BytesIO(csv_content))
+
+    # Clean up prior test data if exists
+    pg_execute_raw("DELETE FROM nikshay_sync_runs WHERE filename = %s;", ["nikshay_q3_test.csv"])
+    pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN ('9998881', '9998882');")
+
+    with patch("backend.routers.nikshay.get_raw_monthly_reports", new_callable=AsyncMock) as mock_get_reports:
+        mock_get_reports.return_value = []
+
+        res = await reconcile_nikshay(
+            file=upload_file,
+            month="All",
+            district="Patna",
+            admin={"username": "TestReconcileAdmin", "role": "SUPER_ADMIN", "user_id": "test_recon_1"}
+        )
+
+        assert res["success"] is True
+        summary = res["summary"]
+        assert summary["is_quarterly"] is True
+        assert "2026-07" in summary["target_months"]
+        assert "2026-08" in summary["target_months"]
+        assert summary["total_nikshay_uploaded"] == 2
+
+        # Check telemetry logged into nikshay_sync_runs table
+        runs = pg_execute_raw(
+            "SELECT * FROM nikshay_sync_runs WHERE filename = %s ORDER BY id DESC LIMIT 1;",
+            ["nikshay_q3_test.csv"],
+            fetch=True
+        )
+        assert len(runs) == 1
+        assert runs[0]["synced_by"] == "TestReconcileAdmin"
+        assert str(runs[0]["report_month"]) == "2026-07-01"
+
+        # Check patient ledger has diagnosis_date stored
+        pt_rows = pg_execute_raw(
+            "SELECT patient_id, diagnosis_date FROM nikshay_verified_patients WHERE patient_id IN ('9998881', '9998882') ORDER BY patient_id;",
+            fetch=True
+        )
+        assert len(pt_rows) == 2
+        assert str(pt_rows[0]["diagnosis_date"]) == "2026-07-15"
+        assert str(pt_rows[1]["diagnosis_date"]) == "2026-08-20"
+
+        # Clean up telemetry run and test patients
+        pg_execute_raw("DELETE FROM nikshay_sync_runs WHERE filename = %s;", ["nikshay_q3_test.csv"])
+        pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN ('9998881', '9998882');")
+
+
 
