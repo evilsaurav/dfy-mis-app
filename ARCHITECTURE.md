@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.8.0 (v2.9.5 - Sunday Roll-Forward Grace Period Engine, TA Prefill Visual Highlighting & Snapshot Undo, Dynamic Live-Roster KPI Generation & Batch Deduplication)  
+> *Version:* 3.9.0 (v2.9.7 - Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Authentication Gateway)  
 > *Status:* Production Active
 
 ---
@@ -436,6 +436,75 @@ flowchart TD
   - **Tier 2 (Exit Auto-Save)**: Closing the modal or clicking "Back to Roster" automatically flushes the open tab draft.
   - **Tier 3 (Periodic Debounce)**: An in-flight 45-second timer automatically saves active typing in the background.
   - **Manual Bulk Flush**: Clicking "Save All Staff" commits all draft tabs across the district simultaneously via `handleSaveLogBulk`.
+
+#### 6.14.4 Frontline Monthly Impact Digest & 30+ Performance Indicators Engine (v2.9.7)
+The Frontline Monthly Impact Digest (`GET /fo/monthly-recap`) empowers field staff with transparency into their clinical achievements, treatment linkages, and verified travel reimbursements directly on their mobile devices.
+
+```mermaid
+flowchart TD
+    subgraph Client [📱 Mobile PWA - FoMonthlyRecapCard.jsx]
+        StaffReq["FO Profile Tab Loaded<br/>(Month & Staff Selection)"]
+        PIN["Pass 4-Digit PIN via x-fo-pin Header<br/>or fo_pin Query Param"]
+    end
+
+    subgraph Auth_Gateway [🔐 Dual Authentication Gateway]
+        AuthFunc["authenticate_fo_or_admin()"]
+        CheckJWT{"Has Bearer JWT?"}
+        CheckPIN{"Has FO PIN?"}
+        VerifyJWT["Verify HS256 Token<br/>Check Sub-Admin District Scope"]
+        VerifyPIN["Query staff_directory<br/>WHERE pin = %s AND district = %s"]
+        Reject401["401 Unauthorized<br/>(Missing/Invalid PIN or Token)"]
+        Reject403["403 Forbidden<br/>(Sub-Admin Cross-District Attempt)"]
+    end
+
+    subgraph Data_Pipeline [⚡ High-Performance Aggregation Engine]
+        CacheCheck{"Redis Micro-Cache Hit?<br/>fo_monthly_recap_{month}_{dist}_{fo}"}
+        ServeCache["Return Cached JSON (<5ms)"]
+        QueryReports["Aggregated SQL Query on daily_field_reports<br/>(Clinical, Outreach, Digital, Mobility)"]
+        QueryFdc["Child Table Relational Join<br/>daily_field_reports ⨝ report_fdc_details<br/>SUM(strips) for Exact Medicine Dispensed"]
+        QueryTA["Query travel_allowance_rosters & daily_logs<br/>Active Days, Total KM, Rate, Net Payable"]
+        PrivacyMask["Mask Payable Amount to ₹0.00<br/>if status != 'APPROVED'"]
+        SetCache["Write to Redis Cache<br/>TTL = 300 Seconds"]
+    end
+
+    StaffReq --> PIN --> AuthFunc
+    AuthFunc --> CheckJWT
+    CheckJWT -->|Yes| VerifyJWT
+    CheckJWT -->|No| CheckPIN
+    CheckPIN -->|Yes| VerifyPIN
+    CheckPIN -->|No| Reject401
+    VerifyJWT -->|Cross-District Sub-Admin| Reject403
+    VerifyJWT -->|Authorized| CacheCheck
+    VerifyPIN -->|Invalid PIN| Reject401
+    VerifyPIN -->|Valid Staff| CacheCheck
+    CacheCheck -->|Cache Hit| ServeCache
+    CacheCheck -->|Cache Miss| QueryReports
+    QueryReports --> QueryFdc --> QueryTA --> PrivacyMask --> SetCache --> ServeCache
+```
+
+- **Dual-Authentication Gateway (`authenticate_fo_or_admin`)**:
+  - Accepts standard Admin JWT Bearer tokens or 4-digit mobile PINs (`x-fo-pin` header or `fo_pin` URL query param) verified against `staff_directory`.
+  - Fixes mobile `401 Unauthorized` errors on `/fo/ta/monthly-summary`, `/fo/ta/dispute`, and `/fo/monthly-recap`.
+  - Enforces strict canonical Sub-Admin district authorization (Rule 4): Sub-Admins attempting to view recap data for non-permitted districts receive HTTP `403 Forbidden`.
+- **5 Clinical & Mobility Pillars (30+ Performance Indicators)**:
+  - *Clinical Case Finding*: TB Notifications, Presumptive TB Screenings, Sputum Collections, CBNAAT Tests, HIV Screenings, Diabetes Screenings, Culture/DST Tests.
+  - *Treatment Adherence*: FDC Patients Initiated, FDC Strips Dispensed, TPT Initiated, TPT Presumptive Screened, Differentiated TB Care Assessments, Treatment Outcome Updates, Nutrition Kits Distributed.
+  - *Field Outreach*: Face-to-Face Meetings, Household Contact Tracing, Follow-Up Home Visits, Doctor / Chemist Visits.
+  - *Digital Compliance*: Bank DBT Accounts Linked, KYC Documents Verified, Aadhaar Face Auth Completed, Patient Consents Uploaded.
+  - *Mobility & Travel Allowance*: Field Active Reporting Days, Total Distance (KM), Daily Average Running (KM/day), Approved Rate (₹/KM), Gross Amount, Net Payable Amount.
+- **Relational Child-Table Aggregation for FDC Strips**:
+  - Aggregates exact dispensed medicine strips via SQL join:
+    ```sql
+    SELECT COALESCE(SUM(f.strips), 0)
+    FROM daily_field_reports r
+    JOIN report_fdc_details f ON r.id = f.report_id
+    WHERE r.report_date >= %s AND r.report_date <= %s
+      AND r.district ILIKE %s
+      AND (r.officer_name ILIKE %s OR r.officer_name ILIKE %s)
+    ```
+- **Privacy Masking & Micro-Caching**:
+  - If Travel Allowance status is not `APPROVED` (i.e. `DRAFT`, `SUBMITTED`, or `REVERTED`), `final_payable_amount` is strictly masked to `0.00` to prevent unfinalized financial expectations.
+  - Aggregation results are cached in Redis (`fo_monthly_recap_{month}_{canon_dist}_{fo}`) for 300 seconds, slashing database overhead during peak field usage.
 
 ---
 

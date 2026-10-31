@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.6-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.7-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -59,6 +59,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [30. High-Throughput PostgreSQL Batch Deduplication & Bulk Ingestion](#30--high-throughput-postgresql-batch-deduplication--bulk-ingestion)
   - [31. Frontline Micro-Interactions: Morphing Buttons, Vault Indicators & Fail-Closed Security](#31--frontline-micro-interactions-morphing-buttons-vault-indicators--fail-closed-security)
   - [32. Official Author Attribution & Executive Excel Metadata Stamping](#32--official-author-attribution--executive-excel-metadata-stamping)
+  - [33. Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth](#33--frontline-monthly-impact-digest-30-performance-indicators-engine--fo-travel-allowance-pin-auth)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -548,6 +549,28 @@ flowchart TD
 
 ---
 
+### 33. 🌟 Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth
+- **Consolidated Monthly Impact Digest (`FoMonthlyRecapCard.jsx`)**:
+  - Integrated a Spotify-Wrapped style glassmorphic scorecard directly into the Field Officer Profile tab, showcasing monthly achievements, treatment linkages, and verified travel allowances.
+  - Designed with high-contrast glowing metric badges, dark gradient cards (`from-slate-900 via-indigo-950 to-slate-900`), and 12-Card Bento Highlight Grid.
+- **30+ Performance Indicators Engine**:
+  - Aggregates clinical metrics across 5 operational pillars:
+    1. *Clinical Case Finding & Diagnostics*: TB Notifications, Presumptive TB Screened, Sputum Samples Collected, CBNAAT Tests Facilitated, HIV Screenings, Diabetes Screenings, Culture/DST Testing.
+    2. *Treatment Adherence & Preventive Therapy*: FDC Patients Initiated, Total FDC Strips Dispensed (relational join with `report_fdc_details`), TPT Initiated, TPT Presumptive Screened, Differentiated TB Care Assessments, Treatment Outcome Updates, Nutrition Kit Distributions.
+    3. *Field Outreach & Direct Stakeholder Engagement*: Face-to-Face Community Meetings, Household Contact Tracing, Follow-Up Home Visits, Doctor / Chemist Provider Visits.
+    4. *Digital Compliance, Biometrics & DBT Linkage*: Bank Account DBT Linkages, KYC Documentation Completed, Aadhaar Face Auth Verifications, Signed Patient Consents Uploaded.
+    5. *Field Mobility & Travel Allowance*: Field Active Reporting Days, Total Distance (KM), Daily Average Running (KM/day), Approved Rate (₹/KM), Gross Amount, Net Approved Payable Amount.
+- **FO Mobile PIN Authentication for Travel Allowance**:
+  - Solved mobile `401 Unauthorized` errors on `/fo/ta/monthly-summary`, `/fo/ta/dispute`, and `/fo/monthly-recap` by introducing a dual-authentication gateway (`authenticate_fo_or_admin`).
+  - Field Officers authenticate seamlessly using their existing 4-digit mobile PIN against `staff_directory` without requiring complex JWT token flows.
+  - Strictly restricts Sub-Admins from querying records outside their assigned districts (`403 Forbidden`).
+  - Masks unapproved travel allowance amounts to ₹0.00 until formally passed by the State Incharge.
+- **Retrospective Multi-Month Selector & 1-Click WhatsApp Bulletin**:
+  - Field staff can switch across the active month and past 5 operational months with sub-millisecond responses served from Redis micro-caches (TTL 300s).
+  - 1-click WhatsApp performance bulletin generates emoji-bulleted monthly summaries ready for sharing in district coordination groups.
+
+---
+
 ## 📍 Districts Covered
 
 The system supports active staff and reporting across **22+ Districts of Bihar**:
@@ -716,8 +739,9 @@ Mis field report/
 | `POST` | `/admin/ta/resolve-dispute` | Incharge & Super Admin: Resolve an open FO travel dispute |
 | `GET` | `/admin/ta/export-excel` | Download multi-sheet Travel Allowance workbook (`.xlsx`) |
 | `GET` | `/admin/ta/statewide-summary` | Fetch statewide executive TA summary aggregated across all districts (cached) |
-| `GET` | `/fo/ta/monthly-summary` | Field Officer: View personal monthly TA status, payable amount, and dispute timer |
-| `POST` | `/fo/ta/dispute` | Field Officer: Raise a formal travel allowance dispute within the 24h window |
+| `GET` | `/fo/ta/monthly-summary` | Field Officer: View personal monthly TA status, payable amount, and dispute timer (Auth: FO PIN or Admin JWT) |
+| `POST` | `/fo/ta/dispute` | Field Officer: Raise a formal travel allowance dispute within the 24h window (Auth: FO PIN or Admin JWT) |
+| `GET` | `/fo/monthly-recap` | Field Officer: View consolidated Monthly Impact Digest with 30+ clinical & mobility indicators (Auth: FO PIN or Admin JWT, cached 300s) |
 
 ---
 

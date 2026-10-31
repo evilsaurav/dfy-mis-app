@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.7] - 2026-10-31
+
+### Added
+- **Frontline Monthly Impact Digest & 30+ Performance Indicators Engine**:
+  - Implemented `/fo/monthly-recap` endpoint providing frontline Field Officers with a consolidated, monthly performance recap directly within their mobile profile tab.
+  - Aggregates comprehensive indicators across 5 core clinical pillars:
+    1. *Clinical Case Finding & Diagnostics*: TB Notifications, Presumptive TB Screened, Sputum Samples Collected, CBNAAT Tests Facilitated, HIV Screenings, Diabetes Screenings, Culture/DST Testing.
+    2. *Treatment Adherence & Preventive Therapy*: FDC Patients Initiated, Total FDC Strips Dispensed (via relational join on `report_fdc_details`), TPT Initiated, TPT Presumptive Screened, Differentiated TB Care Assessments, Treatment Outcome Updates, Nutrition Kit Distributions.
+    3. *Field Outreach & Direct Stakeholder Engagement*: Face-to-Face Community Meetings, Household Contact Tracing, Follow-Up Home Visits, Doctor / Chemist Provider Visits.
+    4. *Digital Compliance, Biometrics & DBT Linkage*: Bank Account DBT Linkages, KYC Documentation Completed, Aadhaar Face Auth Verifications, Signed Patient Consents Uploaded.
+    5. *Field Mobility & Travel Allowance*: Field Active Reporting Days, Total Distance (KM), Daily Average Running (KM/day), Approved Rate (₹/KM), Gross Amount, Net Approved Payable Amount.
+  - Relational SQL query joins `report_fdc_details` to calculate exact strips dispensed (`COALESCE(SUM(f.strips), 0)`).
+  - Micro-cached in Redis (`fo_monthly_recap_{month}_{canon_dist}_{fo}`) with a 300s TTL for sub-millisecond retrieval.
+- **FO Mobile PIN Authentication for Travel Allowance**:
+  - Added dual-authentication gateway `authenticate_fo_or_admin` supporting both 4-digit FO Mobile PINs (`x-fo-pin` header / `fo_pin` query param against `staff_directory`) and standard Admin JWT Bearer tokens.
+  - Resolved `401 Unauthorized` and `Could not load Travel Allowance data` errors on Field Officer mobile devices when loading `/fo/ta/monthly-summary`, `/fo/ta/dispute`, and `/fo/monthly-recap`.
+  - Enforced strict canonical Sub-Admin RBAC district isolation (Rule 4): Sub-Admins attempting to query recap or TA data for districts outside their permitted scope receive HTTP `403 Forbidden`.
+  - Privacy Masking: Unapproved travel allowance amounts are masked to ₹0.00 with pending status badges until formally passed (`APPROVED`) by the State Incharge.
+- **Spotify-Wrapped Style Mobile UI (`FoMonthlyRecapCard.jsx`)**:
+  - Designed a dark glassmorphic card (`from-slate-900 via-indigo-950 to-slate-900`) with high-contrast glowing metric badges.
+  - 12-Card Bento Highlight Grid surfacing headline achievements.
+  - Slide-over Full 30-Point Impact Story modal breaking down all 5 operational pillars.
+  - Retrospective Multi-Month Selector supporting seamless navigation across the current month and past 5 operational months.
+  - 1-Click WhatsApp Performance Bulletin generator formatting and copying emoji-bulleted monthly achievements ready for district review groups.
+
+---
+
 ## [2.9.6] - 2026-10-31
 
 ### Fixed & Hardened

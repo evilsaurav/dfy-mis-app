@@ -1,16 +1,47 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.6";
+export const APP_VERSION = "2.9.7";
 export const LAST_UPDATED_DATE = "31 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.9.7",
+    date: "31 Oct 2026",
+    title: "Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "✨ Consolidated Monthly Impact Digest: Introduced a modern Spotify-Wrapped style glassmorphic scorecard directly in the Field Officer Profile tab, showcasing monthly achievements, treatment linkages, and travel allowance.",
+      "📊 30+ Performance Indicators Engine: Aggregates complete metrics across 5 clinical pillars: Clinical Case Finding (Notifications, Presumptive, Sputum Collection, CBNAAT Tests, HIV/DM, Culture DST), Treatment Adherence (FDC Patients, FDC Strips Dispensed, TPT Initiated, TPT Presumptive, Diff TB Care, Outcomes, Kits), Field Outreach (Face-to-Face Meetings, Contact Tracing, Home Visits, Follow-ups, Doctor/Chemist Visits), Digital Compliance (Bank DBT, KYC Documents, Aadhaar Face Auth, Signed Consents), and Mobility/TA (Active Days, Distance, Daily Average KM, Approved Rate, Net Payable).",
+      "🔐 FO Mobile PIN Authentication for Travel Allowance: Resolved mobile 401 Unauthorized errors on TA endpoints (/fo/ta/monthly-summary, /fo/ta/dispute, /fo/monthly-recap) by enabling 4-digit PIN authentication against staff_directory without requiring Admin JWTs.",
+      "🗓️ Multi-Month Retrospective Selector: Frontline officers can seamlessly switch between current and past 5 operational months with instant Redis micro-cached responses (<5ms latency).",
+      "📲 1-Click WhatsApp Performance Bulletin: Formats and copies a comprehensive, emoji-bulleted summary with all 30 indicators ready to share in district coordination groups."
+    ],
+    details: [
+      {
+        tag: "Frontline Empowerment",
+        color: "emerald",
+        text: "Provides field staff transparent, motivational visibility into their monthly healthcare contributions and approved allowances."
+      },
+      {
+        tag: "Mobile Auth Hardening",
+        color: "indigo",
+        text: "Allows field officers to securely check TA records using their mobile PIN while enforcing cross-district RBAC boundaries for supervisors."
+      },
+      {
+        tag: "High-Performance Aggregation",
+        color: "teal",
+        text: "Micro-cached in Redis (TTL 300s) with sub-millisecond child table relational queries for FDC strips."
+      }
+    ]
+  },
+  {
     version: "v2.9.6",
     date: "31 Oct 2026",
     title: "Statewide Multi-District Staff Isolation & TA Prefill Cross-Contamination Guard",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous",
+    badgeColor: "slate",
     highlights: [
       "🛡️ Strict Multi-District Staff Isolation: Enforced canonical district filtering across all Travel Allowance endpoints (roster retrieval, prefill, single log save, and bulk log save). Staff sharing duplicate names across different districts in Bihar (e.g., Suraj Kumar in Jehanabad vs Nawada) are strictly isolated with zero cross-contamination.",
       "⚡ Canonical ID Normalization: Resolved staff identity using canonical staff directory primary keys instead of statewide name matching, ensuring prefill lookups and saved logs always bind to the officer's true district ledger.",

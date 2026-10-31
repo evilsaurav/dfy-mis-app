@@ -5,7 +5,7 @@
 > *Design Framework:* Tailwind CSS v4 + React 19 + Lucide Icons  
 > *Typography:* Plus Jakarta Sans  
 > *Target Form Factors:* Mobile PWA (Field Staff) & Responsive Desktop Studio (Administrators)  
-> *Version:* 3.7.0 (v2.9.5 - Amber Prefill Badges, Snapshot Revert Controls, PIN Vault Typing Dots & Morphing Submission Buttons)  
+> *Version:* 3.8.0 (v2.9.7 - Spotify-Wrapped Glassmorphic Mobile Architecture, 12-Card Bento Impact Grid & Full 30-Point Story Studio)  
 > *Status:* Production Active
 
 ---
@@ -285,3 +285,66 @@ flowchart LR
    - **Sequence Badge**: `7 ➔ Payroll Audit Rule`
    - **Action**: Deactivated or soft-deleted field officers are automatically hidden from active rosters unless they have recorded travel readings or travel allowance for that specific calendar month.
    - **Audit Integrity**: Staff who recorded travel activity (`total_km > 0` or non-zero payable amounts) prior to leaving the organization remain visible in that month's roster to ensure financial reconciliation, payroll settlement, and expense audits remain 100% verifiable.
+
+---
+
+### 6.5 Frontline Monthly Impact Digest & 30+ Performance Indicators Engine (Spotify-Wrapped Mobile Architecture)
+
+The **Frontline Monthly Impact Digest** (`FoMonthlyRecapCard.jsx`) introduces an editorial, celebratory glassmorphic experience on mobile PWA screens, elevating frontline motivation through visual transparency.
+
+```mermaid
+flowchart TD
+    subgraph UI_Surface [Glassmorphic Hero Card]
+        Hero["Spotify-Wrapped Dark Theme<br/>(from-slate-900 via-indigo-950 to-slate-900)"]
+        MonthSelect["🗓️ Retrospective Month Picker<br/>(Current & Past 5 Operational Months)"]
+        BentoGrid["📊 12-Card Bento Highlight Grid<br/>Glowing Indicators & Pillar Badges"]
+    end
+
+    subgraph Actions [Interactive Workflows]
+        FullStoryBtn["✨ 'View Full 30-Point Impact Story'<br/>(Opens Slide-Over Sheet Modal)"]
+        WhatsAppBtn["📲 'Share via WhatsApp'<br/>(1-Click Formatted Bulletin Copy)"]
+    end
+
+    subgraph Story_Modal [Full 30-Point Clinical Story Modal]
+        P1["Pillar 1: Clinical Case Finding (7 Indicators)"]
+        P2["Pillar 2: Treatment Adherence (7 Indicators)"]
+        P3["Pillar 3: Field Outreach & Meetings (4 Indicators)"]
+        P4["Pillar 4: Digital Compliance & DBT (4 Indicators)"]
+        P5["Pillar 5: Mobility & Travel Reimbursement (6 Indicators)"]
+    end
+
+    Hero --> MonthSelect
+    Hero --> BentoGrid
+    Hero --> FullStoryBtn
+    Hero --> WhatsAppBtn
+    FullStoryBtn --> Story_Modal
+    Story_Modal --> P1 & P2 & P3 & P4 & P5
+```
+
+#### Key Design Patterns & Tokens:
+1. **Glassmorphic Spotify-Wrapped Gradient**:
+   - Surface background: `bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900`.
+   - Structural boundary: `border border-indigo-500/30` with `backdrop-blur-md` and rounded corners (`rounded-3xl`).
+   - Ambient glow: Accent glows in emerald (`#10B981`), amber (`#F59E0B`), and cyan (`#06B6D4`).
+2. **12-Card Bento Highlight Grid**:
+   - High-contrast, dense 2-column or 4-column responsive grid highlighting headline numbers:
+     - *TB Notifications* (Emerald glow `text-emerald-300`, `bg-emerald-500/10`)
+     - *Presumptive Screened* (Cyan glow `text-cyan-300`, `bg-cyan-500/10`)
+     - *Sputum Collected* (Blue glow `text-blue-300`, `bg-blue-500/10`)
+     - *CBNAAT Facilitated* (Violet glow `text-violet-300`, `bg-violet-500/10`)
+     - *HIV / DM Screened* (Amber glow `text-amber-300`, `bg-amber-500/10`)
+     - *FDC Patients Linked* (Rose glow `text-rose-300`, `bg-rose-500/10`)
+     - *FDC Strips Dispensed* (Pink glow `text-pink-300`, `bg-pink-500/10`)
+     - *TPT Initiated* (Emerald glow `text-emerald-300`, `bg-emerald-500/10`)
+     - *Face-to-Face Meetings* (Indigo glow `text-indigo-300`, `bg-indigo-500/10`)
+     - *Bank DBT Accounts Linked* (Teal glow `text-teal-300`, `bg-teal-500/10`)
+     - *Total Travel KM* (Amber glow `text-amber-300`, `bg-amber-500/10`)
+     - *Net Payable TA* (Emerald badge if `APPROVED`, masked amber badge if pending)
+3. **5-Pillar Full Story Slide-Over Sheet**:
+   - Breaks down the complete catalog of 30+ indicators into organized clinical pillars with progress bars and contextual sub-labels.
+   - Prevents cognitive overload by separating top-level glanceable highlights from granular clinical statistics.
+4. **1-Click WhatsApp Performance Bulletin Generator**:
+   - Formats a celebratory, emoji-bulleted summary with officer name, active days, key notifications, tests, home visits, and travel summary.
+   - Provides instant haptic feedback via Sonner toast notification ("Copied to clipboard! Ready to paste in WhatsApp").
+5. **Privacy Guard & Unapproved TA Masking**:
+   - When Travel Allowance claim is still in `DRAFT`, `SUBMITTED`, or `REVERTED` status, the net payable amount displays a locked badge (`₹0.00`) with an explicit "Pending Approval" pill, eliminating unverified financial expectations before final Incharge review.

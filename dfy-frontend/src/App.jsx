@@ -14,6 +14,7 @@ import {
 import { downloadOrShareCanvas } from './canvasShare'
 import { getOperationalMonth } from './utils/operationalMonth'
 import TravelAllowanceCard from './components/Fo/TravelAllowanceCard'
+import FoMonthlyRecapCard from './components/Fo/FoMonthlyRecapCard'
 import { TA_FEATURE_ENABLED } from './config/featureFlags'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
@@ -7100,14 +7101,15 @@ function App() {
                 setStats={setFoMonthlyHistory}
                 onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
               />
-              {/* Travel Allowance Card */}
+              {/* Consolidated Monthly Impact & Travel Allowance Recap */}
               {TA_FEATURE_ENABLED && (
                 <div className="px-4 pt-4">
-                  <TravelAllowanceCard
+                  <FoMonthlyRecapCard
                     foName={formData.fo_name}
                     workingPlace={formData.working_place}
-                    month={getOperationalMonth().operationalMonth}
-                    authToken={formData.pin}
+                    pin={formData.pin}
+                    currentMonth={getOperationalMonth().operationalMonth}
+                    showToast={showToast}
                   />
                 </div>
               )}
