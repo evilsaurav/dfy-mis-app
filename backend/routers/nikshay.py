@@ -1074,6 +1074,7 @@ async def reconcile_nikshay(
                 ])
             except Exception as audit_err:
                 logger.warning(f"Error logging sync telemetry to nikshay_sync_runs: {audit_err}")
+            cache.delete("nikshay_sync_meta_light")
 
             sync_meta_doc = {
                 "synced_at": now_utc.isoformat(),
@@ -1174,6 +1175,72 @@ async def get_nikshay_sync_status(admin: dict = Depends(get_current_admin)):
     cached = cache.get("nikshay_sync_meta_light")
     if cached is not None:
         return cached
+
+    # 1. Primary: Query nikshay_sync_runs table in PostgreSQL
+    try:
+        rows = pg_execute_raw(
+            "SELECT * FROM nikshay_sync_runs ORDER BY id DESC LIMIT 1;",
+            fetch=True
+        )
+        if rows:
+            row = rows[0]
+            synced_at = row.get("synced_at")
+            synced_at_iso = None
+            synced_at_ist = None
+            if synced_at:
+                if isinstance(synced_at, str):
+                    try:
+                        synced_at_dt = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
+                    except Exception:
+                        synced_at_dt = None
+                else:
+                    synced_at_dt = synced_at
+
+                if synced_at_dt:
+                    if synced_at_dt.tzinfo is None:
+                        synced_at_dt = synced_at_dt.replace(tzinfo=timezone.utc)
+                    ist_dt = synced_at_dt.astimezone(timezone(timedelta(hours=5, minutes=30)))
+                    synced_at_ist = ist_dt.strftime("%d %b %Y, %I:%M %p")
+                    synced_at_iso = synced_at_dt.isoformat()
+                else:
+                    synced_at_iso = str(synced_at)
+                    synced_at_ist = str(synced_at)
+
+            report_month = row.get("report_month")
+            month_str = ""
+            if report_month:
+                if hasattr(report_month, "strftime"):
+                    month_str = report_month.strftime("%Y-%m")
+                else:
+                    month_str = str(report_month)[:7]
+
+            match_rate = row.get("match_rate_pct")
+            try:
+                match_rate_val = round(float(match_rate), 2) if match_rate is not None else 0.0
+            except (ValueError, TypeError):
+                match_rate_val = 0.0
+
+            res = {
+                "success": True,
+                "has_sync": True,
+                "synced_at": synced_at_iso,
+                "synced_at_ist": synced_at_ist,
+                "synced_by": row.get("synced_by") or "Super Admin",
+                "filename": row.get("filename") or "",
+                "sheet_used": row.get("sheet_used") or "Default",
+                "month": month_str,
+                "district": row.get("district_name_snapshot") or "All",
+                "total_matched": int(row.get("total_matched") or 0),
+                "total_grace_under_72h": int(row.get("total_grace_under_72h") or 0),
+                "total_flagged_over_72h": int(row.get("total_flagged_over_72h") or 0),
+                "match_rate_pct": match_rate_val
+            }
+            cache.set("nikshay_sync_meta_light", res, ttl=300)
+            return res
+    except Exception as e:
+        logger.warning(f"Error reading nikshay_sync_runs: {e}")
+
+    # 2. Fallback: Try admin_config if nikshay_sync_runs has 0 rows or fails
     try:
         row = pg_fetch_one("admin_config", filters={"id": "nikshay_sync_meta"})
         if not row:
@@ -1198,6 +1265,7 @@ async def get_nikshay_sync_status(admin: dict = Depends(get_current_admin)):
                 "synced_at_ist": d.get("synced_at_ist"),
                 "synced_by": d.get("synced_by", "Super Admin"),
                 "filename": d.get("filename", ""),
+                "sheet_used": d.get("sheet_used", "Default"),
                 "month": d.get("month", ""),
                 "district": d.get("district", "All"),
                 "total_matched": d.get("total_matched", 0),
@@ -1208,7 +1276,7 @@ async def get_nikshay_sync_status(admin: dict = Depends(get_current_admin)):
             cache.set("nikshay_sync_meta_light", res, ttl=300)
             return res
     except Exception as e:
-        logger.warning(f"Error reading nikshay_sync_meta: {e}")
+        logger.warning(f"Error reading nikshay_sync_meta fallback: {e}")
     return {"success": True, "has_sync": False}
 
 # =========================================================================

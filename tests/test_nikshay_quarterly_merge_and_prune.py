@@ -211,4 +211,48 @@ async def test_reconcile_nikshay_multi_month_and_telemetry(monkeypatch):
         pg_execute_raw("DELETE FROM nikshay_verified_patients WHERE patient_id IN ('9998881', '9998882');")
 
 
+def test_sync_status_reads_from_sync_runs(monkeypatch):
+    """Verify that get_nikshay_sync_status reads from nikshay_sync_runs table as primary source of truth."""
+    import asyncio
+    from datetime import datetime, timezone
+    from backend.core.cache import cache
+    from backend.core.supabase import pg_execute_raw
+    from backend.routers.nikshay import get_nikshay_sync_status
+
+    monkeypatch.setenv("TEST_LIVE_DB", "1")
+
+    # Clean up any previous test row
+    pg_execute_raw("DELETE FROM nikshay_sync_runs WHERE filename = %s;", ["test_sync.xlsx"])
+
+    # Insert a mock/test row into nikshay_sync_runs
+    pg_execute_raw(
+        """
+        INSERT INTO nikshay_sync_runs (
+            district_name_snapshot, report_month, filename, sheet_used,
+            synced_by, synced_by_id, total_matched, total_grace_under_72h,
+            total_flagged_over_72h, match_rate_pct, synced_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        """,
+        ["Patna", "2026-08-01", "test_sync.xlsx", "Master", "Test Admin", "admin_123", 42, 5, 2, 85.5, datetime.now(timezone.utc)]
+    )
+
+    try:
+        # Clear cache
+        cache.delete("nikshay_sync_meta_light")
+
+        res = asyncio.run(get_nikshay_sync_status(admin={"username": "superadmin", "role": "SUPER_ADMIN"}))
+
+        assert res["success"] is True
+        assert res["has_sync"] is True
+        assert res["total_matched"] == 42
+        assert res["synced_at_ist"] is not None and len(res["synced_at_ist"]) > 5
+        assert res["district"] == "Patna"
+        assert res["filename"] == "test_sync.xlsx"
+    finally:
+        # Clean up the test row
+        pg_execute_raw("DELETE FROM nikshay_sync_runs WHERE filename = %s;", ["test_sync.xlsx"])
+        cache.delete("nikshay_sync_meta_light")
+
+
+
 
