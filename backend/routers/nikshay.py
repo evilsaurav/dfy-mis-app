@@ -51,6 +51,23 @@ router = APIRouter(tags=["nikshay"])
 logger = logging.getLogger("nikshay")
 NIKSHAY_EXPORT_SEMAPHORE = asyncio.Semaphore(1)
 
+
+def ensure_nikshay_schema():
+    """Ensures diagnosis_date and relevant performance indexes exist on nikshay_verified_patients."""
+    try:
+        pg_execute_raw(
+            """
+            ALTER TABLE nikshay_verified_patients ADD COLUMN IF NOT EXISTS diagnosis_date DATE;
+            CREATE INDEX IF NOT EXISTS idx_nikshay_pt_diag_date ON nikshay_verified_patients(diagnosis_date);
+            CREATE INDEX IF NOT EXISTS idx_nikshay_pt_dist_diag ON nikshay_verified_patients(district, diagnosis_date);
+            """
+        )
+    except Exception as e:
+        logger.warning(f"[Nikshay Schema] Migration notice: {e}")
+
+# Safe idempotent initialization at module import
+ensure_nikshay_schema()
+
 # --- Nikshay Column Header Matching Helpers ---
 # =========================================================================
 def is_name_header(c: Any) -> bool:
