@@ -1,16 +1,47 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.9";
+export const APP_VERSION = "2.9.10";
 export const LAST_UPDATED_DATE = "01 Nov 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.9.10",
+    date: "01 Nov 2026",
+    title: "Nikshay Reconciler Auto-Detect Ingestion, Cumulative Ledger Aggregation & FO 1-Tap Calling",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📁 Unified Auto-Detect Upload Surface: Simplified the Nikshay Reconciler by removing manual month and district inputs; automatically detects diagnosis dates and canonical districts across single-month or multi-month dumps (e.g. Last 3 Months).",
+      "🔒 Permanent Cumulative Ledger Aggregate Parity: Upgraded ledger queries to execute indexed PostgreSQL aggregation (COUNT(*) and FILTER (...)) micro-cached per district (300s TTL), reflecting exact statewide (27,000+) and district (1,300+ in Bhojpur) counts.",
+      "📞 Frontline Direct 1-Tap Calling: Enriched all pending follow-up alerts with patient names and phone numbers from verified and sync grace registries (4,000+ alerts instantly populated), adding a 1-tap dialer and clipboard copy action.",
+      "📱 WhatsApp Follow-Up List Enrichment: WhatsApp task share export now formats each patient with their name and phone number for immediate contact by field teams.",
+      "🔍 Longitudinal Tracker Demographics Restoration: Fixed patient lookup to query patient_id (TEXT) first, preventing PostgreSQL BIGINT type aborts and restoring patient names and phone numbers across all tracker views."
+    ],
+    details: [
+      {
+        tag: "Frontline Efficiency",
+        color: "emerald",
+        text: "Field Officers can now call pending patients directly from their follow-up list without manually searching IDs."
+      },
+      {
+        tag: "Reconciler UX",
+        color: "indigo",
+        text: "No more guessing target months or picking districts—just drag and drop the Nikshay export sheet."
+      },
+      {
+        tag: "Data Integrity",
+        color: "teal",
+        text: "Cumulative Ledger now displays true aggregate statistics across the entire database collection."
+      }
+    ]
+  },
+  {
     version: "v2.9.9",
     date: "01 Nov 2026",
     title: "Nikshay Reconciler Quarterly Ingestion, High-Speed Monotonic Smart Merge & 3-Month Rolling Retention Prune",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous",
+    badgeColor: "slate",
     highlights: [
       "⚡ Multi-Month & Quarterly Dump Ingestion: Upgraded the Nikshay Reconciler to seamlessly ingest full quarterly reports spanning multiple months based on Spectrum_Diagnosis_Date, routing records into the cumulative ledger without duplication.",
       "🔒 High-Speed Batch Monotonic Smart Merge Engine: Replaced slow row-by-row updates with atomic PostgreSQL batch upserts (execute_values in 1,000 chunks). Verified indicators (HIV, DM, Bank DBT, UDST, Contact Tracing) now accumulate monotonically using boolean OR logic—never erasing previously validated clinical care.",

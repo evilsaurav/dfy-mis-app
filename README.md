@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.9-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.10-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -61,6 +61,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [32. Official Author Attribution & Executive Excel Metadata Stamping](#32--official-author-attribution--executive-excel-metadata-stamping)
   - [33. Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth](#33--frontline-monthly-impact-digest-30-performance-indicators-engine--fo-travel-allowance-pin-auth)
   - [34. Nikshay Reconciler Quarterly Ingestion, Monotonic Smart Merge & 3-Month Rolling Retention Prune](#34--nikshay-reconciler-quarterly-ingestion-monotonic-smart-merge--3-month-rolling-retention-prune)
+  - [35. Unified Auto-Detect Nikshay Upload, Cumulative Ledger Aggregations & Frontline 1-Tap Calling](#35--unified-auto-detect-nikshay-upload-cumulative-ledger-aggregations--frontline-1-tap-calling)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -600,6 +601,21 @@ flowchart TD
   - Displays a live stopwatch (`⏱️ Elapsed Time: MM:SSs`) and low-memory guidance notice during reconciliation, preventing accidental double-clicks and page refreshes.
   - Replaces "Pending / No Dump Yet" in the modal header with a persistent, pulsing IST timestamp badge linked directly to the PostgreSQL `nikshay_sync_runs` table.
   - Integrated a dedicated Prune Old Records modal in the Permanent Cumulative Ledger toolbar for Super Admins.
+
+### 35. 🔒 Unified Auto-Detect Nikshay Upload, Cumulative Ledger Aggregations & Frontline 1-Tap Calling
+- **Zero-Friction Unified Upload Card**:
+  - Removed manual `Target Month` and `District Filter` inputs from the Reconciler upload interface.
+  - Dynamically detects reporting months and canonical districts directly from spreadsheet rows, supporting both single-month and quarterly dumps (e.g. Last 3 Months) without administrative pre-filtering.
+- **Permanent Cumulative Ledger Aggregate Parity & Micro-Caching**:
+  - Replaced view-slice clamping in `get_cumulative_ledger` with direct PostgreSQL aggregations (`COUNT(*)` and `COUNT(*) FILTER (...)`), micro-cached for 300s by `(district, search)` for rapid pagination.
+  - Correctly reflects total population metrics (e.g. 1,334 in Bhojpur, 27,000+ statewide) across all metric cards and pagination indicators.
+  - Automated cache eviction of `ledger_*` and `journey_*` prefixes upon every reconciliation sync.
+- **Frontline 1-Tap Direct Patient Dialing (`tel:`)**:
+  - Upgraded `get_patient_journey` to query `patient_id` (TEXT) before BIGINT IDs, resolving transaction aborts and restoring patient names and phone numbers in the Nikshay Patient Tracker.
+  - Added multi-tier fallback checking `nikshay_sync_grace_records`, `nikshay_sync_flagged_records`, and `report_fdc_details`.
+  - Upgraded `compute_cascade_alerts` to batch-enrich pending follow-up alerts with patient demographics (4,000+ alerts instantly populated).
+  - Integrated 1-Tap Call (`📞 Call <phone>`) and copy actions directly on pending patient cards in `PendingInterventionsActionCenter` (`App.jsx`).
+  - Enhanced WhatsApp follow-up list export with patient names and telephone numbers for seamless field team outreach.
 
 ---
 

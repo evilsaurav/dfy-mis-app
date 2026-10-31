@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.10] - 2026-11-01
+
+### Added & Optimized
+- **Nikshay Reconciler Zero-Friction Unified Upload Surface**:
+  - Removed manual `Target Month` and `District Filter` inputs from the Reconciler upload form.
+  - Replaced with a unified upload card supporting single-month or multi-month dumps (e.g. Last 3 Months) with automatic detection of diagnosis dates, districts, and indicator columns across all sheets.
+- **Permanent Cumulative Ledger Aggregate Parity & Micro-Caching**:
+  - Upgraded `/admin/nikshay/cumulative-ledger` to run high-speed PostgreSQL aggregate queries (`COUNT(*)` and `COUNT(*) FILTER (...)`) instead of returning 50-row sliced counts.
+  - Micro-cached collection metrics per `(district, search)` with 300s TTL, ensuring sub-15ms page turns while accurately reflecting full district populations (e.g. 1,334 verified in Bhojpur, 27,000+ statewide).
+  - Wired automated cache invalidation for `ledger_*` and `journey_*` prefixes upon every reconciliation sync run.
+- **Field Officer Patient Demographics & 1-Tap Calling Direct Dialing**:
+  - Fixed `get_patient_journey` to query `nikshay_verified_patients` by `patient_id` (TEXT) first, preventing type mismatch transaction aborts on PostgreSQL `BIGINT` primary keys.
+  - Added multi-tier fallback checking `nikshay_sync_grace_records`, `nikshay_sync_flagged_records`, and `report_fdc_details` so patient demographics (`patient_name`, `phone`) are consistently resolved.
+  - Upgraded `compute_cascade_alerts` to batch-enrich pending follow-up alerts with patient name and phone number (instantly populating 4,000+ pending alerts).
+  - Integrated direct 1-Tap Dialing (`📞 Call <phone>`) and phone number copy button on all pending cards in `PendingInterventionsActionCenter` (`App.jsx`).
+  - Enhanced WhatsApp list export with patient names and contact numbers for seamless field coordinator follow-ups.
+
+---
+
 ## [2.9.9] - 2026-11-01
 
 ### Added & Optimized
