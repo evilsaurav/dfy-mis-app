@@ -5,7 +5,7 @@
 > *Design Framework:* Tailwind CSS v4 + React 19 + Lucide Icons  
 > *Typography:* Plus Jakarta Sans  
 > *Target Form Factors:* Mobile PWA (Field Staff) & Responsive Desktop Studio (Administrators)  
-> *Version:* 3.8.0 (v2.9.7 - Spotify-Wrapped Glassmorphic Mobile Architecture, 12-Card Bento Impact Grid & Full 30-Point Story Studio)  
+> *Version:* 3.8.1 (v2.9.8 - 3D Atmospheric Corner Fade, Elevation Halo & Profile Deduplication)  
 > *Status:* Production Active
 
 ---
@@ -322,11 +322,15 @@ flowchart TD
 ```
 
 #### Key Design Patterns & Tokens:
-1. **Glassmorphic Spotify-Wrapped Gradient**:
+1. **Glassmorphic Spotify-Wrapped Gradient & 3D Atmospheric Corner Fade**:
    - Surface background: `bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900`.
-   - Structural boundary: `border border-indigo-500/30` with `backdrop-blur-md` and rounded corners (`rounded-3xl`).
+   - Structural boundary: `border border-indigo-500/30` with `ring-1 ring-white/10 ring-inset` and rounded corners (`rounded-3xl`).
+   - 3D Atmospheric Outer Halo: `-inset-1.5 bg-gradient-to-r from-indigo-500/25 via-sky-500/20 to-purple-600/25 rounded-[30px] blur-xl opacity-80` to gradually fade the surrounding white page canvas into a soft luminous blue/indigo aura around the rounded corners.
+   - 3D Depth Shadows: `shadow-[0_20px_50px_-15px_rgba(15,23,42,0.65),0_0_35px_rgba(99,102,241,0.18)]` for realistic physical elevation.
    - Ambient glow: Accent glows in emerald (`#10B981`), amber (`#F59E0B`), and cyan (`#06B6D4`).
-2. **12-Card Bento Highlight Grid**:
+2. **Profile View Deduplication**:
+   - Retired the legacy 2-column "Work Breakdown" section from `MyProfileDashboard` to eliminate redundant indicator displays, establishing the Monthly Impact Digest as the single unified command surface for all 30 indicators.
+3. **12-Card Bento Highlight Grid**:
    - High-contrast, dense 2-column or 4-column responsive grid highlighting headline numbers:
      - *TB Notifications* (Emerald glow `text-emerald-300`, `bg-emerald-500/10`)
      - *Presumptive Screened* (Cyan glow `text-cyan-300`, `bg-cyan-500/10`)

@@ -2188,26 +2188,6 @@ const MyProfileDashboard = ({
           </div>
         </div>
       )}
-
-      <h3 className="text-sm font-black text-slate-800 uppercase tracking-widest mb-4 px-2">Work Breakdown</h3>
-      <div className="grid grid-cols-2 gap-3">
-        {Object.entries(breakdown).filter(([, v]) => Number(v) > 0).length === 0 ? (
-          <p className="col-span-2 text-xs text-slate-400 font-medium text-center py-4 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-            Abhi tak is mahine koi work record darj nahi hua hai.
-          </p>
-        ) : (
-          Object.entries(breakdown).map(([k, v]) => {
-            if (!v || v === 0) return null;
-            const label = k.replace(/_/g, " ");
-            return (
-              <div key={k} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider truncate mr-2">{label}</span>
-                <span className="text-lg font-black text-slate-800">{v}</span>
-              </div>
-            );
-          })
-        )}
-      </div>
         </>
       )}
     </div>
@@ -7101,9 +7081,11 @@ function App() {
                 setStats={setFoMonthlyHistory}
                 onRefreshStats={() => fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin)}
               />
-              {/* Consolidated Monthly Impact & Travel Allowance Recap */}
+              {/* Consolidated Monthly Impact & Travel Allowance Recap with 3D Atmospheric Fusion */}
               {TA_FEATURE_ENABLED && (
-                <div className="px-4 pt-4">
+                <div className="px-3 sm:px-4 pt-3 pb-6 relative">
+                  {/* Atmospheric radial wash gradually blending page canvas into soft indigo aura */}
+                  <div className="absolute inset-x-2 inset-y-1 bg-gradient-to-b from-transparent via-indigo-950/[0.04] to-transparent rounded-3xl pointer-events-none -z-10 blur-xl" />
                   <FoMonthlyRecapCard
                     foName={formData.fo_name}
                     workingPlace={formData.working_place}

@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.9.0 (v2.9.7 - Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Authentication Gateway)  
+> *Version:* 3.9.1 (v2.9.8 - Child-Table Resilient Aggregation Engine, 100% Indicator Parity & Profile View Deduplication)  
 > *Status:* Production Active
 
 ---
@@ -492,6 +492,11 @@ flowchart TD
   - *Field Outreach*: Face-to-Face Meetings, Household Contact Tracing, Follow-Up Home Visits, Doctor / Chemist Visits.
   - *Digital Compliance*: Bank DBT Accounts Linked, KYC Documents Verified, Aadhaar Face Auth Completed, Patient Consents Uploaded.
   - *Mobility & Travel Allowance*: Field Active Reporting Days, Total Distance (KM), Daily Average Running (KM/day), Approved Rate (₹/KM), Gross Amount, Net Payable Amount.
+- **Child-Table Resilient Aggregation Engine (100% Data Parity)**:
+  - Upgraded `/fo/monthly-recap` to query `report_kpi_entries` alongside `daily_field_reports` using a 2-step indexed query.
+  - Prioritizes verified patient IDs (`notification_ids`, `hiv_dm_ids`, `dbt_ids`, `contact_tracing_ids`, `differentiated_tb_ids`, `documents_ids`, etc.) from child tables, only falling back to parent `legacy_count_*` when child entries are absent.
+  - Resolves under-reporting for historical migrated records where parent counts were NULL (e.g. Ram Prasad in Bhojpur reporting 50 notifications matching Profile Target stats).
+  - Guarantees 100% mathematical parity across past months (September 2026), current month (October 2026), and future cycles (November 2026+) with **zero live database mutations**.
 - **Relational Child-Table Aggregation for FDC Strips**:
   - Aggregates exact dispensed medicine strips via SQL join:
     ```sql

@@ -2951,41 +2951,107 @@ def get_fo_monthly_recap(
     }
 
     try:
+        # Step 1: Query daily_field_reports for that officer, district, and month range
         rep_sql = """
             SELECT 
-                COUNT(DISTINCT date_of_reporting) as active_duty_days,
-                COALESCE(SUM(total_km), 0) as total_km,
-                COALESCE(SUM(doctor_store_visits_count), 0) as doctor_store_visits,
-                COALESCE(SUM(legacy_count_notifications), 0) as notifications,
-                COALESCE(SUM(legacy_count_hiv_dm), 0) as hiv_dm,
-                COALESCE(SUM(legacy_count_dbt), 0) as dbt,
-                COALESCE(SUM(legacy_count_sample_collection), 0) as sample_collection,
-                COALESCE(SUM(legacy_count_sample_tested), 0) as sample_tested,
-                COALESCE(SUM(legacy_count_home_visit), 0) as home_visit,
-                COALESCE(SUM(legacy_count_contact_tracing), 0) as contact_tracing,
-                COALESCE(SUM(legacy_count_follow_up), 0) as follow_up,
-                COALESCE(SUM(legacy_count_face_to_face), 0) as face_to_face,
-                COALESCE(SUM(legacy_count_presumptive), 0) as presumptive,
-                COALESCE(SUM(legacy_count_documents), 0) as documents,
-                COALESCE(SUM(legacy_count_fdc_provided), 0) as fdc_provided,
-                COALESCE(SUM(legacy_count_kit_consumption), 0) as kit_consumption,
-                COALESCE(SUM(legacy_count_tpt_treatment_start), 0) as tpt_treatment_start,
-                COALESCE(SUM(legacy_count_tpt_presumptive), 0) as tpt_presumptive,
-                COALESCE(SUM(legacy_count_outcome_assigned), 0) as outcome_assigned,
-                COALESCE(SUM(legacy_count_adhar_face_authentication), 0) as adhar_face_authentication,
-                COALESCE(SUM(legacy_count_consent_with_id), 0) as consent_with_id,
-                COALESCE(SUM(legacy_count_culture_dst), 0) as culture_dst,
-                COALESCE(SUM(legacy_count_differentiated_tb), 0) as differentiated_tb
+                id,
+                date_of_reporting,
+                COALESCE(total_km, 0) as total_km,
+                COALESCE(doctor_store_visits_count, 0) as doctor_store_visits,
+                COALESCE(legacy_count_notifications, 0) as notifications,
+                COALESCE(legacy_count_hiv_dm, 0) as hiv_dm,
+                COALESCE(legacy_count_dbt, 0) as dbt,
+                COALESCE(legacy_count_sample_collection, 0) as sample_collection,
+                COALESCE(legacy_count_sample_tested, 0) as sample_tested,
+                COALESCE(legacy_count_home_visit, 0) as home_visit,
+                COALESCE(legacy_count_contact_tracing, 0) as contact_tracing,
+                COALESCE(legacy_count_follow_up, 0) as follow_up,
+                COALESCE(legacy_count_face_to_face, 0) as face_to_face,
+                COALESCE(legacy_count_presumptive, 0) as presumptive,
+                COALESCE(legacy_count_documents, 0) as documents,
+                COALESCE(legacy_count_fdc_provided, 0) as fdc_provided,
+                COALESCE(legacy_count_kit_consumption, 0) as kit_consumption,
+                COALESCE(legacy_count_tpt_treatment_start, 0) as tpt_treatment_start,
+                COALESCE(legacy_count_tpt_presumptive, 0) as tpt_presumptive,
+                COALESCE(legacy_count_outcome_assigned, 0) as outcome_assigned,
+                COALESCE(legacy_count_adhar_face_authentication, 0) as adhar_face_authentication,
+                COALESCE(legacy_count_consent_with_id, 0) as consent_with_id,
+                COALESCE(legacy_count_culture_dst, 0) as culture_dst,
+                COALESCE(legacy_count_differentiated_tb, 0) as differentiated_tb
             FROM daily_field_reports
             WHERE (LOWER(TRIM(working_place)) = LOWER(TRIM(%s)) OR LOWER(TRIM(working_place)) = LOWER(TRIM(%s)))
               AND LOWER(TRIM(fo_name)) = LOWER(TRIM(%s))
               AND date_of_reporting >= %s::date
               AND date_of_reporting <= %s::date
+            ORDER BY date_of_reporting ASC
         """
-        rows = pg_execute_raw(rep_sql, [canon_dist, district, clean_fo, start_date, end_date], fetch=True)
-        if rows:
-            for k, v in rows[0].items():
-                clinical_data[k] = float(v) if k == "total_km" else int(v or 0)
+        rep_rows = pg_execute_raw(rep_sql, [canon_dist, district, clean_fo, start_date, end_date], fetch=True) or []
+        
+        if rep_rows:
+            distinct_days = set()
+            report_ids = []
+            for r in rep_rows:
+                if r.get("date_of_reporting"):
+                    distinct_days.add(str(r["date_of_reporting"])[:10])
+                if r.get("id"):
+                    report_ids.append(r["id"])
+                clinical_data["total_km"] += float(r.get("total_km") or 0.0)
+                clinical_data["doctor_store_visits"] += int(r.get("doctor_store_visits") or 0)
+
+            clinical_data["active_duty_days"] = len(distinct_days)
+
+            # Step 2: Query child report_kpi_entries grouped by report_id and category
+            kpi_map = {}
+            if report_ids:
+                try:
+                    kpi_rows = pg_execute_raw("""
+                        SELECT report_id, category, COUNT(*) as cnt
+                        FROM report_kpi_entries
+                        WHERE report_id = ANY(%s)
+                        GROUP BY report_id, category
+                    """, [report_ids], fetch=True) or []
+                    for kr in kpi_rows:
+                        rid = kr["report_id"]
+                        cat = kr["category"]
+                        if rid not in kpi_map:
+                            kpi_map[rid] = {}
+                        kpi_map[rid][cat] = int(kr.get("cnt") or 0)
+                except Exception as kpi_err:
+                    logger.debug(f"Notice: recap child KPI fetch: {kpi_err}")
+
+            # Step 3: Map indicators prioritizing child entries over legacy counts
+            indicator_kpi_cat = {
+                "notifications": "notification_ids",
+                "hiv_dm": "hiv_dm_ids",
+                "dbt": "dbt_ids",
+                "sample_collection": "sample_collection_ids",
+                "sample_tested": "sample_tested_ids",
+                "home_visit": "home_visit_ids",
+                "contact_tracing": "contact_tracing_ids",
+                "follow_up": "follow_up_ids",
+                "face_to_face": "face_to_face_ids",
+                "presumptive": "presumptive_ids",
+                "documents": "documents_ids",
+                "fdc_provided": "fdc_provided_ids",
+                "kit_consumption": "kit_consumption_ids",
+                "tpt_treatment_start": "tpt_treatment_start_ids",
+                "tpt_presumptive": "tpt_presumptive_ids",
+                "outcome_assigned": "outcome_assigned_ids",
+                "adhar_face_authentication": "adhar_face_authentication_ids",
+                "consent_with_id": "consent_with_id_ids",
+                "culture_dst": "culture_dst_ids",
+                "differentiated_tb": "differentiated_tb_ids"
+            }
+
+            for r in rep_rows:
+                rid = r.get("id")
+                r_kpis = kpi_map.get(rid, {}) if rid else {}
+                for ind_key, kpi_cat in indicator_kpi_cat.items():
+                    child_cnt = r_kpis.get(kpi_cat, 0)
+                    if child_cnt > 0:
+                        clinical_data[ind_key] += child_cnt
+                    else:
+                        clinical_data[ind_key] += int(r.get(ind_key) or 0)
     except Exception as e:
         logger.warning(f"Error querying recap daily reports: {e}")
 
@@ -3018,23 +3084,23 @@ def get_fo_monthly_recap(
                 if r_wp == canon_dist and is_officer_name_match(r_fo, clean_fo, canon_dist) and r_date.startswith(month):
                     clinical_data["active_duty_days"] += 1
                     clinical_data["total_km"] += float(r.get("total_km") or 0.0)
-                    clinical_data["notifications"] += int(r.get("legacy_count_notifications") or 0)
-                    clinical_data["hiv_dm"] += int(r.get("legacy_count_hiv_dm") or 0)
-                    clinical_data["dbt"] += int(r.get("legacy_count_dbt") or 0)
-                    clinical_data["sample_collection"] += int(r.get("legacy_count_sample_collection") or 0)
-                    clinical_data["sample_tested"] += int(r.get("legacy_count_sample_tested") or 0)
-                    clinical_data["home_visit"] += int(r.get("legacy_count_home_visit") or 0)
-                    clinical_data["contact_tracing"] += int(r.get("legacy_count_contact_tracing") or 0)
-                    clinical_data["follow_up"] += int(r.get("legacy_count_follow_up") or 0)
-                    clinical_data["face_to_face"] += int(r.get("legacy_count_face_to_face") or 0)
-                    clinical_data["presumptive"] += int(r.get("legacy_count_presumptive") or 0)
-                    clinical_data["documents"] += int(r.get("legacy_count_documents") or 0)
-                    clinical_data["fdc_provided"] += int(r.get("legacy_count_fdc_provided") or 0)
+                    clinical_data["notifications"] += len(r.get("notification_ids") or []) or int(r.get("legacy_count_notifications") or 0)
+                    clinical_data["hiv_dm"] += len(r.get("hiv_dm_ids") or []) or int(r.get("legacy_count_hiv_dm") or 0)
+                    clinical_data["dbt"] += len(r.get("dbt_ids") or []) or int(r.get("legacy_count_dbt") or 0)
+                    clinical_data["sample_collection"] += len(r.get("sample_collection_ids") or []) or int(r.get("legacy_count_sample_collection") or 0)
+                    clinical_data["sample_tested"] += len(r.get("sample_tested_ids") or []) or int(r.get("legacy_count_sample_tested") or 0)
+                    clinical_data["home_visit"] += len(r.get("home_visit_ids") or []) or int(r.get("legacy_count_home_visit") or 0)
+                    clinical_data["contact_tracing"] += len(r.get("contact_tracing_ids") or []) or int(r.get("legacy_count_contact_tracing") or 0)
+                    clinical_data["follow_up"] += len(r.get("follow_up_ids") or []) or int(r.get("legacy_count_follow_up") or 0)
+                    clinical_data["face_to_face"] += len(r.get("face_to_face_ids") or []) or int(r.get("legacy_count_face_to_face") or 0)
+                    clinical_data["presumptive"] += len(r.get("presumptive_ids") or []) or int(r.get("legacy_count_presumptive") or 0)
+                    clinical_data["documents"] += len(r.get("documents_ids") or []) or int(r.get("legacy_count_documents") or 0)
+                    clinical_data["fdc_provided"] += len(r.get("fdc_provided_ids") or []) or int(r.get("legacy_count_fdc_provided") or 0)
                     clinical_data["fdc_strips"] += int(r.get("fdc_strips") or (int(r.get("legacy_count_fdc_provided") or 0) * 2))
-                    clinical_data["tpt_treatment_start"] += int(r.get("legacy_count_tpt_treatment_start") or 0)
-                    clinical_data["tpt_presumptive"] += int(r.get("legacy_count_tpt_presumptive") or 0)
-                    clinical_data["consent_with_id"] += int(r.get("legacy_count_consent_with_id") or 0)
-                    clinical_data["adhar_face_authentication"] += int(r.get("legacy_count_adhar_face_authentication") or 0)
+                    clinical_data["tpt_treatment_start"] += len(r.get("tpt_treatment_start_ids") or []) or int(r.get("legacy_count_tpt_treatment_start") or 0)
+                    clinical_data["tpt_presumptive"] += len(r.get("tpt_presumptive_ids") or []) or int(r.get("legacy_count_tpt_presumptive") or 0)
+                    clinical_data["consent_with_id"] += len(r.get("consent_with_id_ids") or []) or int(r.get("legacy_count_consent_with_id") or 0)
+                    clinical_data["adhar_face_authentication"] += len(r.get("adhar_face_authentication_ids") or []) or int(r.get("legacy_count_adhar_face_authentication") or 0)
         except Exception as e:
             logger.debug(f"mock recap stream skipped: {e}")
 

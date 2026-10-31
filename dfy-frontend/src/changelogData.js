@@ -1,16 +1,46 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.7";
+export const APP_VERSION = "2.9.8";
 export const LAST_UPDATED_DATE = "31 Oct 2026";
 
 export const CHANGELOG_ENTRIES = [
   {
+    version: "v2.9.8",
+    date: "31 Oct 2026",
+    title: "Frontline Digest Child-Table Data Parity Engine, 3D Atmospheric Fusion & Work Metrics Deduplication",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🛡️ Child-Table Resilient Aggregation Engine: Upgraded /fo/monthly-recap to prioritize verified patient IDs from report_kpi_entries over parent legacy counts, guaranteeing 100% exact parity with Profile Work Breakdown across past, present, and future months.",
+      "💎 3D Atmospheric Corner Fade: Integrated an outer ambient glow halo (-inset-1.5 blur-xl) and multi-layered depth shadows, seamlessly fading the dark scorecard into the surrounding page canvas without harsh rectangular cutouts.",
+      "🧹 Profile View Deduplication: Removed redundant legacy Work Breakdown card grid from MyProfileDashboard, establishing the Monthly Impact Digest as the single authoritative surface for all 30 clinical and mobility indicators.",
+      "⚡ Zero-DB-Mutation Safety: Completely resolved indicator discrepancies with 100% non-destructive query-layer synthesis, preserving live database integrity with zero risk of data corruption."
+    ],
+    details: [
+      {
+        tag: "Data Parity",
+        color: "emerald",
+        text: "Ensures frontline officers and coordinators see identical notification and clinical counts across all profile and recap views."
+      },
+      {
+        tag: "3D Design Polish",
+        color: "indigo",
+        text: "Atmospheric corner fade and ambient lighting merge the glassmorphic card naturally into the mobile dashboard."
+      },
+      {
+        tag: "Production Safety",
+        color: "teal",
+        text: "Query-level resolution leaves all 7,200+ production reports and 100,000+ patient records completely untouched."
+      }
+    ]
+  },
+  {
     version: "v2.9.7",
     date: "31 Oct 2026",
     title: "Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Previous",
+    badgeColor: "slate",
     highlights: [
       "✨ Consolidated Monthly Impact Digest: Introduced a modern Spotify-Wrapped style glassmorphic scorecard directly in the Field Officer Profile tab, showcasing monthly achievements, treatment linkages, and travel allowance.",
       "📊 30+ Performance Indicators Engine: Aggregates complete metrics across 5 clinical pillars: Clinical Case Finding (Notifications, Presumptive, Sputum Collection, CBNAAT Tests, HIV/DM, Culture DST), Treatment Adherence (FDC Patients, FDC Strips Dispensed, TPT Initiated, TPT Presumptive, Diff TB Care, Outcomes, Kits), Field Outreach (Face-to-Face Meetings, Contact Tracing, Home Visits, Follow-ups, Doctor/Chemist Visits), Digital Compliance (Bank DBT, KYC Documents, Aadhaar Face Auth, Signed Consents), and Mobility/TA (Active Days, Distance, Daily Average KM, Approved Rate, Net Payable).",

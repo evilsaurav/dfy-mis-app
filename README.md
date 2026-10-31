@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.7-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.8-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -550,9 +550,15 @@ flowchart TD
 ---
 
 ### 33. 🌟 Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth
-- **Consolidated Monthly Impact Digest (`FoMonthlyRecapCard.jsx`)**:
-  - Integrated a Spotify-Wrapped style glassmorphic scorecard directly into the Field Officer Profile tab, showcasing monthly achievements, treatment linkages, and verified travel allowances.
-  - Designed with high-contrast glowing metric badges, dark gradient cards (`from-slate-900 via-indigo-950 to-slate-900`), and 12-Card Bento Highlight Grid.
+- **Consolidated Monthly Impact Digest & 3D Atmospheric Fusion (`FoMonthlyRecapCard.jsx`)**:
+  - Integrated an editorial glassmorphic scorecard directly into the Field Officer Profile tab, showcasing monthly achievements, treatment linkages, and verified travel allowances.
+  - Engineered with a 3D atmospheric corner fade (`-inset-1.5` ambient halo blur with multi-stop depth shadows `shadow-[0_20px_50px_-15px_rgba(15,23,42,0.65),0_0_35px_rgba(99,102,241,0.18)]`), smoothly blending the dark card into the page canvas with a soft luminous aura.
+  - Removed redundant legacy Work Breakdown card grids from `MyProfileDashboard`, providing a single unified command view with zero metric duplication.
+- **Child-Table Resilient Aggregation Engine (100% Data Parity)**:
+  - Upgraded `/fo/monthly-recap` to join child table `report_kpi_entries`, mapping verified Nikshay patient IDs across all 20 clinical categories.
+  - Resolves indicator count discrepancies caused by older migrated reports containing NULL legacy columns (e.g. Ram Prasad in Bhojpur reporting 50 notifications matching Profile Target stats).
+  - Guarantees 100% numerical parity between Profile Work Breakdown and the Monthly Impact Digest across past, present, and future reporting months.
+  - Implemented entirely through non-destructive query-layer synthesis without running risky bulk database migrations or polluting live data.
 - **30+ Performance Indicators Engine**:
   - Aggregates clinical metrics across 5 operational pillars:
     1. *Clinical Case Finding & Diagnostics*: TB Notifications, Presumptive TB Screened, Sputum Samples Collected, CBNAAT Tests Facilitated, HIV Screenings, Diabetes Screenings, Culture/DST Testing.

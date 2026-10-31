@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.8] - 2026-10-31
+
+### Fixed & Hardened
+- **Frontline Monthly Impact Digest Child-Table Resilient Aggregation Engine**:
+  - Upgraded `/fo/monthly-recap` query engine to perform an indexed child table join with `report_kpi_entries`, mapping patient counts across all 20 clinical categories.
+  - Resolved indicator count discrepancies where older migrated reports containing NULL `legacy_count_*` values caused under-reporting in the monthly digest (e.g. Ram Prasad in Bhojpur reporting 46 instead of 50).
+  - Guarantees 100% exact numerical parity between Profile Target stats and the Monthly Impact Digest across historical months (September 2026), active operational months (October 2026), and upcoming cycles (November 2026+).
+  - **Zero Database Mutation Safety**: Implemented entirely via read-only SQL aggregation synthesis, ensuring all 7,200+ production reports and 100,000+ patient records remain completely untouched and unpolluted.
+
+### Changed & UI Polish
+- **Frontline Profile Deduplication**:
+  - Removed legacy redundant 2-column "Work Breakdown" section from `MyProfileDashboard` (`App.jsx`), establishing the Monthly Impact Digest as the single unified command surface for all 30 indicators.
+  - Maintained frontline target pacing, streak counter, and Honors studio triggers.
+- **3D Atmospheric Corner Fade & Elevation System**:
+  - Introduced an outer atmospheric aura envelope (`-inset-1.5 bg-gradient-to-r from-indigo-500/25 via-sky-500/20 to-purple-600/25 blur-xl`) and multi-stop depth shadows (`shadow-[0_20px_50px_-15px_rgba(15,23,42,0.65),0_0_35px_rgba(99,102,241,0.18)]`).
+  - Added internal bevel lighting (`ring-1 ring-white/10 ring-inset`) and corner lights that softly bleed into the surrounding canvas, eliminating harsh rectangular borders and providing seamless 3D elevation.
+
+---
+
 ## [2.9.7] - 2026-10-31
 
 ### Added

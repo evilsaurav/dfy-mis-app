@@ -197,12 +197,16 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
   const mobility = data?.mobility_and_ta || {};
 
   return (
-    <div className="w-full">
-      {/* ── Main Hero Card ──────────────────────────────────────────────── */}
-      <div className="relative rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-slate-700/80 shadow-[0_10px_35px_rgba(0,0,0,0.35)] overflow-hidden text-white p-4 sm:p-5 transition-all">
-        {/* Ambient Top Glow */}
-        <div className="absolute -top-12 -right-12 w-44 h-44 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-12 -left-12 w-44 h-44 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+    <div className="w-full relative my-1">
+      {/* ── 3D Atmospheric Outer Halo (Merges the white canvas into a soft glowing blue/indigo aura) ── */}
+      <div className="absolute -inset-1.5 bg-gradient-to-r from-indigo-500/25 via-sky-500/20 to-purple-600/25 rounded-[30px] blur-xl opacity-80 -z-10 pointer-events-none transition-all duration-500" />
+      <div className="absolute -inset-0.5 bg-gradient-to-b from-indigo-500/15 via-slate-900/10 to-indigo-950/25 rounded-[28px] blur-xs -z-10 pointer-events-none" />
+
+      {/* ── Main 3D Elevated Hero Card ─────────────────────────────────── */}
+      <div className="relative rounded-3xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-indigo-500/30 ring-1 ring-white/10 ring-inset shadow-[0_20px_50px_-15px_rgba(15,23,42,0.65),0_0_35px_rgba(99,102,241,0.18)] overflow-hidden text-white p-4 sm:p-5 transition-all">
+        {/* Ambient Top & Bottom 3D Corner Lights */}
+        <div className="absolute -top-12 -right-12 w-52 h-52 bg-gradient-to-br from-indigo-500/25 to-sky-400/20 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-52 h-52 bg-gradient-to-tr from-emerald-500/20 to-teal-400/15 rounded-full blur-3xl pointer-events-none" />
 
         {/* ── Header: Title & Month Dropdown ────────────────────────────── */}
         <div className="flex items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
