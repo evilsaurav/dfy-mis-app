@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { canonicalizeDistrict, isOfficerNameMatch, parseTargetVal, DEFAULT_BIHAR_DISTRICTS } from '../../../utils/districtHelpers';
+import StaffDossierModal from './StaffDossierModal';
 
 export default function StaffManagementModal({
   showStaffSuite,
@@ -29,11 +30,13 @@ export default function StaffManagementModal({
   setStaffToggleModal,
   handleExecuteToggleStaffStatus,
   isTogglingStaff,
-  fetchStaffList
+  fetchStaffList,
+  showToast
 }) {
   // 1. Internal states for Transfer Modal & Local Staff Overrides
   const [transferModal, setTransferModal] = useState(null);
   const [staffOverrides, setStaffOverrides] = useState({});
+  const [selectedDossierOfficer, setSelectedDossierOfficer] = useState(null);
 
   // 2. Role Gating: SUPER_ADMIN or MAIN_INCHARGE
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN' || currentUser?.username === 'admin';
@@ -385,6 +388,14 @@ export default function StaffManagementModal({
                                       🔄 Transfer
                                     </button>
                                   )}
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedDossierOfficer(s)}
+                                    className="text-xs font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
+                                    title="View & Edit Full HR Master Dossier"
+                                  >
+                                    📋 Dossier
+                                  </button>
                                   <button
                                     onClick={() => {
                                       const cDist = canonicalizeDistrict(s.district);
@@ -868,6 +879,21 @@ export default function StaffManagementModal({
             </form>
           </div>
         </div>
+      )}
+
+      {/* 23. Staff HR Master Dossier Modal */}
+      {selectedDossierOfficer && (
+        <StaffDossierModal
+          officer={selectedDossierOfficer}
+          onClose={() => setSelectedDossierOfficer(null)}
+          currentUser={currentUser}
+          onStaffUpdated={(updatedStaff) => {
+            setStaffOverrides(prev => ({ ...prev, [updatedStaff.id]: updatedStaff }));
+            setSelectedDossierOfficer(updatedStaff);
+            if (fetchStaffList) fetchStaffList();
+          }}
+          showToast={showToast}
+        />
       )}
 
     </>
