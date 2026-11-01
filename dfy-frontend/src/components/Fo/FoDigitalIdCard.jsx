@@ -17,13 +17,41 @@ export const FoDigitalIdCard = ({ formData, showToast }) => {
   const cardRef = useRef(null);
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dfy-mis-app.onrender.com';
 
+  const getCacheKey = () => {
+    if (!formData?.working_place || !formData?.fo_name) return null;
+    return `dfy_id_dossier_${formData.working_place}_${formData.fo_name}`.replace(/\s+/g, '_').toLowerCase();
+  };
+
   const fetchDossier = async () => {
     if (!formData?.working_place || !formData?.fo_name || !formData?.pin) {
       setLoading(false);
       return;
     }
+    const cacheKey = getCacheKey();
+
+    // 1. Instant Offline Hydration from Phone's Local Storage (0ms lag)
+    if (cacheKey) {
+      try {
+        const cachedRaw = localStorage.getItem(cacheKey);
+        if (cachedRaw) {
+          const cached = JSON.parse(cachedRaw);
+          if (cached && typeof cached === 'object') {
+            setDossier(cached);
+            setEditForm({
+              phone: cached.phone || '',
+              blood_group: cached.blood_group || '',
+              emergency_contact: cached.emergency_contact || ''
+            });
+            setLoading(false);
+          }
+        }
+      } catch (e) {
+        console.warn('Error reading local dossier cache:', e);
+      }
+    }
+
+    // 2. Background Stale-While-Revalidate: Fetch from server and sync to phone
     try {
-      setLoading(true);
       const url = `${API_BASE_URL}/fo/profile-dossier?district=${encodeURIComponent(formData.working_place)}&fo_name=${encodeURIComponent(formData.fo_name)}&pin=${encodeURIComponent(formData.pin)}`;
       const res = await fetch(url);
       if (res.ok) {
@@ -35,10 +63,16 @@ export const FoDigitalIdCard = ({ formData, showToast }) => {
             blood_group: data.staff.blood_group || '',
             emergency_contact: data.staff.emergency_contact || ''
           });
+          if (cacheKey) {
+            try {
+              localStorage.setItem(cacheKey, JSON.stringify(data.staff));
+            } catch (e) {}
+          }
         }
       }
     } catch (err) {
-      console.warn('Could not fetch staff dossier:', err);
+      // Offline mode: Officer continues viewing verified card directly from phone storage!
+      console.warn('Network offline or slow, using phone local storage for ID card:', err);
     } finally {
       setLoading(false);
     }
@@ -76,6 +110,12 @@ export const FoDigitalIdCard = ({ formData, showToast }) => {
       const data = await res.json();
       if (res.ok && data.success) {
         setDossier(data.staff);
+        const cacheKey = getCacheKey();
+        if (cacheKey) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(data.staff));
+          } catch (e) {}
+        }
         showToast?.('Contact & Blood Group details updated! 🎉', 'success');
         setShowEditModal(false);
       } else {
