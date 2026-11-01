@@ -1,10 +1,41 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.10";
+export const APP_VERSION = "2.9.11";
 export const LAST_UPDATED_DATE = "01 Nov 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.11",
+    date: "01 Nov 2026",
+    title: "Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🪪 Official Frontline Digital ID Card: Introduced a downloadable/printable DFY Lanyard Badge featuring the official Doctors For You emblem, 35x45mm dashed photo placeholder for physical photo affixing, Employee ID (e.g. EP00021), Emergency Blood Group pill, and Tenure milestone.",
+      "✏️ FO Self-Edit Contact & Emergency Info: Field Officers can now update their mobile number, emergency blood group, and emergency contact directly from the Profile tab with instant card synchronization.",
+      "🏢 PostgreSQL HR Schema Expansion: Expanded staff_directory with 13 nullable HR master columns (emp_no, blood_group, job_title, reporting_to, reporting_manager_emp_no, date_joined, dob, gender, marital_status, phone, email, emergency_contact, location).",
+      "⚡ 3-Tier Cascade HR Seeding Engine: Automatically matched and seeded 171 active personnel (99.4% of real active cadre) from the official DFY Bihar HR Master dataset into PostgreSQL.",
+      "📋 Admin HR Master Dossier Modal: Admins can inspect complete personnel dossiers from the Staff Directory and edit any of the 14 attributes with Sub-Admin district RBAC checks and audit trail logging."
+    ],
+    details: [
+      {
+        tag: "Frontline Identity",
+        color: "teal",
+        text: "Frontline cadre now carry official digital credentials and printable PVC-ready ID badges for field credibility."
+      },
+      {
+        tag: "Emergency Safety",
+        color: "rose",
+        text: "Emergency blood groups and family contacts are now instantly accessible during field travel and road emergencies."
+      },
+      {
+        tag: "HR Governance",
+        color: "indigo",
+        text: "Staff directory transformed from basic names to a comprehensive, searchable human resources dossier."
+      }
+    ]
+  },
   {
     version: "v2.9.10",
     date: "01 Nov 2026",

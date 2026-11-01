@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.11] - 2026-11-01
+
+### Added & Optimized
+- **Official Staff HR Master Dossier Seeding & PostgreSQL Schema Expansion**:
+  - Expanded PostgreSQL `staff_directory` table with 13 nullable HR master attributes: `emp_no`, `email`, `phone`, `blood_group`, `dob`, `date_joined`, `gender`, `marital_status`, `job_title`, `reporting_to`, `reporting_manager_emp_no`, `location`, `emergency_contact`.
+  - Created indexes on `emp_no` and `phone` for high-speed administrative lookup.
+  - Implemented 3-tier cascade auto-matching engine in `scripts/seed_staff_master_data.py` (normalized clean name, 10-digit phone, district+token overlap) and successfully seeded 171 staff records (96.6% overall, 99.4% of real active personnel).
+- **Frontline Digital ID Card & Self-Edit Sheet (`FoDigitalIdCard.jsx`)**:
+  - Designed an official DFY Lanyard Identity Badge mounted prominently at the top of the FO Profile tab.
+  - Features official Doctors For You circular emblem, "Bihar TB Elimination Program • PPSA Project" banner, standard 35x45mm dashed photo placeholder for physical photo affixing upon print, monospace Employee ID badge (`EP00021`), official job title, district badge, emergency blood group pill, supervisor line, and service tenure milestone.
+  - Added slide-up self-edit modal allowing Field Officers to update their 10-digit mobile number, emergency blood group (from validated set `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`), and emergency contact line via `PUT /fo/update-profile-contact`.
+  - Added "📥 Download ID Card" triggering clean, print-ready CSS rendering for standard ID-1/CR80 PVC cardstock printing.
+- **Admin Staff Dossier Modal & RBAC Editing Suite (`StaffDossierModal.jsx`)**:
+  - Integrated "📋 Dossier" action button on each staff row in the Admin Staff Directory modal.
+  - Created tabbed/sectioned HR dossier modal displaying all 14 personal, official, management, and emergency attributes.
+  - Implemented full dossier editing form backed by `PUT /admin/staff/{id}/update-dossier` with Sub-Admin district RBAC enforcement and administrative audit trail logging (`STAFF_DOSSIER_UPDATED`).
+
+---
+
 ## [2.9.10] - 2026-11-01
 
 ### Added & Optimized
