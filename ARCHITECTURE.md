@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.9.1 (v2.9.8 - Child-Table Resilient Aggregation Engine, 100% Indicator Parity & Profile View Deduplication)  
+> *Version:* 3.9.4 (v2.9.11 - Staff HR Master Dossier, Frontline Digital ID Card & Sub-Admin RBAC Governance)  
 > *Status:* Production Active
 
 ---
@@ -575,9 +575,93 @@ flowchart TD
 
 ---
 
-## 9. Production Deployment Specification
+## 9. Staff HR Master Dossier, Frontline Digital ID Card & RBAC Governance
 
-### 8.1 Backend Web Service (Render.com)
+To transform frontline identity management from basic text names into a resilient, high-trust human resources infrastructure across Bihar's 22+ operational districts:
+
+```mermaid
+flowchart TD
+    subgraph Master_Data_Source ["Official DFY HR Repository"]
+        Excel["All Employees Master Data.xlsx<br/>(210 Working, 177 Relieved)"]
+    end
+
+    subgraph Seeding_Engine ["Cascade Seeding & Cleansing Engine"]
+        Filter["Filter: Employment Status == 'Working'<br/>(Strictly purge 177 relieved)"]
+        Match["3-Tier Matching Engine<br/>Tier 1: Canonical District + Exact Name<br/>Tier 2: 10-Digit Mobile Number<br/>Tier 3: District + Token Fuzzy Overlap"]
+    end
+
+    subgraph Relational_Core ["Supabase PostgreSQL (staff_directory)"]
+        Columns["13 Nullable HR Master Columns<br/>emp_no, email, phone, blood_group, dob,<br/>date_joined, gender, marital_status, job_title,<br/>reporting_to, reporting_manager_emp_no, location, emergency_contact"]
+        Indexes["B-Tree Indexes:<br/>idx_staff_directory_emp_no<br/>idx_staff_directory_phone"]
+    end
+
+    subgraph Frontline_Surface ["Field Officer Mobile PWA (React 19)"]
+        PassBar["Sleek ~70px Digital Pass Bar<br/>Mounted at top of Profile Tab"]
+        BadgeModal["Full-Screen Lanyard Badge Modal<br/>Medical Security Theme (Teal/Emerald)<br/>35x45mm Photo Placeholder<br/>Mumbai HO Address & Portal Link"]
+        OfflineCache["Local Device Storage Caching<br/>localStorage: Stale-While-Revalidate<br/>Instant 0ms Offline Rendering<br/>Egress < 3 MB/month statewide"]
+    end
+
+    subgraph Leadership_Controls ["Admin Executive Suite"]
+        DossierModal["Screen-Fitting Adaptive Dossier Modal<br/>Anchored Fixed Header (shrink-0)<br/>Compact 4-Quadrant Layout (max-h-[92vh])<br/>Zero Scrolling on Desktop / Responsive on Mobile"]
+        RBAC["Sub-Admin District RBAC Gate<br/>Cross-District Edits -> HTTP 403<br/>Audit Trail: STAFF_DOSSIER_UPDATED"]
+    end
+
+    Excel --> Filter
+    Filter --> Match
+    Match --> Columns
+    Columns --> Indexes
+
+    Columns <-->|GET /fo/profile-dossier (PIN stripped)| PassBar
+    PassBar --> BadgeModal
+    BadgeModal <--> OfflineCache
+
+    Columns <-->|GET /admin/staff/list & PUT /admin/staff/{id}/update-dossier| DossierModal
+    DossierModal --> RBAC
+```
+
+### 9.1 Data Model & PostgreSQL Schema Expansion
+The PostgreSQL `staff_directory` table is expanded with 13 nullable attributes to house institutional HR records without breaking existing authentication or report submission paths:
+- `emp_no` (`TEXT`): Monospace institutional employee code (e.g. `EP00021`).
+- `email` (`TEXT`), `phone` (`TEXT`): Official contact channels.
+- `blood_group` (`TEXT`): Emergency clinical blood group (strictly validated against `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`).
+- `dob` (`DATE`), `date_joined` (`DATE`): Date of birth and service anniversary for tenure calculation.
+- `gender` (`TEXT`), `marital_status` (`TEXT`): Personal demographic attributes.
+- `job_title` (`TEXT`): Official employment designation (e.g. `Senior Field Officer`, `District Coordinator`).
+- `reporting_to` (`TEXT`), `reporting_manager_emp_no` (`TEXT`): Supervisor chain mapping.
+- `location` (`TEXT`): Official duty station / district posting.
+- `emergency_contact` (`TEXT`): Primary emergency contact name and telephone number.
+
+B-tree indexes on `emp_no` and `phone` guarantee instant sub-millisecond retrieval during admin lookups and directory filtering.
+
+### 9.2 Relieved Personnel Exclusion & Strict Canonical District Collision Resolution
+In rural field operations, common Indian names (e.g., *Rahul Kumar*, *Prince Kumar*) frequently appear across multiple districts. Matching against raw personnel rosters without temporal and geographic constraints leads to erroneous supervisor attribution (e.g., matching active personnel to retired supervisors in different districts).
+- **Relieved Filter**: The seeding engine strictly filters records where `Employment Status == 'Working'`, purging all 177 former employees.
+- **Geographic Constraint**: Seeding requires `district_matches(db_dist, excel_loc)`. For example, Aurangabad staff *Rahul Kumar* (`EP02962`) and *Prince Kumar* (`EP01898`) are strictly resolved to their actual active Aurangabad supervisor *Shyamsundar Yadav*, rather than relieved supervisors from Jamui or Madhubani.
+
+### 9.3 Frontline Lanyard Identity Badge & Standard ID-1 PVC Print Specification
+- **Modular Entry Point**: Rather than cluttering the Profile view with a large static badge, a sleek ~70px Quick-Access Pass Bar sits at the top of the tab. Clicking "🪪 View ID" opens an immersive, accessible modal.
+- **Visual & Security Design**: Built with a vibrant medical security aesthetic (`from-teal-50 via-slate-50 to-emerald-50`), metallic lanyard punch hole grommet, official Doctors For You circular emblem, and monospace employee code.
+- **35x45mm Standard Photo Placeholder**: Frontline field workers can print the card on standard PVC or cardstock and physically affix a standard 35mm x 45mm passport photograph in the designated dashed frame ("Affix Photo Here / 35mm x 45mm / पासपोर्ट फोटो लगाएं").
+- **Institutional Attestation**: Features the official Doctors For You registered Head Office address (*Flat No - 201/203, Building Number - 22, Lallubhai Compound, Mankhurd, Mumbai-400043, Maharashtra, INDIA*), official website (`https://doctorsforyou.org/`), and official assignment notice (*"This is a digital assigned ID card valid for official field operations under Doctors For You"*).
+
+### 9.4 Stale-While-Revalidate Offline Phone Caching Architecture
+To guarantee that field officers can present their credentials to government hospital superintendents, medical officers, and police checkpoints during deep rural blackouts:
+1. **0ms Cached Boot**: On modal open, the component immediately checks `localStorage.getItem("dfy_fo_dossier_{district}_{officer}")`. If present, the badge renders with 0ms latency.
+2. **Silent Background Revalidation**: Simultaneously, a non-blocking fetch queries `GET /fo/profile-dossier`.
+3. **Bandwidth Economy**: If the returned payload matches local storage, no re-render is triggered. If changed, `localStorage` is silently updated. Statewide monthly egress is under 3 MB total.
+
+### 9.5 Screen-Fitting Adaptive Admin Dossier Suite
+The Admin Staff Management suite allows state and district coordinators to inspect and edit staff dossiers via `StaffDossierModal.jsx`:
+- **Screen-Fitting Layout**: Anchored with a fixed header (`shrink-0`) and a compact 4-quadrant layout (`max-h-[92vh]`) that completely fits within desktop and laptop viewports without vertical scrolling.
+- **Adaptive Stacking**: On mobile viewports (< 768px), the quadrants gracefully collapse into a scrollable single-column format.
+- **Fail-Safe Sub-Admin District RBAC**: `PUT /admin/staff/{id}/update-dossier` enforces canonical district boundaries. Sub-Admins attempting to modify staff outside their assigned districts are blocked with HTTP 403 Forbidden.
+- **Audit Logging**: Every HR record edit writes an immutable administrative audit record (`STAFF_DOSSIER_UPDATED`).
+
+---
+
+## 10. Production Deployment Specification
+
+### 10.1 Backend Web Service (Render.com)
 - **Environment**: Python 3.10+
 - **Build Command**: `pip install -r requirements.txt`
 - **Start Command**:
@@ -591,7 +675,7 @@ flowchart TD
   - `JWT_SECRET_KEY`: Secret string for HS256 JWT signing.
   - `PORT`: Dynamically assigned by Render (default: 10000).
 
-### 8.2 Frontend PWA (Vercel / Netlify)
+### 10.2 Frontend PWA (Vercel / Netlify)
 - **Framework Preset**: Vite
 - **Root Directory**: `dfy-frontend`
 - **Build Command**: `npm run build`

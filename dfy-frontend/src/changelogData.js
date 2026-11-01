@@ -12,17 +12,22 @@ export const CHANGELOG_ENTRIES = [
     badge: "Latest Release",
     badgeColor: "emerald",
     highlights: [
-      "🪪 Official Frontline Digital ID Card: Introduced a downloadable/printable DFY Lanyard Badge featuring the official Doctors For You emblem, 35x45mm dashed photo placeholder for physical photo affixing, Employee ID (e.g. EP00021), Emergency Blood Group pill, and Tenure milestone.",
-      "✏️ FO Self-Edit Contact & Emergency Info: Field Officers can now update their mobile number, emergency blood group, and emergency contact directly from the Profile tab with instant card synchronization.",
-      "🏢 PostgreSQL HR Schema Expansion: Expanded staff_directory with 13 nullable HR master columns (emp_no, blood_group, job_title, reporting_to, reporting_manager_emp_no, date_joined, dob, gender, marital_status, phone, email, emergency_contact, location).",
-      "⚡ 3-Tier Cascade HR Seeding Engine: Automatically matched and seeded 171 active personnel (99.4% of real active cadre) from the official DFY Bihar HR Master dataset into PostgreSQL.",
-      "📋 Admin HR Master Dossier Modal: Admins can inspect complete personnel dossiers from the Staff Directory and edit any of the 14 attributes with Sub-Admin district RBAC checks and audit trail logging."
+      "🪪 Official Frontline Digital ID Card: Introduced a sleek ~70px Quick-Access Pass Bar opening an immersive full-screen DFY Lanyard Badge with medical security styling, 35x45mm dashed photo placeholder, Employee ID (EP00021), official Mumbai Head Office address, and printable PVC-ready rendering.",
+      "⚡ Stale-While-Revalidate Offline Phone Caching: Frontline staff ID credentials are saved directly to device storage, providing instant 0ms offline display during rural connectivity outages with low-bandwidth background sync.",
+      "✏️ FO Self-Edit Contact & Emergency Info: Field Officers can update their mobile number, emergency blood group, and family emergency contact directly from the Profile tab with real-time badge synchronization.",
+      "🏢 PostgreSQL HR Schema Expansion & Relieved Personnel Filter: Expanded staff_directory with 13 HR master columns, indexed on emp_no and phone; seeded 155 active working staff with strict canonical district matching and supervisor resolution.",
+      "📋 Screen-Fitting Adaptive Admin Dossier Suite: Admins can inspect and edit complete personnel dossiers with an anchored fixed header and high-density 4-quadrant layout that eliminates vertical scrolling on desktop while adapting to mobile, backed by Sub-Admin district RBAC."
     ],
     details: [
       {
         tag: "Frontline Identity",
         color: "teal",
         text: "Frontline cadre now carry official digital credentials and printable PVC-ready ID badges for field credibility."
+      },
+      {
+        tag: "Offline Resilience",
+        color: "amber",
+        text: "Zero-latency offline ID card access on field phones guarantees uninterrupted identification during remote village duty."
       },
       {
         tag: "Emergency Safety",
@@ -32,7 +37,7 @@ export const CHANGELOG_ENTRIES = [
       {
         tag: "HR Governance",
         color: "indigo",
-        text: "Staff directory transformed from basic names to a comprehensive, searchable human resources dossier."
+        text: "Staff directory transformed from basic names to a comprehensive, searchable human resources dossier with strict Sub-Admin RBAC."
       }
     ]
   },

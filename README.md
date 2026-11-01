@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.10-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.11-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -62,6 +62,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [33. Frontline Monthly Impact Digest, 30+ Performance Indicators Engine & FO Travel Allowance PIN Auth](#33--frontline-monthly-impact-digest-30-performance-indicators-engine--fo-travel-allowance-pin-auth)
   - [34. Nikshay Reconciler Quarterly Ingestion, Monotonic Smart Merge & 3-Month Rolling Retention Prune](#34--nikshay-reconciler-quarterly-ingestion-monotonic-smart-merge--3-month-rolling-retention-prune)
   - [35. Unified Auto-Detect Nikshay Upload, Cumulative Ledger Aggregations & Frontline 1-Tap Calling](#35--unified-auto-detect-nikshay-upload-cumulative-ledger-aggregations--frontline-1-tap-calling)
+  - [36. Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite](#36--official-staff-hr-master-dossier-frontline-digital-id-card--admin-dossier-suite)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -617,6 +618,32 @@ flowchart TD
   - Integrated 1-Tap Call (`📞 Call <phone>`) and copy actions directly on pending patient cards in `PendingInterventionsActionCenter` (`App.jsx`).
   - Enhanced WhatsApp follow-up list export with patient names and telephone numbers for seamless field team outreach.
 
+### 36. 🪪 Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite
+- **Official Frontline Digital ID Card & Pass Bar (`FoDigitalIdCard.jsx`)**:
+  - Mounted an official Doctors For You Lanyard Identity Badge in the FO Profile tab, triggered via a sleek ~70px Quick-Access Pass Bar with "🪪 View ID" button, opening an immersive full-screen modal that preserves clean profile layout.
+  - Features vibrant medical security theme (`from-teal-50 via-slate-50 to-emerald-50`), metallic lanyard grommet, standard 35x45mm dashed photo placeholder for physical passport photo affixing, monospace Employee ID badge (`EP00021`), official designation, district badge, emergency blood group pill, supervisor attribution, and tenure milestone.
+  - Stamped with the official Doctors For You registered Mumbai Head Office address (*Flat No - 201/203, Building Number - 22, Lallubhai Compound, Mankhurd, Mumbai-400043, Maharashtra, INDIA*), official website (`https://doctorsforyou.org/`), and official assignment notice (*"This is a digital assigned ID card valid for official field operations under Doctors For You"*).
+  - Built-in "📥 Download ID Card" action rendering clean, print-ready CSS for standard ID-1/CR80 PVC cardstock printing.
+- **Stale-While-Revalidate Offline Phone Storage Caching**:
+  - Frontline staff identity credentials are saved directly to device `localStorage` (`dfy_fo_dossier_{district}_{officer}`).
+  - Instantaneous 0ms badge rendering upon opening even during zero-connectivity field blackouts.
+  - Revalidates silently in the background when connectivity resumes, updating only if changed; minimizes cellular data egress to under 3 MB/month across the entire state.
+- **Active Working Staff Filtering & Cascade Seeding Engine**:
+  - Filtered out all 177 `Relieved` records from the master HR dataset (`All Employees Master Data - Doctors for you.xlsx`), eliminating former employees and cross-district namesake collisions.
+  - Enforced strict canonical district matching (`district_matches(db_dist, excel_loc)`) with alias normalizations (e.g. `tiwary` -> `tiwari`, `manibushan` -> `manibhushan`).
+  - Successfully seeded 155 active working field personnel into PostgreSQL, resolving reporting manager attributions (e.g., Aurangabad Prince Kumar & Rahul Kumar correctly assigned to `Shyamsundar Yadav`).
+- **PostgreSQL HR Schema Expansion**:
+  - Expanded `staff_directory` table with 13 nullable HR master attributes: `emp_no`, `email`, `phone`, `blood_group`, `dob`, `date_joined`, `gender`, `marital_status`, `job_title`, `reporting_to`, `reporting_manager_emp_no`, `location`, `emergency_contact`.
+  - Added B-tree indexes on `emp_no` and `phone` for fast administrative lookup.
+- **Screen-Fitting Adaptive Admin Staff Dossier Suite (`StaffDossierModal.jsx`)**:
+  - Integrated "📋 Dossier" action button on each staff row in the Admin Staff Directory modal.
+  - Redesigned the modal with an anchored fixed header (`shrink-0`) and high-density 4-quadrant layout (`max-h-[92vh]`) that fits 100% on laptop/desktop viewports without scrolling, while adaptively stacking on mobile devices.
+  - Comprehensive editing form backed by `PUT /admin/staff/{id}/update-dossier` with full audit trail logging (`STAFF_DOSSIER_UPDATED`).
+- **Security & Sub-Admin District RBAC Hardening**:
+  - Sanitized `GET /fo/profile-dossier` to automatically strip sensitive `pin` fields from JSON payloads before transmission.
+  - Enforced strict Sub-Admin district RBAC: Sub-Admins attempting to modify staff belonging to districts outside their permitted portfolio receive HTTP 403 Forbidden.
+  - Validated self-service contact updates (`PUT /fo/update-profile-contact`) against strict 10-digit mobile patterns and allowed medical blood groups (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`).
+
 ---
 
 ## 📍 Districts Covered
@@ -790,6 +817,13 @@ Mis field report/
 | `GET` | `/fo/ta/monthly-summary` | Field Officer: View personal monthly TA status, payable amount, and dispute timer (Auth: FO PIN or Admin JWT) |
 | `POST` | `/fo/ta/dispute` | Field Officer: Raise a formal travel allowance dispute within the 24h window (Auth: FO PIN or Admin JWT) |
 | `GET` | `/fo/monthly-recap` | Field Officer: View consolidated Monthly Impact Digest with 30+ clinical & mobility indicators (Auth: FO PIN or Admin JWT, cached 300s) |
+
+### 10. Staff HR Master Dossier & Frontline Identity
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/fo/profile-dossier` | Field Officer: Fetch complete personal HR dossier with automatic PIN sanitization and offline cache headers |
+| `PUT` | `/fo/update-profile-contact` | Field Officer: Self-service update for 10-digit mobile number, emergency blood group, and emergency contact |
+| `PUT` | `/admin/staff/{id}/update-dossier` | Admin & Sub-Admin: Update complete personnel HR attributes with strict Sub-Admin district RBAC (HTTP 403 on foreign districts) and audit trail logging (`STAFF_DOSSIER_UPDATED`) |
 
 ---
 

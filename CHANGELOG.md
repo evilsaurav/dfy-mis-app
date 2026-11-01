@@ -9,19 +9,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [2.9.11] - 2026-11-01
 
 ### Added & Optimized
-- **Official Staff HR Master Dossier Seeding & PostgreSQL Schema Expansion**:
-  - Expanded PostgreSQL `staff_directory` table with 13 nullable HR master attributes: `emp_no`, `email`, `phone`, `blood_group`, `dob`, `date_joined`, `gender`, `marital_status`, `job_title`, `reporting_to`, `reporting_manager_emp_no`, `location`, `emergency_contact`.
-  - Created indexes on `emp_no` and `phone` for high-speed administrative lookup.
-  - Implemented 3-tier cascade auto-matching engine in `scripts/seed_staff_master_data.py` (normalized clean name, 10-digit phone, district+token overlap) and successfully seeded 171 staff records (96.6% overall, 99.4% of real active personnel).
-- **Frontline Digital ID Card & Self-Edit Sheet (`FoDigitalIdCard.jsx`)**:
-  - Designed an official DFY Lanyard Identity Badge mounted prominently at the top of the FO Profile tab.
-  - Features official Doctors For You circular emblem, "Bihar TB Elimination Program • PPSA Project" banner, standard 35x45mm dashed photo placeholder for physical photo affixing upon print, monospace Employee ID badge (`EP00021`), official job title, district badge, emergency blood group pill, supervisor line, and service tenure milestone.
-  - Added slide-up self-edit modal allowing Field Officers to update their 10-digit mobile number, emergency blood group (from validated set `A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`), and emergency contact line via `PUT /fo/update-profile-contact`.
+- **Official Frontline Digital ID Card & Quick-Access Pass Bar (`FoDigitalIdCard.jsx`)**:
+  - Engineered an official Doctors For You Lanyard Identity Badge accessible via a sleek ~70px Quick-Access Pass Bar at the top of the FO Profile tab, opening an immersive full-screen modal that preserves clean profile layout.
+  - Features vibrant medical security theme (`from-teal-50 via-slate-50 to-emerald-50`), metallic lanyard grommet, standard 35x45mm dashed photo placeholder for physical passport photo affixing, monospace Employee ID badge (`EP00021`), official designation, district pill, emergency blood group pill, supervisor attribution, and tenure milestone.
+  - Stamped with the official Doctors For You registered Mumbai Head Office address (*Flat No - 201/203, Building Number - 22, Lallubhai Compound, Mankhurd, Mumbai-400043, Maharashtra, INDIA*), official portal URL (`https://doctorsforyou.org/`), and official assignment notice (*"This is a digital assigned ID card valid for official field operations under Doctors For You"*).
   - Added "📥 Download ID Card" triggering clean, print-ready CSS rendering for standard ID-1/CR80 PVC cardstock printing.
-- **Admin Staff Dossier Modal & RBAC Editing Suite (`StaffDossierModal.jsx`)**:
+- **Offline Phone Storage Caching (Stale-While-Revalidate)**:
+  - Cached the complete FO identity dossier directly in the officer's device `localStorage` (`dfy_fo_dossier_{district}_{officer}`).
+  - Instantaneous 0ms card display upon opening even during zero-connectivity field blackouts.
+  - Revalidates silently in the background when connectivity resumes, updating only if changed; minimizes cellular data egress to under 3 MB/month across the entire state.
+- **Active Working Staff Filtering & Cascade Seeding Engine**:
+  - Filtered out all 177 `Relieved` records from the master HR dataset (`All Employees Master Data - Doctors for you.xlsx`), eliminating former employees and cross-district namesake collisions.
+  - Enforced strict canonical district matching (`district_matches(db_dist, excel_loc)`) with alias normalizations (e.g. `tiwary` -> `tiwari`, `manibushan` -> `manibhushan`).
+  - Successfully seeded 155 active working field personnel into PostgreSQL, resolving reporting manager attributions (e.g., Aurangabad Prince Kumar & Rahul Kumar correctly assigned to `Shyamsundar Yadav`).
+- **PostgreSQL HR Schema Expansion**:
+  - Expanded `staff_directory` table with 13 nullable HR master attributes: `emp_no`, `email`, `phone`, `blood_group`, `dob`, `date_joined`, `gender`, `marital_status`, `job_title`, `reporting_to`, `reporting_manager_emp_no`, `location`, `emergency_contact`.
+  - Added B-tree indexes on `emp_no` and `phone` for fast administrative lookup.
+- **Screen-Fitting Adaptive Admin Staff Dossier Suite (`StaffDossierModal.jsx`)**:
   - Integrated "📋 Dossier" action button on each staff row in the Admin Staff Directory modal.
-  - Created tabbed/sectioned HR dossier modal displaying all 14 personal, official, management, and emergency attributes.
-  - Implemented full dossier editing form backed by `PUT /admin/staff/{id}/update-dossier` with Sub-Admin district RBAC enforcement and administrative audit trail logging (`STAFF_DOSSIER_UPDATED`).
+  - Redesigned the modal with an anchored fixed header (`shrink-0`) and high-density 4-quadrant layout (`max-h-[92vh]`) that fits 100% on laptop/desktop viewports without scrolling, while adaptively stacking on mobile devices.
+  - Comprehensive editing form backed by `PUT /admin/staff/{id}/update-dossier` with full audit trail logging (`STAFF_DOSSIER_UPDATED`).
+- **Security & Sub-Admin District RBAC Hardening**:
+  - Sanitized `GET /fo/profile-dossier` to automatically strip sensitive `pin` fields from JSON payloads before transmission.
+  - Enforced strict Sub-Admin district RBAC: Sub-Admins attempting to modify staff belonging to districts outside their permitted portfolio receive HTTP 403 Forbidden.
+  - Validated self-service contact updates (`PUT /fo/update-profile-contact`) against strict 10-digit mobile patterns and allowed medical blood groups (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`).
 
 ---
 
