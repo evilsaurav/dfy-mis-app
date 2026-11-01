@@ -61,6 +61,19 @@ async def test_seeded_staff_dossier_integrity(monkeypatch):
             assert r["blood_group"] in ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'], f"Invalid blood_group: {r['blood_group']}"
         assert r["name"], "Staff name must not be empty"
 
+    # Specific check for Aurangabad & Bhojpur multi-name staff
+    aurangabad_staff = pg_execute_raw(
+        "SELECT name, emp_no, reporting_to FROM staff_directory WHERE district = 'Aurangabad' AND is_active = TRUE;",
+        fetch=True
+    ) or []
+    by_name = {s["name"]: s for s in aurangabad_staff}
+    if "Prince Kumar" in by_name and by_name["Prince Kumar"]["emp_no"]:
+        assert by_name["Prince Kumar"]["emp_no"] == "EP01898"
+        assert by_name["Prince Kumar"]["reporting_to"] == "Shyamsundar Yadav"
+    if "Rahul Kumar" in by_name and by_name["Rahul Kumar"]["emp_no"]:
+        assert by_name["Rahul Kumar"]["emp_no"] == "EP02962"
+        assert by_name["Rahul Kumar"]["reporting_to"] == "Shyamsundar Yadav"
+
 def test_fo_profile_dossier_and_update_endpoints():
     """Verify FO profile-dossier retrieval and contact self-update endpoints."""
     from main import app

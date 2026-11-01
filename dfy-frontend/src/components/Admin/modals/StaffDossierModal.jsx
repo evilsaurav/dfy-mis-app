@@ -287,6 +287,19 @@ export default function StaffDossierModal({
               </div>
             </div>
 
+            {/* Official Registered Address & Advisory Notice */}
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/80 dark:border-slate-700/80 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
+              <div className="font-bold text-teal-800 dark:text-teal-300">
+                🛡️ Officially Assigned Digital Identity Card • Valid for Field Operations under Bihar TB Elimination Program (PPSA Project)
+              </div>
+              <div className="text-[9.5px]">
+                <strong>Doctors For You (Head Office):</strong> Flat No - 201/203, Building Number - 22, Lallubhai Compound, Mankhurd, Mumbai-400043, Maharashtra, INDIA • Portal:{' '}
+                <a href="https://doctorsforyou.org/" target="_blank" rel="noopener noreferrer" className="font-bold text-teal-700 dark:text-teal-400 underline">
+                  https://doctorsforyou.org/
+                </a>
+              </div>
+            </div>
+
             {/* Bottom Actions */}
             <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100 dark:border-slate-800">
               <button
