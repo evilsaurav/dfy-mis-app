@@ -1167,6 +1167,9 @@ async def get_fo_profile_dossier(
         if staff.get(k):
             staff[k] = str(staff[k])
 
+    # Security: Never expose raw PIN in API response over the wire
+    staff.pop("pin", None)
+
     return {"success": True, "staff": staff}
 
 @router.put("/fo/update-profile-contact")
@@ -1213,6 +1216,7 @@ async def update_fo_profile_contact(req: FoUpdateContactReq):
         for k in ["dob", "date_joined", "created_at", "updated_at"]:
             if staff.get(k):
                 staff[k] = str(staff[k])
+        staff.pop("pin", None)
         return {"success": True, "message": "No changes requested", "staff": staff}
 
     set_clauses.append("updated_at = NOW()")
@@ -1224,6 +1228,8 @@ async def update_fo_profile_contact(req: FoUpdateContactReq):
     for k in ["dob", "date_joined", "created_at", "updated_at"]:
         if updated_staff.get(k):
             updated_staff[k] = str(updated_staff[k])
+
+    updated_staff.pop("pin", None)
 
     invalidate_staff_directory_cache()
     evict_officer_profile_cache(req.district, req.fo_name)
@@ -1244,9 +1250,11 @@ async def update_staff_dossier_admin(
         staff = dict(staff_row[0])
 
         staff_dist = canonicalize_district(staff.get("district", ""))
-        if admin.get("role") == "SUB_ADMIN":
-            allowed = admin.get("allowed_districts", [])
-            if "All" not in allowed and staff_dist not in allowed:
+        admin_role = str(admin.get("role", "")).upper()
+        if admin_role not in ("SUPER_ADMIN", "MAIN_INCHARGE"):
+            raw_allowed = admin.get("allowed_districts", [])
+            allowed = [canonicalize_district(d) for d in raw_allowed] if isinstance(raw_allowed, list) else []
+            if "All" not in allowed and "ALL" not in [d.upper() for d in allowed] and staff_dist not in allowed:
                 raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit staff in district '{staff_dist}'.")
 
         set_clauses = []

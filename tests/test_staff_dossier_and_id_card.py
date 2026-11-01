@@ -117,6 +117,8 @@ def test_fo_profile_dossier_and_update_endpoints():
         assert data["success"] is True
         assert data["staff"]["emp_no"] == "EP99999"
         assert data["staff"]["blood_group"] == "O+"
+        # Verify PIN is NEVER leaked in response
+        assert "pin" not in data["staff"], "PIN must be stripped from response payload"
 
     # 2. Validation in FO Contact update
     # Invalid phone format
@@ -210,6 +212,27 @@ def test_admin_staff_dossier_update():
             assert data["success"] is True
             assert data["staff"]["blood_group"] == "AB+"
             assert mock_log.called
+
+        # 3. Sub-admin RBAC check: Disallowed district must return 403 Forbidden
+        sub_admin_gaya = {"username": "sub_gaya", "role": "SUB_ADMIN", "allowed_districts": ["Gaya"]}
+        app.dependency_overrides[get_current_admin] = lambda: sub_admin_gaya
+        with patch("backend.routers.staff.pg_execute_raw", return_value=mock_staff_row):
+            res_denied = client.put("/admin/staff/999/update-dossier", json={
+                "blood_group": "AB+"
+            })
+            assert res_denied.status_code == 403
+            assert "Permission denied" in res_denied.json()["detail"]
+
+        # 4. Sub-admin RBAC check: Permitted district must succeed with 200 OK
+        sub_admin_patna = {"username": "sub_patna", "role": "SUB_ADMIN", "allowed_districts": ["Patna"]}
+        app.dependency_overrides[get_current_admin] = lambda: sub_admin_patna
+        with patch("backend.routers.staff.pg_execute_raw", side_effect=[mock_staff_row, updated_staff_row]), \
+             patch("backend.routers.staff.log_admin_activity"):
+            res_allowed = client.put("/admin/staff/999/update-dossier", json={
+                "blood_group": "AB+"
+            })
+            assert res_allowed.status_code == 200
+            assert res_allowed.json()["success"] is True
     finally:
         app.dependency_overrides.clear()
 
