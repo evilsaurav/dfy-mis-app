@@ -167,7 +167,20 @@ async def get_staff_full_list(
                     "created_at": d.get("created_at", ""),
                     "status": "active" if is_active else "inactive",
                     "is_active": is_active,
-                    "inactive_since": d.get("inactive_since")
+                    "inactive_since": d.get("inactive_since"),
+                    "emp_no": d.get("emp_no") or "",
+                    "email": d.get("email") or "",
+                    "phone": d.get("phone") or "",
+                    "blood_group": d.get("blood_group") or "",
+                    "dob": str(d.get("dob") or ""),
+                    "date_joined": str(d.get("date_joined") or ""),
+                    "gender": d.get("gender") or "",
+                    "marital_status": d.get("marital_status") or "",
+                    "job_title": d.get("job_title") or "",
+                    "reporting_to": d.get("reporting_to") or "",
+                    "reporting_manager_emp_no": d.get("reporting_manager_emp_no") or "",
+                    "location": d.get("location") or "",
+                    "emergency_contact": d.get("emergency_contact") or ""
                 })
         staff.sort(key=lambda s: (s["district"], s["name"]))
         res = {"success": True, "staff": staff}
@@ -1064,3 +1077,281 @@ async def export_staff_pins(district: Optional[str] = "All", districts: Optional
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- Predictive Cascade & Dropout Alerts Engine (Mission Critical Priority) ---
+
+# --- Staff HR Master Dossier & Digital ID Card Endpoints ---
+
+VALID_BLOOD_GROUPS = {'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'}
+
+class FoUpdateContactReq(BaseModel):
+    district: str
+    fo_name: str
+    pin: str
+    phone: Optional[str] = None
+    blood_group: Optional[str] = None
+    emergency_contact: Optional[str] = None
+
+class AdminUpdateStaffDossierReq(BaseModel):
+    emp_no: Optional[str] = None
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    blood_group: Optional[str] = None
+    dob: Optional[str] = None
+    date_joined: Optional[str] = None
+    gender: Optional[str] = None
+    marital_status: Optional[str] = None
+    job_title: Optional[str] = None
+    reporting_to: Optional[str] = None
+    reporting_manager_emp_no: Optional[str] = None
+    location: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    designation: Optional[str] = None
+    is_active: Optional[bool] = None
+
+def find_staff_by_credentials(district: str, fo_name: str):
+    c_dist = canonicalize_district(district)
+    clean_fo = re.sub(r'[^a-zA-Z0-9]', '', fo_name).lower()
+    district_variants = list(dict.fromkeys([
+        c_dist.lower(),
+        district.strip().lower(),
+        canonicalize_district(district).lower()
+    ]))
+    if "champaran" in c_dist.lower():
+        district_variants.extend(["east champaran", "motihari", "purbi champaran"])
+    if "aurangabad" in c_dist.lower():
+        district_variants.extend(["aurangabad", "aurangabad-bi", "aurangabad bi"])
+    if "bhojpur" in c_dist.lower():
+        district_variants.extend(["bhojpur", "arrah", "ara"])
+
+    fo_trimmed = fo_name.strip()
+    slug_variants = [f"{clean_fo[:25]}_{d}" for d in district_variants]
+
+    staff_rows = pg_execute_raw(
+        """
+        SELECT * FROM staff_directory
+        WHERE (LOWER(TRIM(district)) = ANY(%s) OR district_id::text = ANY(%s))
+          AND (
+              LOWER(TRIM(name)) = LOWER(TRIM(%s))
+              OR REGEXP_REPLACE(LOWER(name), '[^a-z0-9]', '', 'g') = %s
+              OR slug = ANY(%s)
+          )
+          AND deleted_at IS NULL
+        ORDER BY is_active DESC, id ASC
+        LIMIT 1;
+        """,
+        [district_variants, district_variants, fo_trimmed, clean_fo, slug_variants],
+        fetch=True
+    )
+    if staff_rows and len(staff_rows) > 0:
+        return dict(staff_rows[0])
+    return None
+
+@router.get("/fo/profile-dossier")
+async def get_fo_profile_dossier(
+    district: str,
+    fo_name: str,
+    pin: str
+):
+    staff = find_staff_by_credentials(district, fo_name)
+    if not staff:
+        raise HTTPException(status_code=401, detail="Invalid credentials or unauthorized staff record.")
+    if staff.get("is_active") is False or staff.get("status") == "inactive":
+        raise HTTPException(status_code=403, detail="Staff account is deactivated.")
+    
+    real_pin = str(staff.get("pin", ""))
+    from backend.core.security import verify_password
+    if not (verify_password(str(pin), real_pin) or str(pin) == real_pin):
+        raise HTTPException(status_code=401, detail="Invalid PIN credentials.")
+
+    for k in ["dob", "date_joined", "created_at", "updated_at"]:
+        if staff.get(k):
+            staff[k] = str(staff[k])
+
+    return {"success": True, "staff": staff}
+
+@router.put("/fo/update-profile-contact")
+async def update_fo_profile_contact(req: FoUpdateContactReq):
+    staff = find_staff_by_credentials(req.district, req.fo_name)
+    if not staff:
+        raise HTTPException(status_code=401, detail="Invalid credentials or unauthorized staff record.")
+    if staff.get("is_active") is False or staff.get("status") == "inactive":
+        raise HTTPException(status_code=403, detail="Staff account is deactivated.")
+    
+    real_pin = str(staff.get("pin", ""))
+    from backend.core.security import verify_password
+    if not (verify_password(str(req.pin), real_pin) or str(req.pin) == real_pin):
+        raise HTTPException(status_code=401, detail="Invalid PIN credentials.")
+
+    set_clauses = []
+    params = []
+
+    if req.phone is not None:
+        raw_phone = str(req.phone).strip()
+        if raw_phone:
+            clean_p = re.sub(r'\D', '', raw_phone)
+            if len(clean_p) != 10:
+                raise HTTPException(status_code=400, detail="Phone number must be a valid 10-digit mobile number.")
+            set_clauses.append("phone = %s")
+            params.append(clean_p)
+
+    if req.blood_group is not None:
+        bg_raw = str(req.blood_group).strip().upper()
+        if bg_raw:
+            m = re.match(r'^([ABO]+[+-])', bg_raw)
+            norm_bg = m.group(1) if m else bg_raw
+            if norm_bg not in VALID_BLOOD_GROUPS:
+                raise HTTPException(status_code=400, detail=f"Invalid blood group '{req.blood_group}'. Allowed: {sorted(list(VALID_BLOOD_GROUPS))}")
+            set_clauses.append("blood_group = %s")
+            params.append(norm_bg)
+
+    if req.emergency_contact is not None:
+        em_contact = str(req.emergency_contact).strip()[:150]
+        set_clauses.append("emergency_contact = %s")
+        params.append(em_contact)
+
+    if not set_clauses:
+        for k in ["dob", "date_joined", "created_at", "updated_at"]:
+            if staff.get(k):
+                staff[k] = str(staff[k])
+        return {"success": True, "message": "No changes requested", "staff": staff}
+
+    set_clauses.append("updated_at = NOW()")
+    sql = f"UPDATE staff_directory SET {', '.join(set_clauses)} WHERE id = %s RETURNING *;"
+    params.append(staff["id"])
+
+    updated_rows = pg_execute_raw(sql, params, fetch=True)
+    updated_staff = dict(updated_rows[0]) if updated_rows else staff
+    for k in ["dob", "date_joined", "created_at", "updated_at"]:
+        if updated_staff.get(k):
+            updated_staff[k] = str(updated_staff[k])
+
+    invalidate_staff_directory_cache()
+    evict_officer_profile_cache(req.district, req.fo_name)
+    cache.delete_prefix("admin_staff_")
+
+    return {"success": True, "message": "Contact details updated successfully", "staff": updated_staff}
+
+@router.put("/admin/staff/{staff_id}/update-dossier")
+async def update_staff_dossier_admin(
+    staff_id: str,
+    req: AdminUpdateStaffDossierReq,
+    admin: dict = Depends(get_current_admin)
+):
+    try:
+        staff_row = pg_execute_raw("SELECT * FROM staff_directory WHERE id::text = %s OR slug = %s LIMIT 1;", [staff_id, staff_id], fetch=True)
+        if not staff_row:
+            raise HTTPException(status_code=404, detail=f"Staff with ID '{staff_id}' not found.")
+        staff = dict(staff_row[0])
+
+        staff_dist = canonicalize_district(staff.get("district", ""))
+        if admin.get("role") == "SUB_ADMIN":
+            allowed = admin.get("allowed_districts", [])
+            if "All" not in allowed and staff_dist not in allowed:
+                raise HTTPException(status_code=403, detail=f"Permission denied. You cannot edit staff in district '{staff_dist}'.")
+
+        set_clauses = []
+        params = []
+        diff = {}
+
+        if req.name is not None and req.name.strip():
+            set_clauses.append("name = %s")
+            params.append(req.name.strip())
+            diff["name"] = req.name.strip()
+
+        if req.emp_no is not None:
+            clean_emp = req.emp_no.strip().upper() if req.emp_no.strip() else None
+            set_clauses.append("emp_no = %s")
+            params.append(clean_emp)
+            diff["emp_no"] = clean_emp
+
+        if req.phone is not None:
+            raw_p = req.phone.strip()
+            clean_p = re.sub(r'\D', '', raw_p) if raw_p else None
+            if clean_p and len(clean_p) != 10:
+                raise HTTPException(status_code=400, detail="Phone must be 10 digits.")
+            set_clauses.append("phone = %s")
+            params.append(clean_p)
+            diff["phone"] = clean_p
+
+        if req.email is not None:
+            clean_em = req.email.strip().lower() if req.email.strip() else None
+            set_clauses.append("email = %s")
+            params.append(clean_em)
+            diff["email"] = clean_em
+
+        if req.blood_group is not None:
+            raw_bg = req.blood_group.strip().upper() if req.blood_group.strip() else None
+            if raw_bg:
+                m = re.match(r'^([ABO]+[+-])', raw_bg)
+                norm_bg = m.group(1) if m else raw_bg
+                if norm_bg not in VALID_BLOOD_GROUPS:
+                    raise HTTPException(status_code=400, detail=f"Invalid blood group '{req.blood_group}'.")
+                set_clauses.append("blood_group = %s")
+                params.append(norm_bg)
+                diff["blood_group"] = norm_bg
+            else:
+                set_clauses.append("blood_group = NULL")
+                diff["blood_group"] = None
+
+        for field in ["job_title", "reporting_to", "reporting_manager_emp_no", "location", "gender", "marital_status", "emergency_contact", "designation"]:
+            val = getattr(req, field, None)
+            if val is not None:
+                clean_val = str(val).strip() if str(val).strip() else None
+                set_clauses.append(f"{field} = %s")
+                params.append(clean_val)
+                diff[field] = clean_val
+
+        for date_field in ["dob", "date_joined"]:
+            d_val = getattr(req, date_field, None)
+            if d_val is not None:
+                clean_d = str(d_val).strip() if str(d_val).strip() else None
+                if clean_d and not re.match(r'^\d{4}-\d{2}-\d{2}', clean_d):
+                    raise HTTPException(status_code=400, detail=f"Invalid format for {date_field}. Expected YYYY-MM-DD.")
+                set_clauses.append(f"{date_field} = %s")
+                params.append(clean_d)
+                diff[date_field] = clean_d
+
+        if req.is_active is not None:
+            set_clauses.append("is_active = %s")
+            params.append(req.is_active)
+            diff["is_active"] = req.is_active
+
+        if not set_clauses:
+            for k in ["dob", "date_joined", "created_at", "updated_at"]:
+                if staff.get(k):
+                    staff[k] = str(staff[k])
+            return {"success": True, "message": "No updates requested", "staff": staff}
+
+        set_clauses.append("updated_at = NOW()")
+        sql = f"UPDATE staff_directory SET {', '.join(set_clauses)} WHERE id = %s RETURNING *;"
+        params.append(staff["id"])
+
+        updated_rows = pg_execute_raw(sql, params, fetch=True)
+        updated_staff = dict(updated_rows[0]) if updated_rows else staff
+        for k in ["dob", "date_joined", "created_at", "updated_at"]:
+            if updated_staff.get(k):
+                updated_staff[k] = str(updated_staff[k])
+
+        # Audit log
+        await log_admin_activity(
+            action_type="STAFF_DOSSIER_UPDATED",
+            details=f"Admin {admin.get('username')} updated dossier for {staff.get('name')} ({staff.get('district')})",
+            user_name=admin.get("username", "admin"),
+            user_id=str(admin.get("id", "admin")),
+            role=admin.get("role", "SUPER_ADMIN"),
+            district=staff.get("district", "All"),
+            target_officer=staff.get("name", ""),
+            diff=diff
+        )
+
+        invalidate_staff_directory_cache()
+        evict_officer_profile_cache(staff.get("district", ""), staff.get("name", ""))
+        cache.delete_prefix("admin_staff_")
+
+        return {"success": True, "message": "Staff dossier updated successfully", "staff": updated_staff}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating staff dossier: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
