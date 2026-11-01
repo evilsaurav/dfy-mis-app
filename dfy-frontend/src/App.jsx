@@ -15,6 +15,7 @@ import { downloadOrShareCanvas } from './canvasShare'
 import { getOperationalMonth } from './utils/operationalMonth'
 import TravelAllowanceCard from './components/Fo/TravelAllowanceCard'
 import FoMonthlyRecapCard from './components/Fo/FoMonthlyRecapCard'
+import { FoDigitalIdCard } from './components/Fo/FoDigitalIdCard'
 import { TA_FEATURE_ENABLED } from './config/featureFlags'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
@@ -1371,6 +1372,9 @@ const MyProfileDashboard = ({
   
   return (
     <div className="w-full max-w-lg mx-auto animate-fade-in pb-10">
+      {/* Frontline Official Cadre Digital ID Card */}
+      <FoDigitalIdCard formData={formData} showToast={showToast} />
+
       {/* Profile Header & Monthly Target Card */}
       <div className="bg-white rounded-3xl p-6 shadow-xl shadow-teal-900/5 border border-slate-100 mb-6 text-center relative overflow-hidden">
         <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
