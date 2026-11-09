@@ -6,7 +6,8 @@ export default function AdminLogin({
   password,
   setPassword,
   error,
-  handleLogin
+  handleLogin,
+  isLoading = false
 }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50/20 to-slate-100/60 flex items-center justify-center p-4 font-sans">
@@ -28,9 +29,10 @@ export default function AdminLogin({
             <input 
               type="text" 
               value={loginUsername} 
+              disabled={isLoading}
               onChange={(e) => setLoginUsername(e.target.value)} 
               placeholder="e.g. admin or mis_buxar" 
-              className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs" 
+              className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed" 
             />
           </div>
 
@@ -39,16 +41,35 @@ export default function AdminLogin({
             <input 
               type="password" 
               value={password} 
+              disabled={isLoading}
               onChange={(e) => setPassword(e.target.value)} 
               placeholder="Enter password" 
-              className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs" 
+              className="w-full bg-slate-50/80 border border-slate-200 rounded-xl px-4 py-3 text-slate-800 text-sm font-semibold focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white outline-none transition-all placeholder:text-slate-400 shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed" 
             />
           </div>
 
           {error && <p className="text-rose-600 text-xs font-bold text-center bg-rose-50/90 p-2.5 rounded-xl border border-rose-200/80 animate-fade-in">{error}</p>}
 
-          <button type="submit" className="w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-black py-3.5 rounded-xl shadow-md shadow-indigo-600/25 hover:from-indigo-700 hover:to-indigo-800 active:scale-[0.98] transition-all text-xs uppercase tracking-wider cursor-pointer">
-            Enter Admin Portal &rarr;
+          <button 
+            type="submit" 
+            disabled={isLoading}
+            className={`w-full bg-gradient-to-r from-indigo-600 to-indigo-700 text-white font-black py-3.5 rounded-xl shadow-md shadow-indigo-600/25 transition-all text-xs uppercase tracking-wider flex items-center justify-center gap-2 ${
+              isLoading 
+                ? 'opacity-85 cursor-wait pointer-events-none ring-2 ring-indigo-400/50' 
+                : 'hover:from-indigo-700 hover:to-indigo-800 active:scale-[0.98] cursor-pointer'
+            }`}
+          >
+            {isLoading ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Entering Admin Portal...</span>
+              </>
+            ) : (
+              <span>Enter Admin Portal &rarr;</span>
+            )}
           </button>
         </form>
 

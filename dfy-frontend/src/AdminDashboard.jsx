@@ -49,6 +49,7 @@ export default function AdminDashboard() {
     }
   });
   const [loginUsername, setLoginUsername] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [error, setError] = useState('');
   const [month, setMonth] = useState(() => getOperationalMonth().operationalMonth);
   const [rawRecords, setRawRecords] = useState([]);
@@ -708,7 +709,9 @@ export default function AdminDashboard() {
 
   const handleLogin = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
+    if (isLoggingIn) return;
     setError('');
+    setIsLoggingIn(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
       const res = await fetch(`${API_BASE_URL}/admin/auth/user-login`, {
@@ -729,6 +732,8 @@ export default function AdminDashboard() {
       showToast(`✓ Welcome back, ${data.user.name}!`, "success");
     } catch (err) {
       setError(err.message);
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -844,6 +849,7 @@ export default function AdminDashboard() {
         setPassword={setPassword}
         error={error}
         handleLogin={handleLogin}
+        isLoading={isLoggingIn}
       />
     );
   }

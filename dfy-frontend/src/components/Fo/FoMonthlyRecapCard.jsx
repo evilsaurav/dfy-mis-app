@@ -39,6 +39,55 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
   const [disputeSuccess, setDisputeSuccess] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // TA Daily Kilometer Breakdown Modal State
+  const [showBreakdownModal, setShowBreakdownModal] = useState(false);
+  const [breakdownData, setBreakdownData] = useState(null);
+  const [loadingBreakdown, setLoadingBreakdown] = useState(false);
+  const [breakdownError, setBreakdownError] = useState(null);
+
+  // 1-Month Rule: Only current operational month (idx 0) or immediately preceding month (idx 1) can view full daily details.
+  // Older months (> 1 month back, idx >= 2) only display the passed amount summary.
+  const isDetailedBreakdownEligible = useMemo(() => {
+    const idx = monthOptions.findIndex((opt) => opt.val === selectedMonth);
+    return idx === 0 || idx === 1;
+  }, [monthOptions, selectedMonth]);
+
+  const selectedMonthLabel = useMemo(() => {
+    return monthOptions.find((opt) => opt.val === selectedMonth)?.label || selectedMonth;
+  }, [monthOptions, selectedMonth]);
+
+  // Handler to fetch and open breakdown modal
+  const handleOpenBreakdown = async () => {
+    setShowBreakdownModal(true);
+    setBreakdownError(null);
+
+    if (breakdownData && breakdownData.month === selectedMonth) {
+      return;
+    }
+
+    setLoadingBreakdown(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dfy-mis-app.onrender.com';
+      const params = new URLSearchParams({
+        month: selectedMonth,
+        district: workingPlace,
+        fo_name: foName,
+        ...(pin ? { pin: String(pin) } : {})
+      });
+      const res = await fetch(`${API_BASE_URL}/fo/ta/monthly-summary?${params.toString()}`, {
+        headers: pin ? { Authorization: `Bearer ${pin}` } : {},
+      });
+      if (!res.ok) throw new Error('Failed to load travel allowance breakdown');
+      const json = await res.json();
+      setBreakdownData(json?.data || null);
+    } catch (err) {
+      console.warn('Breakdown fetch error:', err);
+      setBreakdownError('Could not load day-wise travel logs. Please try again.');
+    } finally {
+      setLoadingBreakdown(false);
+    }
+  };
+
   // ── Fetch Consolidated Recap ───────────────────────────────────────────────
   useEffect(() => {
     if (!foName || !workingPlace || !selectedMonth) return;
@@ -271,7 +320,9 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
                     </p>
                     <p className="text-[10px] text-slate-400 mt-0.5">
                       {mobility.total_km?.toFixed(1)} KM @ ₹{mobility.rate_per_km}/KM
-                      {mobility.deduction_amount > 0 && ` • -₹${mobility.deduction_amount?.toFixed(2)} Deduction`}
+                      {mobility.deduction_amount > 0 && (
+                        <span className="text-rose-400 font-bold"> • -₹{mobility.deduction_amount?.toFixed(2)} Deduction</span>
+                      )}
                       {mobility.avg_km_per_day > 0 && ` • Avg ${mobility.avg_km_per_day} KM/day`}
                     </p>
                   </div>
@@ -279,6 +330,24 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
                     <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black px-2 py-0.5 rounded-lg shadow-2xs">
                       Passed
                     </span>
+
+                    {/* Eligible for full breakdown: Current or previous 1 month */}
+                    {isDetailedBreakdownEligible ? (
+                      <button
+                        type="button"
+                        onClick={handleOpenBreakdown}
+                        className="flex items-center gap-1 text-[10px] sm:text-[11px] font-black bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-2.5 py-1 rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
+                        title="View day-wise kilometer feed and deduction details"
+                      >
+                        <span>📋 View Details</span>
+                      </button>
+                    ) : (
+                      /* Older than 1 month: Only amount summary */
+                      <span className="text-[9px] text-slate-400 italic">
+                        Archive Summary
+                      </span>
+                    )}
+
                     {mobility.dispute_window_active && !disputeSuccess && (
                       <button
                         type="button"
@@ -685,6 +754,20 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
                         <span>Final Net Payable:</span>
                         <span className="tabular-nums">₹{mobility.final_payable_amount?.toFixed(2)}</span>
                       </div>
+                      {isDetailedBreakdownEligible && (
+                        <div className="pt-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowFullStory(false);
+                              handleOpenBreakdown();
+                            }}
+                            className="w-full bg-gradient-to-r from-emerald-600/30 to-teal-600/30 hover:from-emerald-600/40 hover:to-teal-600/40 border border-emerald-500/40 text-emerald-200 font-black text-xs py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <span>📋 View Day-Wise Kilometer Feed & Deductions &rarr;</span>
+                          </button>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -706,6 +789,235 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
                 className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs py-2.5 px-4 rounded-xl cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Detailed TA Daily Kilometer Breakdown Modal (Option A) ────────────── */}
+      {showBreakdownModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-t-3xl sm:rounded-3xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl text-white overflow-hidden animate-slide-up">
+            
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 bg-slate-900/95 sticky top-0 z-10 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-9 h-9 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center text-lg shadow-sm">
+                  📄
+                </span>
+                <div>
+                  <h3 className="font-black text-sm sm:text-base text-slate-100 flex items-center gap-2">
+                    Travel Allowance Day-Wise Breakdown
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    {foName} • {selectedMonthLabel} ({workingPlace})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBreakdownModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-sm font-bold transition-all cursor-pointer"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Modal Scrollable Content */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 flex-1">
+              
+              {loadingBreakdown ? (
+                <div className="py-12 flex flex-col items-center justify-center gap-3 text-slate-400 text-xs">
+                  <div className="w-8 h-8 border-3 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                  <span>Loading day-wise travel logs & deductions...</span>
+                </div>
+              ) : breakdownError ? (
+                <div className="py-8 px-4 bg-rose-500/10 border border-rose-500/25 rounded-2xl text-center space-y-2">
+                  <p className="font-bold text-xs text-rose-300">⚠️ {breakdownError}</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenBreakdown}
+                    className="px-4 py-1.5 bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/40 text-rose-200 text-xs font-bold rounded-xl transition-all cursor-pointer"
+                  >
+                    Retry Loading
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* ── 🔴 PROMINENT RED DEDUCTION BANNER ── */}
+                  {Number(breakdownData?.deduction_amount || mobility.deduction_amount || 0) > 0 ? (
+                    <div className="p-4 rounded-2xl bg-gradient-to-r from-rose-950/95 via-slate-900 to-rose-950/95 border-2 border-rose-500/70 shadow-lg shadow-rose-950/40 space-y-2.5 animate-pulse-subtle">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs sm:text-sm font-black uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                          <span className="text-base sm:text-lg animate-pulse">⚠️</span>
+                          Deduction Applied (Paisa Kata Gaya Hai)
+                        </span>
+                        <span className="bg-rose-500/25 text-rose-300 border border-rose-500/50 text-xs sm:text-sm font-black px-3 py-1 rounded-full tabular-nums">
+                          -₹{Number(breakdownData?.deduction_amount || mobility.deduction_amount || 0).toFixed(2)}
+                        </span>
+                      </div>
+                      
+                      {/* Reason Box */}
+                      <div className="bg-rose-900/40 p-3 rounded-xl border border-rose-800/50 text-xs text-rose-200 space-y-1">
+                        <div className="flex items-center gap-1.5 font-bold text-rose-300">
+                          <span>📌</span>
+                          <span>Karan / Reason:</span>
+                        </div>
+                        <p className="text-rose-100 font-medium pl-5">
+                          {breakdownData?.deduction_reason || mobility.deduction_reason || "Duty / Verification discrepancy ke karan deduction apply kiya gaya."}
+                        </p>
+                      </div>
+
+                      {/* Gross vs Net comparison */}
+                      <div className="flex items-center justify-between pt-2 border-t border-rose-900/50 text-xs text-slate-300">
+                        <span>Kul Claim (Gross): <strong className="text-white tabular-nums">₹{Number(breakdownData?.gross_amount || mobility.gross_amount || 0).toFixed(2)}</strong></span>
+                        <span>Pass Hua (Net Approved): <strong className="text-emerald-400 font-black tabular-nums text-sm">₹{Number(breakdownData?.final_payable_amount || mobility.final_payable_amount || 0).toFixed(2)}</strong></span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Zero Deductions Banner */
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/70 via-slate-900 to-teal-950/70 border border-emerald-500/40 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-sm font-bold">
+                          ✓
+                        </span>
+                        <div>
+                          <p className="text-xs font-bold text-emerald-300">Zero Deduction (100% Passed)</p>
+                          <p className="text-[10px] text-slate-400">Aapka pura travel claim bina kisi deduction ke pass kiya gaya hai.</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-black text-emerald-300 tabular-nums">
+                        ₹{Number(breakdownData?.final_payable_amount || mobility.final_payable_amount || 0).toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Summary Metric Strip */}
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Rate</span>
+                      <span className="text-xs sm:text-sm font-black text-slate-200">
+                        ₹{breakdownData?.rate_per_km || mobility.rate_per_km || 4.0}/KM
+                      </span>
+                    </div>
+                    <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Total Distance</span>
+                      <span className="text-xs sm:text-sm font-black text-indigo-300 tabular-nums">
+                        {Number(breakdownData?.total_km || mobility.total_km || 0).toFixed(1)} KM
+                      </span>
+                    </div>
+                    <div className="bg-slate-800/60 p-2.5 rounded-2xl border border-slate-700/60">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Net Payable</span>
+                      <span className="text-xs sm:text-sm font-black text-emerald-300 tabular-nums">
+                        ₹{Number(breakdownData?.final_payable_amount || mobility.final_payable_amount || 0).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Day-Wise Kilometer Feed */}
+                  <div className="space-y-2 mt-3">
+                    <div className="flex items-center justify-between px-1">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                        <span>📅</span>
+                        <span>Rozana Kilometer Vivaran (Daily Feed)</span>
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-medium">
+                        Total Days: {breakdownData?.days?.length || 0}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+                      {breakdownData?.days && breakdownData.days.length > 0 ? (
+                        breakdownData.days.map((d) => {
+                          const totalKmNum = Number(d.total_km || 0);
+                          const hasTravel = totalKmNum > 0 || (d.morning_km !== null && d.morning_km !== undefined && d.morning_km !== '');
+                          
+                          let dayFormatted = `Day ${String(d.day).padStart(2, '0')}`;
+                          if (d.date) {
+                            try {
+                              const dt = new Date(d.date);
+                              if (!isNaN(dt.getTime())) {
+                                dayFormatted = dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', weekday: 'short' });
+                              }
+                            } catch (e) {
+                              dayFormatted = `Day ${String(d.day).padStart(2, '0')}`;
+                            }
+                          }
+
+                          return hasTravel ? (
+                            <div 
+                              key={d.day} 
+                              className="p-3 rounded-2xl bg-slate-800/80 border border-slate-700/70 hover:border-slate-600 transition-all flex flex-col gap-1.5 shadow-2xs"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                  {dayFormatted}
+                                </span>
+                                <span className="bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-xs font-black px-2.5 py-0.5 rounded-lg tabular-nums">
+                                  {totalKmNum.toFixed(1)} KM
+                                </span>
+                              </div>
+
+                              {/* Odometer readings */}
+                              {(d.morning_km !== null || d.evening_km !== null) && (
+                                <div className="text-[11px] text-slate-400 flex items-center gap-2 bg-slate-900/70 px-2.5 py-1 rounded-lg font-mono">
+                                  <span>Start: <strong className="text-slate-200">{d.morning_km ?? '—'}</strong></span>
+                                  <span>➔</span>
+                                  <span>End: <strong className="text-slate-200">{d.evening_km ?? '—'}</strong></span>
+                                </div>
+                              )}
+
+                              {/* Visited places & Purpose */}
+                              {(d.visited_names || d.purpose) && (
+                                <div className="text-[11px] text-slate-300 space-y-0.5 pt-0.5">
+                                  {d.visited_names && (
+                                    <p className="line-clamp-2"><span className="text-slate-400 font-medium">Locations:</span> {d.visited_names}</p>
+                                  )}
+                                  {d.purpose && (
+                                    <p className="line-clamp-2"><span className="text-slate-400 font-medium">Purpose:</span> {d.purpose}</p>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* Admin notes */}
+                              {d.admin_remarks && (
+                                <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md mt-0.5">
+                                  📝 <strong>Admin Note:</strong> {d.admin_remarks}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div 
+                              key={d.day} 
+                              className="px-3 py-2 rounded-xl bg-slate-900/40 border border-slate-800/40 flex items-center justify-between text-xs text-slate-500"
+                            >
+                              <span className="font-medium text-slate-400">{dayFormatted}</span>
+                              <span className="text-[11px] italic">No travel logged / Rest Day</span>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <p className="text-xs text-slate-400 text-center py-6">
+                          Is mahine ke liye koi rozana travel logs uplabdh nahi hain.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setShowBreakdownModal(false)}
+                className="w-full sm:w-auto px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Close Breakdown
               </button>
             </div>
           </div>
