@@ -1,16 +1,52 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.11";
-export const LAST_UPDATED_DATE = "01 Nov 2026";
+export const APP_VERSION = "2.9.12";
+export const LAST_UPDATED_DATE = "09 Nov 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.12",
+    date: "09 Nov 2026",
+    title: "Tactile Admin Login Feedback, FO TA Month Breakdown & Deduction Transparency Suite",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "🔄 Tactile Admin Login Feedback: Enter Admin Portal button now morphs with a rotating SVG spinner and disabled input locks, providing immediate visual feedback and anti-double-tap safety.",
+      "📋 FO Travel Allowance 1-Month Breakdown: Field Officers can now inspect full day-by-day travel kilometers, odometer readings, visited locations, and duty remarks directly from the Profile tab.",
+      "🔴 Prominent Red Deduction Banner: Any administrative deduction is highlighted in a high-visibility red callout showing exact deduction amount (-₹XX), supervisor reason, and Gross vs Net financial comparison.",
+      "🔒 1-Month History Window Restriction: Full daily breakdown is strictly visible for the active and immediately preceding month; older records display an Archive Summary to preserve mobile performance.",
+      "🛡️ Resilient Backend Fallback: When dedicated TA logs are empty, the backend automatically enriches daily kilometer feeds directly from daily field reporting tables."
+    ],
+    details: [
+      {
+        tag: "Admin Experience",
+        color: "teal",
+        text: "Interactive spinner and disabled input locks eliminate double taps on slow cellular networks."
+      },
+      {
+        tag: "Financial Transparency",
+        color: "rose",
+        text: "Prominent red banners and clear deduction reasons give frontline staff 100% transparency into travel allowance calculations."
+      },
+      {
+        tag: "Operational Scope",
+        color: "amber",
+        text: "1-month history window restriction keeps client-side memory lightweight while meeting audit requirements."
+      },
+      {
+        tag: "Data Resilience",
+        color: "indigo",
+        text: "Backend auto-enrichment fallback guarantees complete daily kilometer visibility even before manual roster generation."
+      }
+    ]
+  },
   {
     version: "v2.9.11",
     date: "01 Nov 2026",
     title: "Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "🪪 Official Frontline Digital ID Card: Introduced a sleek ~70px Quick-Access Pass Bar opening an immersive full-screen DFY Lanyard Badge with medical security styling, 35x45mm dashed photo placeholder, Employee ID (EP00021), official Mumbai Head Office address, and printable PVC-ready rendering.",
       "⚡ Stale-While-Revalidate Offline Phone Caching: Frontline staff ID credentials are saved directly to device storage, providing instant 0ms offline display during rural connectivity outages with low-bandwidth background sync.",

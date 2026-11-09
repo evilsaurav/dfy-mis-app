@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.11-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.12-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -63,6 +63,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [34. Nikshay Reconciler Quarterly Ingestion, Monotonic Smart Merge & 3-Month Rolling Retention Prune](#34--nikshay-reconciler-quarterly-ingestion-monotonic-smart-merge--3-month-rolling-retention-prune)
   - [35. Unified Auto-Detect Nikshay Upload, Cumulative Ledger Aggregations & Frontline 1-Tap Calling](#35--unified-auto-detect-nikshay-upload-cumulative-ledger-aggregations--frontline-1-tap-calling)
   - [36. Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite](#36--official-staff-hr-master-dossier-frontline-digital-id-card--admin-dossier-suite)
+  - [37. Tactile Admin Portal Login Feedback & FO Travel Allowance 1-Month Breakdown Suite](#37--tactile-admin-portal-login-feedback--fo-travel-allowance-1-month-breakdown-suite)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -643,6 +644,23 @@ flowchart TD
   - Sanitized `GET /fo/profile-dossier` to automatically strip sensitive `pin` fields from JSON payloads before transmission.
   - Enforced strict Sub-Admin district RBAC: Sub-Admins attempting to modify staff belonging to districts outside their permitted portfolio receive HTTP 403 Forbidden.
   - Validated self-service contact updates (`PUT /fo/update-profile-contact`) against strict 10-digit mobile patterns and allowed medical blood groups (`A+`, `A-`, `B+`, `B-`, `AB+`, `AB-`, `O+`, `O-`).
+
+---
+
+### 37. 🚗 Tactile Admin Portal Login Feedback & FO Travel Allowance 1-Month Breakdown Suite
+- **Tactile Admin Portal Login Handshake (`AdminLogin.jsx` & `AdminDashboard.jsx`)**:
+  - Engineered an immediate tactile response upon clicking *"Enter Admin Portal &rarr;"*: the submit button morphs into an active loading state displaying a rotating SVG spinner (`animate-spin`) and label `"Entering Admin Portal..."`.
+  - Disables form inputs and credentials fields while authentication is in-flight, preventing accidental rapid double-tapping on latent or high-jitter cellular connections.
+  - Automatically recovers and restores interactive state upon authentication failure, displaying clear error feedback without page freezes.
+- **Frontline FO Profile Travel Allowance 1-Month Breakdown Suite (`FoMonthlyRecapCard.jsx`)**:
+  - Implemented a *"📋 View Details"* button on the Approved Travel Allowance card within the Field Officer Profile tab, opening an accessible, high-density slide-up modal (`max-h-[90vh]`).
+  - **1-Month History Window Restriction**: Full day-by-day kilometer logs and deduction breakdowns are strictly visible only for the active month and immediately preceding operational month (last 1 month). Older records (> 1 month back) display an *"Archive Summary"* lock, protecting client memory and bandwidth.
+  - **Prominent Red Deduction Banner**: When a travel allowance has an administrative deduction applied (`deduction_amount > 0`), displays a prominent red warning banner highlighting the exact deduction (`-₹{deduction}`), the administrative reason recorded by the supervisor, and a transparent comparison of **Gross Claim** vs **Net Approved Amount**.
+  - **Emerald 100% Passed Banner**: Displays a reassuring emerald confirmation card (`✓ Zero Deduction (100% Passed)`) when full claims are approved without deduction.
+  - **Comprehensive Daily Kilometer Feed**: Itemizes daily travel (1st to 31st) with start and end odometer readings (`Start ➔ End`), total approved kilometers, places visited, duty purpose, and admin remarks; displays clean muted rows for unlogged/rest days.
+  - **Timezone-Safe Date Parsing & Isolation**: Robust local date parsing preventing UTC midnight rollover bugs, with automatic state reset when switching months to prevent cross-month data bleed.
+- **Backend Resilient TA Log Fallback (`backend/routers/travel_allowance.py`)**:
+  - Enhanced `/fo/ta/monthly-summary` to automatically fall back and cross-populate daily kilometers, visited locations, and duty remarks directly from `daily_field_reports` when `travel_allowance_daily_logs` has not yet been populated for that month.
 
 ---
 

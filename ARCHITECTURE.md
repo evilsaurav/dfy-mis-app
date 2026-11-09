@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.9.4 (v2.9.11 - Staff HR Master Dossier, Frontline Digital ID Card & Sub-Admin RBAC Governance)  
+> *Version:* 3.9.5 (v2.9.12 - Tactile Login Feedback, FO TA Month Breakdown & Deduction Transparency)  
 > *Status:* Production Active
 
 ---

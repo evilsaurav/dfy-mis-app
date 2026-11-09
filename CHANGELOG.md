@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.12] - 2026-11-09
+
+### Added & Optimized
+- **Tactile Admin Login Animated Feedback & Double-Tap Guard (`AdminLogin.jsx` & `AdminDashboard.jsx`)**:
+  - Engineered an immediate tactile response upon clicking *"Enter Admin Portal &rarr;"*: the submit button morphs dynamically into an active loading state displaying a rotating SVG spinner (`animate-spin`) and label `"Entering Admin Portal..."`.
+  - Disables form inputs and credentials fields while the authentication handshake is in-flight, preventing accidental rapid double-tapping on latent or high-jitter cellular networks.
+  - Automatically recovers and restores interactive state upon authentication failure, displaying clear error feedback without page freezes.
+- **Frontline FO Profile Travel Allowance 1-Month Breakdown Suite (`FoMonthlyRecapCard.jsx`)**:
+  - Implemented a *"📋 View Details"* button on the Approved Travel Allowance card within the Field Officer Profile tab, opening an accessible, high-density slide-up modal (`max-h-[90vh]`).
+  - **1-Month History Window Restriction**: Full day-by-day kilometer logs and deduction breakdowns are strictly visible only for the current active month and immediately preceding operational month (last 1 month). Older records (> 1 month back) display an *"Archive Summary"* lock, protecting client memory and bandwidth.
+  - **Prominent Red Deduction Banner**: When a travel allowance has an administrative deduction applied (`deduction_amount > 0`), displays a prominent red warning banner highlighting the exact deduction (`-₹{deduction}`), the administrative reason recorded by the supervisor, and a transparent comparison of **Gross Claim** vs **Net Approved Amount**.
+  - **Emerald 100% Passed Banner**: Displays a reassuring emerald confirmation card (`✓ Zero Deduction (100% Passed)`) when full claims are approved without deduction.
+  - **Comprehensive Daily Kilometer Feed**: Itemizes daily travel (1st to 31st) with start and end odometer readings (`Start ➔ End`), total approved kilometers, places visited, duty purpose, and admin remarks; displays clean muted rows for unlogged/rest days.
+  - **Timezone-Safe Date Parsing & Isolation**: Robust local date parsing preventing UTC midnight rollover bugs, with automatic state reset when switching months to prevent cross-month data bleed.
+- **Backend Resilient TA Log Fallback (`backend/routers/travel_allowance.py`)**:
+  - Enhanced `/fo/ta/monthly-summary` to automatically fall back and cross-populate daily kilometers, visited locations, and duty remarks directly from `daily_field_reports` when `travel_allowance_daily_logs` has not yet been populated for that month.
+  - Added test mock fallbacks and hardened PIN authentication parameter handling.
+
+---
+
 ## [2.9.11] - 2026-11-01
 
 ### Added & Optimized
