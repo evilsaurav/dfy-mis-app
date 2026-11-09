@@ -56,6 +56,13 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
     return monthOptions.find((opt) => opt.val === selectedMonth)?.label || selectedMonth;
   }, [monthOptions, selectedMonth]);
 
+  // Reset breakdown modal state if selectedMonth changes
+  useEffect(() => {
+    setShowBreakdownModal(false);
+    setBreakdownData(null);
+    setBreakdownError(null);
+  }, [selectedMonth]);
+
   // Handler to fetch and open breakdown modal
   const handleOpenBreakdown = async () => {
     setShowBreakdownModal(true);
@@ -65,6 +72,7 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
       return;
     }
 
+    setBreakdownData(null);
     setLoadingBreakdown(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dfy-mis-app.onrender.com';
@@ -935,11 +943,12 @@ export default function FoMonthlyRecapCard({ foName, workingPlace, pin, currentM
                           const hasTravel = totalKmNum > 0 || (d.morning_km !== null && d.morning_km !== undefined && d.morning_km !== '');
                           
                           let dayFormatted = `Day ${String(d.day).padStart(2, '0')}`;
-                          if (d.date) {
+                          if (d.date && typeof d.date === 'string' && d.date.includes('-')) {
                             try {
-                              const dt = new Date(d.date);
-                              if (!isNaN(dt.getTime())) {
-                                dayFormatted = dt.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', weekday: 'short' });
+                              const [y, m, dt] = d.date.split('-').map(Number);
+                              const localDate = new Date(y, m - 1, dt);
+                              if (!isNaN(localDate.getTime())) {
+                                dayFormatted = localDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', weekday: 'short' });
                               }
                             } catch (e) {
                               dayFormatted = `Day ${String(d.day).padStart(2, '0')}`;
