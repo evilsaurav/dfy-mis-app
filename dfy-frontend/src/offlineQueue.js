@@ -1,8 +1,9 @@
 // --- DFY MIS IndexedDB Offline Queue Engine ---
 export const DB_NAME = 'DFY_MIS_OFFLINE_DB';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 export const STORE_NAME = 'offline_reports_queue';
 export const REGISTRY_STORE_NAME = 'district_notified_registry';
+export const COHORT_STORE_NAME = 'fo_cohort_3m_cache';
 
 export const openOfflineDB = () => {
   return new Promise((resolve, reject) => {
@@ -23,6 +24,9 @@ export const openOfflineDB = () => {
       }
       if (!db.objectStoreNames.contains(REGISTRY_STORE_NAME)) {
         db.createObjectStore(REGISTRY_STORE_NAME, { keyPath: 'district' });
+      }
+      if (!db.objectStoreNames.contains(COHORT_STORE_NAME)) {
+        db.createObjectStore(COHORT_STORE_NAME, { keyPath: 'fo_key' });
       }
     };
 
@@ -361,4 +365,308 @@ export const isPatientIdNotified = async (district, patientId) => {
   }
 
   return { notified: false };
+};
+
+// =========================================================================
+// --- 3-Month FO 75% Indicator Cohort Cache & '+1' Incremental Delta Engine ---
+// =========================================================================
+
+/**
+ * Generates canonical storage key per Field Officer & District
+ */
+export const getCohortFoKey = (district, foName) => {
+  const cleanDist = String(district || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cleanFo = String(foName || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
+  if (!cleanDist || !cleanFo) return '';
+  return `dfy_cohort_3m_${cleanDist}_${cleanFo}`;
+};
+
+/**
+ * Saves FO 3-month cohort compliance snapshot to IndexedDB with localStorage fallback
+ */
+export const saveFoCohortCache = async (district, foName, cacheDoc) => {
+  const foKey = getCohortFoKey(district, foName);
+  if (!foKey || !cacheDoc) return null;
+
+  const record = {
+    ...cacheDoc,
+    fo_key: foKey,
+    client_updated_at: Date.now()
+  };
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(foKey, JSON.stringify(record));
+    }
+  } catch (lsErr) {
+    console.warn('Failed to mirror FO cohort cache to localStorage:', lsErr);
+  }
+
+  try {
+    const db = await openOfflineDB();
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(COHORT_STORE_NAME, 'readwrite');
+        const store = tx.objectStore(COHORT_STORE_NAME);
+        const req = store.put(record);
+        req.onsuccess = () => resolve(record);
+        req.onerror = () => resolve(record);
+      } catch {
+        resolve(record);
+      }
+    });
+  } catch {
+    return record;
+  }
+};
+
+/**
+ * Retrieves FO 3-month cohort compliance snapshot from IndexedDB or localStorage
+ */
+export const getFoCohortCache = async (district, foName) => {
+  const foKey = getCohortFoKey(district, foName);
+  if (!foKey) return null;
+
+  try {
+    const db = await openOfflineDB();
+    const idbRes = await new Promise((resolve) => {
+      try {
+        const tx = db.transaction(COHORT_STORE_NAME, 'readonly');
+        const store = tx.objectStore(COHORT_STORE_NAME);
+        const req = store.get(foKey);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch {
+        resolve(null);
+      }
+    });
+    if (idbRes && idbRes.months_data) {
+      return idbRes;
+    }
+  } catch {
+    // Fall back to localStorage
+  }
+
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(foKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && parsed.months_data) return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading FO cohort cache from localStorage:', e);
+  }
+
+  return null;
+};
+
+/**
+ * Merges server response (`NO_CHANGE`, `DELTA`, or `FULL`) into existing phone cache.
+ * Automatically prunes any months older than the active 3-month rolling window.
+ */
+export const mergeServerCohortSync = (existingCache, serverPayload, district, foName) => {
+  const foKey = getCohortFoKey(district, foName);
+  if (!serverPayload || !serverPayload.success) return existingCache;
+
+  const targetMonths = Array.isArray(serverPayload.months) && serverPayload.months.length > 0
+    ? serverPayload.months
+    : (existingCache?.months || []);
+
+  const baseMonthsData = {};
+  const prevMonthsData = existingCache?.months_data || {};
+
+  // Carry over only valid 3-month rolling window months (prunes >3m old data cleanly)
+  targetMonths.forEach((m) => {
+    baseMonthsData[m] = {
+      patients: { ...(prevMonthsData[m]?.patients || {}) }
+    };
+  });
+
+  if (serverPayload.mode === 'NO_CHANGE') {
+    return {
+      ...(existingCache || {}),
+      fo_key: foKey,
+      months: targetMonths,
+      months_data: baseMonthsData,
+      server_kpi_count: serverPayload.server_kpi_count ?? existingCache?.server_kpi_count ?? 0,
+      server_synced_at: serverPayload.server_synced_at || existingCache?.server_synced_at,
+      client_updated_at: Date.now()
+    };
+  }
+
+  if (serverPayload.mode === 'DELTA') {
+    const updatedList = Array.isArray(serverPayload.updated_patients) ? serverPayload.updated_patients : [];
+    updatedList.forEach((pt) => {
+      const pid = String(pt?.id || '').trim();
+      const m = pt?.month;
+      if (!pid || !m || !baseMonthsData[m]) return;
+      baseMonthsData[m].patients[pid] = {
+        date: pt.date || '',
+        name: pt.name || baseMonthsData[m].patients[pid]?.name || '',
+        phone: pt.phone || baseMonthsData[m].patients[pid]?.phone || '',
+        hiv: Boolean(pt.hiv),
+        udst: Boolean(pt.udst),
+        dbt: Boolean(pt.dbt),
+        ct: Boolean(pt.ct)
+      };
+    });
+
+    return {
+      ...(existingCache || {}),
+      fo_key: foKey,
+      months: targetMonths,
+      months_data: baseMonthsData,
+      server_kpi_count: serverPayload.server_kpi_count ?? existingCache?.server_kpi_count ?? 0,
+      server_synced_at: serverPayload.server_synced_at || existingCache?.server_synced_at,
+      client_updated_at: Date.now()
+    };
+  }
+
+  // Mode FULL
+  const fullData = serverPayload.months_data || {};
+  const cleanMonthsData = {};
+  targetMonths.forEach((m) => {
+    cleanMonthsData[m] = {
+      patients: { ...(fullData[m]?.patients || {}) }
+    };
+  });
+
+  return {
+    fo_key: foKey,
+    months: targetMonths,
+    months_data: cleanMonthsData,
+    server_kpi_count: serverPayload.server_kpi_count ?? 0,
+    server_synced_at: serverPayload.server_synced_at || new Date().toISOString(),
+    client_updated_at: Date.now()
+  };
+};
+
+/**
+ * '+1 Formula': Immediately updates phone's local 3-month cohort cache when FO submits a report
+ * or adds patient IDs — zero full reload needed, works 100% offline.
+ */
+export const applyOptimisticCohortPlusOne = (existingCache, reportFormData, activeOpMonth, district, foName) => {
+  const foKey = getCohortFoKey(district, foName);
+  if (!foKey || !reportFormData) return existingCache;
+
+  const months = Array.isArray(existingCache?.months) && existingCache.months.length > 0
+    ? [...existingCache.months]
+    : [activeOpMonth].filter(Boolean);
+
+  const nextMonthsData = {};
+  months.forEach((m) => {
+    nextMonthsData[m] = {
+      patients: { ...(existingCache?.months_data?.[m]?.patients || {}) }
+    };
+  });
+
+  const repDate = String(reportFormData.date_of_reporting || reportFormData.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const notifMonth = (repDate.length >= 7 ? repDate.slice(0, 7) : activeOpMonth) || months[0];
+
+  // Ensure notification month exists in cache if within window
+  if (notifMonth && nextMonthsData[notifMonth]) {
+    const notifIds = Array.isArray(reportFormData.notification_ids) ? reportFormData.notification_ids : [];
+    notifIds.forEach((rawId) => {
+      const pid = String(rawId || '').trim().split('.')[0];
+      if (pid.length < 5) return;
+      if (!nextMonthsData[notifMonth].patients[pid]) {
+        nextMonthsData[notifMonth].patients[pid] = {
+          date: repDate,
+          name: '',
+          phone: '',
+          hiv: false,
+          udst: false,
+          dbt: false,
+          ct: false
+        };
+      }
+    });
+  }
+
+  // Flip indicator flags (+1) across any of the 3 cached months where the patient was notified
+  const indicatorMappings = [
+    ['hiv_dm_ids', 'hiv'],
+    ['sample_tested_ids', 'udst'],
+    ['dbt_ids', 'dbt'],
+    ['contact_tracing_ids', 'ct']
+  ];
+
+  indicatorMappings.forEach(([formKey, flagKey]) => {
+    const ids = Array.isArray(reportFormData[formKey]) ? reportFormData[formKey] : [];
+    ids.forEach((rawId) => {
+      const pid = String(rawId || '').trim().split('.')[0];
+      if (pid.length < 5) return;
+      Object.keys(nextMonthsData).forEach((mKey) => {
+        if (nextMonthsData[mKey]?.patients?.[pid]) {
+          nextMonthsData[mKey].patients[pid] = {
+            ...nextMonthsData[mKey].patients[pid],
+            [flagKey]: true
+          };
+        }
+      });
+    });
+  });
+
+  return {
+    ...(existingCache || {}),
+    fo_key: foKey,
+    months,
+    months_data: nextMonthsData,
+    client_updated_at: Date.now()
+  };
+};
+
+/**
+ * Computes exact 75% cohort compliance stats for a single month's patient map.
+ */
+export const computeMonthCohortStats = (monthPatientsMap) => {
+  const entries = Object.entries(monthPatientsMap || {});
+  const totalNotified = entries.length;
+  const target75 = totalNotified > 0 ? Math.ceil(totalNotified * 0.75) : 0;
+
+  const counts = { hiv: 0, udst: 0, dbt: 0, ct: 0 };
+  const pendingByIndicator = { hiv: [], udst: [], dbt: [], ct: [] };
+
+  entries.forEach(([pid, pt]) => {
+    const row = { id: pid, ...pt };
+    if (pt.hiv) counts.hiv += 1; else pendingByIndicator.hiv.push(row);
+    if (pt.udst) counts.udst += 1; else pendingByIndicator.udst.push(row);
+    if (pt.dbt) counts.dbt += 1; else pendingByIndicator.dbt.push(row);
+    if (pt.ct) counts.ct += 1; else pendingByIndicator.ct.push(row);
+  });
+
+  const buildMetric = (key) => {
+    const done = counts[key];
+    const pct = totalNotified > 0 ? Math.round((done / totalNotified) * 100) : 0;
+    const neededFor75 = totalNotified > 0 ? Math.max(0, target75 - done) : 0;
+    const achieved = totalNotified > 0 && pct >= 75;
+    return {
+      key,
+      done,
+      total: totalNotified,
+      pct,
+      target75,
+      neededFor75,
+      achieved,
+      pendingPatients: pendingByIndicator[key]
+    };
+  };
+
+  const indicators = {
+    hiv: buildMetric('hiv'),
+    udst: buildMetric('udst'),
+    dbt: buildMetric('dbt'),
+    ct: buildMetric('ct')
+  };
+
+  const achievedCount = Object.values(indicators).filter((i) => i.achieved).length;
+
+  return {
+    totalNotified,
+    target75,
+    achievedCount,
+    indicators
+  };
 };

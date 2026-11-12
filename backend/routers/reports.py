@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timedelta, date as dt_date, timezone
 from typing import Optional, List, Dict, Any, Tuple, Set
 from collections import defaultdict
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -1058,6 +1058,7 @@ async def submit_daily_report(
         )
         pg_payload["staff_id"] = resolved_staff_id
         pg_payload["district_id"] = resolved_district_id
+        pg_payload["last_edited_at"] = datetime.now(timezone.utc).isoformat()
 
         # Upsert parent row in daily_field_reports and retrieve integer PK 'id'
         int_report_id = None
@@ -2691,6 +2692,370 @@ async def update_pacing_settings(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _parse_utc_timestamp(raw_ts: Any) -> Optional[datetime]:
+    """Parses ISO/PostgreSQL timestamps safely into UTC-aware datetime for comparison."""
+    if isinstance(raw_ts, str):
+        # Recover '+' lost when URL query parameters aren't percent-encoded (e.g. 'T10:00:00 00:00')
+        raw_ts = re.sub(r'(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\s+(\d{2}:\d{2})$', r'\1+\2', raw_ts.strip())
+    dt = parse_to_ist_datetime(raw_ts)
+    if dt is None:
+        return None
+    return dt.astimezone(timezone.utc)
+
+
+def compute_fo_3m_cohort_sync(
+    district: str,
+    fo_name: str,
+    months: int = 3,
+    since: Optional[str] = None,
+    known_months: Optional[str] = None,
+    known_kpi_count: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Computes 3-month cohort compliance (HIV/DM, UDST, DBT, Contact Tracing against 75% goal)
+    combining DFY Daily Field Reports and Nikshay Reconciled Patients.
+    Supports incremental '+1' delta sync via `since` timestamp cursor.
+    """
+    clean_wp = canonicalize_district(district)
+    clean_fo = re.sub(r'[^a-zA-Z0-9]', '', str(fo_name or "")).lower()
+    raw_fo = (fo_name or "").strip()
+
+    now_ist = get_ist_now()
+    cur_op_month = get_active_operational_month(now_ist)
+    target_months: List[str] = [cur_op_month]
+    m_cursor = cur_op_month
+    for _ in range(max(0, months - 1)):
+        m_cursor = get_previous_month(m_cursor)
+        target_months.append(m_cursor)
+
+    target_months_set = set(target_months)
+    oldest_start, _ = get_month_date_range(target_months[-1])
+    _, cur_end = get_month_date_range(target_months[0])
+    today_str = now_ist.date().strftime("%Y-%m-%d")
+    latest_end = max(cur_end, today_str)
+    server_synced_at = datetime.now(timezone.utc).isoformat()
+
+    resolved_staff_id, _ = resolve_staff_and_district_ids(
+        fo_name=raw_fo,
+        district=clean_wp
+    )
+
+    dist_param = list({str(clean_wp).lower(), str(clean_wp), str(district or "").strip().lower()})
+    fo_variants = {raw_fo.lower(), clean_fo}
+    if "ashwani" in clean_fo:
+        fo_variants.update(["ashwani kumar", "ashwanikumar", "ashwani kr keshri", "ashwanikrkeshri"])
+    if "vinay" in clean_fo:
+        fo_variants.update(["vinay prakash", "vinay kumar", "vinay kumar lt", "vinayprakash", "vinaykumar", "vinaykumarlt"])
+    fo_param = list(fo_variants)
+
+    cat_to_flag = {
+        "notification_ids": "notification",
+        "notifications": "notification",
+        "hiv_dm_ids": "hiv",
+        "hiv_dm": "hiv",
+        "sample_tested_ids": "udst",
+        "tests": "udst",
+        "dbt_ids": "dbt",
+        "dbt": "dbt",
+        "contact_tracing_ids": "ct",
+        "contact_tracing": "ct",
+    }
+    tracked_categories = [
+        "notification_ids",
+        "hiv_dm_ids",
+        "sample_tested_ids",
+        "dbt_ids",
+        "contact_tracing_ids",
+    ]
+
+    # 1. Fetch reports in 3-month window for this FO
+    rep_rows: List[Dict[str, Any]] = []
+    try:
+        rep_sql = """
+            SELECT id, date_of_reporting,
+                   COALESCE(last_edited_at, created_at) AS sync_ts
+            FROM daily_field_reports
+            WHERE (
+                (staff_id = %s AND %s IS NOT NULL)
+                OR (
+                    (LOWER(TRIM(working_place)) = ANY(%s) OR district_id::text = ANY(%s))
+                    AND (
+                        LOWER(TRIM(fo_name)) = ANY(%s)
+                        OR REGEXP_REPLACE(LOWER(COALESCE(fo_name, '')), '[^a-z0-9]', '', 'g') = ANY(%s)
+                    )
+                )
+            )
+            AND date_of_reporting >= %s::date
+            AND date_of_reporting <= %s::date
+            ORDER BY date_of_reporting ASC
+        """
+        rep_rows = pg_execute_raw(
+            rep_sql,
+            [resolved_staff_id, resolved_staff_id, dist_param, dist_param, fo_param, fo_param, oldest_start, latest_end],
+            fetch=True
+        ) or []
+    except Exception as e:
+        logger.debug(f"[cohort-compliance-sync] PG report fetch notice: {e}")
+        rep_rows = []
+
+    since_dt = _parse_utc_timestamp(since) if since else None
+    report_ts_by_id: Dict[Any, Optional[datetime]] = {}
+    report_date_by_id: Dict[Any, str] = {}
+    changed_report_ids: Set[Any] = set()
+
+    for r in rep_rows:
+        rid = r.get("id")
+        r_date = str(r.get("date_of_reporting") or "")[:10]
+        r_ts = _parse_utc_timestamp(r.get("sync_ts"))
+        report_ts_by_id[rid] = r_ts
+        report_date_by_id[rid] = r_date
+        if since_dt and r_ts and r_ts > since_dt:
+            changed_report_ids.add(rid)
+
+    # 2. Fetch child KPI entries (primary source of truth)
+    kpi_rows: List[Dict[str, Any]] = []
+    if rep_rows:
+        rep_ids = [r["id"] for r in rep_rows if r.get("id") is not None]
+        if rep_ids:
+            try:
+                kpi_rows = pg_execute_raw(
+                    """
+                    SELECT report_id, category::text AS category, patient_id
+                    FROM report_kpi_entries
+                    WHERE report_id = ANY(%s) AND category::text = ANY(%s)
+                    """,
+                    [rep_ids, tracked_categories],
+                    fetch=True
+                ) or []
+            except Exception as kpi_err:
+                logger.debug(f"[cohort-compliance-sync] KPI entries fetch notice: {kpi_err}")
+
+    # Fallback to mock active_db if PG returned nothing (unit tests / offline mock store)
+    if not rep_rows and not kpi_rows:
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                docs = active_db.collection("daily_field_reports").stream()
+                for doc in docs:
+                    d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+                    d_dist = canonicalize_district(d.get("working_place", ""))
+                    d_fo = re.sub(r'[^a-zA-Z0-9]', '', str(d.get("fo_name") or "")).lower()
+                    d_date = str(d.get("date_of_reporting") or "")[:10]
+                    if d_dist.lower() != clean_wp.lower() or d_fo != clean_fo:
+                        continue
+                    if not d_date or d_date < oldest_start or d_date > latest_end:
+                        continue
+                    rid = d.get("id") or f"{d_date}_{d_fo}"
+                    r_ts = _parse_utc_timestamp(d.get("last_edited_at") or d.get("created_at") or d.get("timestamp_completed"))
+                    report_date_by_id[rid] = d_date
+                    report_ts_by_id[rid] = r_ts
+                    if since_dt and r_ts and r_ts > since_dt:
+                        changed_report_ids.add(rid)
+                    for cat_key in tracked_categories:
+                        pids = d.get(cat_key) or []
+                        if isinstance(pids, list):
+                            for pid in pids:
+                                pid_clean = str(pid).strip().split(".")[0]
+                                if len(pid_clean) >= 5:
+                                    kpi_rows.append({"report_id": rid, "category": cat_key, "patient_id": pid_clean})
+            except Exception as mock_err:
+                logger.debug(f"[cohort-compliance-sync] mock fallback notice: {mock_err}")
+
+    total_kpi_count = len(kpi_rows)
+    changed_pids: Set[str] = set()
+
+    # Pass 1: Identify 3-month Notified Cohort Patients
+    cohort_patients: Dict[str, Dict[str, Any]] = {}
+    for kr in kpi_rows:
+        cat = str(kr.get("category") or "").strip()
+        if cat_to_flag.get(cat) != "notification":
+            continue
+        pid = str(kr.get("patient_id") or "").strip().split(".")[0]
+        if len(pid) < 5:
+            continue
+        rid = kr.get("report_id")
+        r_date = report_date_by_id.get(rid, "")
+        r_month = r_date[:7] if len(r_date) >= 7 else ""
+        if r_month not in target_months_set:
+            continue
+        if pid not in cohort_patients:
+            cohort_patients[pid] = {
+                "id": pid,
+                "month": r_month,
+                "date": r_date,
+                "name": "",
+                "phone": "",
+                "hiv": False,
+                "udst": False,
+                "dbt": False,
+                "ct": False,
+            }
+        elif r_date and (not cohort_patients[pid]["date"] or r_date < cohort_patients[pid]["date"]):
+            cohort_patients[pid]["date"] = r_date
+            cohort_patients[pid]["month"] = r_month
+        if rid in changed_report_ids:
+            changed_pids.add(pid)
+
+    # Pass 2: Mark all 4 indicators done from DFY MIS entries (including cross-month completions)
+    for kr in kpi_rows:
+        cat = str(kr.get("category") or "").strip()
+        flag = cat_to_flag.get(cat)
+        if not flag or flag == "notification":
+            continue
+        pid = str(kr.get("patient_id") or "").strip().split(".")[0]
+        if pid in cohort_patients:
+            cohort_patients[pid][flag] = True
+            if kr.get("report_id") in changed_report_ids:
+                changed_pids.add(pid)
+
+    # Pass 3: Combine with Nikshay Reconciled Portal Data + Demographics
+    all_cohort_pids = list(cohort_patients.keys())
+    if all_cohort_pids:
+        try:
+            nik_rows = pg_execute_raw(
+                """
+                SELECT patient_id, patient_name, phone,
+                       hiv_tested, dm_tested, bank_validated,
+                       udst_done, contact_tracing_done,
+                       last_reconciled_at
+                FROM nikshay_verified_patients
+                WHERE patient_id = ANY(%s)
+                """,
+                [all_cohort_pids],
+                fetch=True
+            ) or []
+            for nr in nik_rows:
+                pid = str(nr.get("patient_id") or "").strip()
+                if pid not in cohort_patients:
+                    continue
+                pt = cohort_patients[pid]
+                if nr.get("patient_name") and not pt["name"]:
+                    pt["name"] = str(nr["patient_name"]).strip()
+                if nr.get("phone") and not pt["phone"]:
+                    pt["phone"] = str(nr["phone"]).strip()
+                if nr.get("hiv_tested") or nr.get("dm_tested"):
+                    pt["hiv"] = True
+                if nr.get("udst_done"):
+                    pt["udst"] = True
+                if nr.get("bank_validated"):
+                    pt["dbt"] = True
+                if nr.get("contact_tracing_done"):
+                    pt["ct"] = True
+                nik_ts = _parse_utc_timestamp(nr.get("last_reconciled_at"))
+                if since_dt and nik_ts and nik_ts > since_dt:
+                    changed_pids.add(pid)
+
+            # Fallback demographics from grace table if name/phone still empty
+            missing_demo_pids = [p for p, pt in cohort_patients.items() if not pt["name"] or not pt["phone"]]
+            if missing_demo_pids:
+                grace_rows = pg_execute_raw(
+                    "SELECT patient_id, patient_name, phone FROM nikshay_sync_grace_records WHERE patient_id = ANY(%s)",
+                    [missing_demo_pids],
+                    fetch=True
+                ) or []
+                for gr in grace_rows:
+                    pid = str(gr.get("patient_id") or "").strip()
+                    if pid in cohort_patients:
+                        pt = cohort_patients[pid]
+                        if not pt["name"] and gr.get("patient_name") and "Unregistered" not in str(gr["patient_name"]):
+                            pt["name"] = str(gr["patient_name"]).strip()
+                        if not pt["phone"] and gr.get("phone"):
+                            pt["phone"] = str(gr["phone"]).strip()
+        except Exception as nik_err:
+            logger.debug(f"[cohort-compliance-sync] Nikshay enrichment notice: {nik_err}")
+
+    # 4. Determine Sync Mode: NO_CHANGE vs DELTA vs FULL
+    client_months = [m.strip() for m in (known_months or "").split(",") if m.strip()]
+    months_match = client_months == target_months
+    no_deletion = known_kpi_count is None or total_kpi_count >= known_kpi_count
+
+    if since_dt and months_match and no_deletion:
+        if not changed_pids:
+            return {
+                "success": True,
+                "mode": "NO_CHANGE",
+                "months": target_months,
+                "server_kpi_count": total_kpi_count,
+                "server_synced_at": server_synced_at,
+            }
+        return {
+            "success": True,
+            "mode": "DELTA",
+            "months": target_months,
+            "updated_patients": [cohort_patients[pid] for pid in changed_pids if pid in cohort_patients],
+            "server_kpi_count": total_kpi_count,
+            "server_synced_at": server_synced_at,
+        }
+
+    # Mode FULL: Group patients cleanly by operational month
+    grouped_months: Dict[str, Dict[str, Any]] = {m: {"patients": {}} for m in target_months}
+    for pid, pt in cohort_patients.items():
+        m = pt["month"]
+        if m in grouped_months:
+            grouped_months[m]["patients"][pid] = {
+                "date": pt["date"],
+                "name": pt["name"],
+                "phone": pt["phone"],
+                "hiv": pt["hiv"],
+                "udst": pt["udst"],
+                "dbt": pt["dbt"],
+                "ct": pt["ct"],
+            }
+
+    return {
+        "success": True,
+        "mode": "FULL",
+        "months": target_months,
+        "months_data": grouped_months,
+        "server_kpi_count": total_kpi_count,
+        "server_synced_at": server_synced_at,
+    }
+
+
+@router.get("/api/fo/cohort-compliance-sync")
+async def get_fo_cohort_compliance_sync(
+    district: str = Query(..., description="Field Officer district"),
+    fo_name: str = Query(..., description="Field Officer full name"),
+    pin: Optional[str] = Query(None, description="Officer 4-digit PIN"),
+    months: int = Query(3, ge=1, le=6, description="Rolling month window (default 3)"),
+    since: Optional[str] = Query(None, description="ISO timestamp cursor from previous sync"),
+    known_months: Optional[str] = Query(None, description="Comma-separated YYYY-MM months cached on device"),
+    known_kpi_count: Optional[int] = Query(None, description="Cached KPI entry count for deletion check"),
+    authorization: Optional[str] = Header(None),
+):
+    """
+    Returns last 3 months of Field Officer notification cohort compliance
+    for the 4 mandatory 75% indicators (HIV/DM, UDST, DBT, Contact Tracing),
+    combining DFY MIS entries and Nikshay Portal verified records.
+    Supports incremental '+1' delta updates using the `since` cursor.
+    """
+    from backend.routers.travel_allowance import authenticate_fo_or_admin
+
+    authenticate_fo_or_admin(
+        district=district,
+        fo_name=fo_name,
+        pin=pin,
+        authorization=authorization,
+    )
+
+    try:
+        return await asyncio.to_thread(
+            compute_fo_3m_cohort_sync,
+            district=district,
+            fo_name=fo_name,
+            months=months,
+            since=since,
+            known_months=known_months,
+            known_kpi_count=known_kpi_count,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[cohort-compliance-sync] Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to sync 3-month cohort compliance.")
+
 
 
 

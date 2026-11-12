@@ -9,13 +9,19 @@ import {
   syncAllOfflineReports, 
   saveDistrictRegistry, 
   getDistrictRegistry, 
-  isPatientIdNotified 
+  isPatientIdNotified,
+  getFoCohortCache,
+  saveFoCohortCache,
+  mergeServerCohortSync,
+  applyOptimisticCohortPlusOne,
+  computeMonthCohortStats
 } from './offlineQueue'
 import { downloadOrShareCanvas } from './canvasShare'
 import { getOperationalMonth } from './utils/operationalMonth'
 import TravelAllowanceCard from './components/Fo/TravelAllowanceCard'
 import FoMonthlyRecapCard from './components/Fo/FoMonthlyRecapCard'
 import { FoDigitalIdCard } from './components/Fo/FoDigitalIdCard'
+import CohortCompliance3MCard from './components/Fo/CohortCompliance3MCard'
 import { TA_FEATURE_ENABLED } from './config/featureFlags'
 
 // Local Indian Date Formatter (avoids UTC toISOString midnight offset)
@@ -117,13 +123,15 @@ const PendingInterventionsActionCenter = ({
   onAutofill,
   showToast,
   onRefresh,
-  fullView = false
+  fullView = false,
+  cohortFilter = null,
+  onClearCohortFilter = null
 }) => {
   const [isExpanded, setIsExpanded] = useState(fullView);
   const [selectedFilter, setSelectedFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
-  if (loading) {
+  if (loading && !cohortFilter) {
     return (
       <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-xs mb-5 flex items-center justify-center gap-2 text-slate-400 text-xs font-bold animate-pulse">
         <span className="animate-spin text-base">⏳</span>
@@ -132,7 +140,7 @@ const PendingInterventionsActionCenter = ({
     );
   }
 
-  if (!cascadeAlerts || cascadeAlerts.length === 0) {
+  if (!cohortFilter && (!cascadeAlerts || cascadeAlerts.length === 0)) {
     return (
       <div className="bg-gradient-to-br from-emerald-50/90 via-teal-50/70 to-blue-50/70 rounded-3xl p-4 sm:p-5 border border-emerald-200/80 shadow-sm mb-6 animate-fade-in">
         <div className="flex items-center justify-between gap-2">
@@ -165,19 +173,49 @@ const PendingInterventionsActionCenter = ({
     );
   }
 
+  // Build normalized alert source: either active cohortFilter patients OR standard 45-day cascadeAlerts
+  const activeSourceAlerts = cohortFilter
+    ? (cohortFilter.pendingPatients || []).map((pt) => {
+        const iconMap = { hiv: '🧪', udst: '🔬', dbt: '💳', ct: '👥' };
+        const colorMap = { hiv: 'purple', udst: 'emerald', dbt: 'amber', ct: 'blue' };
+        let daysElapsed = 0;
+        if (pt.date) {
+          const parsed = new Date(pt.date);
+          if (!Number.isNaN(parsed.getTime())) {
+            daysElapsed = Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 86400000));
+          }
+        }
+        return {
+          id: pt.id,
+          patient_name: pt.name || '',
+          phone: pt.phone || '',
+          notified_date: pt.date || '',
+          days_elapsed: daysElapsed,
+          missing_items: [{
+            key: cohortFilter.fieldKey,
+            label: cohortFilter.label,
+            icon: iconMap[cohortFilter.indicatorKey] || '⚡',
+            color: colorMap[cohortFilter.indicatorKey] || 'emerald'
+          }]
+        };
+      })
+    : (cascadeAlerts || []);
+
   const hivCount = cascadeSummary.hiv_pending || 0;
   const diffTbCount = cascadeSummary.diff_tb_pending || 0;
   const dbtCount = cascadeSummary.dbt_pending || 0;
   const contactCount = cascadeSummary.contact_pending || 0;
   const udstCount = cascadeSummary.udst_pending || 0;
 
-  const filteredAlerts = cascadeAlerts.filter(a => {
+  const filteredAlerts = activeSourceAlerts.filter(a => {
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       const matchId = String(a.id || '').toLowerCase().includes(q);
+      const matchName = String(a.patient_name || '').toLowerCase().includes(q);
       const matchDate = String(a.notified_date || '').toLowerCase().includes(q);
-      if (!matchId && !matchDate) return false;
+      if (!matchId && !matchName && !matchDate) return false;
     }
+    if (cohortFilter) return true;
     if (selectedFilter === 'ALL') return true;
     if (selectedFilter === 'HIV') return !a.has_hiv;
     if (selectedFilter === 'DIFF_TB') return !a.has_diff_tb;
@@ -194,14 +232,15 @@ const PendingInterventionsActionCenter = ({
     const workingPlace = formData?.working_place || '';
     let msg = `*DFY TB MIS: Pending Follow-up Action List*\n`;
     if (foName) msg += `Field Officer: *${foName}* (${workingPlace})\n`;
-    msg += `Total Pending Patients: *${cascadeAlerts.length}*\n`;
+    if (cohortFilter) msg += `Cohort Filter: *${cohortFilter.month} - ${cohortFilter.label}*\n`;
+    msg += `Total Pending Patients: *${activeSourceAlerts.length}*\n`;
     msg += `Date: ${new Date().toLocaleDateString('en-IN')}\n\n`;
 
-    cascadeAlerts.forEach((a, idx) => {
+    activeSourceAlerts.forEach((a, idx) => {
       msg += `${idx + 1}. Patient: *${a.patient_name || 'Patient'}* (ID: *${a.id}*)\n`;
       if (a.phone) msg += `   📞 Phone: *${a.phone}*\n`;
       msg += `   Notified: ${a.notified_date || 'N/A'} (${a.days_elapsed}d ago)\n`;
-      msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : 'Follow-up'}\n\n`;
+      msg += `   Pending: ${a.missing_actions ? a.missing_actions.join(', ') : (cohortFilter?.label || 'Follow-up')}\n\n`;
     });
     msg += `_Kripya in sabhi patients ka priority follow-up karein!_\n\n_Generated on DFY MIS by Saurav Kumar_`;
 
@@ -222,13 +261,15 @@ const PendingInterventionsActionCenter = ({
           <span className="text-xl">⚡</span>
           <div>
             <h3 className="text-xs sm:text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-1.5">
-              <span>Pending Interventions</span>
+              <span>{cohortFilter ? `${cohortFilter.label} Pending` : 'Pending Interventions'}</span>
               <span className="bg-rose-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs">
-                {cascadeAlerts.length}
+                {activeSourceAlerts.length}
               </span>
             </h3>
             <p className="text-[10px] text-slate-500 font-bold">
-              In notified patients ke follow-up actions baaki hain
+              {cohortFilter
+                ? `Cohort Month ${cohortFilter.month} me ${cohortFilter.label} pending patients`
+                : 'In notified patients ke follow-up actions baaki hain'}
             </p>
           </div>
         </div>
@@ -243,7 +284,24 @@ const PendingInterventionsActionCenter = ({
         </button>
       </div>
 
-      {/* Quick Category Summary Filter Pills */}
+      {/* Cohort Filter Active Banner OR Quick Category Summary Filter Pills */}
+      {cohortFilter ? (
+        <div className="mb-3.5 flex items-center justify-between gap-2 bg-indigo-900 text-white px-3 py-2 rounded-2xl border border-indigo-700 shadow-xs text-xs">
+          <span className="font-bold flex items-center gap-1.5 truncate">
+            <span>🎯</span>
+            <span className="truncate">Filtered: {cohortFilter.month} &bull; {cohortFilter.label}</span>
+          </span>
+          {onClearCohortFilter && (
+            <button
+              type="button"
+              onClick={onClearCohortFilter}
+              className="bg-white/15 hover:bg-white/25 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shrink-0 transition-all cursor-pointer"
+            >
+              ✕ Show All
+            </button>
+          )}
+        </div>
+      ) : (
       <div className="flex flex-wrap gap-1.5 mb-3.5">
         <button
           type="button"
@@ -327,9 +385,10 @@ const PendingInterventionsActionCenter = ({
           </button>
         )}
       </div>
+      )}
 
       {/* Live Search Bar for Full View */}
-      {fullView && cascadeAlerts.length > 2 && (
+      {fullView && activeSourceAlerts.length > 2 && (
         <div className="relative mb-3.5">
           <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400 text-xs">🔍</span>
           <input
@@ -5481,6 +5540,12 @@ function App() {
   const [cascadeSummary, setCascadeSummary] = useState({});
   const [loadingCascadeAlerts, setLoadingCascadeAlerts] = useState(false);
 
+  // Field Staff 3-Month 75% Cohort Compliance Cache & Filter State
+  const [cohortCache, setCohortCache] = useState(null);
+  const [isSyncingCohort, setIsSyncingCohort] = useState(false);
+  const [cohortFilter, setCohortFilter] = useState(null);
+  const isSyncingCohortRef = useRef(false);
+
   // Field Staff Monthly Ledger for Duplicate Warning
   const [foMonthlyHistory, setFoMonthlyHistory] = useState(null);
 
@@ -5650,6 +5715,105 @@ function App() {
     }
   };
 
+  const syncFoCohortCompliance = useCallback(async (district, fo_name, pin, force = false) => {
+    const cleanDist = district || workingPlaceRef.current || formData.working_place;
+    const cleanFo = fo_name || formData.fo_name;
+    const cleanPin = pin || formData.pin;
+    if (!cleanDist || !cleanFo) return;
+
+    // 1. Instant 0ms hydration from phone storage (IndexedDB / localStorage)
+    let cached = null;
+    try {
+      cached = await getFoCohortCache(cleanDist, cleanFo);
+      if (cached) {
+        setCohortCache(cached);
+      }
+    } catch (e) {
+      console.warn("Cohort phone hydration notice:", e);
+    }
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+    // 2. 2-hour freshness guard (unless user explicitly tapped manual Delta Sync)
+    if (!force && cached?.server_synced_at) {
+      const syncedMs = Date.parse(cached.server_synced_at);
+      if (!Number.isNaN(syncedMs) && (Date.now() - syncedMs < 2 * 60 * 60 * 1000)) {
+        return;
+      }
+    }
+
+    if (isSyncingCohortRef.current) return;
+    isSyncingCohortRef.current = true;
+    setIsSyncingCohort(true);
+
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const params = new URLSearchParams({
+        district: cleanDist,
+        fo_name: cleanFo,
+        months: '3',
+        ...(cleanPin ? { pin: String(cleanPin) } : {})
+      });
+      if (cached?.server_synced_at && Array.isArray(cached?.months) && cached.months.length > 0) {
+        params.set('since', cached.server_synced_at);
+        params.set('known_months', cached.months.join(','));
+        if (typeof cached.server_kpi_count === 'number') {
+          params.set('known_kpi_count', String(cached.server_kpi_count));
+        }
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/fo/cohort-compliance-sync?${params.toString()}`, {
+        headers: cleanPin ? { Authorization: `Bearer ${cleanPin}` } : {}
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.success) {
+          const merged = mergeServerCohortSync(cached, json, cleanDist, cleanFo);
+          setCohortCache(merged);
+          await saveFoCohortCache(cleanDist, cleanFo, merged);
+          if (force) {
+            const msg = json.mode === 'NO_CHANGE'
+              ? "✓ Phone data already up-to-date!"
+              : json.mode === 'DELTA'
+                ? `✓ +${json.updated_patients?.length || 0} delta update synced!`
+                : "✓ 3-Month cohort data synced!";
+            showToast(msg, "success");
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Cohort compliance delta sync notice:", err);
+    } finally {
+      isSyncingCohortRef.current = false;
+      setIsSyncingCohort(false);
+    }
+  }, [formData.working_place, formData.fo_name, formData.pin, showToast]);
+
+  const applyCohortPlusOneLocal = useCallback(async (submittedPayload) => {
+    if (!formData.working_place || !formData.fo_name || !submittedPayload) return;
+    try {
+      const existing = cohortCache || (await getFoCohortCache(formData.working_place, formData.fo_name));
+      const activeOp = getOperationalMonth().operationalMonth;
+      const nextDoc = applyOptimisticCohortPlusOne(existing, submittedPayload, activeOp, formData.working_place, formData.fo_name);
+      if (nextDoc) {
+        setCohortCache(nextDoc);
+        await saveFoCohortCache(formData.working_place, formData.fo_name, nextDoc);
+      }
+    } catch (e) {
+      console.warn("Local +1 cohort update notice:", e);
+    }
+  }, [cohortCache, formData.working_place, formData.fo_name]);
+
+  const resolvedCohortFilter = useMemo(() => {
+    if (!cohortFilter || !cohortCache?.months_data?.[cohortFilter.month]) return null;
+    const stats = computeMonthCohortStats(cohortCache.months_data[cohortFilter.month].patients || {});
+    const pendingPatients = stats.indicators[cohortFilter.indicatorKey]?.pendingPatients || [];
+    return {
+      ...cohortFilter,
+      pendingPatients
+    };
+  }, [cohortFilter, cohortCache]);
+
   const fetchAndStoreDistrictRegistry = useCallback(async (district, force = false) => {
     const targetDist = district || workingPlaceRef.current || formData.working_place;
     if (!targetDist) return;
@@ -5687,6 +5851,7 @@ function App() {
       if (formData.fo_name) {
         fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
         fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
+        syncFoCohortCompliance(formData.working_place, formData.fo_name, formData.pin, false);
       }
     }
   }, [isLoggedIn, formData.working_place, formData.fo_name, fetchAndStoreDistrictRegistry]);
@@ -6097,6 +6262,8 @@ function App() {
     } catch (e) {}
     setIsLoggedIn(false);
     setTodaySubmittedReport(null);
+    setCohortCache(null);
+    setCohortFilter(null);
     setFormData({
       working_place: "", fo_name: "", pin: "",
       notification_ids: [], hiv_dm_ids: [], dbt_ids: [], 
@@ -6661,6 +6828,7 @@ function App() {
           localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`);
         } catch (e) {}
         await updateOfflineCount();
+        await applyCohortPlusOneLocal(payload);
 
         // Reset form inputs to blank for fresh additions
         setFormData(prev => ({
@@ -6757,6 +6925,7 @@ function App() {
         fetchFoMonthlyHistory(formData.working_place, formData.fo_name, formData.pin);
         fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
         fetchAndStoreDistrictRegistry(formData.working_place);
+        await applyCohortPlusOneLocal(payload);
       } else {
         const result = await response.json();
         showToast(result.detail || "Error in saving data.", "error");
@@ -6768,6 +6937,7 @@ function App() {
         setShowReviewModal(false);
         try { localStorage.removeItem(`dfy_draft_${formData.working_place}_${formData.fo_name}`); } catch (e) {}
         await updateOfflineCount();
+        await applyCohortPlusOneLocal(payload);
 
         setSubmittedReportSummary({
           text: summaryText,
@@ -7086,22 +7256,45 @@ function App() {
                 <div>
                   <h2 className="text-base sm:text-lg font-black text-slate-800 flex items-center gap-2">
                     <span>⚡</span>
-                    <span>Pending Interventions</span>
+                    <span>Pending Interventions &amp; 75% Tracker</span>
                   </h2>
                   <p className="text-xs text-slate-500 font-medium">
-                    Priority follow-up actions for your notified TB patients
+                    3-Month 75% compliance &amp; priority follow-up actions
                   </p>
                 </div>
                 <button
                   type="button"
-                  onClick={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
-                  disabled={loadingCascadeAlerts}
-                  className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+                  onClick={() => {
+                    fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+                    syncFoCohortCompliance(formData.working_place, formData.fo_name, formData.pin, true);
+                  }}
+                  disabled={loadingCascadeAlerts || isSyncingCohort}
+                  className="px-3 py-1.5 bg-white hover:bg-slate-50 disabled:opacity-60 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-2xs flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
                 >
-                  <span className={loadingCascadeAlerts ? "animate-spin" : ""}>🔄</span>
+                  <span className={(loadingCascadeAlerts || isSyncingCohort) ? "animate-spin" : ""}>🔄</span>
                   <span>Sync</span>
                 </button>
               </div>
+
+              <CohortCompliance3MCard
+                cohortCache={cohortCache}
+                syncing={isSyncingCohort}
+                onSync={() => syncFoCohortCompliance(formData.working_place, formData.fo_name, formData.pin, true)}
+                activeFilter={resolvedCohortFilter}
+                onSelectIndicator={(selection) => {
+                  setCohortFilter((prev) => {
+                    if (prev && prev.month === selection.month && prev.indicatorKey === selection.indicatorKey) {
+                      return null;
+                    }
+                    return {
+                      month: selection.month,
+                      indicatorKey: selection.indicatorKey,
+                      label: selection.label,
+                      fieldKey: selection.fieldKey
+                    };
+                  });
+                }}
+              />
 
               <PendingInterventionsActionCenter 
                 cascadeAlerts={cascadeAlerts}
@@ -7110,8 +7303,13 @@ function App() {
                 formData={formData}
                 onAutofill={handleAutofillPendingId}
                 showToast={showToast}
-                onRefresh={() => fetchFoCascadeAlerts(formData.working_place, formData.fo_name)}
+                onRefresh={() => {
+                  fetchFoCascadeAlerts(formData.working_place, formData.fo_name);
+                  syncFoCohortCompliance(formData.working_place, formData.fo_name, formData.pin, true);
+                }}
                 fullView={true}
+                cohortFilter={resolvedCohortFilter}
+                onClearCohortFilter={() => setCohortFilter(null)}
               />
             </div>
           ) : currentView === 'profile' ? (
