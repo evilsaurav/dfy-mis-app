@@ -54,11 +54,11 @@ export default function ReportsStudioModal({
   if (!showReportsStudio) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-4xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
+          <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-6xl shadow-2xl border border-slate-100 h-[94vh] max-h-[94vh] flex flex-col overflow-hidden animate-fade-in">
             
             {/* Modal Header */}
-            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+            <div className="shrink-0 flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
               <div>
                 <h3 className="text-xl font-black text-slate-800 flex items-center gap-2">
                   <span>📊</span> DFY Executive Reports &amp; Export Studio
@@ -69,7 +69,7 @@ export default function ReportsStudioModal({
             </div>
 
             {/* Studio Navigation Tabs */}
-            <div className="flex flex-wrap gap-2 pb-4 border-b border-slate-100">
+            <div className="shrink-0 flex flex-wrap gap-1.5 sm:gap-2 pb-3 border-b border-slate-100">
               {[
                 { id: "kpi_workbooks", label: "📁 District KPI Excel", icon: "📁" },
                 { id: "medicine_consumption", label: "💊 Medicine Consumption", icon: "💊" },
@@ -90,7 +90,7 @@ export default function ReportsStudioModal({
             </div>
 
             {/* Studio Content Area */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar my-4 pr-1">
+            <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar my-3 pr-1">
               
               {/* Tab 1: District KPI Workbooks */}
               {reportsStudioTab === "kpi_workbooks" && (
@@ -138,7 +138,7 @@ export default function ReportsStudioModal({
                     </div>
 
                     {/* District Chips */}
-                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                    <div className="flex flex-wrap gap-1.5 max-h-64 overflow-y-auto custom-scrollbar p-1">
                       {availableKpiDistricts.map(dist => {
                         const isSelected = selectedKpiDistricts.includes(dist);
                         return (
@@ -506,7 +506,7 @@ export default function ReportsStudioModal({
                       </div>
 
                       {/* District Chips */}
-                      <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                      <div className="flex flex-wrap gap-1.5 max-h-64 overflow-y-auto custom-scrollbar p-1">
                         {availableKpiDistricts.map(dist => {
                           const isSelected = selectedMedDistricts.includes(dist);
                           return (
@@ -787,7 +787,7 @@ export default function ReportsStudioModal({
                     </div>
 
                     {/* District Chips */}
-                    <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                    <div className="flex flex-wrap gap-1.5 max-h-64 overflow-y-auto custom-scrollbar p-1">
                       {availableAttendanceDistricts.map(dist => {
                         const isSelected = selectedAttendanceDistricts.includes(dist);
                         return (
@@ -988,18 +988,18 @@ export default function ReportsStudioModal({
 
             {/* Travel Allowance Payroll Launch Tile */}
             {TA_FEATURE_ENABLED && (
-              <div className="pt-3 border-t border-slate-100">
-                <p className="text-xs font-black text-slate-500 uppercase tracking-wider mb-3">Payroll</p>
+              <div className="shrink-0 pt-2 border-t border-slate-100">
+                <p className="sr-only">Payroll</p>
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
                     onClick={() => { setShowReportsStudio(false); onOpenTravelAllowance?.(); }}
-                    className="flex flex-col items-start gap-2 p-4 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left"
+                    className="inline-flex items-center gap-2.5 px-3.5 py-2 rounded-xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all text-left cursor-pointer"
                   >
-                    <span className="text-2xl">🚗</span>
+                    <span className="text-lg">🚗</span>
                     <div>
                       <p className="font-bold text-slate-800 text-sm">Travel Allowance</p>
-                      <p className="text-slate-500 text-xs">Monthly bike log, per-staff approval &amp; payroll export</p>
+                      <p className="text-slate-500 text-[11px]">Bike log &amp; payroll export</p>
                     </div>
                   </button>
                 </div>
@@ -1007,7 +1007,7 @@ export default function ReportsStudioModal({
             )}
 
             {/* Modal Footer */}
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
+            <div className="shrink-0 pt-2.5 border-t border-slate-100 flex justify-end">
               <button onClick={() => setShowReportsStudio(false)} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all">Close Studio</button>
             </div>
 

@@ -157,11 +157,11 @@ export default function FoInspectorModal({
         };
 
         return (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-3xl shadow-2xl border border-slate-100 max-h-[88vh] flex flex-col animate-fade-in">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-2 sm:p-4">
+            <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-6 w-full max-w-5xl shadow-2xl border border-slate-100 h-[94vh] max-h-[94vh] flex flex-col overflow-hidden animate-fade-in">
               
               {/* Modal Header */}
-              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-4 border-b border-slate-100">
+              <div className="shrink-0 flex flex-col sm:flex-row justify-between sm:items-center gap-3 pb-3 border-b border-slate-100">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center font-black text-xl shrink-0">
                     {inspectingFO.fo_name.charAt(0)}
@@ -181,7 +181,7 @@ export default function FoInspectorModal({
               </div>
 
               {/* Search Bar */}
-              <div className="py-3 flex items-center gap-2">
+              <div className="shrink-0 py-2.5 flex flex-wrap items-center gap-2">
                 <div className="relative flex-1">
                   <input
                     type="text"
@@ -219,7 +219,7 @@ export default function FoInspectorModal({
               </div>
 
               {/* Dates & Submitted IDs Accordion */}
-              <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1 my-2">
+              <div className="min-h-0 flex-1 overflow-y-auto space-y-4 custom-scrollbar pr-1 my-2">
                 {/* 3-Month 75% Indicator Cohort Compliance (FO Phone Parity View) */}
                 {(loadingCohort || foCohortData) && (
                   <div>
@@ -407,7 +407,7 @@ export default function FoInspectorModal({
               </div>
 
               {/* Modal Footer */}
-              <div className="pt-3 border-t border-slate-100 flex justify-end">
+              <div className="shrink-0 pt-3 border-t border-slate-100 flex justify-end">
                 <button onClick={() => { onClose(); }} className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs py-2.5 px-6 rounded-xl transition-all">Close</button>
               </div>
 
