@@ -34,7 +34,8 @@ export default function CohortCompliance3MCard({
   syncing = false,
   onSync,
   activeFilter = null,
-  onSelectIndicator
+  onSelectIndicator,
+  storageSubtitle = null
 }) {
   // Base states first (TDZ safe)
   const monthsList = useMemo(() => {
@@ -86,7 +87,7 @@ export default function CohortCompliance3MCard({
           </h3>
           <p className="text-[10px] text-slate-300 font-medium mt-0.5 flex items-center gap-1.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            <span>Phone Saved ({lastSyncText}) &bull; DFY + Nikshay Combined</span>
+            <span>{storageSubtitle || `Phone Saved (${lastSyncText}) • DFY + Nikshay Combined`}</span>
           </p>
         </div>
 

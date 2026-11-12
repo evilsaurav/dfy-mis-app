@@ -328,6 +328,7 @@ def evict_officer_profile_cache(district: str, fo_name: str, date_str: str = "",
         clean_dist = canonicalize_district(district).lower().replace(" ", "_")
         clean_fo = str(fo_name or "").strip().lower().replace(" ", "_")
         cache.delete(f"profile_{clean_dist}_{clean_fo}_{month}")
+        cache.delete_prefix("admin_cohort_3m_")
         if old_district:
             cache.delete(get_profile_cache_key(old_district, fo_name, month))
             clean_old = canonicalize_district(old_district).lower().replace(" ", "_")

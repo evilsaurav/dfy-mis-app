@@ -412,6 +412,7 @@ export default function AdminModals(props) {
       <FoInspectorModal
         inspectingFO={props.inspectingFO}
         onClose={() => props.setInspectingFO(null)}
+        authFetch={props.authFetch}
         rawRecords={props.rawRecords}
         staffDirectory={props.staffDirectory}
         targetsData={props.targetsData}

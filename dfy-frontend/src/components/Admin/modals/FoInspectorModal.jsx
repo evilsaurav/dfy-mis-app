@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { canonicalizeDistrict, canonicalizeFo, isOfficerNameMatch, parseTargetVal } from '../../../utils/districtHelpers';
+import CohortCompliance3MCard from '../../Fo/CohortCompliance3MCard';
 
 export default function FoInspectorModal({
   inspectingFO,
   onClose,
+  authFetch = null,
   rawRecords = [],
   staffDirectory = {},
   targetsData = [],
@@ -25,6 +28,51 @@ export default function FoInspectorModal({
   setAdminEditModal = () => {}
 }) {
   const [copiedFoCategory, setCopiedFoCategory] = useState(null);
+  const [foCohortState, setFoCohortState] = useState({ key: '', data: null });
+  const [loadingCohort, setLoadingCohort] = useState(false);
+  const [cohortDrillFilter, setCohortDrillFilter] = useState(null);
+
+  const inspectingDistrictResolved = inspectingFO
+    ? ((inspectingFO.district && inspectingFO.district !== 'All')
+        ? inspectingFO.district
+        : (selectedDistrict !== 'All' ? selectedDistrict : ''))
+    : '';
+  const inspectingCohortKey = inspectingFO?.fo_name && inspectingDistrictResolved
+    ? `${inspectingDistrictResolved}__${inspectingFO.fo_name}`
+    : '';
+  const foCohortData = foCohortState.key === inspectingCohortKey ? foCohortState.data : null;
+
+  const fetchFo3mCohort = useCallback(async () => {
+    if (!authFetch || !inspectingFO?.fo_name || !inspectingDistrictResolved) return;
+    const reqKey = `${inspectingDistrictResolved}__${inspectingFO.fo_name}`;
+    setLoadingCohort(true);
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://dfy-mis-app.onrender.com';
+      const params = new URLSearchParams({
+        district: inspectingDistrictResolved,
+        fo_name: inspectingFO.fo_name,
+        months: '3'
+      });
+      const res = await authFetch(`${API_BASE_URL}/api/fo/cohort-compliance-sync?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.success) {
+          setFoCohortState({ key: reqKey, data });
+        }
+      }
+    } catch (err) {
+      if (err?.message?.includes('Session expired')) return;
+      console.warn('FO 3M cohort inspector fetch error:', err);
+    } finally {
+      setLoadingCohort(false);
+    }
+  }, [authFetch, inspectingFO, inspectingDistrictResolved]);
+
+  useEffect(() => {
+    if (inspectingFO?.fo_name && inspectingDistrictResolved) {
+      fetchFo3mCohort();
+    }
+  }, [inspectingFO, inspectingDistrictResolved, fetchFo3mCohort]);
   if (!inspectingFO) return null;
 
         const foRecords = rawRecords.filter(r => {
@@ -172,6 +220,72 @@ export default function FoInspectorModal({
 
               {/* Dates & Submitted IDs Accordion */}
               <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-1 my-2">
+                {/* 3-Month 75% Indicator Cohort Compliance (FO Phone Parity View) */}
+                {(loadingCohort || foCohortData) && (
+                  <div>
+                    <CohortCompliance3MCard
+                      cohortCache={foCohortData}
+                      syncing={loadingCohort}
+                      onSync={fetchFo3mCohort}
+                      storageSubtitle="Live DFY + Nikshay Combined Audit • Same as FO Phone"
+                      activeFilter={cohortDrillFilter}
+                      onSelectIndicator={(sel) => {
+                        setCohortDrillFilter((prev) =>
+                          prev && prev.month === sel.month && prev.indicatorKey === sel.indicatorKey ? null : sel
+                        );
+                      }}
+                    />
+                    {cohortDrillFilter && (
+                      <div className="bg-indigo-50/90 border border-indigo-200 rounded-2xl p-3.5 -mt-2 mb-4 animate-fade-in">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-black text-indigo-950">
+                            Pending for {cohortDrillFilter.month} &bull; {cohortDrillFilter.label} ({(cohortDrillFilter.pendingPatients || []).length})
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {(cohortDrillFilter.pendingPatients || []).length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const idsText = cohortDrillFilter.pendingPatients.map((p) => p.id).join(', ');
+                                  if (navigator.clipboard && idsText) {
+                                    navigator.clipboard.writeText(idsText);
+                                    setCopiedFoCategory('COHORT_PENDING');
+                                    setTimeout(() => setCopiedFoCategory(null), 2000);
+                                  }
+                                }}
+                                className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-2.5 py-1 rounded-lg cursor-pointer"
+                              >
+                                {copiedFoCategory === 'COHORT_PENDING' ? '✓ Copied!' : '📋 Copy IDs'}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setCohortDrillFilter(null)}
+                              className="text-indigo-700 hover:text-indigo-950 text-xs font-black px-1.5 cursor-pointer"
+                            >
+                              ✕ Close
+                            </button>
+                          </div>
+                        </div>
+                        {(cohortDrillFilter.pendingPatients || []).length === 0 ? (
+                          <p className="text-[11px] font-bold text-emerald-700">✓ No pending patients in this cohort indicator.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                            {cohortDrillFilter.pendingPatients.map((pt) => (
+                              <div key={pt.id} className="bg-white border border-indigo-100 rounded-xl px-2.5 py-1.5 text-[11px] flex items-center justify-between gap-2">
+                                <span className="truncate font-bold text-slate-800">
+                                  <span className="font-mono text-indigo-700">{pt.id}</span>
+                                  {pt.name ? ` — ${pt.name}` : ''}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-bold shrink-0">{pt.phone || pt.date || ''}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {filteredDays.length > 0 ? (
                   filteredDays.map((rec, rIdx) => {
                     const dayIdsCount = categoriesConfig.reduce((sum, c) => sum + (rec[c.key] || []).length, 0);

@@ -225,3 +225,80 @@ def test_cohort_sync_deletion_and_rollover_fall_back_to_full():
         )
         assert res_roll.status_code == 200
         assert res_roll.json()["mode"] == "FULL"
+
+
+def test_admin_cohort_compliance_3m_super_admin_and_sub_admin_rbac():
+    """Verify Super Admin receives all districts while Sub-Admin is strictly scoped to allowed_districts."""
+    from backend.core.security import get_current_admin
+
+    fixed_now = datetime(2026, 11, 12, 14, 0, tzinfo=IST)
+    rep_rows = [
+        {"id": 201, "working_place": "Buxar", "fo_name": "Santosh Kumar", "date_of_reporting": "2026-10-10"},
+        {"id": 202, "working_place": "Patna", "fo_name": "Amit Singh", "date_of_reporting": "2026-10-12"},
+        {"id": 203, "working_place": "Buxar", "fo_name": "Santosh Kumar", "date_of_reporting": "2026-11-05"},
+    ]
+    kpi_rows = [
+        {"report_id": 201, "category": "notification_ids", "patient_id": "200001"},
+        {"report_id": 201, "category": "notification_ids", "patient_id": "200002"},
+        {"report_id": 201, "category": "hiv_dm_ids", "patient_id": "200001"},
+        # Cross-month UDST completed in Nov for Oct patient 200001
+        {"report_id": 203, "category": "sample_tested_ids", "patient_id": "200001"},
+        # Patna patient
+        {"report_id": 202, "category": "notification_ids", "patient_id": "300001"},
+    ]
+    nik_rows = [
+        {
+            "patient_id": "200001",
+            "patient_name": "Sunil Das",
+            "phone": "9988776655",
+            "hiv_tested": False,
+            "dm_tested": False,
+            "bank_validated": True,
+            "udst_done": False,
+            "contact_tracing_done": False,
+        }
+    ]
+
+    # 1. Unauthenticated Admin call -> 401/403
+    unauth = client.get("/api/admin/cohort-compliance-3m")
+    assert unauth.status_code in (401, 403)
+
+    # 2. Super Admin -> sees BOTH Buxar & Patna
+    main.app.dependency_overrides[get_current_admin] = lambda: {"role": "SUPER_ADMIN", "username": "root"}
+    with patch.object(reports_router, "get_ist_now", return_value=fixed_now), \
+         patch.object(reports_router, "pg_execute_raw", side_effect=_make_pg_mock(rep_rows, kpi_rows, nik_rows)):
+        res_super = client.get("/api/admin/cohort-compliance-3m?months=3&force_refresh=true")
+        assert res_super.status_code == 200
+        body = res_super.json()
+        assert body["success"] is True
+        dist_names = [d["district"] for d in body["districts"]]
+        assert "Buxar" in dist_names
+        assert "Patna" in dist_names
+
+        buxar_fo = next(o for o in body["officers"] if o["district"] == "Buxar")
+        oct_stats = buxar_fo["months"]["2026-10"]
+        assert oct_stats["total_notified"] == 2
+        assert oct_stats["target_75"] == 2
+        assert oct_stats["indicators"]["hiv"]["done"] == 1
+        assert oct_stats["indicators"]["udst"]["done"] == 1  # Nov cross-month
+        assert oct_stats["indicators"]["dbt"]["done"] == 1   # Nikshay verified
+        assert oct_stats["pending_by_indicator"]["ct"][0]["id"] == "200001"
+        assert oct_stats["pending_by_indicator"]["ct"][0]["name"] == "Sunil Das"
+
+    # 3. Sub-Admin restricted to Buxar only -> Patna filtered out + 403 on Patna param
+    main.app.dependency_overrides[get_current_admin] = lambda: {
+        "role": "SUB_ADMIN",
+        "username": "buxar_coord",
+        "allowed_districts": ["Buxar"],
+    }
+    with patch.object(reports_router, "get_ist_now", return_value=fixed_now), \
+         patch.object(reports_router, "pg_execute_raw", side_effect=_make_pg_mock(rep_rows, kpi_rows, nik_rows)):
+        res_sub = client.get("/api/admin/cohort-compliance-3m?months=3&force_refresh=true")
+        assert res_sub.status_code == 200
+        sub_body = res_sub.json()
+        assert [d["district"] for d in sub_body["districts"]] == ["Buxar"]
+        assert all(o["district"] == "Buxar" for o in sub_body["officers"])
+
+        res_cross = client.get("/api/admin/cohort-compliance-3m?district=Patna")
+        assert res_cross.status_code == 403
+

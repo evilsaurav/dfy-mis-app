@@ -454,6 +454,7 @@ def sync_nikshay_cumulative_ledger_sync(
     if total_written > 0:
         cache.delete_prefix("ledger_")
         cache.delete_prefix("journey_")
+        cache.delete_prefix("admin_cohort_3m_")
 
     total_unchanged = max(0, total_processed - total_written)
     return {"total_processed": total_processed, "written": total_written, "unchanged": total_unchanged}
@@ -1077,6 +1078,7 @@ async def reconcile_nikshay(
             cache.delete("nikshay_sync_meta_light")
             cache.delete_prefix("ledger_")
             cache.delete_prefix("journey_")
+            cache.delete_prefix("admin_cohort_3m_")
 
             sync_meta_doc = {
                 "synced_at": now_utc.isoformat(),
@@ -2133,6 +2135,7 @@ async def purge_old_nikshay_records(
                 cache.delete_prefix("ledger_")
                 cache.delete_prefix("journey_")
                 cache.delete("nikshay_cumulative_ledger_summary")
+                cache.delete_prefix("admin_cohort_3m_")
 
             await log_admin_activity(
                 action_type=f"NIKSHAY_PURGE_{retention_months}M_PARTIAL_FAILURE",
@@ -2169,6 +2172,7 @@ async def purge_old_nikshay_records(
         cache.delete_prefix("ledger_")
         cache.delete_prefix("journey_")
         cache.delete("nikshay_cumulative_ledger_summary")
+        cache.delete_prefix("admin_cohort_3m_")
 
         await log_admin_activity(
             action_type=f"NIKSHAY_PURGE_{retention_months}M",

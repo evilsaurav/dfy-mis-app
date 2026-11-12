@@ -3057,6 +3057,446 @@ async def get_fo_cohort_compliance_sync(
         raise HTTPException(status_code=500, detail="Failed to sync 3-month cohort compliance.")
 
 
+def _summarize_patient_cohort_bucket(patients_dict: Dict[str, Dict[str, Any]], include_pending: bool = True) -> Dict[str, Any]:
+    """Computes exact 75% cohort compliance metrics for a dict of notified patients."""
+    total_notified = len(patients_dict)
+    target_75 = math.ceil(total_notified * 0.75) if total_notified > 0 else 0
+
+    counts = {"hiv": 0, "udst": 0, "dbt": 0, "ct": 0}
+    pending_by_ind: Dict[str, List[Dict[str, Any]]] = {"hiv": [], "udst": [], "dbt": [], "ct": []}
+
+    for pid, pt in patients_dict.items():
+        for fk in ("hiv", "udst", "dbt", "ct"):
+            if pt.get(fk):
+                counts[fk] += 1
+            elif include_pending:
+                pending_by_ind[fk].append({
+                    "id": pid,
+                    "name": pt.get("name", ""),
+                    "phone": pt.get("phone", ""),
+                    "date": pt.get("date", ""),
+                })
+
+    indicators: Dict[str, Dict[str, Any]] = {}
+    achieved_count = 0
+    for fk in ("hiv", "udst", "dbt", "ct"):
+        done = counts[fk]
+        pct = round((done / total_notified) * 100) if total_notified > 0 else 0
+        achieved = total_notified > 0 and pct >= 75
+        needed = max(0, target_75 - done) if total_notified > 0 else 0
+        if achieved:
+            achieved_count += 1
+        indicators[fk] = {
+            "done": done,
+            "total": total_notified,
+            "pct": pct,
+            "target_75": target_75,
+            "needed_for_75": needed,
+            "achieved": achieved,
+        }
+
+    out: Dict[str, Any] = {
+        "total_notified": total_notified,
+        "target_75": target_75,
+        "achieved_count": achieved_count,
+        "indicators": indicators,
+    }
+    if include_pending:
+        for fk in ("hiv", "udst", "dbt", "ct"):
+            pending_by_ind[fk].sort(key=lambda r: (r.get("date") or "", r.get("id") or ""))
+        out["pending_by_indicator"] = pending_by_ind
+    return out
+
+
+def compute_admin_3m_cohort_summary(
+    district: Optional[str] = None,
+    allowed_districts: Optional[List[str]] = None,
+    months: int = 3,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
+    """
+    Aggregates 3-month rolling 75% cohort compliance (DFY MIS OR Nikshay Portal combined)
+    across districts and individual Field Officers for the Admin Dashboard.
+    Enforces strict district scoping when `allowed_districts` is provided (Sub-Admin RBAC).
+    """
+    allowed_canon: Optional[List[str]] = None
+    if allowed_districts is not None:
+        cleaned_allowed = [canonicalize_district(d) for d in allowed_districts if d and str(d).strip().lower() != "all"]
+        allowed_canon = sorted(set(cleaned_allowed))
+
+    clean_req_dist: Optional[str] = None
+    if district and str(district).strip() and str(district).strip().lower() != "all":
+        clean_req_dist = canonicalize_district(district)
+        if allowed_canon is not None and clean_req_dist not in allowed_canon:
+            raise HTTPException(status_code=403, detail="Cross-district access denied for Sub-Admin.")
+
+    now_ist = get_ist_now()
+    cur_op_month = get_active_operational_month(now_ist)
+    target_months: List[str] = [cur_op_month]
+    m_cursor = cur_op_month
+    for _ in range(max(0, months - 1)):
+        m_cursor = get_previous_month(m_cursor)
+        target_months.append(m_cursor)
+    target_months_set = set(target_months)
+
+    scope_tag = clean_req_dist or ("sub_" + "_".join(allowed_canon) if allowed_canon else "all")
+    cache_key = f"admin_cohort_3m_{scope_tag}_{cur_op_month}_{months}".lower().replace(" ", "_")
+    if not force_refresh:
+        cached = cache.get(cache_key)
+        if cached:
+            return cached
+
+    oldest_start, _ = get_month_date_range(target_months[-1])
+    _, cur_end = get_month_date_range(target_months[0])
+    latest_end = max(cur_end, now_ist.date().strftime("%Y-%m-%d"))
+
+    scoped_dist_list: Optional[List[str]] = None
+    if clean_req_dist:
+        scoped_dist_list = [clean_req_dist.lower(), clean_req_dist]
+    elif allowed_canon is not None:
+        if not allowed_canon:
+            empty_summary = {m: _summarize_patient_cohort_bucket({}, include_pending=False) for m in target_months}
+            return {
+                "success": True,
+                "months": target_months,
+                "summary_by_month": empty_summary,
+                "districts": [],
+                "officers": [],
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        scoped_dist_list = list({d.lower() for d in allowed_canon} | set(allowed_canon))
+
+    tracked_categories = [
+        "notification_ids",
+        "hiv_dm_ids",
+        "sample_tested_ids",
+        "dbt_ids",
+        "contact_tracing_ids",
+    ]
+    cat_to_flag = {
+        "notification_ids": "notification",
+        "notifications": "notification",
+        "hiv_dm_ids": "hiv",
+        "hiv_dm": "hiv",
+        "sample_tested_ids": "udst",
+        "tests": "udst",
+        "dbt_ids": "dbt",
+        "dbt": "dbt",
+        "contact_tracing_ids": "ct",
+        "contact_tracing": "ct",
+    }
+
+    # 1. Batch fetch daily_field_reports inside 3-month window
+    rep_rows: List[Dict[str, Any]] = []
+    try:
+        if scoped_dist_list:
+            rep_sql = """
+                SELECT id, working_place, fo_name, date_of_reporting
+                FROM daily_field_reports
+                WHERE LOWER(TRIM(working_place)) = ANY(%s)
+                  AND date_of_reporting >= %s::date
+                  AND date_of_reporting <= %s::date
+                ORDER BY date_of_reporting ASC
+            """
+            rep_rows = pg_execute_raw(rep_sql, [scoped_dist_list, oldest_start, latest_end], fetch=True) or []
+        else:
+            rep_sql = """
+                SELECT id, working_place, fo_name, date_of_reporting
+                FROM daily_field_reports
+                WHERE date_of_reporting >= %s::date
+                  AND date_of_reporting <= %s::date
+                ORDER BY date_of_reporting ASC
+            """
+            rep_rows = pg_execute_raw(rep_sql, [oldest_start, latest_end], fetch=True) or []
+    except Exception as e:
+        logger.debug(f"[admin-cohort-3m] PG report fetch notice: {e}")
+        rep_rows = []
+
+    report_meta: Dict[Any, Tuple[str, str, str, str]] = {}  # rid -> (canon_dist, display_fo, canon_fo, date_str)
+    for r in rep_rows:
+        rid = r.get("id")
+        if rid is None:
+            continue
+        r_dist = canonicalize_district(r.get("working_place") or "")
+        if not r_dist:
+            continue
+        if clean_req_dist and r_dist != clean_req_dist:
+            continue
+        if allowed_canon is not None and r_dist not in allowed_canon:
+            continue
+        raw_name = str(r.get("fo_name") or "").strip()
+        if not raw_name:
+            continue
+        c_fo = canonicalize_fo_name(raw_name, r_dist) or re.sub(r'[^a-z0-9]', '', raw_name.lower())
+        r_date = str(r.get("date_of_reporting") or "")[:10]
+        report_meta[rid] = (r_dist, raw_name, c_fo, r_date)
+
+    # 2. Batch fetch child KPI entries for scoped reports
+    kpi_rows: List[Dict[str, Any]] = []
+    if report_meta:
+        try:
+            kpi_rows = pg_execute_raw(
+                """
+                SELECT report_id, category::text AS category, patient_id
+                FROM report_kpi_entries
+                WHERE report_id = ANY(%s) AND category::text = ANY(%s)
+                """,
+                [list(report_meta.keys()), tracked_categories],
+                fetch=True,
+            ) or []
+        except Exception as kpi_err:
+            logger.debug(f"[admin-cohort-3m] KPI entries fetch notice: {kpi_err}")
+
+    # Fallback to mock active_db if PG returned empty (unit tests / local mock store)
+    if not rep_rows and not kpi_rows:
+        active_db = get_active_db()
+        if active_db and hasattr(active_db, "collection"):
+            try:
+                docs = active_db.collection("daily_field_reports").stream()
+                for doc in docs:
+                    d = doc.to_dict() if hasattr(doc, "to_dict") else (doc if isinstance(doc, dict) else {})
+                    r_dist = canonicalize_district(d.get("working_place", ""))
+                    if clean_req_dist and r_dist != clean_req_dist:
+                        continue
+                    if allowed_canon is not None and r_dist not in allowed_canon:
+                        continue
+                    r_date = str(d.get("date_of_reporting") or "")[:10]
+                    if not r_date or r_date < oldest_start or r_date > latest_end:
+                        continue
+                    raw_name = str(d.get("fo_name") or "").strip()
+                    if not raw_name:
+                        continue
+                    c_fo = canonicalize_fo_name(raw_name, r_dist) or re.sub(r'[^a-z0-9]', '', raw_name.lower())
+                    rid = d.get("id") or f"{r_date}_{r_dist}_{c_fo}"
+                    report_meta[rid] = (r_dist, raw_name, c_fo, r_date)
+                    for cat_key in tracked_categories:
+                        pids = d.get(cat_key) or []
+                        if isinstance(pids, list):
+                            for pid in pids:
+                                pid_clean = str(pid).strip().split(".")[0]
+                                if len(pid_clean) >= 5:
+                                    kpi_rows.append({"report_id": rid, "category": cat_key, "patient_id": pid_clean})
+            except Exception as mock_err:
+                logger.debug(f"[admin-cohort-3m] mock fallback notice: {mock_err}")
+
+    # Group per-FO: (canon_dist, canon_fo) -> {"display_name": str, "patients": {pid: {...}}}
+    fo_buckets: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    pid_to_fo_keys: Dict[str, List[Tuple[Tuple[str, str], str]]] = defaultdict(list)
+
+    # Pass 1: Identify Notified Patients across the 3-month window
+    for kr in kpi_rows:
+        if cat_to_flag.get(str(kr.get("category") or "").strip()) != "notification":
+            continue
+        meta = report_meta.get(kr.get("report_id"))
+        if not meta:
+            continue
+        r_dist, raw_name, c_fo, r_date = meta
+        r_month = r_date[:7] if len(r_date) >= 7 else ""
+        if r_month not in target_months_set:
+            continue
+        pid = str(kr.get("patient_id") or "").strip().split(".")[0]
+        if len(pid) < 5:
+            continue
+
+        fo_key = (r_dist, c_fo)
+        if fo_key not in fo_buckets:
+            fo_buckets[fo_key] = {"district": r_dist, "fo_name": raw_name, "patients": {}}
+        elif len(raw_name) > len(fo_buckets[fo_key]["fo_name"]):
+            fo_buckets[fo_key]["fo_name"] = raw_name
+
+        f_patients = fo_buckets[fo_key]["patients"]
+        if pid not in f_patients:
+            f_patients[pid] = {
+                "month": r_month,
+                "date": r_date,
+                "name": "",
+                "phone": "",
+                "hiv": False,
+                "udst": False,
+                "dbt": False,
+                "ct": False,
+            }
+            pid_to_fo_keys[pid].append((fo_key, r_month))
+        elif r_date and (not f_patients[pid]["date"] or r_date < f_patients[pid]["date"]):
+            f_patients[pid]["date"] = r_date
+            f_patients[pid]["month"] = r_month
+
+    # Pass 2: Mark all 4 indicators done from DFY MIS entries (including cross-month follow-ups)
+    for kr in kpi_rows:
+        flag = cat_to_flag.get(str(kr.get("category") or "").strip())
+        if not flag or flag == "notification":
+            continue
+        meta = report_meta.get(kr.get("report_id"))
+        if not meta:
+            continue
+        r_dist, _, c_fo, _ = meta
+        pid = str(kr.get("patient_id") or "").strip().split(".")[0]
+        fo_key = (r_dist, c_fo)
+        bucket = fo_buckets.get(fo_key)
+        if bucket and pid in bucket["patients"]:
+            bucket["patients"][pid][flag] = True
+
+    # Pass 3: Single batch Nikshay Portal enrichment + demographics
+    all_pids = list(pid_to_fo_keys.keys())
+    if all_pids:
+        try:
+            nik_rows = pg_execute_raw(
+                """
+                SELECT patient_id, patient_name, phone,
+                       hiv_tested, dm_tested, bank_validated,
+                       udst_done, contact_tracing_done
+                FROM nikshay_verified_patients
+                WHERE patient_id = ANY(%s)
+                """,
+                [all_pids],
+                fetch=True,
+            ) or []
+            for nr in nik_rows:
+                pid = str(nr.get("patient_id") or "").strip()
+                if pid not in pid_to_fo_keys:
+                    continue
+                for fo_key, _ in pid_to_fo_keys[pid]:
+                    pt = fo_buckets[fo_key]["patients"].get(pid)
+                    if not pt:
+                        continue
+                    if nr.get("patient_name") and not pt["name"]:
+                        pt["name"] = str(nr["patient_name"]).strip()
+                    if nr.get("phone") and not pt["phone"]:
+                        pt["phone"] = str(nr["phone"]).strip()
+                    if nr.get("hiv_tested") or nr.get("dm_tested"):
+                        pt["hiv"] = True
+                    if nr.get("udst_done"):
+                        pt["udst"] = True
+                    if nr.get("bank_validated"):
+                        pt["dbt"] = True
+                    if nr.get("contact_tracing_done"):
+                        pt["ct"] = True
+
+            # Fallback demographics from grace records for remaining blank name/phone
+            missing_demo = [
+                pid for pid in all_pids
+                if any(
+                    not fo_buckets[fk]["patients"][pid].get("name") or not fo_buckets[fk]["patients"][pid].get("phone")
+                    for fk, _ in pid_to_fo_keys[pid]
+                )
+            ]
+            if missing_demo:
+                grace_rows = pg_execute_raw(
+                    "SELECT patient_id, patient_name, phone FROM nikshay_sync_grace_records WHERE patient_id = ANY(%s)",
+                    [missing_demo],
+                    fetch=True,
+                ) or []
+                for gr in grace_rows:
+                    pid = str(gr.get("patient_id") or "").strip()
+                    if pid not in pid_to_fo_keys:
+                        continue
+                    for fo_key, _ in pid_to_fo_keys[pid]:
+                        pt = fo_buckets[fo_key]["patients"].get(pid)
+                        if not pt:
+                            continue
+                        if gr.get("patient_name") and not pt["name"]:
+                            pt["name"] = str(gr["patient_name"]).strip()
+                        if gr.get("phone") and not pt["phone"]:
+                            pt["phone"] = str(gr["phone"]).strip()
+        except Exception as nik_err:
+            logger.debug(f"[admin-cohort-3m] Nikshay batch enrichment notice: {nik_err}")
+
+    # Pass 4: Build Summary (Scope-wide), District Matrix, and FO Rows
+    scope_by_month: Dict[str, Dict[str, Dict[str, Any]]] = {m: {} for m in target_months}
+    dist_by_month: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = defaultdict(lambda: {m: {} for m in target_months})
+    dist_fo_counts: Dict[str, int] = defaultdict(int)
+    officers_out: List[Dict[str, Any]] = []
+
+    for (_, _), info in fo_buckets.items():
+        d_name = info["district"]
+        fo_name = info["fo_name"]
+        dist_fo_counts[d_name] += 1
+        fo_months_summary: Dict[str, Any] = {}
+
+        by_m: Dict[str, Dict[str, Dict[str, Any]]] = {m: {} for m in target_months}
+        for pid, pt in info["patients"].items():
+            m = pt["month"]
+            if m in by_m:
+                by_m[m][pid] = pt
+                # Aggregate into district & scope buckets (unique per FO+PID key to match FO view sums)
+                agg_key = f"{d_name}::{fo_name}::{pid}"
+                dist_by_month[d_name][m][agg_key] = pt
+                scope_by_month[m][agg_key] = pt
+
+        for m in target_months:
+            fo_months_summary[m] = _summarize_patient_cohort_bucket(by_m[m], include_pending=True)
+
+        officers_out.append({
+            "district": d_name,
+            "fo_name": fo_name,
+            "months": fo_months_summary,
+        })
+
+    officers_out.sort(key=lambda o: (o["district"], o["fo_name"]))
+
+    districts_out: List[Dict[str, Any]] = []
+    for d_name in sorted(dist_by_month.keys()):
+        d_months_summary = {
+            m: _summarize_patient_cohort_bucket(dist_by_month[d_name][m], include_pending=False)
+            for m in target_months
+        }
+        districts_out.append({
+            "district": d_name,
+            "fo_count": dist_fo_counts[d_name],
+            "months": d_months_summary,
+        })
+
+    summary_by_month = {
+        m: _summarize_patient_cohort_bucket(scope_by_month[m], include_pending=False)
+        for m in target_months
+    }
+
+    result = {
+        "success": True,
+        "months": target_months,
+        "summary_by_month": summary_by_month,
+        "districts": districts_out,
+        "officers": officers_out,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    cache.set(cache_key, result, ttl=180)
+    return result
+
+
+@router.get("/api/admin/cohort-compliance-3m")
+async def get_admin_cohort_compliance_3m(
+    district: Optional[str] = Query(None, description="Optional district filter ('All' for all permitted districts)"),
+    months: int = Query(3, ge=1, le=6, description="Rolling month window (default 3)"),
+    force_refresh: bool = Query(False, description="Bypass short server TTL cache"),
+    admin: dict = Depends(get_current_admin),
+):
+    """
+    Returns last 3 months of 75% cohort compliance across Districts and Field Officers
+    for Super Admin (all districts) and Sub-Admin (strictly assigned allowed_districts).
+    """
+    role = str(admin.get("role") or "").upper()
+    allowed_districts: Optional[List[str]] = None
+    if role == "SUB_ADMIN":
+        raw_allowed = admin.get("allowed_districts") or admin.get("districts") or []
+        if not any(str(d).strip().lower() == "all" for d in raw_allowed):
+            allowed_districts = list(raw_allowed)
+
+    try:
+        return await asyncio.to_thread(
+            compute_admin_3m_cohort_summary,
+            district=district,
+            allowed_districts=allowed_districts,
+            months=months,
+            force_refresh=force_refresh,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[admin-cohort-3m] Unexpected error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to compute 3-month admin cohort compliance.")
+
+
+
 
 
 

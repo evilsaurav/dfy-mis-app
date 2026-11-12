@@ -27,6 +27,7 @@ import OverviewTab from './components/Admin/tabs/OverviewTab';
 import StaffPacingTab from './components/Admin/tabs/StaffPacingTab';
 import DistrictBenchmarksTab from './components/Admin/tabs/DistrictBenchmarksTab';
 import TravelAllowanceTab from './components/Admin/tabs/TravelAllowanceTab';
+import CohortComplianceTab from './components/Admin/tabs/CohortComplianceTab';
 import AdminLogin from './components/Admin/AdminLogin';
 import AdminModals from './components/Admin/AdminModals';
 
@@ -58,7 +59,7 @@ export default function AdminDashboard() {
   const isSuperAdmin = currentUser?.role === 'SUPER_ADMIN';
 
   // 2. Navigation & Filter States
-  const [activeMainTab, setActiveMainTab] = useState('overview'); // 'overview' | 'staff_pacing' | 'district_benchmarks' | 'travel_allowance'
+  const [activeMainTab, setActiveMainTab] = useState('overview'); // 'overview' | 'staff_pacing' | 'cohort_compliance' | 'district_benchmarks' | 'travel_allowance'
   const [selectedDistrict, setSelectedDistrict] = useState('All');
   const [selectedFO, setSelectedFO] = useState('All');
   const [sortConfig, setSortConfig] = useState({ key: 'notifications', direction: 'desc' });
@@ -1080,6 +1081,17 @@ export default function AdminDashboard() {
           isIncharge={currentUser?.role === 'MAIN_INCHARGE' || isSuperAdmin}
         />
 
+        {/* Tab 5: Last 3 Months 75% Indicator Cohort Matrix (DFY + Nikshay Combined) */}
+        <CohortComplianceTab
+          activeMainTab={activeMainTab}
+          selectedDistrict={selectedDistrict}
+          isSuperAdmin={isSuperAdmin}
+          currentUser={currentUser}
+          authFetch={authFetch}
+          showToast={showToast}
+          setInspectingFO={modals.setInspectingFO}
+        />
+
         {/* Branding Footer */}
         <footer className="w-full text-center py-8 mt-auto opacity-70">
           <p className="text-sm font-bold text-slate-500 tracking-widest uppercase">
@@ -1090,6 +1102,7 @@ export default function AdminDashboard() {
         {/* --- 24 Modular Administration Modals --- */}
         <AdminModals
           {...modals}
+          authFetch={authFetch}
           selectedDistrict={selectedDistrict}
           districts={districts}
           currentUser={currentUser}

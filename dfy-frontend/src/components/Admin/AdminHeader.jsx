@@ -734,6 +734,18 @@ export default function AdminHeader({
                 </span>
               )}
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveMainTab('cohort_compliance')}
+              className={`px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs transition-all flex items-center gap-2 active:scale-95 shrink-0 relative cursor-pointer ${
+                activeMainTab === 'cohort_compliance'
+                  ? 'bg-indigo-700 text-white shadow-sm shadow-indigo-700/25 font-black'
+                  : 'bg-slate-50 hover:bg-indigo-50/70 text-slate-700 hover:text-indigo-900 border border-slate-200/90 font-bold'
+              }`}
+            >
+              <span>🩺</span>
+              <span>75% Cohort (3M)</span>
+            </button>
             {isSuperAdmin && (
               <button
                 type="button"
