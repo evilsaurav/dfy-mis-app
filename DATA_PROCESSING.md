@@ -4,7 +4,7 @@
 > *Author:* Health Informatics & Analytics Engineering  
 > *Platform:* FastAPI Backend + Supabase PostgreSQL + React 19 Engine  
 > *Coverage:* 22+ Districts in Bihar, India  
-> *Version:* 2.8.3 (Stealth 10 AM Cutoff, Staff Attendance Dual-Sheet, Consonant Defense & Documents Cohort Partitioning)  
+> *Version:* 2.9.13 (3-Month Combined DFY + Nikshay 75% Cohort Engine, Phone +1 Sync & Admin Matrix)  
 > *Status:* Production Active
 
 ---
@@ -354,3 +354,15 @@ The system tracks 22 standardized clinical and programmatic indicators:
 | 20 | `adhar_face_auth_ids` | Aadhaar Face Auth | Group 5 (Advanced) | Array of Strings | Biometric authentication on UIDAI / Nikshay portal |
 | 21 | `consent_with_id_ids` | Consent with ID | Group 5 (Advanced) | Array of Strings | Signed programmatic consent forms filed |
 | 22 | `culture_dst_ids` | Culture / DST | Group 5 (Advanced) | Array of Strings | Drug Susceptibility Testing & Line Probe Assay (Buxar specific) |
+
+---
+
+## 5. Last 3 Months 75% Cohort Compliance Pipeline (Combined DFY + Nikshay)
+
+1. **Cohort Denominator ($N$)**: For each of the 3 rolling operational months ($M_0, M_{-1}, M_{-2}$), deduplicated unique `patient_id` entries from `notification_ids` form that month's cohort base (assigned to earliest `date_of_reporting` if repeated).
+2. **Union Numerator ($\text{DFY MIS} \lor \text{Nikshay Portal}$)**: Across all reports from $M_{-2}$ start through today (crediting cross-month follow-ups back to the patient's notification month), an indicator flag becomes `True` if recorded in **either**:
+   - **HIV/DM**: `report_kpi_entries` (`hiv_dm_ids`) $\lor$ `nikshay_verified_patients` (`hiv_tested` $\lor$ `dm_tested`)
+   - **UDST**: `report_kpi_entries` (`sample_tested_ids`) $\lor$ `nikshay_verified_patients.udst_done`
+   - **DBT**: `report_kpi_entries` (`dbt_ids`) $\lor$ `nikshay_verified_patients.bank_validated`
+   - **Contact Tracing**: `report_kpi_entries` (`contact_tracing_ids`) $\lor$ `nikshay_verified_patients.contact_tracing_done`
+3. **75% Target Formula**: $\text{target}_{75} = \lceil N \times 0.75 \rceil$, compliance $\text{pct} = \text{round}(\text{done} / N \times 100)$, pass condition $\text{pct} \ge 75\%$.

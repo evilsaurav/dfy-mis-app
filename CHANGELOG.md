@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ---
 
+## [2.9.13] - 2026-11-12
+
+### Added & Optimized
+- **FO 3-Month 75% Indicator Cohort Tracker & Offline Phone `+1` Delta Sync (`CohortCompliance3MCard.jsx`, `offlineQueue.js`, `App.jsx`)**:
+  - Added a persistent 3-month rolling cohort compliance tracker at the top of the FO **⚡ Pending** tab, measuring achievement against the **75% programmatic target (`Math.ceil(Notified * 0.75)`)** across **HIV / DM**, **UDST Testing**, **DBT Bank**, and **Contact Tracing**.
+  - **Combined `DFY OR Nikshay` + Cross-Month Rule (`GET /api/fo/cohort-compliance-sync`)**: Uses unique FO `notification_ids` per operational month (`M0`, `M1`, `M2`) as denominator, and marks each indicator Done if recorded in DFY MIS reports (`hiv_dm_ids`, `sample_tested_ids`, `dbt_ids`, `contact_tracing_ids`) **OR** verified in Nikshay (`nikshay_verified_patients`), automatically crediting cross-month follow-ups back to the patient's notification cohort month.
+  - **Phone IndexedDB Storage & Optimistic `+1` Formula**: Stores the 3-month cohort map locally in `DFY_MIS_OFFLINE_DB` (`fo_cohort_3m_cache`, with `localStorage` fallback), auto-prunes months older than 3 months, applies instant optimistic `+1` updates on daily report submission (online, offline queue, or fallback), and supports `NO_CHANGE` / `DELTA` (`since` cursor) / `FULL` incremental syncing (falling back cleanly to `FULL` if `known_kpi_count` detects deletions).
+  - **Tap-to-Filter Pending Action Center**: Clicking any indicator tile filters `PendingInterventionsActionCenter` below to show only that month and indicator's incomplete patients with 1-tap Calling, ID Copy, Autofill, and filtered WhatsApp export.
+- **Admin Dashboard 3-Month 75% Cohort Compliance Suite (`CohortComplianceTab.jsx`, `FoInspectorModal.jsx`)**:
+  - Added a dedicated **`🩺 75% Cohort (3M)`** tab in `AdminDashboard` for both **Super Admin** (all districts) and **Sub-Admin** (strictly scoped to `allowed_districts` with HTTP 403 cross-district defense), powered by batch PostgreSQL aggregation (`GET /api/admin/cohort-compliance-3m`) and automatic cache invalidation (`admin_cohort_3m_`) on report mutations and Nikshay reconciliations.
+  - Provides 3-month state/district summary cards with 75% threshold markers, interactive District-Wise Matrix, Field Officer Table with `<75% At-Risk` filter, Pending Patient Drill-Down modal, and 1-click WhatsApp Coaching list copy.
+  - Embedded the live FO 3-Month 75% Audit card directly inside `FoInspectorModal.jsx` so Admins see an exact 1:1 mirror of the officer's phone tracker.
+- **Admin Modal Viewport & Flexbox Clipping Fixes (`FoInspectorModal.jsx`, `ReportsStudioModal.jsx`)**:
+  - Fixed flex-shrink clipping on laptop/desktop viewports by expanding both modals to near-fullscreen (`h-[94vh] max-h-[94vh]`, `max-w-5xl` / `max-w-6xl`), adding `shrink-0` to headers/tabs/footers and `min-h-0 flex-1 overflow-y-auto` to scrollable bodies, and compacting the Travel Allowance launch shortcut in `ReportsStudioModal.jsx`.
+- **In-App Guides & Documentation (`App.jsx`, `AppGuideModal.jsx`)**:
+  - Added a Bento SOP workflow & Chapter 13 in FO Field Manual (`Visual SOP & Bento Flowcharts` + accordion manual) and a dedicated **75% Cohort (3M) & Nikshay Rule** Bento SOP module in Admin SOP Guide.
+
+---
+
 ## [2.9.12] - 2026-11-09
 
 ### Added & Optimized

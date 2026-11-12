@@ -1,6 +1,6 @@
 # 🩺 Doctors For You (DFY) - TB Field MIS & Analytics System
 
-[![Version](https://img.shields.io/badge/Version-v2.9.12-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
+[![Version](https://img.shields.io/badge/Version-v2.9.13-059669?style=for-the-badge&logo=semver&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![Status](https://img.shields.io/badge/Status-Production_Active-success?style=for-the-badge&logo=statuspage&logoColor=white)](https://github.com/evilsaurav/dfy-mis-app)
 [![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![React](https://img.shields.io/badge/React_19-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)](https://reactjs.org/)
@@ -64,6 +64,7 @@ For in-depth architectural blueprints, UI/UX design systems, and data processing
   - [35. Unified Auto-Detect Nikshay Upload, Cumulative Ledger Aggregations & Frontline 1-Tap Calling](#35--unified-auto-detect-nikshay-upload-cumulative-ledger-aggregations--frontline-1-tap-calling)
   - [36. Official Staff HR Master Dossier, Frontline Digital ID Card & Admin Dossier Suite](#36--official-staff-hr-master-dossier-frontline-digital-id-card--admin-dossier-suite)
   - [37. Tactile Admin Portal Login Feedback & FO Travel Allowance 1-Month Breakdown Suite](#37--tactile-admin-portal-login-feedback--fo-travel-allowance-1-month-breakdown-suite)
+  - [38. Last 3 Months 75% Indicator Cohort Tracker, Offline `+1` Delta Sync & Admin Compliance Matrix](#38--last-3-months-75-indicator-cohort-tracker-offline-1-delta-sync--admin-compliance-matrix)
 - [Districts Covered](#-districts-covered)
 - [Tech Stack](#-tech-stack)
 - [Project Directory Structure](#-project-directory-structure)
@@ -664,6 +665,27 @@ flowchart TD
 
 ---
 
+### 38. 🩺 Last 3 Months 75% Indicator Cohort Tracker, Offline `+1` Delta Sync & Admin Compliance Matrix
+- **Exact Combined `DFY OR Nikshay` + Cross-Month 75% Calculation Rule**:
+  - **Denominator (`Total Notified Cohort = N`)**: Deduplicated unique `patient_id` entries submitted by the Field Officer in `notification_ids` across each of the last 3 operational months (`M0` = active month, `M1` = `-1m`, `M2` = `-2m`).
+  - **Numerator (`DFY MIS` OR `Nikshay Verified Portal`)**: Evaluates 4 mandatory TB cascade indicators per notified patient across reports up to today (**capturing cross-month follow-ups** back to the notification month):
+    - **HIV / DM**: `hiv_dm_ids` in DFY MIS **OR** `nikshay_verified_patients` (`hiv_tested OR dm_tested`)
+    - **UDST Testing**: `sample_tested_ids` in DFY MIS **OR** `nikshay_verified_patients.udst_done`
+    - **DBT Bank**: `dbt_ids` in DFY MIS **OR** `nikshay_verified_patients.bank_validated`
+    - **Contact Tracing**: `contact_tracing_ids` in DFY MIS **OR** `nikshay_verified_patients.contact_tracing_done`
+  - **75% Target Threshold**: $\text{target}_{75} = \lceil N \times 0.75 \rceil$, with indicator compliance $\text{pct} = \text{round}(\text{done} / N \times 100) \ge 75\%$.
+- **FO Mobile PWA Storage (`IndexedDB`) & Optimistic `+1` Incremental Sync (`CohortCompliance3MCard.jsx`, `offlineQueue.js`)**:
+  - Persists the FO's 3-month cohort snapshot directly on-device inside IndexedDB (`DFY_MIS_OFFLINE_DB` &rarr; `fo_cohort_3m_cache`, with `localStorage` fallback), automatically pruning months older than 3 months.
+  - Submitting a daily report (online, offline queue, or fallback) immediately applies optimistic **`+1` delta updates** to the cached cohort without re-downloading full history.
+  - Background/manual sync calls `GET /api/fo/cohort-compliance-sync?since=...&known_months=...&known_kpi_count=...`, returning `NO_CHANGE`, `DELTA` (only updated patients), or safe `FULL` re-baseline on month rollover/deletions.
+  - Tapping any indicator card inside the **`⚡ Pending`** tab filters `PendingInterventionsActionCenter` below for 1-tap Call, ID Copy, Autofill, and filtered WhatsApp export.
+- **Admin Dashboard **`🩺 75% Cohort (3M)`** Tab & Inspector 1:1 Parity (`CohortComplianceTab.jsx`, `FoInspectorModal.jsx`)**:
+  - **Batch Statewide/District Matrix (`GET /api/admin/cohort-compliance-3m`)**: Provides 3-month summary bars, District-Wise Compliance Matrix, and Field Officer Compliance Table (`<75% At-Risk` filter) with pending patient drill-down & 1-click WhatsApp coaching list export.
+  - **Strict Sub-Admin District RBAC**: Super Admins view all 22+ districts; Sub-Admins are strictly scoped to their `allowed_districts` (HTTP 403 on cross-district queries) with automatic `admin_cohort_3m_` cache eviction on report edits/Nikshay reconciliations.
+  - **FoInspectorModal 1:1 Audit Card & Viewport Modal Fix**: Embeds `CohortCompliance3MCard` inside `FoInspectorModal` for exact FO-to-Admin number parity, and upgrades both `FoInspectorModal` (`max-w-5xl h-[94vh]`) and `ReportsStudioModal` (`max-w-6xl h-[94vh]`, `shrink-0` headers/footers, `min-h-0 flex-1 overflow-y-auto`) to prevent clipping on laptop screens.
+
+---
+
 ## 📍 Districts Covered
 
 The system supports active staff and reporting across **22+ Districts of Bihar**:
@@ -716,7 +738,9 @@ Mis field report/
 │   ├── test_top_performers_studio_ui.mjs
 │   ├── test_guide_new_features_flowcharts_ui.mjs
 │   ├── test_attendance_leaves_and_lifecycle.py
-│   └── test_repair_duplicate_notifications.py
+│   ├── test_repair_duplicate_notifications.py
+│   ├── test_fo_cohort_3m_compliance_sync.py
+│   └── test_fo_cohort_plus_one_sync.mjs
 │
 └── dfy-frontend/               # React 19 + Vite Frontend Application
     ├── index.html              # App entry HTML with PWA meta tags
@@ -727,10 +751,13 @@ Mis field report/
     │   ├── dfy-logo.png        # Official Doctors For You circular emblem
     │   └── favicon.png         # High-resolution brand favicon
     └── src/
-        ├── App.jsx             # Field Officer Mobile PWA: Honors & Badges, Achievement Studio, Offline PIN
-        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Dashboard: 4-Role Top Performers Studio & Full-Width Analytics
+        ├── App.jsx             # Field Officer Mobile PWA: Pending 75% Tracker, Honors, Offline PIN
+        ├── AdminDashboard.jsx  # Central Admin & Sub-Admin Dashboard: 75% Cohort Matrix, Pacing & TA
+        ├── components/
+        │   ├── Fo/CohortCompliance3MCard.jsx        # 3-Month 75% Indicator Tracker & Tap Filter
+        │   └── Admin/tabs/CohortComplianceTab.jsx   # District & FO 75% Cohort Compliance Suite
         ├── changelogData.js    # Client-side in-app changelog & version history
-        ├── offlineQueue.js     # IndexedDB offline storage & auto-sync engine
+        ├── offlineQueue.js     # IndexedDB offline report queue + fo_cohort_3m_cache +1 sync engine
         ├── staff_directory.json # Master local baseline staff directory
         ├── main.jsx            # React root mount point & Router
         └── index.css           # Tailwind CSS imports & animations
@@ -748,6 +775,7 @@ Mis field report/
 | `POST` | `/check-today-status` | Check if officer has submitted a report today |
 | `POST` | `/my-profile-stats` | Fetch officer-specific monthly summary, dynamic working days & pacing velocity |
 | `GET` | `/api/district-notification-registry` | Fetch 90-day district notifications for offline IndexedDB duplicate prevention cache |
+| `GET` | `/api/fo/cohort-compliance-sync` | Sync 3-month combined DFY + Nikshay 75% cohort compliance (`NO_CHANGE` / `DELTA` / `FULL`) |
 
 ### 2. Admin Analytics, RBAC & Report Management
 | Method | Endpoint | Description |
@@ -755,6 +783,7 @@ Mis field report/
 | `POST` | `/admin/login` | Admin & Sub-Admin credentials login with RBAC permissions |
 | `POST` | `/admin/dashboard-data` | Filtered analytics data, KPIs, leaderboard & target pacing (`force_refresh` support) |
 | `GET` | `/api/statewide-top-performers` | Multi-metric statewide leaderboard across 4 cadres (Districts DC, FO & Hub Agents, Lab Technicians LT, SCT Agents) with dynamic designation mapping and cache invalidation |
+| `GET` | `/api/admin/cohort-compliance-3m` | Batch 3-month combined DFY + Nikshay 75% cohort matrix across Districts & FOs (Sub-Admin RBAC scoped) |
 | `POST` | `/admin/reports/delete-day` | Delete an officer's single-day report with atomic rollup rollback & RBAC |
 | `GET` | `/admin/attendance/live` | Live field staff attendance radar (submitted vs missing) |
 | `GET` | `/admin/today-attendance` | Live attendance radar with date cutoff (`inactive_since`), 10 AM morning cutoff segregation, submitted vs missing vs on-leave resolution |

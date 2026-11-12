@@ -1,16 +1,51 @@
 // changelogData.js - Application Release Notes & Update History
 // High-performance client-side release log (Zero backend / Database load)
 
-export const APP_VERSION = "2.9.12";
-export const LAST_UPDATED_DATE = "09 Nov 2026";
+export const APP_VERSION = "2.9.13";
+export const LAST_UPDATED_DATE = "12 Nov 2026";
 
 export const CHANGELOG_ENTRIES = [
+  {
+    version: "v2.9.13",
+    date: "12 Nov 2026",
+    title: "3-Month 75% Cohort Tracker (DFY + Nikshay), Phone +1 Delta Sync & Full-Screen Modal Fixes",
+    badge: "Latest Release",
+    badgeColor: "emerald",
+    highlights: [
+      "📊 FO 3-Month 75% Indicator Cohort Tracker: Live 3-month compliance card in the Pending tab tracking HIV/DM, UDST, DBT, and Contact Tracing against the 75% target (Math.ceil(Notified * 0.75)) using combined DFY MIS OR Nikshay Verified Portal data and cross-month follow-up matching.",
+      "⚡ Phone Storage & +1 Delta Sync: 3-month patient cohort state is persisted locally in IndexedDB (fo_cohort_3m_cache), updates optimistically (+1) on every report submit even offline, and syncs only incremental changes via since cursor.",
+      "🩺 Admin 75% Cohort (3M) Tab & FO Inspector Parity: Dedicated District & FO Compliance Matrix tab (Super Admin + Sub-Admin RBAC scoped) with pending patient drill-down & WhatsApp Coaching list, plus an embedded 1:1 live 3-month card inside FoInspectorModal.",
+      "🖥️ Reports Studio & FO Inspector Modal Sizing Fix: Expanded modals to 94vh viewport with shrink-0 headers/footers and min-h-0 scroll bodies so District KPI Excel selection and FO Cohort cards never clip on laptop screens."
+    ],
+    details: [
+      {
+        tag: "75% Cohort Math",
+        color: "emerald",
+        text: "Combines DFY MIS entries OR Nikshay portal flags across cross-month follow-ups; counts exact Ceil(N x 0.75) target per month."
+      },
+      {
+        tag: "Offline +1 Sync",
+        color: "indigo",
+        text: "IndexedDB + NO_CHANGE/DELTA/FULL cursor sync keeps mobile bandwidth minimal while working 100% offline."
+      },
+      {
+        tag: "Admin Governance",
+        color: "teal",
+        text: "Strict Sub-Admin allowed_districts RBAC enforcement with HTTP 403 isolation and automatic cache invalidation."
+      },
+      {
+        tag: "UI Polish",
+        color: "amber",
+        text: "Eliminated flexbox compression bugs in FoInspectorModal and ReportsStudioModal for smooth full-height visibility."
+      }
+    ]
+  },
   {
     version: "v2.9.12",
     date: "09 Nov 2026",
     title: "Tactile Admin Login Feedback, FO TA Month Breakdown & Deduction Transparency Suite",
-    badge: "Latest Release",
-    badgeColor: "emerald",
+    badge: "Stable Release",
+    badgeColor: "slate",
     highlights: [
       "🔄 Tactile Admin Login Feedback: Enter Admin Portal button now morphs with a rotating SVG spinner and disabled input locks, providing immediate visual feedback and anti-double-tap safety.",
       "📋 FO Travel Allowance 1-Month Breakdown: Field Officers can now inspect full day-by-day travel kilometers, odometer readings, visited locations, and duty remarks directly from the Profile tab.",

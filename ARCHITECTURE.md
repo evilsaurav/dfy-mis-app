@@ -4,7 +4,7 @@
 > *Author:* Platform Engineering & Health Informatics Team  
 > *Target Runtime:* Cloud-Native Hybrid (FastAPI ASGI on Render + React 19 PWA on Vercel/Netlify)  
 > *Database:* Supabase PostgreSQL (psycopg2 Threaded Pool) & Cloud Object Storage  
-> *Version:* 3.9.5 (v2.9.12 - Tactile Login Feedback, FO TA Month Breakdown & Deduction Transparency)  
+> *Version:* 3.9.6 (v2.9.13 - 3-Month 75% Indicator Cohort Tracker, Offline +1 Delta Sync & Admin Matrix)  
 > *Status:* Production Active
 
 ---
@@ -656,6 +656,13 @@ The Admin Staff Management suite allows state and district coordinators to inspe
 - **Adaptive Stacking**: On mobile viewports (< 768px), the quadrants gracefully collapse into a scrollable single-column format.
 - **Fail-Safe Sub-Admin District RBAC**: `PUT /admin/staff/{id}/update-dossier` enforces canonical district boundaries. Sub-Admins attempting to modify staff outside their assigned districts are blocked with HTTP 403 Forbidden.
 - **Audit Logging**: Every HR record edit writes an immutable administrative audit record (`STAFF_DOSSIER_UPDATED`).
+
+### 9.6 Offline 3-Month 75% Cohort Phone Storage (`fo_cohort_3m_cache`) & `+1` Incremental Sync
+- **Storage Store (`DFY_MIS_OFFLINE_DB`, `DB_VERSION = 3`)**: Stores per-officer 3-month rolling notification cohorts in IndexedDB object store `fo_cohort_3m_cache` (with `localStorage` fallback), keyed by `dfy_cohort_3m_{district}_{fo_name}`.
+- **`+1` Optimistic & Cursor Delta Protocol (`GET /api/fo/cohort-compliance-sync`)**:
+  - Offline/online daily report submissions immediately execute `applyOptimisticCohortPlusOne()`, incrementing indicators across any cached cohort month without waiting for server roundtrips.
+  - Background sync transmits `since`, `known_months`, and `known_kpi_count`, returning minimal `NO_CHANGE`, incremental `DELTA` (`updated_patients`), or safe `FULL` fallback if deletions (`known_kpi_count > total_kpi_count`) or month rollovers occur.
+- **Batch Admin Cohort Aggregation (`GET /api/admin/cohort-compliance-3m`)**: Executes two indexed batch queries (`daily_field_reports` / `report_kpi_entries` + `nikshay_verified_patients`) with 180s `SimpleTTLCache` (`admin_cohort_3m_`) invalidated atomically by `evict_officer_profile_cache` and Nikshay reconciliations.
 
 ---
 

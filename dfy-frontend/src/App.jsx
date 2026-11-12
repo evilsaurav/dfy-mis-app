@@ -3818,6 +3818,67 @@ const FoHelpGuide = () => {
           </div>
         </div>
       )
+    },
+    {
+      id: "cohort_75",
+      icon: "🩺",
+      title: "13. 3-Month 75% Cohort Tracker & Offline +1 Sync",
+      subtitle: "Last 3 months ke 4 indicators ka 75% target meter, DFY+Nikshay rule & phone delta sync",
+      color: "bg-violet-50 border-violet-200 text-violet-800",
+      badge: "v2.9.13 • 75% Rule",
+      content: (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-700 leading-relaxed">
+            <strong>⚡ Pending Tab</strong> ke sabse upar aapko apna <strong>3-Month 75% Indicator Cohort Tracker</strong> dikhta hai. Yeh batata hai ki pichle 2 months aur current month me jitne patients aapne notify kiye hain, unme se <strong>HIV/DM, UDST, DBT aur Contact Tracing</strong> me aapka <strong>75% target</strong> poora hua hai ya nahi.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="bg-white border border-violet-200 rounded-xl p-2.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black text-violet-900">1. Kya Hai &amp; 3-Month Tabs</span>
+                <span className="text-[10px] font-bold bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">M0 / M-1 / M-2</span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Card ke upar <strong>3 Month Pills</strong> hote hain (Current Month + pichle 2 Months). Har month me aapke unique <strong>Notified Patient IDs (N)</strong> ke against 4 indicators ka live <strong>Done / N (%)</strong> meter dikhta hai.
+              </p>
+            </div>
+
+            <div className="bg-white border border-emerald-200 rounded-xl p-2.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black text-emerald-900">2. 75% Calculation Rule</span>
+                <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded">DFY OR Nikshay</span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Target = <strong>Math.ceil(N &times; 75%)</strong>. Patient tabhi <strong>Done</strong> mana jata hai jab woh <strong>DFY Daily Report</strong> me <em>ya</em> <strong>Nikshay Portal</strong> dump me complete ho. Pichle month ke patient ka kaam iss month karne par bhi usko credit milta hai!
+              </p>
+            </div>
+
+            <div className="bg-white border border-indigo-200 rounded-xl p-2.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black text-indigo-900">3. Phone Cache &amp; +1 Sync</span>
+                <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">Offline Ready</span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Yeh 3-month record aapke phone ke <strong>IndexedDB + Local Storage</strong> me save rehta hai. Jaise hi aap aaj ki report submit karte hain, woh Patient ID aapke phone par turant <strong>+1 Done</strong> ho jati hai &mdash; bina poora data dubara download kiye!
+              </p>
+            </div>
+
+            <div className="bg-white border border-amber-200 rounded-xl p-2.5 space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-black text-amber-900">4. Kaise Check &amp; Clear Karein</span>
+                <span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Tap-to-Filter</span>
+              </div>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                Jis indicator par <strong>⚠️ X aur chahiye</strong> likha ho, us tile par <strong>Tap</strong> karein. Niche Pending Action Center me wahi patients filter hokar aa jayenge &mdash; <strong>📞 Call</strong>, <strong>📋 Copy</strong> ya <strong>⚡ Autofill</strong> se unhe turant complete karein.
+              </p>
+            </div>
+          </div>
+
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-2.5 text-[11px] text-violet-900 leading-relaxed">
+            <strong>🔄 Delta Sync Button:</strong> Network milne par upar <strong>Refresh / Sync</strong> button dabayein; app sirf naye badlav (Delta) server se mangta hai taki mobile data aur battery dono bache.
+          </div>
+        </div>
+      )
     }
   ];
 
@@ -3928,6 +3989,15 @@ const FoHelpGuide = () => {
               }`}
             >
               Travel Allowance
+            </button>
+            <button
+              type="button"
+              onClick={() => setBentoTab("cohort_75")}
+              className={`px-2.5 py-1 rounded-xl text-[10px] font-black transition-all cursor-pointer shrink-0 ${
+                bentoTab === "cohort_75" ? "bg-white text-violet-700 shadow-xs" : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              75% Cohort Sync
             </button>
           </div>
         </div>
@@ -4350,9 +4420,94 @@ const FoHelpGuide = () => {
             </div>
           </div>
         )}
+
+        {/* 6. 3-Month 75% Cohort & Phone +1 Delta Sync Flow (Bento Grid) */}
+        {bentoTab === "cohort_75" && (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* Step 1 */}
+              <div className="bg-gradient-to-br from-violet-50 to-purple-50/40 border border-violet-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-violet-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                  <span className="text-base">⚡</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">1. Open Pending Tab</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">⚡ Pending tab ke top par pichle 3 months (M0, M-1, M-2) ke Cohort tabs dikhenge.</p>
+                </div>
+                <div className="pt-1.5 border-t border-violet-100 flex items-center justify-between text-[9px] font-bold text-violet-700">
+                  <span>3-Month Switcher</span>
+                  <span>➔ Step 2</span>
+                </div>
+              </div>
+
+              {/* Step 2 */}
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50/40 border border-emerald-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                  <span className="text-base">🧮</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">2. Check 75% Target</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">HIV/DM, UDST, DBT aur Contact ka Done/N% dekhkar &ldquo;X aur chahiye&rdquo; gap check karein.</p>
+                </div>
+                <div className="pt-1.5 border-t border-emerald-100 flex items-center justify-between text-[9px] font-bold text-emerald-700">
+                  <span>DFY &cup; Nikshay Rule</span>
+                  <span>➔ Step 3</span>
+                </div>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-gradient-to-br from-amber-50 to-orange-50/40 border border-amber-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                  <span className="text-base">👆</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">3. Tap Tile &amp; Autofill</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Kisi bhi red/amber tile par tap karein; niche exact pending IDs filter ho jati hain.</p>
+                </div>
+                <div className="pt-1.5 border-t border-amber-100 flex items-center justify-between text-[9px] font-bold text-amber-700">
+                  <span>Call / Copy / Autofill</span>
+                  <span>➔ Step 4</span>
+                </div>
+              </div>
+
+              {/* Step 4 */}
+              <div className="bg-gradient-to-br from-indigo-50 to-blue-50/40 border border-indigo-200/90 rounded-2xl p-3 flex flex-col justify-between space-y-2 relative group hover:shadow-xs transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                  <span className="text-base">📲</span>
+                </div>
+                <div>
+                  <strong className="text-[11px] font-black text-slate-900 block leading-tight">4. +1 Phone Delta Sync</strong>
+                  <p className="text-[10px] text-slate-600 mt-0.5">Report submit karte hi phone cache +1 update hota hai; Sync dabane par sirf delta aata hai.</p>
+                </div>
+                <div className="pt-1.5 border-t border-indigo-100 flex items-center justify-between text-[9px] font-bold text-indigo-700">
+                  <span>IndexedDB Saved</span>
+                  <span>&#10003; Complete</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Formula Card */}
+            <div className="bg-violet-50/80 border border-violet-200/80 rounded-2xl p-3 flex items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">🎯</span>
+                <div>
+                  <strong className="text-xs font-black text-violet-950 block">Combined DFY + Nikshay 75% Rule &amp; Phone Storage</strong>
+                  <span className="text-[11px] text-violet-800">Agar aapka kaam DFY Report ya Nikshay Portal dono me se kisi me bhi update hai toh Done gina jata hai. Poora 3-month record phone me rehta hai aur sirf naya +1 delta sync hota hai.</span>
+                </div>
+              </div>
+              <span className="text-[10px] font-black text-violet-800 bg-white border border-violet-200 px-2 py-0.5 rounded-lg shrink-0">
+                Low Data + Fast
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* 12 Accordion Topic Cards */}
+      {/* 13 Accordion Topic Cards */}
       <div className="space-y-3">
         <div className="flex items-center justify-between px-1">
           <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 flex items-center gap-1.5">

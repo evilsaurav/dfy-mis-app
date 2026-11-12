@@ -72,7 +72,8 @@ export default function AppGuideModal({
                   { key: 'audit_trail', label: 'Admin vs Sub-Admin (RBAC)', icon: '📜', desc: 'District boundary protection & logs' },
                   { key: 'faqs', label: 'Field FAQs & Troubleshooting', icon: '❓', desc: 'Top operational questions' },
                   { key: 'top_performers_studio', label: 'Top Performers & Analytics Studio', icon: '🏆', desc: '4-Role Leaderboard, Dynamic Designation Shift & Full-Width Trends' },
-                  { key: 'travel_allowance', label: 'Travel Allowance & Bike Log', icon: '🏍️', desc: 'Pre-fill, Rate Config, Audit & 24h Dispute' }
+                  { key: 'travel_allowance', label: 'Travel Allowance & Bike Log', icon: '🏍️', desc: 'Pre-fill, Rate Config, Audit & 24h Dispute' },
+                  { key: 'cohort_compliance_75', label: '75% Cohort (3M) & Nikshay Rule', icon: '🩺', desc: 'DFY + Nikshay 75% formula, Matrix & RBAC' }
                 ]
                   .filter(topic => {
                     if (!appGuideSearch.trim()) return true;
@@ -1454,6 +1455,176 @@ export default function AppGuideModal({
                 )}
 
                 {/* TOPIC 10: Travel Allowance & Bike Log Engine */}
+                {/* TOPIC 10: 75% Cohort Compliance Engine (3M Rolling) */}
+                {appGuideActiveTopic === 'cohort_compliance_75' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🩺</span>
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900">Last 3 Months 75% Indicator Cohort Engine &amp; Combined Rule</h4>
+                          <p className="text-[11px] text-slate-500 font-medium">DFY MIS + Nikshay union tracking, cross-month follow-ups, District Matrix &amp; FO 1:1 audit</p>
+                        </div>
+                      </div>
+                      <span className="text-[9px] font-bold uppercase bg-violet-100 text-violet-800 px-2 py-0.5 rounded-full border border-violet-200">
+                        DFY &cup; Nikshay &bull; &ge;75% Target
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {/* Step 1: 3-Month Rolling Denominator */}
+                      <div className="bg-gradient-to-br from-slate-50 to-indigo-50/50 border border-indigo-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-indigo-600 text-white font-black text-[10px] flex items-center justify-center">1</span>
+                            <span className="text-[9px] font-bold text-indigo-800 bg-indigo-100 px-2 py-0.5 rounded-full">Step 01 &bull; Denominator (N)</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            3 Operational Months &amp; Unique Patient Cohort
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Cohort engine current active month (<code>M0</code>) ke sath pichle 2 months (<code>M-1m</code>, <code>M-2m</code>) ko operational calendar ke hisab se group karta hai:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🆔</span>
+                              <div><strong>Unique Cohort (N):</strong> Har month me FO ke <code>notification_ids</code> se unique valid <code>patient_id</code> (&ge;5 chars) deduplicate hote hain.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📅</span>
+                              <div><strong>Earliest Notification Lock:</strong> Agar ek hi patient do alag-alag months me repeat report ho, toh uska earliest <code>date_of_reporting</code> uska cohort month tay karta hai.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-indigo-100 flex items-center justify-between text-[10px] text-indigo-800 font-semibold">
+                          <span>Base Notification Set</span>
+                          <span className="text-indigo-600 font-black">➔ Step 2</span>
+                        </div>
+                      </div>
+
+                      {/* Step 2: Combined DFY OR Nikshay Rule */}
+                      <div className="bg-gradient-to-br from-emerald-50/70 to-teal-50/40 border border-emerald-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-emerald-600 text-white font-black text-[10px] flex items-center justify-center">2</span>
+                            <span className="text-[9px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">Step 02 &bull; Numerator Rule</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Combined DFY &cup; Nikshay + Cross-Month Credit
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Scan <code>M-2m</code> start se aaj tak hota hai &mdash; yani agar pichle month notify patient ka test iss month hota hai, toh credit pichle month ko milta hai:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🩸</span>
+                              <div><strong>HIV / DM:</strong> DFY <code>hiv_dm_ids</code> <strong>OR</strong> Nikshay <code>hiv_tested</code> / <code>dm_tested</code></div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🔬</span>
+                              <div><strong>UDST Testing:</strong> DFY <code>sample_tested_ids</code> <strong>OR</strong> Nikshay <code>udst_done</code></div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🏦</span>
+                              <div><strong>DBT Bank:</strong> DFY <code>dbt_ids</code> <strong>OR</strong> Nikshay <code>bank_validated</code></div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>👨‍👩‍👧</span>
+                              <div><strong>Contact Tracing:</strong> DFY <code>contact_tracing_ids</code> <strong>OR</strong> Nikshay <code>contact_tracing_done</code></div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-emerald-100 flex items-center justify-between text-[10px] text-emerald-800 font-semibold">
+                          <span>Union Verification</span>
+                          <span className="text-emerald-600 font-black">➔ Step 3</span>
+                        </div>
+                      </div>
+
+                      {/* Step 3: 75% Threshold & At-Risk Gap Math */}
+                      <div className="bg-gradient-to-br from-amber-50/70 to-orange-50/40 border border-amber-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-amber-600 text-white font-black text-[10px] flex items-center justify-center">3</span>
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-full">Step 03 &bull; 75% Formula</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            75% Target Gate &amp; Deficit Calculation
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Har FO ke har month aur har indicator par alag-alag 75% gate check hota hai:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🎯</span>
+                              <div><strong>Formula:</strong> <code>target_75 = Math.ceil(N &times; 0.75)</code> aur <code>pct = Math.round((done / N) &times; 100)</code>.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>⚠️</span>
+                              <div><strong>Gap Counter:</strong> <code>pct &ge; 75%</code> hone par Green Pass badge dikhta hai; kam hone par exact shortfall <code>needed_for_75 = Math.max(0, target_75 - done)</code> show hota hai.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📱</span>
+                              <div><strong>FO Phone +1 Sync:</strong> FO jab offline/online daily report submit karta hai toh IndexedDB cache turant <code>+1</code> update hota hai, aur server <code>since</code> cursor se sirf delta changes bhejta hai.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-amber-100 flex items-center justify-between text-[10px] text-amber-800 font-semibold">
+                          <span>Exact Target Math</span>
+                          <span className="text-amber-600 font-black">➔ Step 4</span>
+                        </div>
+                      </div>
+
+                      {/* Step 4: Admin Matrix, RBAC & WhatsApp Coaching */}
+                      <div className="bg-gradient-to-br from-purple-50/70 to-indigo-50/40 border border-purple-200/90 rounded-2xl p-4 flex flex-col justify-between space-y-2.5 shadow-2xs">
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center">4</span>
+                            <span className="text-[9px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">Step 04 &bull; Governance</span>
+                          </div>
+                          <h5 className="text-xs font-black text-slate-900 leading-snug">
+                            Admin Matrix, Sub-Admin RBAC &amp; WhatsApp Drill-down
+                          </h5>
+                          <p className="text-[11px] text-slate-600 leading-relaxed mt-1">
+                            Super Admin aur District Coordinators ke liye role-safe supervision workflow:
+                          </p>
+                          <ul className="text-[10.5px] text-slate-700 space-y-1.5 mt-2 pl-0.5">
+                            <li className="flex items-start gap-1.5">
+                              <span>🔐</span>
+                              <div><strong>RBAC Scope Guard:</strong> Super Admin sabhi districts dekhta hai; Sub-Admin sirf apne <code>allowed_districts</code> dekhta hai (unauthorized district query par <code>HTTP 403</code>).</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>🕵️</span>
+                              <div><strong>1:1 FO Inspector + &lt;75% Filter:</strong> Dashboard ke <code>🩺 75% Cohort (3M)</code> tab me District Matrix aur FO table hai; kisi bhi FO par click karke Live Inspector modal me uska exact 3-month card aur pending Patient IDs inspect karein.</div>
+                            </li>
+                            <li className="flex items-start gap-1.5">
+                              <span>📲</span>
+                              <div><strong>1-Tap WhatsApp List:</strong> Pending Patients drawer se exact pending IDs aur <code>aur chahiye</code> gap copy karke FO ko WhatsApp par bhejein.</div>
+                            </li>
+                          </ul>
+                        </div>
+                        <div className="pt-2 border-t border-purple-100 flex items-center justify-between text-[10px] text-purple-800 font-semibold">
+                          <span>Cache Auto-Invalidation</span>
+                          <span className="text-purple-600 font-black">&#10003; Live Sync</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cache & Performance Footnote */}
+                    <div className="bg-slate-900 text-white rounded-2xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <span className="text-lg">⚡</span>
+                        <div>
+                          <div className="text-xs font-black text-violet-300">Automatic Cache Eviction &amp; Viewport Modal Safety</div>
+                          <p className="text-[10.5px] text-slate-300 leading-relaxed mt-0.5">
+                            Har report submit/edit/delete ya Nikshay Excel upload par <code>admin_cohort_3m_*</code> cache keys automatically flush ho jati hain. FO Inspector aur Reports Studio modals <code>94vh</code> flex-locked viewport layout par chalte hain taki koi bhi button ya KPI panel screen se na kate.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* TOPIC 11: Travel Allowance & Bike Log Engine */}
                 {appGuideActiveTopic === 'travel_allowance' && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between pb-2 border-b border-slate-100">
@@ -1616,7 +1787,7 @@ export default function AppGuideModal({
             <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                <span>DFY Bihar MIS Operations Standard &bull; Version 2.9.0</span>
+                <span>DFY Bihar MIS Operations Standard &bull; Version 2.9.13</span>
               </span>
               <button
                 type="button"
