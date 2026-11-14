@@ -6318,14 +6318,8 @@ function App() {
             showToast("Galat PIN! Kripya apna sahi PIN darj karein.", "error");
           } else {
             // Not in vault yet (brand new phone or cleared cache while offline)
-            // Emergency Offline Field Duty Mode: Allow valid 4-digit PIN so work is never blocked!
-            if (/^\d{4}$/.test(formData.pin)) {
-              await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
-              setPinStatus("success");
-              showToast("📴 Offline Duty Mode: Sham ko server se verify ho jayega.", "info");
-            } else {
-              setPinStatus("error");
-            }
+            setPinStatus("error");
+            showToast("Offline PIN is device par verified nahi hai. Kripya pehli baar network me login karein.", "warning");
           }
           return;
         }
@@ -6366,12 +6360,10 @@ function App() {
             showToast("Network slow hai, offline PIN verify ho gaya.", "info");
           } else if (offRes.valid === false && offRes.reason === 'wrong_pin') {
             setPinStatus("error");
-          } else if (/^\d{4}$/.test(formData.pin)) {
-            // Emergency fallback
-            setPinStatus("success");
-            await saveToPinVault(formData.working_place, formData.fo_name, formData.pin);
           } else {
+            // Network timed out and PIN is not cached in vault
             setPinStatus("error");
+            showToast("Network connect nahi ho saka aur offline PIN verified nahi hai. Kripya network me try karein.", "warning");
           }
         }
       };
