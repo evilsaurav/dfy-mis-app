@@ -41,6 +41,7 @@ export default function AuditTrailModal({
   handleManualPruneAuditLogs,
   isPruningAudit,
   exportAuditLogsExcel,
+  isExportingAuditExcel = false,
   fetchAuditLogs,
   loadingAuditLogs,
   auditFilterAction,
@@ -102,11 +103,12 @@ export default function AuditTrailModal({
             <button
               type="button"
               onClick={exportAuditLogsExcel}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95"
+              disabled={isExportingAuditExcel}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 active:scale-95 cursor-pointer disabled:cursor-not-allowed"
               title="Download complete audit log report as Excel .xlsx"
             >
-              <span>📥</span>
-              <span>Export Excel (.xlsx)</span>
+              <span>{isExportingAuditExcel ? "⏳" : "📥"}</span>
+              <span>{isExportingAuditExcel ? "Generating Excel..." : "Export Excel (.xlsx)"}</span>
             </button>
             <button
               type="button"

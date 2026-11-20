@@ -459,24 +459,60 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         cutoff_dt = datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)
         cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
+        effective_action = query.action_type or query.action_filter or "All"
+        effective_district = query.district or query.district_filter or "All"
+        effective_user = query.user_id or query.user_filter or "All"
+
+        filters = {}
+        if effective_action and effective_action != "All":
+            filters["action_type"] = effective_action
+        if effective_user and effective_user != "All":
+            filters["user_id"] = effective_user
+        if effective_district and effective_district != "All":
+            filters["district_name_snapshot"] = effective_district
+
         # Fetch audit logs from PostgreSQL ordered by occurred_at DESC (fallback to timestamp)
+        query_limit = max(query.limit or 3000, 3000)
         pg_rows = []
         try:
-            pg_rows = pg_query_table(
-                "admin_audit_logs",
-                order_by="occurred_at",
-                order_desc=True,
-                limit=query.limit or 300,
-            )
+            clauses = []
+            params = []
+            if effective_action and effective_action != "All":
+                clauses.append("action_type = %s")
+                params.append(effective_action)
+            if effective_user and effective_user != "All":
+                clauses.append("user_id = %s")
+                params.append(effective_user)
+            if effective_district and effective_district != "All":
+                clauses.append("district_name_snapshot = %s")
+                params.append(effective_district)
+
+            where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            query_sql = f"SELECT * FROM admin_audit_logs {where_sql} ORDER BY occurred_at DESC LIMIT %s"
+            params.append(query_limit)
+            pg_rows = pg_execute_raw(query_sql, params=params, fetch=True)
         except Exception:
             pass
+
         if not pg_rows:
             try:
                 pg_rows = pg_query_table(
                     "admin_audit_logs",
+                    filters=filters or None,
+                    order_by="occurred_at",
+                    order_desc=True,
+                    limit=query_limit,
+                )
+            except Exception:
+                pass
+        if not pg_rows:
+            try:
+                pg_rows = pg_query_table(
+                    "admin_audit_logs",
+                    filters=filters or None,
                     order_by="timestamp",
                     order_desc=True,
-                    limit=query.limit or 300,
+                    limit=query_limit,
                 )
             except Exception:
                 pass
@@ -546,28 +582,64 @@ async def get_audit_logs(query: AuditLogQueryReq, admin: dict = Depends(get_curr
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/admin/export-audit-logs")
-async def export_audit_logs(action_type: Optional[str] = "All", district: Optional[str] = "All", user_id: Optional[str] = "All", admin: dict = Depends(get_current_admin)):
+async def export_audit_logs(
+    action_type: Optional[str] = "All",
+    district: Optional[str] = "All",
+    user_id: Optional[str] = "All",
+    search: Optional[str] = None,
+    admin: dict = Depends(get_current_admin)
+):
     try:
         cutoff_dt = datetime.now() - timedelta(days=AUDIT_RETENTION_DAYS)
         cutoff_str = cutoff_dt.strftime("%Y-%m-%d %H:%M:%S")
 
+        filters = {}
+        if action_type and action_type != "All":
+            filters["action_type"] = action_type
+        if user_id and user_id != "All":
+            filters["user_id"] = user_id
+        if district and district != "All":
+            filters["district_name_snapshot"] = district
+
         pg_rows = []
         try:
-            pg_rows = pg_query_table(
-                "admin_audit_logs",
-                order_by="occurred_at",
-                order_desc=True,
-                limit=1000,
-            )
+            clauses = []
+            params = []
+            if action_type and action_type != "All":
+                clauses.append("action_type = %s")
+                params.append(action_type)
+            if user_id and user_id != "All":
+                clauses.append("user_id = %s")
+                params.append(user_id)
+            if district and district != "All":
+                clauses.append("district_name_snapshot = %s")
+                params.append(district)
+
+            where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            query_sql = f"SELECT * FROM admin_audit_logs {where_sql} ORDER BY occurred_at DESC LIMIT 4000"
+            pg_rows = pg_execute_raw(query_sql, params=params, fetch=True)
         except Exception:
             pass
+
         if not pg_rows:
             try:
                 pg_rows = pg_query_table(
                     "admin_audit_logs",
+                    filters=filters or None,
+                    order_by="occurred_at",
+                    order_desc=True,
+                    limit=4000,
+                )
+            except Exception:
+                pass
+        if not pg_rows:
+            try:
+                pg_rows = pg_query_table(
+                    "admin_audit_logs",
+                    filters=filters or None,
                     order_by="timestamp",
                     order_desc=True,
-                    limit=1000,
+                    limit=4000,
                 )
             except Exception:
                 pass
@@ -609,6 +681,19 @@ async def export_audit_logs(action_type: Optional[str] = "All", district: Option
                 continue
             if user_id and user_id != "All" and d.get("user_id") != user_id:
                 continue
+            if search:
+                s_lower = search.lower()
+                matches_search = (
+                    s_lower in str(d.get("user_name", "")).lower()
+                    or s_lower in str(d.get("user_id", "")).lower()
+                    or s_lower in str(d.get("action_type", "")).lower()
+                    or s_lower in str(d.get("details", "")).lower()
+                    or s_lower in str(d.get("district", "")).lower()
+                    or s_lower in str(d.get("ip_address", "")).lower()
+                    or s_lower in str(d.get("target_officer", "")).lower()
+                )
+                if not matches_search:
+                    continue
                 
             formatted_time = d.get("timestamp_ist") or format_log_to_ist(raw_ts, d.get("is_ist", False))
             client_dev = (d.get("diff") if isinstance(d.get("diff"), dict) else {}).get("device", "")

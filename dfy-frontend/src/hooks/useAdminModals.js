@@ -161,6 +161,7 @@ export function useAdminModals({
   const [auditFilterTarget, setAuditFilterTarget] = useState('All');
   const [auditSearchQuery, setAuditSearchQuery] = useState('');
   const [isPruningAudit, setIsPruningAudit] = useState(false);
+  const [isExportingAuditExcel, setIsExportingAuditExcel] = useState(false);
 
   // 10. Broadcast Studio & Unread Popup
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
@@ -577,7 +578,7 @@ export function useAdminModals({
           user_id: effectiveUser,
           user_filter: effectiveUser,
           search: effectiveSearch,
-          limit: 300
+          limit: 3000
         })
       });
       if (res.ok) {
@@ -591,28 +592,40 @@ export function useAdminModals({
     }
   }, [auditFilterAction, auditFilterTarget, auditFilterAdmin, auditSearchQuery, authFetch]);
 
-  const exportAuditLogsExcel = () => {
-    if (!auditLogs || auditLogs.length === 0) {
-      if (showToast) showToast("No audit logs to export.", "info");
-      return;
+  const exportAuditLogsExcel = async () => {
+    if (isExportingAuditExcel) return;
+    setIsExportingAuditExcel(true);
+    if (showToast) showToast("Generating official Audit Trail Excel (.xlsx) report...", "info");
+    try {
+      const API_BASE_URL = import.meta.env.VITE_API_URL || "https://dfy-mis-app.onrender.com";
+      const params = new URLSearchParams({
+        action_type: auditFilterAction || "All",
+        district: auditFilterTarget || "All",
+        user_id: auditFilterAdmin || "All"
+      });
+      if (auditSearchQuery) {
+        params.append("search", auditSearchQuery);
+      }
+      const res = await authFetch(`${API_BASE_URL}/admin/export-audit-logs?${params.toString()}`);
+      if (!res.ok) {
+        throw new Error(`Export failed with status ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `DFY_Admin_Audit_Trail_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      if (showToast) showToast("✓ Audit Trail Excel (.xlsx) downloaded successfully!", "success");
+    } catch (err) {
+      console.error("Failed to download audit logs Excel", err);
+      if (showToast) showToast("Failed to download Excel. Please try again.", "error");
+    } finally {
+      setIsExportingAuditExcel(false);
     }
-    const headers = ["Timestamp", "Actor", "Role", "Action", "Target", "Details", "IP Address"];
-    const rows = auditLogs.map(l => [
-      formatAuditTimestamp(l.timestamp),
-      l.actor_username || "Unknown",
-      l.actor_role || "—",
-      l.action || "—",
-      l.target_identifier || "—",
-      JSON.stringify(l.details || {}),
-      l.ip_address || "—"
-    ]);
-    const tsvContent = [headers.join("\t"), ...rows.map(r => r.join("\t"))].join("\n");
-    const blob = new Blob([tsvContent], { type: "text/tab-separated-values;charset=utf-8;" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `audit_logs_${new Date().toISOString().slice(0, 10)}.tsv`;
-    link.click();
-    if (showToast) showToast("✓ Audit logs exported successfully!", "success");
   };
 
   const handleManualPruneAuditLogs = async () => {
@@ -2392,7 +2405,7 @@ export function useAdminModals({
     auditFilterUser: auditFilterAdmin, setAuditFilterUser: setAuditFilterAdmin,
     auditSearchQuery, setAuditSearchQuery,
     auditLogsList: auditLogs,
-    formatAuditTimestamp, isPruningAudit,
+    formatAuditTimestamp, isPruningAudit, isExportingAuditExcel,
     fetchAuditLogs, exportAuditLogsExcel, handleManualPruneAuditLogs,
 
     // 10. Broadcast Studio & Unread Popup

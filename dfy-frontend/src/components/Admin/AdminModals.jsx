@@ -163,6 +163,7 @@ export default function AdminModals(props) {
         isSuperAdmin={props.isSuperAdmin}
         handleManualPruneAuditLogs={props.handleManualPruneAuditLogs}
         isPruningAudit={props.isPruningAudit}
+        isExportingAuditExcel={props.isExportingAuditExcel}
         exportAuditLogsExcel={props.exportAuditLogsExcel}
         fetchAuditLogs={props.fetchAuditLogs}
         loadingAuditLogs={props.loadingAuditLogs || props.auditLoading}
